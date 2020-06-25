@@ -421,7 +421,7 @@ ZoneOnlyPolicy::~ZoneOnlyPolicy()
 }
 
 bool ZoneOnlyPolicy::validate(std::vector<LocalityEntry> const& solutionSet, Reference<LocalitySet> const& fromServers) const {
-	PolicyAcross policyAcross(_count, _attribKey, Reference<IReplicationPolicy>(new PolicyOne()));
+	PolicyAcross policyAcross(_count, "zoneid", Reference<IReplicationPolicy>(new PolicyOne()));
 	return policyAcross.validate(solutionSet, fromServers);
 }
 
@@ -431,7 +431,7 @@ bool ZoneOnlyPolicy::selectReplicas(
 	std::vector<LocalityEntry>	&				results )
 {
 	int					count = 0;
-	AttribKey		indexKey = fromServers->keyIndex(_attribKey);
+	AttribKey		indexKey = fromServers->keyIndex("zoneid");
 	auto				groupIndexKey = fromServers->getGroupKeyIndex(indexKey);
 	int					resultsInit = results.size();
 
@@ -552,57 +552,51 @@ TEST_CASE("/ReplicationPolicy/Serialization") {
 	return Void();
 }
 
-void testReplicationPolicyTime(int nTests, bool withAlsoServers) {
-//	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new ZoneOnlyPolicy(3));
+// Returns selectReplica calls per second throughput.
+int testReplicationPolicyTime(int nTests, bool withAlsoServers, bool useNewPolicy) {
+	Reference<IReplicationPolicy> policy = useNewPolicy ? Reference<IReplicationPolicy>(new ZoneOnlyPolicy(3)) : Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 
 	Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
-	LocalityMap<int>* logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
-	std::string s0 = "d32c91b2aa394fe242a5c3afb6074d5b";
-	std::string s1 = "e14806c23081e62eee5c9faa5ede51e1";
-	std::string s2 = "0623a7ca2195884d6c6c79f131c4812a";
-	std::string s3 = "a5cb7017e44d7157d132b744997f3889";
-	std::string s4 = "7b6ac661b1a0970e23cb8f6319ba226d";
-	std::string s5 = "52a5b3de6154a74a54c2463859c7fa08";
-	std::string dc2 = "2";
-	std::string dc4 = "4";
+	auto* logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
+	std::vector<std::string> zoneIds = {"a", "b", "a", "b", "c", "d", "e", "f"};
+	std::vector<LocalityData> localities;
+	std::vector<int> localitiesIndex;
+	localities.reserve(zoneIds.size());
+	localitiesIndex.reserve(zoneIds.size());
+	int index = 0;
 
-	LocalityData locality0 = {Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(s0)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()};
-	LocalityData locality1 = {Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(s1)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()};
-	LocalityData locality2 = {Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(s2)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(dc2))};
-	LocalityData locality3 = {Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(s3)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(dc4))};
-	LocalityData locality4 = {Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(s4)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(dc2))};
-	LocalityData locality5 = {Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(s5)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(dc4))};
-
-	std::vector<int> v = {0, 1, 2, 3, 4, 5};
-	logServerMap->add(locality0, &v[0]);
-	logServerMap->add(locality1, &v[1]);
-	logServerMap->add(locality2, &v[2]);
-	logServerMap->add(locality3, &v[3]);
-	logServerMap->add(locality4, &v[4]);
-	logServerMap->add(locality5, &v[5]);
-
-	logServerMap->processZoneLocalitiesMap();
-
-	double t = timer();
-	std::vector<LocalityEntry> alsoServers = {LocalityEntry(1)};
-	std::vector<LocalityEntry> result;
-
-	for (int i = 0; i < nTests; i++) {
-		if (withAlsoServers) {
-			ASSERT(policy->selectReplicas(logServerSet, alsoServers, result));
-		} else {
-			ASSERT(policy->selectReplicas(logServerSet, result));
-		}
+	for (const auto& zoneId : zoneIds) {
+		localities.emplace_back(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(zoneId)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+		localitiesIndex.push_back(index);
+		logServerMap->add(localities.back(), &localitiesIndex.back());
 	}
 
-	TraceEvent("SelectReplicasDuration").detail("DurationTime", timer() - t).detail("WithAlsoServers", withAlsoServers);
+	std::vector<LocalityEntry> alsoServers = {LocalityEntry(1)};
+	std::vector<LocalityEntry> result;
+	double t = timer();
+	if (withAlsoServers) {
+		for (int i = 0; i < nTests; i++) ASSERT(policy->selectReplicas(logServerSet, alsoServers, result));
+	} else {
+		for (int i = 0; i < nTests; i++) ASSERT(policy->selectReplicas(logServerSet, result));
+	}
+	int res = (int) (nTests / (timer() - t));
+	TraceEvent("SelectReplicasDuration")
+	    .detail("Policy", useNewPolicy ? "New" : "Old")
+		.detail("WithAlsoServers", withAlsoServers? "yes" : "no")
+	    .detail("CallsPerSecond", res);
+	return res;
 }
 
-TEST_CASE("/ReplicationPolicy/Time") {
-	for (int i = 0; i < 10; i++) {
-		testReplicationPolicyTime(2000000, true);
-		testReplicationPolicyTime(2000000, false);
+TEST_CASE("/ReplicationPolicy/Benchmark") {
+	std::vector<std::tuple<int, bool, bool>> configs = {
+		{5000000, true, false},
+		{5000000, true, true},
+		{5000000, false, false},
+		{5000000, false, true}
+	};
+
+	for (const auto& config : configs) {
+		testReplicationPolicyTime(std::get<0>(config), std::get<1>(config), std::get<2>(config));
 	}
 	return Void();
 }

@@ -168,7 +168,7 @@ struct ZoneOnlyPolicy : IReplicationPolicy, public ReferenceCounted<ZoneOnlyPoli
 	virtual ~ZoneOnlyPolicy();
 	virtual std::string name() const { return "Zone-only"; }
 	int getCount() const { return _count; }
-	virtual std::string info() const { return format("%s^%d x ", _attribKey.c_str(), _count); }
+	virtual std::string info() const { return format("%d x ", _count); }
 	virtual int maxResults() const { return _count; }
 	virtual int depth() const { return 2; }
 	virtual bool validate(std::vector<LocalityEntry> const& solutionSet, Reference<LocalitySet> const& fromServers) const;
@@ -178,22 +178,18 @@ struct ZoneOnlyPolicy : IReplicationPolicy, public ReferenceCounted<ZoneOnlyPoli
 	template <class Ar>
 	void serialize(Ar& ar) {
 		static_assert(!is_fb_function<Ar>);
-		serializer(ar, _attribKey, _count);
+		serializer(ar, _count);
 	}
 
 	virtual void deserializationDone() {}
 
-	virtual void attributeKeys(std::set<std::string>* set) const override {
-		set->insert(_attribKey);
-	}
+	virtual void attributeKeys(std::set<std::string>* set) const {}
 
 protected:
 	int _count;
-	std::string _attribKey = "zoneid";
 
 	// Cache temporary members
 	std::unordered_set<int> _usedValues;
-
 };
 
 struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
@@ -289,7 +285,7 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
 		} else if (name == LiteralStringRef("Zone-only")) {
-			ZoneOnlyPolicy* pointer = new ZoneOnlyPolicy(1);
+			ZoneOnlyPolicy* pointer = new ZoneOnlyPolicy();
 			pointer->serialize(ar);
 			policy = Reference<IReplicationPolicy>(pointer);
 		} else if (name == LiteralStringRef("And")) {
@@ -309,6 +305,8 @@ void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
 			((PolicyOne*)policy.getPtr())->serialize(ar);
 		} else if (name == "Across") {
 			((PolicyAcross*)policy.getPtr())->serialize(ar);
+		} else if (name == "Zone-only") {
+			((ZoneOnlyPolicy*)policy.getPtr())->serialize(ar);
 		} else if (name == "And") {
 			((PolicyAnd*)policy.getPtr())->serialize(ar);
 		} else if (name == "None") {
