@@ -4872,9 +4872,9 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, 
 	}));
 
 	// Sanity check to ensure no data in the ranges
+	tr.reset();
 	loop {
 		try {
-			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
@@ -4910,9 +4910,9 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, 
 	}
 
 	// Sanity check
+	tr.reset();
 	loop {
 		try {
-			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
