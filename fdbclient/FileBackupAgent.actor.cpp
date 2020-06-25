@@ -3664,9 +3664,6 @@ public:
 				if (lockDB) {
 					wait(lockDatabase(cx, randomUID));
 				}
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkDatabaseLock(tr, randomUID));
 
 				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
@@ -3683,6 +3680,7 @@ public:
 
 		// set up restore request
 		tr->reset();
+		numTries = 0;
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3702,6 +3700,10 @@ public:
 				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
+				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreAgentSubmitRestoreRequestsRetry")
+				    .detail("RestoreIndex", restoreIndex)
+				    .error(e);
+				numTries++;
 				wait(tr->onError(e));
 			}
 		}
