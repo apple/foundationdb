@@ -441,6 +441,7 @@ int main(int argc, char* argv[]) {
 	}
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);
+	FlowTransport::createInstance(!isServer, 0);
 	NetworkAddress publicAddress = NetworkAddress::parse("0.0.0.0:0");
 	if (isServer) {
 		publicAddress = NetworkAddress::parse("0.0.0.0:" + port);
