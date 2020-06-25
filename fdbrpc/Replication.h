@@ -63,6 +63,8 @@ public:
 		_keyIndexArray.clear();
 		_cacheArray.clear();
 		_keymap->clear();
+		localitiesByZone.clear();
+		mutableZoneIds.clear();
 	}
 
 	LocalitySet & copy(LocalitySet const& source) {
@@ -75,6 +77,8 @@ public:
 		_cachemisses = source._cachemisses;
 		_keymap = source._keymap;
 		_localitygroup = (LocalitySet*) source._localitygroup;
+		localitiesByZone = source.localitiesByZone;
+		mutableZoneIds = source.mutableZoneIds;
 		return *this;
 	}
 
@@ -130,6 +134,8 @@ public:
 	{	return _entryArray; }
 
 	std::vector<LocalityEntry>& getMutableEntries() { return _mutableEntryArray; }
+
+	std::vector<int>& getMutableZones() { return mutableZoneIds; }
 
 	std::vector<LocalityEntry> const&	getGroupEntries() const
 	{	return _localitygroup->_entryArray; }
@@ -209,6 +215,25 @@ public:
 			if (g_replicationdebug > 2) printf("Cache Miss: (%2d) %-5s => (%4d) %-10s %3d for %3lu items\n", indexKey._id, keyText(indexKey).c_str(), indexValue._id, valueText(indexValue).c_str(), localitySet->size(), _entryArray.size());
 		}
 		return localitySet;
+	}
+
+	void addEntryToZoneLocalitiesMap(const LocalityEntry& entry) {
+		auto& groupKeyIndex = _keyIndexArray[keyIndex("zoneid")._id];
+		auto& record = getRecordViaEntry(entry);
+		Optional<AttribValue> value = record->getValue(groupKeyIndex);
+		if (value.present()) {
+			if (!localitiesByZone.count(value.get()._id)) {
+				localitiesByZone[value.get()._id] = Reference<LocalitySet>(new LocalitySet(*_localitygroup));
+				mutableZoneIds.push_back(value.get()._id);
+			}
+			localitiesByZone[value.get()._id]->add(record, *this);
+		}
+	}
+
+	void processZoneLocalitiesMap() {
+		for (const auto& entry : _entryArray) {
+			addEntryToZoneLocalitiesMap(entry);
+		}
 	}
 
 	// This function is used to create an subset containing the specified entries
@@ -375,6 +400,14 @@ public:
 		_mutableEntryArray[recordIndex2] = entry;
 	}
 
+	virtual void swapMutableZones(int recordIndex1, int recordIndex2) {
+		ASSERT((recordIndex1 >=0) && (recordIndex1 < mutableZoneIds.size()));
+		ASSERT((recordIndex2 >=0) && (recordIndex2 < mutableZoneIds.size()));
+		auto entry = mutableZoneIds[recordIndex1];
+		mutableZoneIds[recordIndex1] = mutableZoneIds[recordIndex2];
+		mutableZoneIds[recordIndex2] = entry;
+	}
+
 	virtual int	getMemoryUsed() const {
 		int memorySize = sizeof(_entryArray) + sizeof(LocalityEntry) * _entryArray.capacity() + sizeof(_cacheArray) + sizeof(LocalityCacheRecord) * _cacheArray.capacity() + sizeof(_keyIndexArray) + sizeof(AttribKey) * _keyIndexArray.capacity() + sizeof(_cachehits) + sizeof(_cachemisses) + _keymap->getMemoryUsed();
 		for (auto& cacheRecord : _cacheArray) {
@@ -384,6 +417,13 @@ public:
 			memorySize += sizeof(AttribValue) * valueArray.capacity();
 		}
 		return memorySize;
+	}
+
+	Optional<LocalityEntry> getRandomLocalityEntryWithZoneId(int zoneId) {
+		if (localitiesByZone.count(zoneId)) {
+			return localitiesByZone[zoneId]->random();
+		}
+		return Optional<LocalityEntry>();
 	}
 
 protected:
@@ -494,6 +534,9 @@ protected:
 
 	std::vector<AttribKey>								_keyIndexArray;
 	std::vector<LocalityCacheRecord>			_cacheArray;
+
+	std::unordered_map<int, Reference<LocalitySet>> localitiesByZone;
+	std::vector<int> mutableZoneIds;
 
 	LocalitySet*													_localitygroup;
 	long long unsigned int								_cachehits;

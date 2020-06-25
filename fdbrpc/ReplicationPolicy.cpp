@@ -453,21 +453,22 @@ bool ZoneOnlyPolicy::selectReplicas(
 	// Process the remaining values
 	if (count < _count) {
 		int recordIndex;
+		// Use zone localities cache.
 		// Use mutable array so that swaps does not affect actual element array
-		auto& mutableArray = fromServers->getMutableEntries();
-		for (int checksLeft = fromServers->size(); checksLeft > 0; checksLeft --) {
+		auto& mutableArray = fromServers->getMutableZones();
+		for (int checksLeft = mutableArray.size(); checksLeft > 0; checksLeft --) {
 
 			recordIndex = deterministicRandom()->randomInt(0, checksLeft);
-			auto& entry = mutableArray[recordIndex];
-			auto value = fromServers->getValueViaGroupKey(entry, groupIndexKey);
-			if (value.present() && !_usedValues.count(value.get()._id)) {
-				results.push_back(mutableArray[recordIndex]);
+			int entry = mutableArray[recordIndex];
+//			auto value = fromServers->getValueViaGroupKey(entry, groupIndexKey);
+			if (!_usedValues.count(entry)) {
+				results.push_back(fromServers->getRandomLocalityEntryWithZoneId(entry).get());
 				count ++;
 				if (count >= _count) break;
-				_usedValues.insert(value.get()._id);
+				_usedValues.insert(entry);
 			}
 			if (recordIndex != checksLeft-1) {
-				fromServers->swapMutableRecords(recordIndex, checksLeft-1);
+				fromServers->swapMutableZones(recordIndex, checksLeft-1);
 			}
 		}
 	}
@@ -570,6 +571,8 @@ int testReplicationPolicyTime(int nTests, bool withAlsoServers, bool useNewPolic
 		localitiesIndex.push_back(index);
 		logServerMap->add(localities.back(), &localitiesIndex.back());
 	}
+
+	logServerMap->processZoneLocalitiesMap();
 
 	std::vector<LocalityEntry> alsoServers = {LocalityEntry(1)};
 	std::vector<LocalityEntry> result;
