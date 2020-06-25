@@ -54,7 +54,7 @@ ACTOR static Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> maste
 ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterData,
                                                    KeyRangeMap<Version>* pRangeVersions);
 
-ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
+ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex);
 ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchData> batchData,
@@ -193,7 +193,7 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterD
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx) {
 	state UID randomUID = deterministicRandom()->randomUniqueID();
-	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait(collectRestoreRequests(cx));
+	state std::vector<RestoreRequest> restoreRequests = wait(collectRestoreRequests(cx));
 	state int restoreIndex = 0;
 
 	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id()).detail("RestoreRequests", restoreRequests.size());
@@ -636,8 +636,8 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	batchData->samples.clear();
 }
 
-ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
-	state Standalone<VectorRef<RestoreRequest>> restoreRequests;
+ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx) {
+	state std::vector<RestoreRequest> restoreRequests;
 	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 
@@ -657,7 +657,7 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 			ASSERT(!restoreRequestValues.more);
 			if (restoreRequestValues.size()) {
 				for (auto& it : restoreRequestValues) {
-					restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
+					restoreRequests.push_back(decodeRestoreRequestValue(it.value));
 					TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
 					    .detail("RestoreRequest", restoreRequests.back().toString());
 				}
