@@ -39,6 +39,9 @@
 #define SevFRMutationInfo SevVerbose
 //#define SevFRMutationInfo SevInfo
 
+#define SevFRDebugInfo SevVerbose
+//#define SevFRDebugInfo SevInfo
+
 struct VersionedMutation {
 	MutationRef mutation;
 	LogMessageVersion version;

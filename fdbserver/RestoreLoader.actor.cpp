@@ -352,7 +352,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
 	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
-	TraceEvent("FastRestoreLoaderPhaseLoadFile", self->id())
+	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString())
 	    .detail("NotProcessed", !paramExist)
@@ -364,7 +364,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
-		TraceEvent("FastRestoreLoadFile", self->id())
+		TraceEvent(SevFRDebugInfo, "FastRestoreLoadFile", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
@@ -372,7 +372,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
 		isDuplicated = false;
 	} else {
-		TraceEvent("FastRestoreLoadFile", self->id())
+		TraceEvent(SevFRDebugInfo, "FastRestoreLoadFile", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("WaitOnProcessLoadParam", req.param.toString());
 	}
@@ -381,7 +381,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(it->second); // wait on the processing of the req.param.
 
 	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
-	TraceEvent("FastRestoreLoaderPhaseLoadFileDone", self->id())
+	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
 	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
@@ -855,7 +855,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state MutationsVec& sampleMutations = samplesIter->second;
 
-	TraceEvent("FastRestoreDecodedRangeFile")
+	TraceEvent(SevFRDebugInfo, "FastRestoreDecodedRangeFile")
 	    .detail("Filename", asset.filename)
 	    .detail("Version", version)
 	    .detail("BeginVersion", asset.beginVersion)

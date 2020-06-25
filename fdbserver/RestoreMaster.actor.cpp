@@ -714,22 +714,22 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	std::set<RestoreFileFR> uniqueLogFiles;
 	*minRangeVersion = MAX_VERSION;
 	for (const RangeFile& f : restorable.get().ranges) {
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFile", f.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFile", f.toString());
 		if (f.fileSize <= 0) {
 			continue;
 		}
 		RestoreFileFR file(f);
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
 		uniqueRangeFiles.insert(file);
 		*minRangeVersion = std::min(*minRangeVersion, file.version);
 	}
 	for (const LogFile& f : restorable.get().logs) {
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("LogFile", f.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("LogFile", f.toString());
 		if (f.fileSize <= 0) {
 			continue;
 		}
 		RestoreFileFR file(f);
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
 		logFiles->push_back(file);
 		uniqueLogFiles.insert(file);
 	}
