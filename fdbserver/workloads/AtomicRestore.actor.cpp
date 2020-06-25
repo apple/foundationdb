@@ -32,7 +32,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 	bool fastRestore; // true: use fast restore, false: use old style restore
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	bool usePartitionedLogs;
-	Key addPrefix, removePrefix; // Orignal key will be first apply removePrefix and then addPrefix
+	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
 	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx)
