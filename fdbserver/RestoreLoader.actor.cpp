@@ -755,7 +755,8 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 	MutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
-	TraceEvent("FastRestoreLoaderParseSerializedLogMutation").detail("RestoreAsset", asset.toString());
+	TraceEvent(SevFRMutationInfo, "FastRestoreLoaderParseSerializedLogMutation")
+	    .detail("RestoreAsset", asset.toString());
 
 	Arena tempArena;
 	for (auto& m : mutationMap) {

@@ -3669,7 +3669,7 @@ public:
 				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreAgentSubmitRestoreRequestsMayFail")
+				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreAgentSubmitRestoreRequestsMayFail")
 				    .detail("Reason", "DB is not properly locked")
 				    .detail("ExpectedLockID", randomUID)
 				    .error(e);
@@ -3700,7 +3700,7 @@ public:
 				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
-				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreAgentSubmitRestoreRequestsRetry")
+				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreAgentSubmitRestoreRequestsRetry")
 				    .detail("RestoreIndex", restoreIndex)
 				    .error(e);
 				numTries++;
@@ -4728,7 +4728,7 @@ static std::pair<bool, bool> insideValidRange(KeyValueRef kv, Standalone<VectorR
 	bool insideRestoreRange = false;
 	bool insideBackupRange = false;
 	for (auto& range : restoreRanges) {
-		TraceEvent("InsideValidRestoreRange")
+		TraceEvent(SevFRTestInfo, "InsideValidRestoreRange")
 		    .detail("Key", kv.key)
 		    .detail("Range", range)
 		    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
@@ -4738,7 +4738,7 @@ static std::pair<bool, bool> insideValidRange(KeyValueRef kv, Standalone<VectorR
 		}
 	}
 	for (auto& range : backupRanges) {
-		TraceEvent("InsideValidBackupRange")
+		TraceEvent(SevFRTestInfo, "InsideValidBackupRange")
 		    .detail("Key", kv.key)
 		    .detail("Range", range)
 		    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
@@ -4836,7 +4836,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, 
 		    .detail("Index", i)
 		    .detail("GetKey", oldData[i].key)
 		    .detail("GetValue", oldData[i].value);
-		if (newKey.size() < removePrefix.size()) { // If true, must check why?!
+		if (newKey.size() < removePrefix.size()) { // If true, must check why.
 			TraceEvent(SevError, "TransformDatabaseContents")
 			    .detail("Key", newKey)
 			    .detail("RemovePrefix", removePrefix);

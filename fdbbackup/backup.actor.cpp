@@ -2225,7 +2225,7 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 			    .detail("RestoreUID", randomUID);
 			wait(backupAgent.submitParallelRestore(db, KeyRef(tagName), ranges, KeyRef(container), dbVersion, true,
 			                                       randomUID, LiteralStringRef(""), LiteralStringRef("")));
-			ASSERT(false); // TODO: Support addPrefix and removePrefix
+			// TODO: Support addPrefix and removePrefix
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
 				TraceEvent("FastRestoreAgent").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");

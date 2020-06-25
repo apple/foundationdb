@@ -504,7 +504,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Standalone<StringRef>> restoreTags;
 
 				// Submit parallel restore requests
-				// TODO: Add addPrefix and removePrefix feature
 				TraceEvent("BackupAndParallelRestoreWorkload")
 				    .detail("PrepareRestores", self->backupRanges.size())
 				    .detail("AddPrefix", self->addPrefix)
