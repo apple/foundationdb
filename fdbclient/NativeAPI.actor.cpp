@@ -2085,7 +2085,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						.detail("EnableLocalityLoadBalance", cx->enableLocalityLoadBalance);
 
 					for(int i=0; i<beginServer.second->size(); i++) {
-						RequestStream<GetKeyValuesReply> const* thisStream = &beginServer.second->get( i, &StorageServerInterface::getKeyValues );
+						RequestStream<GetKeyValuesRequest> const* thisStream = &beginServer.second->get( i, &StorageServerInterface::getKeyValues );
 						auto& qd = cx->queueModel.getMeasurement(thisStream->getEndpoint().token.first());
 						TraceEvent("TransactionDebugAltInfo", info.debugID.get())
 							.detail("Addr", thisStream->getEndpoint().getPrimaryAddress())
