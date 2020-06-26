@@ -1611,6 +1611,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 	}
 }
 
+// Returns a vector of <ShardRange, storage server location info> pairs.
 template <class F>
 Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database const& cx, KeyRange const& keys, int limit, bool reverse, F StorageServerInterface::*member, TransactionInfo const& info ) {
 	ASSERT (!keys.empty());
@@ -3896,8 +3897,21 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
+	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+		if (i == 0) {
+			// Use the actual begin key instead of the shard begin
+			partBegin = keys.begin;
+		} else {
+			partBegin = locations[i].first.begin;
+		}
+		if (i == nLocs - 1) {
+			// Use the actual end key instead of the shard end
+			partEnd = keys.end;
+		} else {
+			partEnd = locations[i].first.end;
+		}
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -3989,9 +4003,22 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, K
 			// 	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
+			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
-				ReadHotSubRangeRequest req(locations[i].first);
-				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getReadHotRanges, req,
+				if (i == 0) {
+					// Use the actual begin key instead of the shard begin
+					partBegin = keys.begin;
+				} else {
+					partBegin = locations[i].first.begin;
+				}
+				if (i == nLocs - 1) {
+					// Use the actual end key instead of the shard end
+					partEnd = keys.end;
+				} else {
+					partEnd = locations[i].first.end;
+				}
+				ReadHotSubRangeRequest req(KeyRangeRef(partBegin, partEnd));
+				fReplies[i] = loadBalance(locations[i].second, &StorageServerInterface::getReadHotRanges, req,
 				                          TaskPriority::DataDistribution);
 			}
 
@@ -4114,8 +4141,21 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 		try {
 			state int nLocs = locations.size();
 			state vector<Future<SplitRangeReply>> fReplies(nLocs);
+			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
-				SplitRangeRequest req(locations[i].first, chunkSize);
+				if (i == 0) {
+					// Use the actual begin key instead of the shard begin
+					partBegin = keys.begin;
+				} else {
+					partBegin = locations[i].first.begin;
+				}
+				if (i == nLocs - 1) {
+					// Use the actual end key instead of the shard end
+					partEnd = keys.end;
+				} else {
+					partEnd = locations[i].first.end;
+				}
+				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
 				fReplies[i] = loadBalance(locations[i].second, &StorageServerInterface::getRangeSplitPoints, req,
 				                          TaskPriority::DataDistribution);
 			}
@@ -4123,12 +4163,16 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 			wait(waitForAll(fReplies));
 			Standalone<VectorRef<KeyRef>> results;
 
+			results.push_back_deep(results.arena(), keys.begin);
 			for (int i = 0; i < nLocs; i++) {
 				if (i > 0) {
 					results.push_back_deep(results.arena(), locations[i].first.begin); // Need this shard boundary
 				}
 				results.append_deep(results.arena(), fReplies[i].get().splitPoints.begin(),
 				                    fReplies[i].get().splitPoints.size());
+			}
+			if (results.back() != keys.end) {
+				results.push_back_deep(results.arena(), keys.end);
 			}
 
 			return results;

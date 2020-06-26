@@ -527,6 +527,70 @@ private:
 	}
 };
 
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert(LiteralStringRef("A"), 200 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Absolute"), 800 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Apple"), 1000 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Banana"), 80 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bob"), 200 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
+
+	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2000 * sampleUnit);
+
+	ASSERT(t.size() == 1 && t[0] == LiteralStringRef("Bah"));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoints") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert(LiteralStringRef("A"), 200 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Absolute"), 800 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Apple"), 1000 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Banana"), 80 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bob"), 200 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
+
+	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 600 * sampleUnit);
+
+	ASSERT(t.size() == 3 && t[0] == LiteralStringRef("Absolute") && t[1] == LiteralStringRef("Apple") &&
+	       t[2] == LiteralStringRef("Bah"));
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert(LiteralStringRef("A"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Absolute"), 80 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Apple"), 10 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Banana"), 80 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bob"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("But"), 10 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 30 * sampleUnit);
+
+	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 1000 * sampleUnit);
+
+	ASSERT(t.size() == 0);
+
+	return Void();
+}
+
 TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/simple") {
 
 	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
