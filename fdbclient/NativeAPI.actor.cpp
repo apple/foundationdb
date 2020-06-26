@@ -2067,7 +2067,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			try {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
-					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
+					TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
 						.detail("ReqBeginKey", req.begin.getKey())
 						.detail("ReqEndKey", req.end.getKey())
 						.detail("OriginalBegin", originalBegin.toString())
@@ -2080,7 +2080,23 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						.detail("ReqVersion", req.version)
 						.detail("Reverse", reverse)
 						.detail("ModifiedSelectors", modifiedSelectors)
-						.detail("Servers", beginServer.second->description());*/
+						.detail("Servers", beginServer.second->description())
+						.detail("BestCount", beginServer.second->countBest())
+						.detail("EnableLocalityLoadBalance", cx->enableLocalityLoadBalance);
+
+					for(int i=0; i<beginServer.second->size(); i++) {
+						RequestStream<GetKeyValuesReply> const* thisStream = &beginServer.second->get( i, &StorageServerInterface::getKeyValues );
+						auto& qd = cx->queueModel.getMeasurement(thisStream->getEndpoint().token.first());
+						TraceEvent("TransactionDebugAltInfo", info.debugID.get())
+							.detail("Addr", thisStream->getEndpoint().getPrimaryAddress())
+							.detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed)
+							.detail("OnlyEndpoint", IFailureMonitor::failureMonitor().onlyEndpointFailed(thisStream->getEndpoint()))
+							.detail("FailedUntilActive", now() < qd.failedUntil)
+							.detail("FailedUntil", qd.failedUntil)
+							.detail("Penalty", qd.penalty)
+							.detail("Metric", qd.smoothOutstanding.smoothTotal())
+							.detail("Latency", qd.latency);
+					}
 				}
 
 				++cx->transactionPhysicalReads;

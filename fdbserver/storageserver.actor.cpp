@@ -1986,7 +1986,7 @@ void coalesceShards(StorageServer *data, KeyRangeRef keys) {
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version version, KeyRangeRef keys, GetRangeLimits limits, bool* isTooOld ) {
+ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version version, KeyRangeRef keys, GetRangeLimits limits, bool* isTooOld, bool enableDebug ) {
 	state Transaction tr( cx );
 	state Standalone<RangeResultRef> output;
 	state KeySelectorRef begin = firstGreaterOrEqual( keys.begin );
@@ -2002,6 +2002,11 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 
 	try {
 		loop {
+			if(enableDebug) {
+				UID debugID = deterministicRandom()->randomUniqueID();
+				TraceEvent("FetchDebug", debugID);
+				tr.debugTransaction(debugID);
+			}
 			Standalone<RangeResultRef> rep = wait( tr.getRange( begin, end, limits, true ) );
 			limits.decrement( rep );
 
@@ -2153,6 +2158,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
+		state int totalRetries = 1;
 		state bool isTooOld = false;
 
 		//FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server we must refresh the cache manually.
@@ -2162,7 +2168,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 			try {
 				TEST(true);		// Fetching keys for transferred shard
 
-				state Standalone<RangeResultRef> this_block = wait( tryGetRange( data->cx, fetchVersion, keys, GetRangeLimits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, fetchBlockBytes ), &isTooOld ) );
+				state Standalone<RangeResultRef> this_block = wait( tryGetRange( data->cx, fetchVersion, keys, GetRangeLimits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, fetchBlockBytes ), &isTooOld, totalRetries%100 == 0 ) );
 
 				int expectedSize = (int)this_block.expectedSize() + (8-(int)sizeof(KeyValueRef))*this_block.size();
 
@@ -2230,6 +2236,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 				break;
 			} catch (Error& e) {
+				totalRetries++;
 				TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
