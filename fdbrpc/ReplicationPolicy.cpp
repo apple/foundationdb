@@ -476,3 +476,49 @@ TEST_CASE("/ReplicationPolicy/Serialization") {
 	testReplicationPolicy(1);
 	return Void();
 }
+
+// Test calls per second throughput for PolicyAcross.selectReplica.
+void testReplicationPolicyThroughput(int nTests, bool withAlsoServers) {
+	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+
+	Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<int>());
+	auto* logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
+	std::vector<std::string> zoneIds = {"a", "b", "a", "b", "c", "d", "e", "f"};
+	std::vector<LocalityData> localities;
+	std::vector<int> localitiesIndex;
+	localities.reserve(zoneIds.size());
+	localitiesIndex.reserve(zoneIds.size());
+	int index = 0;
+
+	for (const auto& zoneId : zoneIds) {
+		localities.emplace_back(Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>(StringRef(zoneId)), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>());
+		localitiesIndex.push_back(index++);
+		logServerMap->add(localities.back(), &localitiesIndex.back());
+	}
+
+	std::vector<LocalityEntry> alsoServers = {LocalityEntry(1)};
+	std::vector<LocalityEntry> result;
+	double t = timer();
+	if (withAlsoServers) {
+		for (int i = 0; i < nTests; i++) ASSERT(policy->selectReplicas(logServerSet, alsoServers, result));
+	} else {
+		for (int i = 0; i < nTests; i++) ASSERT(policy->selectReplicas(logServerSet, result));
+	}
+	int res = (int) (nTests / (timer() - t));
+	TraceEvent("SelectReplicasThroughput")
+		.detail("PolicyAcrossInfo", policy->info())
+		.detail("WithAlsoServers", withAlsoServers? "Yes" : "No")
+		.detail("CallsPerSecond", res);
+}
+
+TEST_CASE("/ReplicationPolicy/Benchmark") {
+	std::vector<std::pair<int, bool>> configs = {
+		{5000000, true},
+		{5000000, false},
+	};
+
+	for (const auto& config : configs) {
+		testReplicationPolicyThroughput(config.first, config.second);
+	}
+	return Void();
+}
