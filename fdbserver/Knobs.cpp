@@ -445,6 +445,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_REBOOT_TIME,                                       5.0 ); if( longReboots ) MAX_REBOOT_TIME = 20.0;
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
 	init( SERVER_MEM_LIMIT,                                8LL << 30 );
+	init( SERVER_MALLOC_ARENA_MAX,                                  6); // If set too high, we waste a lot of virtual memory.  If set too low, then threads will contend on a mutex inside malloc (glibc malloc only)
 
 	//Ratekeeper
 	bool slowRatekeeper = randomize && BUGGIFY;

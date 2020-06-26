@@ -1599,6 +1599,11 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
+#if defined(__linux__) // is there a better way to detect glibc malloc?
+		// need to do this before we start spawning threads, so before we start running flow actors.
+		mallopt(M_ARENA_MAX, SERVER_KNOBS->SERVER_MALLOC_ARENA_MAX);
+#endif
+
 		if (role == SkipListTest) {
 			skipListTest();
 			flushAndExit(FDB_EXIT_SUCCESS);

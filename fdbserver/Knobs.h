@@ -371,6 +371,7 @@ public:
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
 	int64_t SERVER_MEM_LIMIT;
+	int SERVER_MALLOC_ARENA_MAX; // This only has an effect on systms that use glibc malloc.
 
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;
