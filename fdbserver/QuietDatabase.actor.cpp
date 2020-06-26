@@ -269,6 +269,30 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<
 	return result;
 }
 
+ACTOR Future<vector<StorageServerInterface>> getStorageCacheServers( Database cx, bool use_system_priority = false) {
+	TraceEvent("SCGetStorageCacheServers").detail("Stage", "ContactingStorageCacheServers");
+	state Transaction tr( cx );
+	loop {
+		if (use_system_priority) {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			Standalone<RangeResultRef> serverList = wait( tr.getRange( storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY ) );
+			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+
+			TraceEvent("SCGetStorageCacheServersSize").detail("Size", serverList.size());
+			vector<StorageServerInterface> servers;
+			for( int i = 0; i < serverList.size(); i++ )
+				servers.push_back( decodeCacheServerListValue( serverList[i].value ) );
+			return servers;
+		}
+		catch(Error &e) {
+			wait( tr.onError(e) );
+		}
+	}
+}
+
 //Gets the maximum size of all the storage server queues
 ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");

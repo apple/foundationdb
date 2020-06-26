@@ -9,3 +9,5 @@ testTitle=Cycle
     expectedRate=0.80
     keyPrefix=foo/
 
+    testName=Status
+    testDuration=10.0

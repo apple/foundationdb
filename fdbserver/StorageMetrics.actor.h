@@ -294,11 +294,16 @@ struct StorageServerMetrics {
 	// Removes old entries from metricsAverageQueue, updates metricsSampleMap accordingly, and notifies
 	//   WaitMetricsRequests through waitMetricsMap.
 	void poll() {
-		{ StorageMetrics m; m.bytesPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS; bandwidthSample.poll(waitMetricsMap, m); }
-		{ StorageMetrics m; m.iosPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS; iopsSample.poll(waitMetricsMap, m); }
+		{ StorageMetrics m; m.bytesPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+			//printf("\nSCPollBandwidthSample\n");
+			bandwidthSample.poll(waitMetricsMap, m); }
+		{ StorageMetrics m; m.iosPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+			//printf("\nSCPollIOPsSample\n");
+			iopsSample.poll(waitMetricsMap, m); }
 		{
 			StorageMetrics m;
 			m.bytesReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+			//printf("\nSCPollBytesReadSample\n");
 			bytesReadSample.poll(waitMetricsMap, m);
 		}
 		// bytesSample doesn't need polling because we never call addExpire() on it
@@ -380,6 +385,28 @@ struct StorageServerMetrics {
 		}
 	}
 
+	void getStorageMetrics(GetStorageMetricsRequest req, double bytesInputRate, int64_t versionLag) const {
+		GetStorageMetricsReply rep;
+
+		// SOMEDAY: make bytes dynamic with hard disk space
+		rep.load = getMetrics(allKeys);
+
+		//rep.available.bytes = sb.available;
+		rep.available.iosPerKSecond = 10e6;
+		rep.available.bytesPerKSecond = 100e9;
+		rep.available.bytesReadPerKSecond = 100e9;
+
+		//rep.capacity.bytes = sb.total;
+		rep.capacity.iosPerKSecond = 10e6;
+		rep.capacity.bytesPerKSecond = 100e9;
+		rep.capacity.bytesReadPerKSecond = 100e9;
+
+		rep.bytesInputRate = bytesInputRate;
+
+		rep.versionLag = versionLag;
+
+		req.reply.send(rep);
+	}
 	void getStorageMetrics(GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate, int64_t versionLag,
 	                       double lastUpdate) const {
 		GetStorageMetricsReply rep;

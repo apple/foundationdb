@@ -225,6 +225,13 @@ const Value storageCacheServerValue(const StorageServerInterface& ssi) {
 	return wr.toValue();
 }
 
+StorageServerInterface decodeCacheServerListValue( ValueRef const& value ) {
+	StorageServerInterface s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
 const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
                                              LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
 

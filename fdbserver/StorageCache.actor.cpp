@@ -34,6 +34,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/Trace.h"
@@ -57,6 +58,11 @@ inline bool canReplyWith(Error e) {
 			return false;
 	};
 }
+
+#define PRIVATE_PREFIX "\xff\xff"
+
+static const KeyRangeRef privateByteSampleKeys = KeyRangeRef( LiteralStringRef( PRIVATE_PREFIX "BS/" ), LiteralStringRef( PRIVATE_PREFIX "BS0" ) );
+static const KeyRangeRef privateByteSampleSampleKeys = KeyRangeRef( LiteralStringRef( PRIVATE_PREFIX "BS/" PRIVATE_PREFIX "BS/" ), LiteralStringRef( PRIVATE_PREFIX "BS/" PRIVATE_PREFIX "BS0" ) );
 class StorageCacheUpdater;
 
 struct AddingCacheRange : NonCopyable {
@@ -151,14 +157,20 @@ public:
 	Key ck; //cacheKey
 	Reference<AsyncVar<ServerDBInfo>> const& db;
 	Database cx;
+	ActorCollection actors;
 	StorageCacheUpdater *updater;
 
 	//KeyRangeMap <bool> cachedRangeMap; // map of cached key-ranges
 	KeyRangeMap <Reference<CacheRangeInfo>> cachedRangeMap; // map of cached key-ranges
 	uint64_t cacheRangeChangeCounter;      // Max( CacheRangeInfo->changecounter )
 
-	// TODO Add cache metrics, such as available memory/in-use memory etc to help dat adistributor assign cached ranges
-	//StorageCacheMetrics metrics;
+	StorageServerMetrics metrics;
+	CoalescedKeyRangeMap<bool, int64_t, KeyBytesMetric<int64_t>> byteSampleClears;
+	AsyncVar<bool> byteSampleClearsTooLarge;
+	// Update the byteSample, and write the updates to the mutation log@ver, or to storage if ver==invalidVersion
+	void byteSampleApplyMutation( MutationRef const& m, Version ver );
+	void byteSampleApplySet( KeyValueRef kv, Version ver );
+	void byteSampleApplyClear( KeyRangeRef range, Version ver );
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -199,6 +211,7 @@ public:
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, finishedQueries, rowsQueried, bytesQueried;
 		Counter bytesInput, bytesFetched, mutationBytes;  // Like bytesInput but without MVCC accounting
+		Counter sampledBytesCleared;
 		Counter mutations, setMutations, clearRangeMutations, atomicMutations;
 		Counter updateBatches, updateVersions;
 		Counter loops;
@@ -218,6 +231,7 @@ public:
 			bytesInput("BytesInput", cc),
 			bytesFetched("BytesFetched", cc),
 			mutationBytes("MutationBytes", cc),
+			sampledBytesCleared("SampledBytesCleared", cc),
 			mutations("Mutations", cc),
 			setMutations("SetMutations", cc),
 			clearRangeMutations("ClearRangeMutations", cc),
@@ -230,18 +244,20 @@ public:
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self](){ return self->version.get(); });
 			specialCounter(cc, "VersionLag", [self](){ return self->versionLag; });
+			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
+			specialCounter(cc, "BytesStored", [self](){ return self->metrics.byteSample.getEstimate(allKeys); });
 		}
 	} counters;
 
 	explicit StorageCacheData(UID thisServerID, uint16_t index, Reference<AsyncVar<ServerDBInfo>> const& db)
 		:   /*versionedData(FastAllocPTree<KeyRef>{std::make_shared<int>(0)}), */
-			thisServerID(thisServerID), index(index), logProtocol(0), db(db),
+		thisServerID(thisServerID), index(index), logProtocol(0), db(db), actors(false),
 			cacheRangeChangeCounter(0),
 			lastTLogVersion(0), lastVersionWithData(0), peekVersion(0),
 			compactionInProgress(Void()),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
 			debug_inApplyUpdate(false), debug_lastValidateTime(0),
-			versionLag(0), behind(false), counters(this)
+			versionLag(0), behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), counters(this)
 	{
 		version.initMetric(LiteralStringRef("StorageCacheData.Version"), counters.cc.id);
 		desiredOldestVersion.initMetric(LiteralStringRef("StorageCacheData.DesriedOldestVersion"), counters.cc.id);
@@ -318,6 +334,10 @@ public:
 	}
 
 	MutationRef addMutationToMutationLog(Standalone<VersionUpdateRef> &mLV, MutationRef const& m){
+		TraceEvent(SevDebug, "AddMutationToMutationLog")
+			.detail("Key", m.param1)
+			.detail("Value",m.param2);
+		byteSampleApplyMutation( m, mLV.version );
 		counters.bytesInput += mvccStorageBytes(m);
 		return mLV.mutations.push_back_deep( mLV.arena(), m );
 	}
@@ -499,6 +519,14 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			//TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
 		}
 
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+			// If the read yields no value, randomly sample the empty read.
+			int64_t bytesReadPerKSecond =
+				v.present() ? std::max((int64_t)(req.key.size() + v.get().size()), SERVER_KNOBS->EMPTY_READ_PENALTY)
+				: SERVER_KNOBS->EMPTY_READ_PENALTY;
+			data->metrics.notifyBytesReadPerKSecond(req.key, bytesReadPerKSecond);
+		}
+
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
@@ -639,8 +667,20 @@ Key findKey( StorageCacheData* data, KeySelectorRef sel, Version version, KeyRan
 
 	if (index < rep.data.size()) {
 		*pOffset = 0;
+
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+			int64_t bytesReadPerKSecond =
+			    std::max((int64_t)rep.data[index].key.size(), SERVER_KNOBS->EMPTY_READ_PENALTY);
+			data->metrics.notifyBytesReadPerKSecond(sel.getKey(), bytesReadPerKSecond);
+		}
+
 		return rep.data[ index ].key;
 	} else {
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+			int64_t bytesReadPerKSecond = SERVER_KNOBS->EMPTY_READ_PENALTY;
+			data->metrics.notifyBytesReadPerKSecond(sel.getKey(), bytesReadPerKSecond);
+		}
+
 		// FIXME: If range.begin=="" && !forward, return success?
 		*pOffset = index - rep.data.size() + 1;
 		if (!forward) *pOffset = -*pOffset;
@@ -769,6 +809,20 @@ ACTOR Future<Void> getKeyValues( StorageCacheData* data, GetKeyValuesRequest req
 				ASSERT(r.data.size() <= std::abs(req.limit));
 			}
 
+			// For performance concerns, the cost of a range read is billed to the start key and end key of the range.
+			int64_t totalByteSize = 0;
+			for (int i = 0; i < r.data.size(); i++) {
+				totalByteSize += r.data[i].expectedSize();
+			}
+			if (totalByteSize > 0 && SERVER_KNOBS->READ_SAMPLING_ENABLED) {
+				int64_t bytesReadPerKSecond = std::max(totalByteSize, SERVER_KNOBS->EMPTY_READ_PENALTY) / 2;
+				TraceEvent(SevDebug, "SCBytesReadPerKSecond", data->thisServerID).detail("Size", bytesReadPerKSecond);
+				data->metrics.notifyBytesReadPerKSecond(r.data[0].key, bytesReadPerKSecond);
+				data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
+			}
+
+			// TODO: check
+			//r.penalty = data->getPenalty();
 			req.reply.send( r );
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -931,6 +985,10 @@ void StorageCacheData::applyMutation( MutationRef const& m, Arena& arena, Storag
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 
+	StorageMetrics mets;
+	mets.bytesPerKSecond = mvccStorageBytes( m ) / 2;
+	mets.iosPerKSecond = 0;
+	metrics.notify(m.param1, mets);
 	if (m.type == MutationRef::SetValue) {
 		auto prev = data.atLatest().lastLessOrEqual(m.param1);
 		if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
@@ -1258,6 +1316,12 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 					wait(yield());
 				}
 
+				kvItr = this_block.begin();
+				for(; kvItr != this_block.end(); ++kvItr) {
+					data->byteSampleApplySet( *kvItr, invalidVersion );
+					wait(yield());
+				}
+
 				// TODO: If there was more to be fetched and we hit the limit before - possibly a case where data doesn't fit on this cache. For now, we can just fail this cache role.
 				// In future, we should think about evicting some data to make room for the remaining keys
 				if (this_block.more) {
@@ -1393,6 +1457,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 				// TODO Not sure if it's okay to do this here!!
 				removeDataRange( data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->cachedRangeMap, keys );
 				//data->storage.clearRange( keys );
+				data->byteSampleApplyClear( keys, invalidVersion );
 			} else {
 				ASSERT( data->data().getLatestVersion() > data->version.get() );
 				removeDataRange( data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->cachedRangeMap, keys );
@@ -2012,32 +2077,283 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 	}
 }
 
+void StorageCacheData::byteSampleApplyMutation( MutationRef const& m, Version ver ){
+		TraceEvent(SevDebug, "ByteSampleApplyMutation")
+			.detail("Key", m.param1)
+			.detail("Value",m.param2);
+	if (m.type == MutationRef::ClearRange)
+		byteSampleApplyClear( KeyRangeRef(m.param1, m.param2), ver );
+	else if (m.type == MutationRef::SetValue)
+		byteSampleApplySet( KeyValueRef(m.param1, m.param2), ver );
+	else
+		ASSERT(false); // Mutation of unknown type modfying byte sample
+}
+
+//Determines whether a key-value pair should be included in a byte sample
+//Also returns size information about the sample
+ByteSampleInfo isKVInSample(KeyValueRef keyValue) {
+	ByteSampleInfo info;
+
+	const KeyRef key = keyValue.key;
+	info.size = key.size() + keyValue.value.size();
+
+	uint32_t a = 0;
+	uint32_t b = 0;
+	hashlittle2( key.begin(), key.size(), &a, &b );
+
+	double probability = (double)info.size / (key.size() + SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD) / SERVER_KNOBS->BYTE_SAMPLING_FACTOR;
+	info.inSample = a / ((1 << 30) * 4.0) < probability;
+	info.sampledSize = info.size / std::min(1.0, probability);
+
+	return info;
+}
+
+void StorageCacheData::byteSampleApplySet( KeyValueRef kv, Version ver ) {
+	// Update byteSample in memory  and notify waiting metrics
+
+	TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Version", ver);
+
+	ByteSampleInfo sampleInfo = isKVInSample(kv);
+	auto& byteSample = metrics.byteSample.sample;
+
+	int64_t delta = 0;
+	const KeyRef key = kv.key;
+
+	auto old = byteSample.find(key);
+	if (old != byteSample.end()) delta = -byteSample.getMetric(old);
+	if (sampleInfo.inSample) {
+		delta += sampleInfo.sampledSize;
+		byteSample.insert( key, sampleInfo.sampledSize );
+		addMutationToMutationLog( addVersionToMutationLog(ver),
+								  MutationRef(MutationRef::SetValue, key.withPrefix(privateByteSampleKeys.begin),
+												   BinaryWriter::toValue( sampleInfo.sampledSize, Unversioned() )) );
+	} else {
+		bool any = old != byteSample.end();
+		if(!byteSampleClears.rangeContaining(key).value()) {
+			byteSampleClears.insert(key, true);
+			byteSampleClearsTooLarge.set(byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
+			any = true;
+		}
+		if (any) {
+			byteSample.erase(old);
+			auto privateRange = singleKeyRange(key.withPrefix(privateByteSampleKeys.begin));
+			addMutationToMutationLog( addVersionToMutationLog(ver),
+									  MutationRef(MutationRef::ClearRange, privateRange.begin, privateRange.end) );
+		}
+	}
+
+	TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Delta", delta);
+	if (delta) metrics.notifyBytes( key, delta );
+}
+
+void StorageCacheData::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
+	// Update byteSample in memory and notify waiting metrics
+
+	auto& byteSample = metrics.byteSample.sample;
+	bool any = false;
+
+	if(range.begin < allKeys.end) {
+		//NotifyBytes should not be called for keys past allKeys.end
+		KeyRangeRef searchRange = KeyRangeRef(range.begin, std::min(range.end, allKeys.end));
+		counters.sampledBytesCleared += byteSample.sumRange(searchRange.begin, searchRange.end);
+
+		auto r = metrics.waitMetricsMap.intersectingRanges(searchRange);
+		for(auto shard = r.begin(); shard != r.end(); ++shard) {
+			KeyRangeRef intersectingRange = shard.range() & range;
+			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
+			metrics.notifyBytes(shard, -bytes);
+			any = any || bytes > 0;
+		}
+	}
+
+	if(range.end > allKeys.end && byteSample.sumRange(std::max(allKeys.end, range.begin), range.end) > 0)
+		any = true;
+
+	auto clearRanges = byteSampleClears.intersectingRanges(range);
+	for(auto it : clearRanges) {
+		if(!it.value()) {
+			byteSampleClears.insert(range, true);
+			byteSampleClearsTooLarge.set(byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
+			any = true;
+			break;
+		}
+	}
+
+	if (any) {
+		byteSample.eraseAsync( range.begin, range.end );
+		auto privateRange = range.withPrefix( privateByteSampleKeys.begin );
+		addMutationToMutationLog( addVersionToMutationLog(ver),
+								  MutationRef(MutationRef::ClearRange, privateRange.begin, privateRange.end) );
+	}
+}
+
+ACTOR Future<Void> scWaitMetrics( StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout ) {
+	state PromiseStream< StorageMetrics > change;
+	state StorageMetrics metrics = self->getMetrics( req.keys );
+	state Error error = success();
+	state bool timedout = false;
+
+	if ( !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
+		TEST( true ); // ShardWaitMetrics return case 1 (quickly)
+		req.reply.send( metrics );
+		return Void();
+	}
+
+	{
+		auto rs = self->waitMetricsMap.modify( req.keys );
+		for(auto r = rs.begin(); r != rs.end(); ++r)
+			r->value().push_back( change );
+		loop {
+			try {
+				choose {
+					when( StorageMetrics c = waitNext( change.getFuture() ) ) {
+						metrics += c;
+
+						// SOMEDAY: validation! The changes here are possibly partial changes (we receive multiple messages per
+						//  update to our requested range). This means that the validation would have to occur after all
+						//  the messages for one clear or set have been dispatched.
+
+						/*StorageMetrics m = getMetrics( data, req.keys );
+						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond || m.iosPerKSecond != metrics.iosPerKSecond );
+						  if (b) {
+						  printf("keys: '%s' - '%s' @%p\n", printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
+						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n", b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond, metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
+
+						  }*/
+					}
+					when( wait( timeout ) ) {
+						timedout = true;
+					}
+				}
+			} catch (Error& e) {
+				if( e.code() == error_code_actor_cancelled ) throw; // This is only cancelled when the main loop had exited...no need in this case to clean up self
+				error = e;
+				break;
+			}
+
+			if( timedout ) {
+				TEST( true ); // ShardWaitMetrics return on timeout
+				//FIXME: instead of using random chance, send wrong_shard_server when the call in from waitMetricsMultiple (requires additional information in the request)
+				if(deterministicRandom()->random01() < SERVER_KNOBS->WAIT_METRICS_WRONG_SHARD_CHANCE) {
+					req.reply.sendError( wrong_shard_server() );
+				} else {
+					req.reply.send( metrics );
+				}
+				break;
+			}
+
+			if ( !req.min.allLessOrEqual( metrics ) || !metrics.allLessOrEqual( req.max ) ) {
+				TEST( true ); // ShardWaitMetrics return case 2 (delayed)
+				req.reply.send( metrics );
+				break;
+			}
+		}
+
+		wait( delay(0) ); //prevent iterator invalidation of functions sending changes
+	}
+
+	auto rs = self->waitMetricsMap.modify( req.keys );
+	for(auto i = rs.begin(); i != rs.end(); ++i) {
+		auto &x = i->value();
+		for( int j = 0; j < x.size(); j++ ) {
+			if( x[j] == change ) {
+				swapAndPop(&x, j);
+				break;
+			}
+		}
+	}
+	self->waitMetricsMap.coalesce( req.keys );
+
+	if (error.code() != error_code_success ) {
+		if (error.code() != error_code_wrong_shard_server) throw error;
+		TEST( true );	// ShardWaitMetrics delayed wrong_shard_server()
+		req.reply.sendError(error);
+	}
+
+	return Void();
+}
+
+//Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay) {
+//	return ::scWaitMetrics(this, req, delay);
+//}
+
+ACTOR Future<Void> metricsCore( StorageCacheData* self, StorageServerInterface ssi ) {
+	state Future<Void> doPollMetrics = Void();
+
+	TraceEvent(SevDebug, "SCMetricsCoreAddingTraceCountersActor", self->thisServerID);
+	printf("\nSCMetricsCoreAddingTraceCountersActor\n");
+	printf("WaitMetricsMapSize: %d\n", self->metrics.waitMetricsMap.size());
+	self->actors.add(traceCounters("CacheMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self->counters.cc, self->thisServerID.toString() + "/CacheMetrics"));
+
+	loop {
+		choose {
+			when (WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
+				if (!self->isReadable( req.keys )) {
+					TEST( true );	// waitMetrics immediate wrong_shard_server()
+					req.reply.sendError(wrong_shard_server());
+				} else {
+					TraceEvent(SevDebug, "SCMetricsCoreAddingWaitMetricsActor", self->thisServerID);
+					printf("\nSCMetricsCoreAddingWaitMetricsActor\n");
+					self->actors.add( self->metrics.waitMetrics( req, delayJittered( SERVER_KNOBS->STORAGE_METRIC_TIMEOUT ) ) );
+				}
+			}
+
+			when (SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
+				if (!self->isReadable( req.keys )) {
+					TEST( true );	// splitMetrics immediate wrong_shard_server()
+					req.reply.sendError(wrong_shard_server());
+				} else {
+					self->metrics.splitMetrics( req );
+				}
+			}
+		
+			when (GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
+				//StorageBytes sb = self->storage.getStorageBytes();
+				self->metrics.getStorageMetrics( req, self->counters.bytesInput.getRate(), self->versionLag);
+			}
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
+				printf("\nSCGetReadHotRanges\n");
+				if (!self->isReadable(req.keys)) {
+					TEST(true); // readHotSubRanges immediate wrong_shard_server()
+					req.reply.sendError(wrong_shard_server());
+				} else {
+					self->metrics.getReadHotRanges(req);
+				}
+			}
+			when (wait(doPollMetrics) ) {
+				//printf("\nSCDOPollMetrics\n");
+				self->metrics.poll();
+			}
+		}
+	}
+}
 ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db) {
 	state StorageCacheData self(ssi.id(), id, db);
-	state ActorCollection actors(false);
+	//state ActorCollection actors(false);
 	state Future<Void> dbInfoChange = Void();
 	state StorageCacheUpdater updater(self.lastVersionWithData);
 	self.updater = &updater;
 
-	//TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID);
+	TraceEvent("StorageCache_CacheServerInterface", self.thisServerID).detail("UID", ssi.uniqueID);
 
 	// This helps identify the private mutations meant for this cache server
 	self.ck = cacheKeysPrefixFor( id ).withPrefix(systemKeys.begin);  // FFFF/02cacheKeys/[this server]/
 
-	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
+	self.actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
+	//self.actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
+	self.actors.add(metricsCore(&self, ssi));
 
 	// fetch already cached ranges from the database and apply them before proceeding
 	wait( storageCacheStartUpWarmup(&self) );
 
 	//compactCache actor will periodically compact the cache when certain version condition is met
-	actors.add(compactCache(&self));
+	self.actors.add(compactCache(&self));
 
 	// pullAsyncData actor pulls mutations from the TLog and also applies them.
-	actors.add(pullAsyncData(&self));
-	actors.add(watchInterface(&self, ssi));
+	self.actors.add(pullAsyncData(&self));
+	self.actors.add(watchInterface(&self, ssi));
 
-	actors.add(traceRole(Role::STORAGE_CACHE, ssi.id()));
+	self.actors.add(traceRole(Role::STORAGE_CACHE, ssi.id()));
 	self.coreStarted.send( Void() );
 
 	loop {
@@ -2050,16 +2366,16 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 		when( GetValueRequest req = waitNext(ssi.getValue.getFuture()) ) {
 			// TODO do we need to add throttling for cache servers? Probably not
 			//actors.add(self->readGuard(req , getValueQ));
-			actors.add(getValueQ(&self, req));
+			self.actors.add(getValueQ(&self, req));
 		}
 		when( WatchValueRequest req = waitNext(ssi.watchValue.getFuture()) ) {
 			ASSERT(false);
 		}
 		when (GetKeyRequest req = waitNext(ssi.getKey.getFuture())) {
-			actors.add(getKey(&self, req));
+			self.actors.add(getKey(&self, req));
 		}
 		when (GetKeyValuesRequest req = waitNext(ssi.getKeyValues.getFuture()) ) {
-			actors.add(getKeyValues(&self, req));
+			self.actors.add(getKeyValues(&self, req));
 		}
 		when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 			ASSERT(false);
@@ -2073,7 +2389,7 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 		when( ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture()) ) {
 			ASSERT(false);
 		}
-		when(wait(actors.getResult())) {}
+		when(wait(self.actors.getResult())) {}
 		}
 	}
 }
