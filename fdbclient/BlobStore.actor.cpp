@@ -1050,7 +1050,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 
 ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string content) {
 	state UnsentPacketQueue packets;
-	PacketWriter pw(packets.getWriteBuffer(), NULL, Unversioned());
+	PacketWriter pw(packets.getWriteBuffer(content.size()), NULL, Unversioned());
 	pw.serializeBytes(content);
 	if(content.size() > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
@@ -1173,7 +1173,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstor
 
 	std::string resource = format("/%s/%s?uploadId=%s", bucket.c_str(), object.c_str(), uploadID.c_str());
 	HTTP::Headers headers;
-	PacketWriter pw(part_list.getWriteBuffer(), NULL, Unversioned());
+	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), NULL, Unversioned());
 	pw.serializeBytes(manifest);
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), {200}));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then the next retry

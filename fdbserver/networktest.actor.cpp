@@ -240,30 +240,69 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 struct RandomIntRange {
 	int min;
 	int max;
+
+	RandomIntRange(int low = 0, int high = 0) : min(low), max(high) {
+	}
+
+	// Accepts strings of the form "min:max" or "N"
+	// where N will be used for both min and max
+	RandomIntRange(std::string str) {
+		StringRef high = str;
+		StringRef low = high.eat(":");
+		if(high.size() == 0) {
+			high = low;
+		}
+		min = low.size() == 0 ? 0 : atol(low.toString().c_str());
+		max = high.size() == 0 ? 0 : atol(high.toString().c_str());
+		if(min > max) {
+			std::swap(min, max);
+		}
+	}
+
 	int get() const {
-		return nondeterministicRandom()->randomInt(min, max + 1);
+		return (max == 0) ? 0 : nondeterministicRandom()->randomInt(min, max + 1);
+	}
+
+	std::string toString() const {
+		return format("%d:%d", min, max);
 	}
 };
 
 struct P2PNetworkTest {
+	// Addresses to listen on
 	std::vector<Reference<IListener>> listeners;
+	// Addresses to randomly connect to
 	std::vector<NetworkAddress> remotes;
+	// Number of outgoing connections to maintain
 	int connectionsOut;
-	RandomIntRange msgBytes;
+	// Message size range to send on outgoing established connections
+	RandomIntRange sendMsgBytes;
+	// Message size range to send on incoming established connections
+	RandomIntRange recvMsgBytes;
+	// Delay after message send and receive are complete before closing connection
 	RandomIntRange idleMilliseconds;
+	// Random delay before socket reads
+	RandomIntRange waitReadMilliseconds;
+	// Random delay before socket writes
+	RandomIntRange waitWriteMilliseconds;
 
 	double startTime;
 	int64_t bytesSent;
 	int64_t bytesReceived;
 	int sessionsIn;
 	int sessionsOut;
+	int connectErrors;
+	int acceptErrors;
+	int sessionErrors;
+
 	Standalone<StringRef> msgBuffer;
-	int sendRecvSize;
 
 	std::string statsString() {
 		double elapsed = now() - startTime;
-		std::string s = format("%.2f MB/s bytes in  %.2f MB/s bytes out  %.2f/s completed sessions in  %.2f/s completed sessions out",
+		std::string s = format("%.2f MB/s bytes in  %.2f MB/s bytes out  %.2f/s completed sessions in  %.2f/s completed sessions out  ",
 			bytesReceived / elapsed / 1e6, bytesSent / elapsed / 1e6, sessionsIn / elapsed, sessionsOut / elapsed);
+		s += format("Total Errors %d  connect=%d  accept=%d  session=%d",
+			connectErrors + acceptErrors + sessionErrors, connectErrors, acceptErrors, sessionErrors);
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -274,13 +313,16 @@ struct P2PNetworkTest {
 
 	P2PNetworkTest() {}
 
-	P2PNetworkTest(std::string listenerAddresses, std::string remoteAddresses, int connectionsOut, RandomIntRange msgBytes, RandomIntRange idleMilliseconds, int sendRecvSize)
-	  : connectionsOut(connectionsOut), msgBytes(msgBytes), idleMilliseconds(idleMilliseconds), sendRecvSize(sendRecvSize) {
+	P2PNetworkTest(std::string listenerAddresses, std::string remoteAddresses, int connectionsOut, RandomIntRange sendMsgBytes, RandomIntRange recvMsgBytes, RandomIntRange idleMilliseconds, RandomIntRange waitReadMilliseconds, RandomIntRange waitWriteMilliseconds)
+	  : connectionsOut(connectionsOut), sendMsgBytes(sendMsgBytes), recvMsgBytes(recvMsgBytes), idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds), waitWriteMilliseconds(waitWriteMilliseconds) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
 		sessionsOut = 0;
-		msgBuffer = nondeterministicRandom()->randomAlphaNumeric(msgBytes.max);
+		connectErrors = 0;
+		acceptErrors = 0;
+		sessionErrors = 0;
+		msgBuffer = makeString(std::max(sendMsgBytes.max, recvMsgBytes.max));
 
 		if(!remoteAddresses.empty()) {
 			remotes = NetworkAddress::parseList(remoteAddresses);
@@ -298,7 +340,7 @@ struct P2PNetworkTest {
 	}
 
 	ACTOR static Future<Void> readMsg(P2PNetworkTest *self, Reference<IConnection> conn) {
-		state Standalone<StringRef> buffer = makeString(self->sendRecvSize);
+		state Standalone<StringRef> buffer = makeString(FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 		state int bytesToRead = sizeof(int);
 		state int writeOffset = 0;
 		state bool gotHeader = false;
@@ -306,6 +348,11 @@ struct P2PNetworkTest {
 		// Fill buffer sequentially until the initial bytesToRead is read (or more), then read
 		// intended message size and add it to bytesToRead, continue if needed until bytesToRead is 0.
 		loop {
+			int stutter = self->waitReadMilliseconds.get();
+			if(stutter > 0) {
+				wait(delay(stutter / 1e3));
+			}
+
 			int len = conn->read((uint8_t *)buffer.begin() + writeOffset, (uint8_t *)buffer.end());
 			bytesToRead -= len;
 			self->bytesReceived += len;
@@ -313,8 +360,8 @@ struct P2PNetworkTest {
 
 			// If no size header yet but there are enough bytes, read the size
 			if(!gotHeader && bytesToRead <= 0) {
-					gotHeader = true;
-					bytesToRead += *(int *)buffer.begin();
+				gotHeader = true;
+				bytesToRead += *(int *)buffer.begin();
 			}
 
 			if(gotHeader) {
@@ -334,46 +381,65 @@ struct P2PNetworkTest {
 		return Void();
 	}
 
-	ACTOR static Future<Void> writeMsg(P2PNetworkTest *self, Reference<IConnection> conn) {
+	ACTOR static Future<Void> writeMsg(P2PNetworkTest *self, Reference<IConnection> conn, bool incoming) {
 		state UnsentPacketQueue packets;
-		state int msgSize = self->msgBytes.get();
+		state int msgSize = (incoming ? self->recvMsgBytes : self->sendMsgBytes).get();
 
-		PacketWriter writer(packets.getWriteBuffer(), nullptr, Unversioned());
+		PacketWriter writer(packets.getWriteBuffer(msgSize), nullptr, Unversioned());
 		writer.serializeBinaryItem(msgSize);
 		writer.serializeBytes(self->msgBuffer.substr(0, msgSize));
 
-		loop {
-			wait(conn->onWritable());
-			wait( delay( 0, TaskPriority::WriteSocket ) );
-			int len = conn->write(packets.getUnsent(), self->sendRecvSize);
-			self->bytesSent += len;
-			packets.sent(len);
+		state int bytesBeforeDelay = FLOW_KNOBS->MAX_PACKET_SEND_BYTES;
 
-			if(packets.empty())
+		loop {
+			int stutter = self->waitWriteMilliseconds.get();
+			if(stutter > 0) {
+				wait(delay(stutter / 1e3));
+			}
+
+			int sent = conn->write(packets.getUnsent(), bytesBeforeDelay);
+
+			if(sent != 0) {
+				self->bytesSent += sent;
+				bytesBeforeDelay -= sent;
+				packets.sent(sent);
+			}
+
+			if(packets.empty()) {
 				break;
+			}
+
+			wait(conn->onWritable());
+			if(bytesBeforeDelay <= 0) {
+				wait(delay(0, TaskPriority::WriteSocket));
+				bytesBeforeDelay = FLOW_KNOBS->MAX_PACKET_SEND_BYTES;
+			}
 		}
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> doSession(P2PNetworkTest *self, Reference<IConnection> conn, bool accept) {
+	ACTOR static Future<Void> doSession(P2PNetworkTest *self, Reference<IConnection> conn, bool incoming) {
 		try {
-			if(accept) {
+			if(incoming) {
 				wait(conn->acceptHandshake());
 			} else {
 				wait(conn->connectHandshake());
 			}
-			wait(readMsg(self, conn) && writeMsg(self, conn));
+			wait(readMsg(self, conn) && writeMsg(self, conn, incoming));
 			wait(delay(self->idleMilliseconds.get() / 1e3));
 			conn->close();
-			if(accept) {
+			if(incoming) {
 				++self->sessionsIn;
 			} else {
 				++self->sessionsOut;
 			}
 
 		} catch(Error &e) {
-			printf("doSession: error %s on remote %s\n", e.what(), conn->getPeerAddress().toString().c_str());
+			++self->sessionErrors;
+			TraceEvent(SevError, incoming ? "P2PIncomingSessionError" : "P2POutgoingSessionError")
+				.detail("Remote", conn->getPeerAddress())
+				.error(e);
 		}
 
 		return Void();
@@ -389,7 +455,11 @@ struct P2PNetworkTest {
 				//printf("Connected to %s\n", remote.toString().c_str());
 				wait(doSession(self, conn, false));
 			} catch(Error &e) {
-				printf("outgoing: error %s on remote %s\n", e.what(), remote.toString().c_str());
+				++self->connectErrors;
+				TraceEvent(SevError, "P2POutgoingError")
+					.detail("Remote", remote)
+					.error(e);
+				wait(delay(1));
 			}
 		}
 	}
@@ -405,7 +475,11 @@ struct P2PNetworkTest {
 				//printf("Connected from %s\n", conn->getPeerAddress().toString().c_str());
 				sessions.add(doSession(self, conn, true));
 			} catch(Error &e) {
-				printf("incoming: error %s on listener %s\n", e.what(), listener->getListenAddress().toString().c_str());
+				++self->acceptErrors;
+				TraceEvent(SevError, "P2PIncomingError")
+					.detail("Listener", listener->getListenAddress())
+					.error(e);
+				wait(delay(1));
 			}
 		}
 	}
@@ -416,9 +490,12 @@ struct P2PNetworkTest {
 		self->startTime = now();
 
 		printf("%d listeners, %d remotes, %d outgoing connections\n", self->listeners.size(), self->remotes.size(), self->connectionsOut);
-		printf("Message size %d to %d bytes\n", self->msgBytes.min, self->msgBytes.max);
-		printf("Post exchange delay %f to %f seconds\n", self->idleMilliseconds.min / 1e3, self->idleMilliseconds.max / 1e3);
-		printf("Send/Recv size %d bytes\n", self->sendRecvSize);
+		printf("Send message size: %s\n", self->sendMsgBytes.toString().c_str());
+		printf("Receive message size: %s\n", self->recvMsgBytes.toString().c_str());
+		printf("Delay before socket read: %s\n", self->waitReadMilliseconds.toString().c_str());
+		printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
+		printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
+		printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 
 		for(auto n : self->remotes) {
 			printf("Remote: %s\n", n.toString().c_str());
@@ -436,7 +513,7 @@ struct P2PNetworkTest {
 		}
 
 		loop {
-			wait(delay(1.0));
+			wait(delay(1.0, TaskPriority::Max));
 			printf("%s\n", self->statsString().c_str());
 		}
 	}
@@ -460,12 +537,14 @@ std::string getEnvStr(const char *name, std::string defaultValue = "") {
 // TODO: Remove this hacky thing and make a "networkp2ptest" role in fdbserver
 TEST_CASE("!p2ptest") {
 	state P2PNetworkTest p2p(
-		getEnvStr("listenerAddresses", "127.0.0.1:5000,127.0.0.1:5001:tls"),
-		getEnvStr("remoteAddresses", "127.0.0.1:5000,127.0.0.1:5001:tls"),
-		getEnvInt("connectionsOut", 2),
-		{getEnvInt("minMsgBytes", 0), getEnvInt("maxMsgBytes", 1000000)},
-		{getEnvInt("minIdleMilliseconds", 500), getEnvInt("maxIdleMilliseconds", 1000)},
-		getEnvInt("sendRecvSize", 32000)
+		getEnvStr("listenerAddresses", "127.0.0.1:5001:tls"),
+		getEnvStr("remoteAddresses", "127.0.0.1:5001:tls"),
+		getEnvInt("connectionsOut", 1),
+		getEnvStr("sendMsgBytes", "1000000000:1000000000"),
+		getEnvStr("recvMsgBytes", "0:0"),
+		getEnvStr("idleMilliseconds", "0:0"),
+		getEnvStr("waitReadMilliseconds", "0:0"),
+		getEnvStr("waitWriteMilliseconds", "0:0")
 	);
 
 	wait(p2p.run());

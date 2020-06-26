@@ -3849,7 +3849,8 @@ int main(int argc, char* argv[]) {
 				<< FastAllocator<1024>::pageCount << " "
 				<< FastAllocator<2048>::pageCount << " "
 				<< FastAllocator<4096>::pageCount << " "
-				<< FastAllocator<8192>::pageCount << endl;
+				<< FastAllocator<8192>::pageCount << " "
+				<< FastAllocator<16384>::pageCount << endl;
 
 			vector< std::pair<std::string, const char*> > typeNames;
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
