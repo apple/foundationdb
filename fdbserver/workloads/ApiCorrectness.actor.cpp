@@ -357,9 +357,8 @@ public:
 	//results were the same
 	ACTOR Future<bool> runGet(VectorRef<KeyValueRef> data, int numReads, ApiCorrectnessWorkload *self) {
 		//Generate a set of random keys to get
-		state Standalone<VectorRef<Key>> keys;
-		for(int i = 0; i < numReads; i++)
-			keys.push_back(keys.arena(), self->selectRandomKey(data, 0.9));
+		state Standalone<VectorRef<KeyRef>> keys;
+		for (int i = 0; i < numReads; i++) keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
 		state vector<Optional<Value>> values;
 
@@ -554,9 +553,9 @@ public:
 	//results were the same
 	ACTOR Future<bool> runGetKey(VectorRef<KeyValueRef> data, int numGetKeys, ApiCorrectnessWorkload *self) {
 		//Generate a set of random key selectors
-		state Standalone<VectorRef<KeySelector>> selectors;
+		state Standalone<VectorRef<KeySelectorRef>> selectors;
 		for(int i = 0; i < numGetKeys; i++)
-			selectors.push_back(selectors.arena(), self->generateKeySelector(data, 100));
+			selectors.push_back_deep(selectors.arena(), self->generateKeySelector(data, 100));
 
 		state Standalone<VectorRef<KeyRef>> keys;
 
@@ -640,9 +639,8 @@ public:
 	ACTOR Future<bool> runClear(VectorRef<KeyValueRef> data, int numClears, ApiCorrectnessWorkload *self)
 	{
 		//Generate a random set of keys to clear
-		state Standalone<VectorRef<Key>> keys;
-		for(int i = 0; i < numClears; i++)
-			keys.push_back(keys.arena(), self->selectRandomKey(data, 0.9));
+		state Standalone<VectorRef<KeyRef>> keys;
+		for (int i = 0; i < numClears; i++) keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
 		state int currentIndex = 0;
 		while(currentIndex < keys.size()) {
