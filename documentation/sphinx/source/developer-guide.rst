@@ -868,6 +868,56 @@ A user can see stats about data distribution like so::
   ('\xff\xff/metrics/data_distribution_stats/mako083', '{"ShardBytes":297000}')
   ('\xff\xff/metrics/data_distribution_stats/mako0909', '{"ShardBytes":741000}')
 
+Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for use for application-level throttling.
+Some of this information is also available through ``\xff\xff/status/json``,
+but the ``\xff\xff/metrics/health/`` keys are much cheaper to read and may
+return data a few seconds old.
+
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/health/'):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/metrics/health/aggregate', '{"batchLimited":false,"tpsLimit":483988.66315011407,"worstStorageDurabilityLag":5000001,"worstStorageQueue":2036,"worstTLogQueue":300}')
+  ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"tLogQueue":300}')
+  ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpuUsage":2.398696781487125,"diskUsage":0.059995917598039405,"storageDurabilityLag":5000001,"storageQueue":2036}')
+
+``\xff\xff/metrics/health/aggregate``
+
+Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+batchLimited              boolean  Whether or not the cluster is limiting batch priority transactions
+tpsLimit                  number   The rate at which normal priority transactions are allowed to start
+worstStorageDurabilityLag number   See the description for storageDurabilityLag
+worstStorageQueue         number   See the description for storageQueue
+worstTLogQueue            number   See the description for tLogQueue
+========================= ======== ===============
+
+``\xff\xff/metrics/health/log/<id>``
+
+Stats about the health of a particular transaction log
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+tLogQueue                 number   The number of bytes of mutations that need to be stored in memory on this transaction log process
+========================= ======== ===============
+
+``\xff\xff/metrics/health/storage/<id>``
+
+Stats about the health of a particular transaction log
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+cpuUsage                  number   The cpu percentage used by this storage process
+diskUsage                 number   The disk IO percentage used by this storage process
+storageDurabilityLag      number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000.
+storageQueue              number   The number of bytes of mutations that need to be stored in memory on this storage process
+========================= ======== ===============
+
+
 Performance considerations
 ==========================
 
