@@ -220,7 +220,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	state int retries = 0;
 	state UID randomID = deterministicRandom()->randomUniqueID();
 
-	wait(delay(deterministicRandom()->random01() * delayTime));
+	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
 	    .detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
@@ -308,7 +308,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		curTxnSize += range.expectedSize();
 		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
 			fClearRanges.push_back(applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex));
-			delayTime += 0.1;
+			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_DELAY_OFFSET;
 			clearRanges = Standalone<VectorRef<KeyRangeRef>>();
 			curTxnSize = 0;
 		}
@@ -364,9 +364,9 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 			numKeysInBatch++;
 		}
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
-			fGetAndComputeKeys.push_back(
-			    getAndComputeStagingKeys(incompleteStagingKeys, 0.1, cx, applierID, batchIndex, &batchData->counters));
-			delayTime += 0.1; // TODO: Delete this because we may not need this
+			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
+			                                                      batchIndex, &batchData->counters));
+			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_DELAY_OFFSET;
 			numKeysInBatch = 0;
 			incompleteStagingKeys.clear();
 		}
@@ -404,8 +404,8 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
                                                 std::map<Key, StagingKey>::iterator end, Database cx,
                                                 FlowLock* applyStagingKeysBatchLock, UID applierID,
                                                 ApplierBatchData::Counters* cc) {
-	// wait(applyStagingKeysBatchLock->take(TaskPriority::RestoreApplierWriteDB)); // Q: Do we really need the lock?
-	// state FlowLock::Releaser releaser(*applyStagingKeysBatchLock);
+	wait(applyStagingKeysBatchLock->take(TaskPriority::RestoreApplierWriteDB)); // Q: Do we really need the lock?
+	state FlowLock::Releaser releaser(*applyStagingKeysBatchLock);
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
