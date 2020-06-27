@@ -253,6 +253,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	RoleVersionBatchState vbState;
 
+	long receiveMutationReqs;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
@@ -260,6 +262,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
 		Counter appliedTxns, appliedTxnRetries;
 		Counter fetchKeys, fetchTxns, fetchTxnRetries; // number of keys to fetch from dest. FDB cluster.
+		Counter clearOps, clearTxns;
 		// TODO: Add the counter in applying phase
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
@@ -269,7 +272,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
 		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc),
 		    appliedTxnRetries("AppliedTxnRetries", cc), fetchKeys("FetchKeys", cc), fetchTxns("FetchTxns", cc),
-		    fetchTxnRetries("FetchTxnRetries", cc) {}
+		    fetchTxnRetries("FetchTxnRetries", cc), clearOps("ClearOps", cc), clearTxns("ClearTxns", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }

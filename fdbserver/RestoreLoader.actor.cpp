@@ -348,11 +348,15 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state bool isDuplicated = true;
+	state bool printTrace = false;
 	ASSERT(batchData.isValid());
 	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
 	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
-	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
+	batchData->loadFileReqs += 1;
+	printTrace = (batchData->loadFileReqs % 10 == 1);
+	// TODO: Make priority lower than sendMutation priority.
+	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString())
 	    .detail("NotProcessed", !paramExist)
@@ -381,7 +385,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(it->second); // wait on the processing of the req.param.
 
 	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
-	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
+	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
 	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
