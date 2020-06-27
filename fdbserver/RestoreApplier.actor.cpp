@@ -180,7 +180,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 // Clear all ranges in input ranges
 ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRangeRef>> ranges, double delayTime,
-                                                   Database cx, UID applierID, int batchIndex, ApplierBatchData* cc) {
+                                                   Database cx, UID applierID, int batchIndex,
+                                                   ApplierBatchData::Counters* cc) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int retries = 0;
 	state double numOps = 0;
