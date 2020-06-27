@@ -467,6 +467,8 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
+	// Free the memory asap to avoid memory throttling
+	batchData->kvOpsPerLP.clear();
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
