@@ -896,7 +896,7 @@ worstTLogQueue            number   See the description for tLogQueue
 
 ``\xff\xff/metrics/health/log/<id>``
 
-Stats about the health of a particular transaction log
+Stats about the health of a particular transaction log process
 
 ========================= ======== ===============
 **Field**                 **Type** **Description**
@@ -906,7 +906,7 @@ tLogQueue                 number   The number of bytes of mutations that need to
 
 ``\xff\xff/metrics/health/storage/<id>``
 
-Stats about the health of a particular transaction log
+Stats about the health of a particular storage process
 
 ========================= ======== ===============
 **Field**                 **Type** **Description**
