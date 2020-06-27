@@ -853,6 +853,18 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 			        }
 			        return Optional<Value>();
 		        }));
+		// TODO : this module should be in version 700 ?
+		registerSpecialKeySpaceModule(
+			SpecialKeySpace::MODULE::FAILURE,
+			std::make_unique<SingleSpecialKeyImpl>(
+				LiteralStringRef("\xff\xff/failure"),
+				[](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+					if (ryw->getSpecialKeySpaceErrorMsg().present())
+						return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
+					else
+						return Optional<Value>();
+				}
+		));
 	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 

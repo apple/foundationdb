@@ -149,8 +149,10 @@ public:
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
 
-	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() {return specialKeySpaceWriteMap;}
+	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
+	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
+	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
 
 private:
 	friend class RYWImpl;
@@ -180,6 +182,7 @@ private:
 	Reference<TransactionDebugInfo> transactionDebugInfo;
 
 	KeyRangeMap<std::pair<bool, Optional<Value>>> specialKeySpaceWriteMap;
+	Optional<std::string> specialKeySpaceErrorMsg;
 
 	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)

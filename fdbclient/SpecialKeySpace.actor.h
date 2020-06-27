@@ -51,12 +51,26 @@ protected:
 	KeyRange range; // underlying key range for this function
 };
 
+class ManagementAPIError {
+public:
+	static std::string toJsonString(bool retriable, std::string command, std::string msg) {
+		json_spirit::mObject errorObj;
+		errorObj["Retriable"] = retriable;
+		errorObj["Command"] = command;
+		errorObj["Message"] = msg;
+		return json_spirit::write_string(json_spirit::mValue(errorObj), json_spirit::Output_options::raw_utf8);
+	}
+
+private:
+	ManagementAPIError(){};
+};
+
 class SpecialKeyRangeRWImpl : SpecialKeyRangeReadImpl{
 public:
 	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) = 0;
 	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) = 0;
 	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) = 0;
-	virtual Future<Void> commit(ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
+	virtual Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
@@ -111,6 +125,7 @@ public:
 	enum class MODULE {
 		CLUSTERFILEPATH,
 		CONNECTIONSTRING,
+		FAILURE, // A single key space contains a json string which describes the last failure in special-key-space
 		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
@@ -173,10 +188,13 @@ public:
 		for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
 			ASSERT(iter->value() == nullptr);
 			if (iter == readImpls.rangeContaining(kr.end))
-				break; // relax the condition that the end can be another range's start, if needed
+				break; // Note: relax the condition that the end can be another range's start, if needed
 		}
 		readImpls.insert(kr, impl);
 	}
+	// void registerRWKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeRWImpl* impl) {
+
+	// }
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
@@ -239,7 +257,7 @@ public:
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) override;
-	Future<Void> commit(ReadYourWritesTransaction* ryw) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
 #include "flow/unactorcompiler.h"

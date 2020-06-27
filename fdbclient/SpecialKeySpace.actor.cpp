@@ -33,7 +33,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::readModul
 	{ SpecialKeySpace::MODULE::METRICS,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
 	{ SpecialKeySpace::MODULE::MANAGEMENT,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/conf/"), LiteralStringRef("\xff\xff/conf0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/conf/"), LiteralStringRef("\xff\xff/conf0")) },
+	{ SpecialKeySpace::MODULE::FAILURE, singleKeyRange(LiteralStringRef("\xff\xff/failure")) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:
@@ -93,7 +94,9 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->setKey(KeyRef(ks->arena(), result[ks->offset - 1].key));
 			ks->offset = 1;
 		} else {
-			ks->setKey(KeyRef(ks->arena(), keyAfter(result[result.size() - 1].key))); // TODO : the keyAfter will just return if key == \xff\xff
+			ks->setKey(KeyRef(
+			    ks->arena(),
+			    keyAfter(result[result.size() - 1].key))); // TODO : the keyAfter will just return if key == \xff\xff
 			ks->offset -= result.size();
 		}
 	}
@@ -312,7 +315,8 @@ Future<Optional<Value>> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, con
 }
 
 ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Iterator iter = ranges.begin();
 	// TODO : update this set container
 	state std::set<SpecialKeyRangeRWImpl*> writeModulePtrs;
@@ -323,8 +327,13 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		}
 	}
 	state std::set<SpecialKeyRangeRWImpl*>::const_iterator it;
-	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it)
-		wait((*it)->commit(ryw));
+	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
+		Optional<std::string> msg = wait((*it)->commit(ryw));
+		if (msg.present()) {
+			ryw->setSpecialKeySpaceErrorMsg(msg.get());
+			throw special_keys_management_api_failure();
+		}
+	}
 	return Void();
 }
 
@@ -402,7 +411,8 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 }
 
 // Management API - exclude / include
-ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range, KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
+                                                                     KeyRangeRef kr) {
 	// get all keys under \xff/conf/excluded, \xff/conf/excluded
 	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end);
 	ASSERT(excludedServersKeys.contains(krWithoutPrefix));
@@ -417,19 +427,21 @@ ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWri
 			result.push_back(result.arena(), KeyValueRef(rk, rv));
 		}
 	} else {
-		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+		    ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Iterator iter = ranges.begin();
 		int index = 0;
 		while (iter != ranges.end()) {
 			// add all previous entries into result
-			while (index < resultWithoutPrefix.size() && resultWithoutPrefix[index].key.withPrefix(normalKeys.end) < iter->begin()) {
+			while (index < resultWithoutPrefix.size() &&
+			       resultWithoutPrefix[index].key.withPrefix(normalKeys.end) < iter->begin()) {
 				const KeyValueRef& kv = resultWithoutPrefix[index];
 				KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
 				ValueRef rv(result.arena(), kv.value);
 				result.push_back(result.arena(), KeyValueRef(rk, rv));
 				++index;
 			}
-			std::pair<bool, Optional<Value>> entry = iter->value();	
+			std::pair<bool, Optional<Value>> entry = iter->value();
 			if (entry.first) {
 				// add the writen entries if exists
 				if (entry.second.present()) {
@@ -438,7 +450,8 @@ ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWri
 					result.push_back(result.arena(), KeyValueRef(rk, rv));
 				}
 				// move index to skip all entries in the iter->range
-				while (index < resultWithoutPrefix.size() && iter->range().contains(resultWithoutPrefix[index].key.withPrefix(normalKeys.end)))
+				while (index < resultWithoutPrefix.size() &&
+				       iter->range().contains(resultWithoutPrefix[index].key.withPrefix(normalKeys.end)))
 					++index;
 			}
 			++iter;
@@ -462,21 +475,22 @@ Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWri
 	return excludeServersGetRangeActor(ryw, getKeyRange(), kr);
 }
 
-void ExcludeServersRangeImpl::set(ReadYourWritesTransaction *ryw, const KeyRef &key, const ValueRef &value) {
+void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	// TODO : check value valid
 	Value val(value);
 	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(val)));
 }
 
-void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction *ryw, const KeyRef &key) {
+void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 }
 
-void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction *ryw, const KeyRangeRef &range) {
+void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
 	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
-Future<Void> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction *ryw) {
-	// Do all the checks
-	return Void();
+Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	Optional<std::string> result;
+	// TODO : all checks before exclude
+	return result;
 }

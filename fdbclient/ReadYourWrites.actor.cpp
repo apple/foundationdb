@@ -2109,6 +2109,7 @@ void ReadYourWritesTransaction::resetRyow() {
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
 	nativeWriteRanges = Standalone<VectorRef<KeyRangeRef>>();
 	specialKeySpaceWriteMap.rawErase(specialKeys); // TODO : check rawErase
+	specialKeySpaceErrorMsg.reset();
 	watchMap.clear();
 	reading = AndFuture();
 	approximateSize = 0;
