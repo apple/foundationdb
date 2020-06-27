@@ -453,7 +453,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 				fSendMutations.push_back(sendMutationsToApplier(&kvOps, req.batchIndex, loadParam.asset,
 				                                                loadParam.isRangeFile, &batchData->rangeToApplier,
 				                                                &self->appliersInterf));
-				kvOps = VersionedMutationsMap(); // Clear memory for the LoadingParam
+				// kvOps = VersionedMutationsMap(); // Clear memory for the LoadingParam
 			}
 		}
 		wait(waitForAll(fSendMutations));
