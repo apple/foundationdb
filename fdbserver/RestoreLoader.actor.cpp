@@ -453,6 +453,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 				fSendMutations.push_back(sendMutationsToApplier(&kvOps, req.batchIndex, loadParam.asset,
 				                                                loadParam.isRangeFile, &batchData->rangeToApplier,
 				                                                &self->appliersInterf));
+				kvOps = VersionedMutationsMap(); // Clear memory for the LoadingParam
 			}
 		}
 		wait(waitForAll(fSendMutations));
@@ -467,8 +468,6 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
-	// Free the memory asap to avoid memory throttling
-	batchData->kvOpsPerLP.clear();
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	return Void();
 }
