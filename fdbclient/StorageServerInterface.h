@@ -221,10 +221,118 @@ struct WatchValueRequest {
 	}
 };
 
+inline int longCommonPrefix(StringRef x, StringRef y) {
+	int end = std::min(x.size(), y.size());
+	int i = 0;
+	constexpr auto kStepSize = 16;
+	for (; i + kStepSize < end; i += kStepSize) {
+		// Hopefully it compiles to a double-width compare instruction
+		if (std::memcmp(x.begin() + i, y.begin() + i, kStepSize)) {
+			break;
+		}
+	}
+	for (; i < end; ++i) {
+		if (x[i] != y[i]) {
+			break;
+		}
+	}
+	return i;
+}
+
+struct SortedKeyValueVectorRef : VectorRef<KeyValueRef> {
+private:
+	friend struct dynamic_size_traits<SortedKeyValueVectorRef>;
+	mutable Optional<size_t> cachedSize; // Has the lifetime of one flatbuffers serialization call tree
+};
+
+template <>
+struct dynamic_size_traits<SortedKeyValueVectorRef> : std::true_type {
+	// May be called multiple times during one serialization
+	template <class Context>
+	static size_t size(const SortedKeyValueVectorRef& t, Context&) {
+		if (t.cachedSize.present()) return t.cachedSize.get();
+		if (t.size() == 0) return 0;
+		int commonPrefixLength = longCommonPrefix(t.front().key, t.back().key);
+		size_t result = 0;
+		result += 4; // size
+		result += 4; // prefixLength
+		result += commonPrefixLength; // prefixBytes
+		for (const auto& [k, v] : t) {
+			result += 4; // suffixLength
+			result += k.size() - commonPrefixLength; // suffixBytes
+			result += 4; // valueLength
+			result += v.size(); // valueBytes
+		}
+		t.cachedSize = result;
+		return result;
+	}
+
+private:
+	static uint8_t* copyStringRef(uint8_t* out, StringRef t) {
+		int sz = t.size();
+		memcpy(out, &sz, sizeof(sz));
+		out += sizeof(sz);
+		return std::copy(t.begin(), t.end(), out);
+	}
+
+public:
+	// Guaranteed to be called only once during serialization. size will not be called after save during one
+	// serialization
+	template <class Context>
+	static void save(uint8_t* out, const SortedKeyValueVectorRef& t, Context& c) {
+		if (t.size() == 0) return;
+		ASSERT(t.cachedSize.present())
+		size_t finalSizeExpected = t.cachedSize.get();
+		uint8_t* begin = out;
+		t.cachedSize = Optional<size_t>();
+		int commonPrefixLength = longCommonPrefix(t.front().key, t.back().key);
+		int numElements = t.size();
+		memcpy(out, &numElements, sizeof(numElements));
+		out += sizeof(numElements);
+		out = copyStringRef(out, StringRef(t.front().key.begin(), commonPrefixLength));
+		for (const auto& [k, v] : t) {
+			out = copyStringRef(out, StringRef(k.begin() + commonPrefixLength, k.size() - commonPrefixLength));
+			out = copyStringRef(out, v);
+		}
+		ASSERT(out - begin == finalSizeExpected);
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* data, size_t sz, SortedKeyValueVectorRef& t, Context& context) {
+		if (sz == 0) {
+			t = SortedKeyValueVectorRef();
+			return;
+		}
+		ArenaReader reader(context.arena(), StringRef(data, sz), Unversioned());
+		int size;
+		StringRef prefix;
+		reader >> size;
+		reader >> prefix;
+		t.resize(context.arena(), size);
+		const bool prefixEmpty = prefix.size() == 0;
+		for (auto& [k, v] : t) {
+			if (prefixEmpty) {
+				reader >> k;
+			} else {
+				StringRef suffix;
+				reader >> suffix;
+				if (suffix.size() == 0) {
+					k = prefix;
+				} else {
+					k = suffix.withPrefix(prefix, context.arena());
+				}
+			}
+			reader >> v;
+		}
+	}
+};
+
 struct GetKeyValuesReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783066;
 	Arena arena;
-	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	SortedKeyValueVectorRef data;
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;

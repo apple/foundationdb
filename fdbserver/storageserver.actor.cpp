@@ -1142,12 +1142,12 @@ ACTOR Future<Void> getShardStateQ( StorageServer* data, GetShardStateRequest req
 	return Void();
 }
 
-void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output,
-			VectorRef<KeyValueRef> const& vm_output,
-			VectorRef<KeyValueRef> const& base,
-			int& vCount, int limit, bool stopAtEndOfBase, int& pos, int limitBytes = 1<<30 )
-// Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up to) |limit| rows to output
-// If limit<0, base and output are in descending order, and start->key()>end->key(), but start is still inclusive and end is exclusive
+void merge(Arena& arena, VectorRef<KeyValueRef>& output, VectorRef<KeyValueRef> const& vm_output,
+           VectorRef<KeyValueRef> const& base, int& vCount, int limit, bool stopAtEndOfBase, int& pos,
+           int limitBytes = 1 << 30)
+// Combines data from base (at an older version) with sets from newer versions in [start, end) and appends the first (up
+// to) |limit| rows to output If limit<0, base and output are in descending order, and start->key()>end->key(), but
+// start is still inclusive and end is exclusive
 {
 	ASSERT(limit != 0);
 

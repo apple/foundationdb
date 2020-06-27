@@ -409,61 +409,6 @@ struct KeyValueRef {
 	};
 };
 
-uint16_t longCommonPrefix(StringRef x, StringRef y) {
-	uint16_t end = std::min<int>({ x.size(), y.size(), std::numeric_limits<uint16_t>::max() });
-	uint16_t i = 0;
-	constexpr auto kStepSize = 16;
-	for (; i + kStepSize < end; i += kStepSize) {
-		// Hopefully it compiles to a double-width compare instruction
-		if (std::memcmp(x.begin() + i, y.begin() + i, kStepSize)) {
-			break;
-		}
-	}
-	for (; i < end; ++i) {
-		if (x[i] != y[i]) {
-			break;
-		}
-	}
-	return i;
-}
-
-template<>
-struct string_serialized_traits<KeyValueRef> : std::true_type {
-	int32_t getSize(const KeyValueRef& item) const {
-		return 2*sizeof(uint32_t) + item.key.size() + item.value.size();
-	}
-
-	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
-		auto begin = out;
-		uint32_t sz = item.key.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
-		out += sizeof(sz);
-		memcpy(out, item.key.begin(), sz);
-		out += sz;
-		sz = item.value.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
-		out += sizeof(sz);
-		memcpy(out, item.value.begin(), sz);
-		out += sz;
-		return out - begin;
-	}
-
-	template <class Context>
-	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
-		auto begin = data;
-		uint32_t sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.key = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.value = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
-		return data - begin;
-	}
-};
-
 template<>
 struct Traceable<KeyValueRef> : std::true_type {
 	static std::string toString(const KeyValueRef& value) {
