@@ -258,15 +258,18 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		CounterCollection cc;
 		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
 		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
-		Counter appliedTxns;
-		Counter fetchKeys; // number of keys to fetch from dest. FDB cluster.
+		Counter appliedTxns, appliedTxnRetries;
+		Counter fetchKeys, fetchTxns, fetchTxnRetries; // number of keys to fetch from dest. FDB cluster.
+		// TODO: Add the counter in applying phase
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
 		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
 		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
-		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc), fetchKeys("FetchKeys", cc) {}
+		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc),
+		    appliedTxnRetries("AppliedTxnRetries", cc), fetchKeys("FetchKeys", cc), fetchTxns("FetchTxns", cc),
+		    fetchTxnRetries("FetchTxnRetries", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }

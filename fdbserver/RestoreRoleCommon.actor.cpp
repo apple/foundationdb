@@ -139,6 +139,7 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
 	loop {
+		// TODO: Add node ID and batchIndex
 		TraceEvent("FastRestoreTraceProcessMetrics")
 		    .detail("Role", role)
 		    .detail("Node", self->nodeID)
