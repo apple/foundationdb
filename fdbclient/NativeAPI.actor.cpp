@@ -596,6 +596,7 @@ public:
 
 static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
 	Standalone<RangeResultRef> result;
+	if (CLIENT_BUGGIFY) return result;
 	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate")) && metrics.worstStorageDurabilityLag != 0) {
 		json_spirit::mObject statsObj;
 		statsObj["batchLimited"] = metrics.batchLimited;
