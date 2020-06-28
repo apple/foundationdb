@@ -845,30 +845,21 @@ Metrics module
 
 Reads in the metrics module are not transactional and may require rpcs to complete.
 
-The key ``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``. The value is a json object with a "ShardBytes" field. More fields may be added in the future.
+``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``
 
-A user can see stats about data distribution like so::
-
-TODO update with "Storages" field, add table with schema like in health keys, and document caveats. ShardBytes is an estimate.
-
-  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/'):
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/', limit=3):
   ...     print(k, v)
   ...
-  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako00509', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0099', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako01468', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako023', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0289', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako037', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako042', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0457', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0524', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako058', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako064', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0718', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako083', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0909', '{"ShardBytes":741000}')
+  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":3828000,"Storages":["697f39751849d70067eabd1b079478a5"]}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"ShardBytes":2013000,"Storages":["697f39751849d70067eabd1b079478a5"]}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"ShardBytes":3201000,"Storages":["697f39751849d70067eabd1b079478a5"]}')
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+ShardBytes                number   An estimate of the sum of kv sizes for this shard.
+Storages                  [string] A list of the storage process ids currently responsible for this shard.
+========================= ======== ===============
 
 Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for application-level throttling.
 Some of this information is also available in ``\xff\xff/status/json``, but these keys are significantly cheaper (in terms of server resources) to read.
@@ -920,7 +911,7 @@ storageQueue              number   The number of bytes of mutations that need to
 Caveats
 ~~~~~~~
 
-#. ``\xff\xff/metrics/health/`` These keys may return data that's several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys briefly not being present when read. Clients should be prepared for these keys to be absent.
+#. ``\xff\xff/metrics/health/`` These keys may return data that's several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.
 
 Performance considerations
 ==========================
