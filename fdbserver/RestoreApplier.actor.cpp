@@ -117,7 +117,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 	state bool printTrace = false;
 
-	wait(delay(0.0, TaskPriority::RestoreApplierReceiveMutations));
+	// wait(delay(0.0, TaskPriority::RestoreApplierReceiveMutations)); // This hurts performance from 100MB/s to 60MB/s
+	// on circus
 
 	batchData->receiveMutationReqs += 1;
 	// Trace when the receive phase starts at a VB and when it finishes.

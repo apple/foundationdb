@@ -462,6 +462,11 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 		} else {
 			batchStatus->sendAllLogs = Void();
 		}
+		if ((batchStatus->sendAllRanges.present() && batchStatus->sendAllRanges.get().isReady()) &&
+		    (batchStatus->sendAllLogs.present() && batchStatus->sendAllLogs.get().isReady())) {
+			// Both log and range files have been sent.
+			batchData->kvOpsPerLP.clear();
+		}
 	}
 
 	TraceEvent("FastRestoreLoaderPhaseSendMutationsDone", self->id())
