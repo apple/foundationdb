@@ -514,10 +514,11 @@ public:
 };
 
 ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	auto keys = kr.removePrefix(ddStatsRange.begin);
+	state KeyRangeRef keys = kr.removePrefix(ddStatsRange.begin);
 	state Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
 	    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
 	state Standalone<RangeResultRef> result;
+	ryw->getDatabase()->invalidateCache(keys);
 	for (const auto& ddMetricsRef_ : resultWithoutPrefix) {
 		state DDMetricsRef ddMetricsRef = ddMetricsRef_;
 		// each begin key is the previous end key, thus we only encode the begin key in the result

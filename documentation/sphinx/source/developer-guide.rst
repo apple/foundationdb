@@ -849,6 +849,8 @@ The key ``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats abo
 
 A user can see stats about data distribution like so::
 
+TODO update with "Storages" field, add table with schema like in health keys, and document caveats. ShardBytes is an estimate.
+
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/'):
   ...     print(k, v)
   ...
@@ -868,10 +870,8 @@ A user can see stats about data distribution like so::
   ('\xff\xff/metrics/data_distribution_stats/mako083', '{"ShardBytes":297000}')
   ('\xff\xff/metrics/data_distribution_stats/mako0909', '{"ShardBytes":741000}')
 
-Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for use for application-level throttling.
-Some of this information is also available through ``\xff\xff/status/json``,
-but the ``\xff\xff/metrics/health/`` keys are much cheaper to read and may
-return data a few seconds old.
+Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for application-level throttling.
+Some of this information is also available in ``\xff\xff/status/json``, but these keys are significantly cheaper (in terms of server resources) to read.
 
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/health/'):
   ...     print(k, v)
@@ -917,6 +917,10 @@ storageDurabilityLag      number   The difference between the newest version and
 storageQueue              number   The number of bytes of mutations that need to be stored in memory on this storage process
 ========================= ======== ===============
 
+Caveats
+~~~~~~~
+
+#. ``\xff\xff/metrics/health/`` These keys may return data that's several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys briefly not being present when read. Clients should be prepared for these keys to be absent.
 
 Performance considerations
 ==========================
