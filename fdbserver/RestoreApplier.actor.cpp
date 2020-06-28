@@ -114,8 +114,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	// Note: Insert new items into processedFileState will not invalidate the reference.
 	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 
-	TraceEvent(SevInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
-	    .suppressFor(1.0)
+	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
@@ -134,7 +133,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 		for (int mIndex = 0; mIndex < req.versionedMutations.size(); mIndex++) {
 			const VersionedMutation& versionedMutation = req.versionedMutations[mIndex];
-			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
+			TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", versionedMutation.version.toString())
 			    .detail("Index", mIndex)
@@ -147,7 +146,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			    isAtomicOp((MutationRef::Type)versionedMutation.mutation.type) ? 1 : 0;
 			// Sanity check
 			ASSERT_WE_THINK(req.asset.isInVersionRange(versionedMutation.version.version));
-			ASSERT_WE_THINK(req.asset.isInKeyRange(versionedMutation.mutation));
+			ASSERT_WE_THINK(req.asset.isInKeyRange(
+			    versionedMutation.mutation)); // mutation is already applied removePrefix and addPrefix
 
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			batchData->addMutation(versionedMutation.mutation, versionedMutation.version);
@@ -159,8 +159,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
-	TraceEvent(SevInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
-	    .suppressFor(1.0)
+	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
 	    .detail("ProcessedMessageIndex", curMsgIndex.get())
@@ -189,8 +188,8 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 				tr->clear(range);
 				++numOps;
 				if (numOps >= SERVER_KNOBS->FASTRESTORE_TXN_CLEAR_MAX) {
-					TraceEvent(SevWarnAlways, "FastRestoreApplierClearRangeMutationsTooManyClearsInTxn")
-					    .suppressFor(1.0)
+					TraceEvent(SevWarn, "FastRestoreApplierClearRangeMutationsTooManyClearsInTxn")
+					    .suppressFor(5.0)
 					    .detail("Clears", numOps)
 					    .detail("Ranges", ranges.size())
 					    .detail("Range", range.toString());
@@ -256,6 +255,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		if (!fValues[i].get().present()) { // Key not exist in DB
 			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
 			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
+			    .suppressFor(5.0)
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Key", key.first)
 			    .detail("IsReady", fValues[i].isReady())
@@ -407,7 +407,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	state int sets = 0;
 	state int clears = 0;
 	state Key endKey = begin->second.key;
-	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
+	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -443,7 +443,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 					    .detail("Clears", clears);
 				}
 			}
-			TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchPrecommit", applierID)
+			TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatchPrecommit", applierID)
 			    .detail("Begin", begin->first)
 			    .detail("End", endKey)
 			    .detail("Sets", sets)

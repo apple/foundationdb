@@ -617,6 +617,32 @@ struct EventLogRequest {
 	}
 };
 
+struct DebugEntryRef {
+	double time;
+	NetworkAddress address;
+	StringRef context;
+	Version version;
+	MutationRef mutation;
+	DebugEntryRef() {}
+	DebugEntryRef(const char* c, Version v, MutationRef const& m)
+	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
+	    address(g_network->getLocalAddress()) {}
+	DebugEntryRef(Arena& a, DebugEntryRef const& d)
+	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
+
+	size_t expectedSize() const { return context.expectedSize() + mutation.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, time, address, context, version, mutation);
+	}
+};
+
+// TODO: This is necessary because IPAddress uses boost::variant
+// instead of std::variant. If we switch to std::variant, we don't
+// need to explicitly mark DebugEntryRef trivially destructible
+TRIVIALLY_DESTRUCTIBLE(DebugEntryRef); // Allows VectorRef<DebugEntryRef>
+
 struct DiskStoreRequest {
 	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;
