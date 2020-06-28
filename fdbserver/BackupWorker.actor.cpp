@@ -1093,7 +1093,6 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 				wait(done);
 			} catch (Error& e) {
 				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
-				throw err;
 			}
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
