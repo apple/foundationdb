@@ -81,6 +81,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
+		actors.add(updateProcessMetrics(self));
 		actors.add(traceProcessMetrics(self, "RestoreMaster"));
 
 		wait(startProcessRestoreRequests(self, cx));
@@ -511,7 +512,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state Reference<MasterBatchStatus> batchStatus = self->batchStatus[batchIndex];
 	state double startTime = now();
 
-	TraceEvent("FastRestoreMasterDispatchVersionBatchesStart")
+	TraceEvent("FastRestoreMasterDispatchVersionBatchesStart", self->id())
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get());
@@ -562,7 +563,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 		self->checkMemory.trigger();
 	}
 
-	TraceEvent("FastRestoreMasterDispatchVersionBatchesDone")
+	TraceEvent("FastRestoreMasterDispatchVersionBatchesDone", self->id())
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get())

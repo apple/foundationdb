@@ -45,8 +45,8 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
+	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreApplier"));
 	actors.add(traceRoleVersionBatchProgress(self, "RestoreApplier"));
 
@@ -80,10 +80,6 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					if (req.terminate) {
 						exitRole = Void();
 					}
-				}
-				when(wait(updateProcessStatsTimer)) {
-					updateProcessStats(self);
-					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(actors.getResult())) {}
 				when(wait(exitRole)) {
@@ -486,6 +482,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
                                            Database cx) {
 	std::map<Key, StagingKey>::iterator begin = batchData->stagingKeys.begin();
 	std::map<Key, StagingKey>::iterator cur = begin;
+	state int txnBatches = 0;
 	double txnSize = 0;
 	std::vector<Future<Void>> fBatches;
 	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysStart", applierID)
@@ -498,19 +495,22 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 			                                         &batchData->counters));
 			begin = cur;
 			txnSize = 0;
+			txnBatches++;
 		}
 		cur++;
 	}
 	if (begin != batchData->stagingKeys.end()) {
 		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
 		                                         &batchData->counters));
+		txnBatches++;
 	}
 
 	wait(waitForAll(fBatches));
 
 	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysDone", applierID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("StagingKeys", batchData->stagingKeys.size());
+	    .detail("StagingKeys", batchData->stagingKeys.size())
+	    .detail("TransactionBatches", txnBatches);
 	return Void();
 }
 
