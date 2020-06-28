@@ -1089,7 +1089,12 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
 			self.stop();
-			wait(done);
+			try {
+				wait(done);
+			} catch (Error& e) {
+				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
+				throw err;
+			}
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
