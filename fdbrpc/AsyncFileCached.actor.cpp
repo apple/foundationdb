@@ -28,10 +28,19 @@ static std::map<NetworkAddress, std::pair<Reference<EvictablePageCache>, Referen
 
 EvictablePage::~EvictablePage() {
 	if (data) {
-		if (pageCache->pageSize == 4096)
+		switch (pageCache->pageSize) {
+		case 4096:
 			FastAllocator<4096>::release(data);
-		else
+			break;
+		case 8192:
+			FastAllocator<8192>::release(data);
+			break;
+		case 16384:
+			FastAllocator<16384>::release(data);
+			break;
+		default:
 			aligned_free(data);
+		}
 	}
 	if (EvictablePageCache::RANDOM == pageCache->cacheEvictionType) {
 		if (index > -1) {
@@ -57,10 +66,31 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl( std::string filename, 
 	//In a simulated environment, each machine needs its own caches
 	if(g_network->isSimulated()) {
 		auto cacheItr = simulatorPageCaches.find(g_network->getLocalAddress());
-		if(cacheItr == simulatorPageCaches.end()) {
-			int64_t pageCacheSize4k = (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
-			int64_t pageCacheSize64k = (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_64K : FLOW_KNOBS->SIM_PAGE_CACHE_64K;
-			auto caches = std::make_pair(Reference<EvictablePageCache>(new EvictablePageCache(4096, pageCacheSize4k)), Reference<EvictablePageCache>(new EvictablePageCache(65536, pageCacheSize64k)));
+		if (cacheItr == simulatorPageCaches.end()) {
+			// TODO(sam): instead of 4k use knob
+			// NOTE(sam): Not sure I understand what to do here
+			//            pageCacheSizeSmall = 1e8, buggify = 1e7
+			//            pageCahceSize64k = 1e7, buggify = 1e6
+			// TODO(sam): Rename according to function. 4k page cache for now will keep name but can be 4,8, or 16k
+			int64_t pageCacheSizeSmall =
+			    (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
+			switch (FLOW_KNOBS->STORAGE_PAGE_SIZE) {
+			case 8192:
+				pageCacheSizeSmall = (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_8K : FLOW_KNOBS->SIM_PAGE_CACHE_8K;
+				break;
+			case 16384:
+				pageCacheSizeSmall =
+				    (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_16K : FLOW_KNOBS->SIM_PAGE_CACHE_16K;
+				break;
+			}
+			// TODO(sam): Rename according to function.
+			// Ask Alex or someone what the function of the 64k page cache is, sqlite WAL?
+			int64_t pageCacheSize64k =
+			    (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_64K : FLOW_KNOBS->SIM_PAGE_CACHE_64K;
+			auto caches =
+			    std::make_pair(Reference<EvictablePageCache>(
+			                       new EvictablePageCache(FLOW_KNOBS->STORAGE_PAGE_SIZE, pageCacheSizeSmall)),
+			                   Reference<EvictablePageCache>(new EvictablePageCache(65536, pageCacheSize64k)));
 			simulatorPageCaches[g_network->getLocalAddress()] = caches;
 			pageCache = (flags & IAsyncFile::OPEN_LARGE_PAGES) ? caches.second : caches.first;
 		}
@@ -72,7 +102,19 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl( std::string filename, 
 			if(!pc64k.present()) pc64k = Reference<EvictablePageCache>(new EvictablePageCache(65536, FLOW_KNOBS->PAGE_CACHE_64K));
 			pageCache = pc64k.get();
 		} else {
-			if(!pc4k.present()) pc4k = Reference<EvictablePageCache>(new EvictablePageCache(4096, FLOW_KNOBS->PAGE_CACHE_4K));
+			// TODO(sam): Will need a rename -- the 4k page cache can be 8k or 16 ;)
+			if (!pc4k.present()) {
+				int64_t pcsz = FLOW_KNOBS->SIM_PAGE_CACHE_4K;
+				switch (FLOW_KNOBS->STORAGE_PAGE_SIZE) {
+				case 8192:
+					pcsz = FLOW_KNOBS->SIM_PAGE_CACHE_8K;
+					break;
+				case 16384:
+					pcsz = FLOW_KNOBS->SIM_PAGE_CACHE_16K;
+					break;
+				}
+				pc4k = Reference<EvictablePageCache>(new EvictablePageCache(FLOW_KNOBS->STORAGE_PAGE_SIZE, pcsz));
+			}
 			pageCache = pc4k.get();
 		}
 	}
@@ -165,10 +207,19 @@ void AsyncFileCached::releaseZeroCopy( void* data, int length, int64_t offset ) 
 		if(o != orphanedPages.end()) {
 			if(o->second == 1) {
 				if (data) {
-					if (length == 4096)
+					switch (length) {
+					case 4096:
 						FastAllocator<4096>::release(data);
-					else
+						break;
+					case 8192:
+						FastAllocator<8192>::release(data);
+						break;
+					case 16384:
+						FastAllocator<16384>::release(data);
+						break;
+					default:
 						aligned_free(data);
+					}
 				}
 			}
 			else {

@@ -248,18 +248,32 @@ long long FastAllocator<Size>::getActiveThreads() {
 #if FAST_ALLOCATOR_DEBUG
 static int64_t getSizeCode(int i) {
 	switch (i) {
-		case 16: return 1;
-		case 32: return 2;
-		case 64: return 3;
-		case 96: return 4;
-		case 128: return 5;
-		case 256: return 6;
-		case 512: return 7;
-		case 1024: return 8;
-		case 2048: return 9;
-		case 4096: return 10;
-		case 8192: return 11;
-		default: return 12;
+	case 16:
+		return 1;
+	case 32:
+		return 2;
+	case 64:
+		return 3;
+	case 96:
+		return 4;
+	case 128:
+		return 5;
+	case 256:
+		return 6;
+	case 512:
+		return 7;
+	case 1024:
+		return 8;
+	case 2048:
+		return 9;
+	case 4096:
+		return 10;
+	case 8192:
+		return 11;
+	case 16384:
+		return 12;
+	default:
+		return 13;
 	}
 }
 #endif
@@ -527,6 +541,7 @@ void releaseAllThreadMagazines() {
 	FastAllocator<2048>::releaseThreadMagazines();
 	FastAllocator<4096>::releaseThreadMagazines();
 	FastAllocator<8192>::releaseThreadMagazines();
+	FastAllocator<16384>::releaseThreadMagazines();
 }
 
 int64_t getTotalUnusedAllocatedMemory() {
@@ -543,6 +558,7 @@ int64_t getTotalUnusedAllocatedMemory() {
 	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<16384>::getApproximateMemoryUnused();
 
 	return unusedMemory;
 }
@@ -558,3 +574,4 @@ template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
+template class FastAllocator<16384>;

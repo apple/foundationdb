@@ -96,10 +96,16 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
+	init( PAGE_CACHE_8K,                                   2LL<<30 );
+	init( PAGE_CACHE_16K,                                  2LL<<30 );
 	init( PAGE_CACHE_64K,                                200LL<<20 );
 	init( SIM_PAGE_CACHE_4K,                                   1e8 );
+	init( SIM_PAGE_CACHE_8K,                                   1e8 );
+	init( SIM_PAGE_CACHE_16K,                                  1e8 );
 	init( SIM_PAGE_CACHE_64K,                                  1e7 );
 	init( BUGGIFY_SIM_PAGE_CACHE_4K,                           1e6 );
+	init( BUGGIFY_SIM_PAGE_CACHE_8K,                           1e6 );
+	init( BUGGIFY_SIM_PAGE_CACHE_16K,                          1e6 );
 	init( BUGGIFY_SIM_PAGE_CACHE_64K,                          1e6 );
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
@@ -217,6 +223,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
+	init( STORAGE_PAGE_SIZE,                                  4096 );
 }
 // clang-format on
 

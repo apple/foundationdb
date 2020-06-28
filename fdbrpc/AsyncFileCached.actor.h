@@ -68,13 +68,27 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	EvictablePageCache() : pageSize(0), maxPages(0), cacheEvictionType(RANDOM) {}
 
 	explicit EvictablePageCache(int pageSize, int64_t maxSize) : pageSize(pageSize), maxPages(maxSize / pageSize), cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
+	    // TODO(sam): Ensure pageSize is 4k, 8k or 16k here
 		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEvictions"));
 	}
 
 	void allocate(EvictablePage* page) {
 		try_evict();
 		try_evict();
-		page->data = pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096,pageSize);
+		switch (pageSize) {
+		case 4096:
+			page->data = FastAllocator<4096>::allocate();
+			break;
+		case 8192:
+			page->data = FastAllocator<8192>::allocate();
+			break;
+		case 16384:
+			page->data = FastAllocator<16384>::allocate();
+			break;
+		default:
+			// NOTE(sam): Why can't I use the fast allocator here?
+			page->data = aligned_alloc(4096, pageSize);
+		}
 		if (RANDOM == cacheEvictionType) {
 			page->index = pages.size();
 			pages.push_back(page);
@@ -374,7 +388,20 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		owner->orphanedPages[data] = zeroCopyRefCount;
 		zeroCopyRefCount = 0;
 		notReading = Void();
-		data = pageCache->pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageCache->pageSize);
+		switch (pageCache->pageSize) {
+		case 4096:
+			data = FastAllocator<4096>::allocate();
+			break;
+		case 8192:
+			data = FastAllocator<8192>::allocate();
+			break;
+		case 16384:
+			data = FastAllocator<16384>::allocate();
+			break;
+		default:
+			// NOTE(sam): Why can't I use the fast allocator here?
+			data = aligned_alloc(4096, pageCache->pageSize);
+		}
 	}
 
 	Future<Void> write( void const* data, int length, int offset ) {

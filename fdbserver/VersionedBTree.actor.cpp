@@ -1154,9 +1154,23 @@ public:
 		}
 
 		if (pageCacheBytes == 0) {
-			pageCacheBytes = g_network->isSimulated()
-			                     ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
-			                     : FLOW_KNOBS->PAGE_CACHE_4K;
+			int64_t buggifySimPageCachePageSize = FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K;
+			int64_t simPageCachePageSize = FLOW_KNOBS->SIM_PAGE_CACHE_4K;
+			int64_t simPageCache = FLOW_KNOBS->PAGE_CACHE_4K;
+			switch (FLOW_KNOBS->STORAGE_PAGE_SIZE) {
+			case 8192:
+				buggifySimPageCachePageSize = FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_8K;
+				simPageCachePageSize = FLOW_KNOBS->SIM_PAGE_CACHE_8K;
+				simPageCache = FLOW_KNOBS->PAGE_CACHE_8K;
+				break;
+			case 16384:
+				buggifySimPageCachePageSize = FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_16K;
+				simPageCachePageSize = FLOW_KNOBS->SIM_PAGE_CACHE_16K;
+				simPageCache = FLOW_KNOBS->PAGE_CACHE_16K;
+				break;
+			}
+			pageCacheBytes = g_network->isSimulated() ? (BUGGIFY ? buggifySimPageCachePageSize : simPageCachePageSize)
+			                                          : simPageCache;
 		}
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);

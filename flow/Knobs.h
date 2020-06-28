@@ -110,10 +110,16 @@ public:
 
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
+	int64_t PAGE_CACHE_8K;
+	int64_t PAGE_CACHE_16K;
 	int64_t PAGE_CACHE_64K;
 	int64_t SIM_PAGE_CACHE_4K;
+	int64_t SIM_PAGE_CACHE_8K;
+	int64_t SIM_PAGE_CACHE_16K;
 	int64_t SIM_PAGE_CACHE_64K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_4K;
+	int64_t BUGGIFY_SIM_PAGE_CACHE_8K;
+	int64_t BUGGIFY_SIM_PAGE_CACHE_16K;
 	int64_t BUGGIFY_SIM_PAGE_CACHE_64K;
 	std::string CACHE_EVICTION_POLICY; // for now, "random", "lru", are supported
 	int MAX_EVICT_ATTEMPTS;
@@ -236,6 +242,8 @@ public:
 	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+
+	int STORAGE_PAGE_SIZE;
 
 	FlowKnobs();
 	void initialize(bool randomize = false, bool isSimulated = false);

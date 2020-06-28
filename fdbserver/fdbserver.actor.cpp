@@ -1537,9 +1537,30 @@ int main(int argc, char* argv[]) {
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
 
-		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
-			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
-			flushAndExit(FDB_EXIT_ERROR);
+		switch (FLOW_KNOBS->STORAGE_PAGE_SIZE) {
+		case 4096:
+			if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+				fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			break;
+		case 8192:
+			if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_8K) {
+				fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			break;
+		case 16384:
+			if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_16K) {
+				fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			break;
+		default:
+			if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+				fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
 		}
 
 		if (role == SkipListTest) {
@@ -1934,20 +1955,15 @@ int main(int argc, char* argv[]) {
 
 		#ifdef ALLOC_INSTRUMENTATION
 		{
-			std::cout << "Page Counts: "
-				<< FastAllocator<16>::pageCount << " "
-				<< FastAllocator<32>::pageCount << " "
-				<< FastAllocator<64>::pageCount << " "
-				<< FastAllocator<128>::pageCount << " "
-				<< FastAllocator<256>::pageCount << " "
-				<< FastAllocator<512>::pageCount << " "
-				<< FastAllocator<1024>::pageCount << " "
-				<< FastAllocator<2048>::pageCount << " "
-				<< FastAllocator<4096>::pageCount << " "
-				<< FastAllocator<8192>::pageCount << std::endl;
+			std::cout << "Page Counts: " << FastAllocator<16>::pageCount << " " << FastAllocator<32>::pageCount << " "
+			          << FastAllocator<64>::pageCount << " " << FastAllocator<128>::pageCount << " "
+			          << FastAllocator<256>::pageCount << " " << FastAllocator<512>::pageCount << " "
+			          << FastAllocator<1024>::pageCount << " " << FastAllocator<2048>::pageCount << " "
+			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
+			          << FastAllocator<16384>::pageCount << std::endl;
 
-			vector< std::pair<std::string, const char*> > typeNames;
-			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
+			vector<std::pair<std::string, const char*>> typeNames;
+			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 
 #ifdef __linux__
