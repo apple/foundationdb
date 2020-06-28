@@ -198,6 +198,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	wait(processedFileOffset->whenAtLeast(asset.offset));
 	ASSERT(processedFileOffset->get() == asset.offset);
 
+	Arena tempArena;
 	StringRefReader reader(buf, restore_corrupted_data());
 	try {
 		// Read block header
@@ -242,10 +243,24 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
 				continue;
 			}
+
 			// Only apply mutation within the asset.range
+			ASSERT(asset.removePrefix.size() == 0);
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
+				// Remove prefix or add prefix when we restore to a new key space
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+					mutation.param2 =
+					    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
+			} else {
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
 			}
 
 			TraceEvent(SevFRMutationInfo, "FastRestoreDecodePartitionedLogFile")
@@ -338,7 +353,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
 	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
-	TraceEvent("FastRestoreLoaderPhaseLoadFile", self->id())
+	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString())
 	    .detail("NotProcessed", !paramExist)
@@ -350,7 +365,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
 	if (batchData->processedFileParams.find(req.param) == batchData->processedFileParams.end()) {
-		TraceEvent("FastRestoreLoadFile", self->id())
+		TraceEvent(SevFRDebugInfo, "FastRestoreLoadFile", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
@@ -358,7 +373,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
 		isDuplicated = false;
 	} else {
-		TraceEvent("FastRestoreLoadFile", self->id())
+		TraceEvent(SevFRDebugInfo, "FastRestoreLoadFile", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("WaitOnProcessLoadParam", req.param.toString());
 	}
@@ -367,7 +382,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(it->second); // wait on the processing of the req.param.
 
 	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
-	TraceEvent("FastRestoreLoaderPhaseLoadFileDone", self->id())
+	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
 	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
@@ -739,6 +754,10 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 	MutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
+	TraceEvent(SevFRMutationInfo, "FastRestoreLoaderParseSerializedLogMutation")
+	    .detail("RestoreAsset", asset.toString());
+
+	Arena tempArena;
 	for (auto& m : mutationMap) {
 		StringRef k = m.first.contents();
 		StringRef val = m.second.first.contents();
@@ -782,10 +801,23 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			    (!isRangeMutation(mutation) && mutation.param1 < asset.range.begin)) {
 				continue;
 			}
-			// Only apply mutation within the asset.range
+			// Only apply mutation within the asset.range and apply removePrefix and addPrefix
+			ASSERT(asset.removePrefix.size() == 0);
 			if (isRangeMutation(mutation)) {
 				mutation.param1 = mutation.param1 >= asset.range.begin ? mutation.param1 : asset.range.begin;
 				mutation.param2 = mutation.param2 < asset.range.end ? mutation.param2 : asset.range.end;
+				// Remove prefix or add prefix if we restore data to a new key space
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+					mutation.param2 =
+					    mutation.param2.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
+			} else {
+				if (asset.hasPrefix()) { // Avoid creating new Key
+					mutation.param1 =
+					    mutation.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+				}
 			}
 
 			cc->sampledLogBytes += mutation.totalSize();
@@ -822,11 +854,12 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state MutationsVec& sampleMutations = samplesIter->second;
 
-	TraceEvent("FastRestoreDecodedRangeFile")
+	TraceEvent(SevFRDebugInfo, "FastRestoreDecodedRangeFile")
 	    .detail("Filename", asset.filename)
 	    .detail("Version", version)
 	    .detail("BeginVersion", asset.beginVersion)
-	    .detail("EndVersion", asset.endVersion);
+	    .detail("EndVersion", asset.endVersion)
+	    .detail("RestoreAsset", asset.toString());
 	// Sanity check the range file is within the restored version range
 	ASSERT_WE_THINK(asset.isInVersionRange(version));
 
@@ -877,11 +910,16 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	const LogMessageVersion msgVersion(version, std::numeric_limits<int32_t>::max());
 
 	// Convert KV in data into SET mutations of different keys in kvOps
+	Arena tempArena;
 	for (const KeyValueRef& kv : data) {
 		// NOTE: The KV pairs in range files are the real KV pairs in original DB.
-		// Should NOT add prefix or remove surfix for the backup data!
-		MutationRef m(MutationRef::Type::SetValue, kv.key,
-		              kv.value); // ASSUME: all operation in range file is set.
+		MutationRef m(MutationRef::Type::SetValue, kv.key, kv.value);
+		// Remove prefix or add prefix in case we restore data to a different sub keyspace
+		if (asset.hasPrefix()) { // Avoid creating new Key
+			ASSERT(asset.removePrefix.size() == 0);
+			m.param1 = m.param1.removePrefix(asset.removePrefix).withPrefix(asset.addPrefix, tempArena);
+		}
+
 		cc->loadedRangeBytes += m.totalSize();
 
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
@@ -914,10 +952,8 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	// decodeLogFileBlock() must read block by block!
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, asset.offset, asset.len));
-	TraceEvent("FastRestoreLoader")
-	    .detail("DecodedLogFile", asset.filename)
-	    .detail("Offset", asset.offset)
-	    .detail("Length", asset.len)
+	TraceEvent("FastRestoreLoaderDecodeLogFile")
+	    .detail("RestoreAsset", asset.toString())
 	    .detail("DataSize", data.contents().size());
 
 	// Ensure data blocks in the same file are processed in order

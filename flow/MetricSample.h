@@ -132,7 +132,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 			int64_t val = this->sample.addMetric(T(key), delta);
 			if (val < thresholdLimit && (val + std::abs(delta)) >= thresholdLimit) {
 				auto iter = thresholdCrossedSet.find(key);
-				ASSERT(iter != thresholdCrossedSet.end())
+				ASSERT(iter != thresholdCrossedSet.end());
 				thresholdCrossedSet.erase(iter);
 			}
 			if (val == 0)

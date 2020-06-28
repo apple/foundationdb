@@ -78,6 +78,7 @@ Error systemErrorCodeToError();
 
 #undef ERROR
 #define ERROR(name, number, description) inline Error name() { return Error( number ); }; enum { error_code_##name = number };
+
 #include "error_definitions.h"
 
 //actor_cancelled has been renamed
@@ -85,31 +86,32 @@ inline Error actor_cancelled() { return Error( error_code_operation_cancelled );
 enum { error_code_actor_cancelled = error_code_operation_cancelled };
 
 extern Error internal_error_impl( const char* file, int line );
-#define internal_error() internal_error_impl( __FILE__, __LINE__ )
+extern Error internal_error_impl(const char* msg, const char* file, int line);
+#define inernal_error_msg(msg) internal_error_impl(msg, __FILE__, __LINE__)
 
 extern bool isAssertDisabled( int line );
 //#define ASSERT( condition ) ((void)0)
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
 		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
-			throw internal_error();                                                                                    \
+			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
-	} while (false);
+	} while (false)
 #define ASSERT_ABORT(condition)                                                                                        \
 	do {                                                                                                               \
 		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
-			internal_error();                                                                                          \
+			internal_error_impl(#condition, __FILE__, __LINE__);                                                       \
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
 #define UNSTOPPABLE_ASSERT(condition)                                                                                  \
 	do {                                                                                                               \
 		if (!(condition)) {                                                                                            \
-			throw internal_error();                                                                                    \
+			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
 	} while (false)
 #define UNREACHABLE()                                                                                                  \
-	{ throw internal_error(); }
+	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
 
 // ASSERT_WE_THINK() is to be used for assertions that we want to validate in testing, but which are judged too
 // risky to evaluate at runtime, because the code should work even if they are false and throwing internal_error() would

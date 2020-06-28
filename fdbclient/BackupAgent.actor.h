@@ -273,9 +273,10 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 
 	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID);
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID);
+	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
+	                                   Key removePrefix);
 	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                   Key addPrefix, Key removePrefix);
 
@@ -926,6 +927,13 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);
 }
+
+// For fast restore simulation test
+// For testing addPrefix feature in fast restore.
+// Transform db content in restoreRanges by removePrefix and then addPrefix.
+// Assume: DB is locked
+ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                             Key addPrefix, Key removePrefix);
 
 #include "flow/unactorcompiler.h"
 #endif

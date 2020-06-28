@@ -22,9 +22,11 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define TEST_ABORT_FASTRESTORE	0
@@ -42,6 +44,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool usePartitionedLogs;
+	Key addPrefix, removePrefix; // Original key will be first applied removePrefix and then applied addPrefix
+	// CAVEAT: When removePrefix is used, we must ensure every key in backup have the removePrefix
 
 	std::map<Standalone<KeyRef>, Standalone<ValueRef>> dbKVs;
 
@@ -71,10 +75,33 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 		usePartitionedLogs = getOption(options, LiteralStringRef("usePartitionedLogs"),
 		                               deterministicRandom()->random01() < 0.5 ? true : false);
+		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
+		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
 
 		KeyRef beginRange;
 		KeyRef endRange;
 		UID randomID = nondeterministicRandom()->randomUniqueID();
+
+		// Correctness is not clean for addPrefix feature yet. Uncomment below to enable the test
+		// Generate addPrefix
+		// if (addPrefix.size() == 0 && removePrefix.size() == 0) {
+		// 	if (deterministicRandom()->random01() < 0.5) { // Generate random addPrefix
+		// 		int len = deterministicRandom()->randomInt(1, 100);
+		// 		std::string randomStr = deterministicRandom()->randomAlphaNumeric(len);
+		// 		TraceEvent("BackupAndParallelRestoreCorrectness")
+		// 		    .detail("GenerateAddPrefix", randomStr)
+		// 		    .detail("Length", len)
+		// 		    .detail("StrLen", randomStr.size());
+		// 		addPrefix = Key(randomStr);
+		// 	}
+		// }
+		TraceEvent("BackupAndParallelRestoreCorrectness")
+		    .detail("AddPrefix", addPrefix)
+		    .detail("RemovePrefix", removePrefix);
+		ASSERT(addPrefix.size() == 0 && removePrefix.size() == 0);
+		// Do not support removePrefix right now because we must ensure all backup keys have the removePrefix
+		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
+		ASSERT(removePrefix.size() == 0);
 
 		if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
@@ -130,6 +157,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		return _start(cx, this);
 	}
+
+	bool hasPrefix() { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
 
 	virtual Future<bool> check(Database const& cx) { return true; }
 
@@ -475,11 +504,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Standalone<StringRef>> restoreTags;
 
 				// Submit parallel restore requests
-				TraceEvent("FastRestore").detail("PrepareRestores", self->backupRanges.size());
+				TraceEvent("BackupAndParallelRestoreWorkload")
+				    .detail("PrepareRestores", self->backupRanges.size())
+				    .detail("AddPrefix", self->addPrefix)
+				    .detail("RemovePrefix", self->removePrefix);
 				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
 				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
-				                                       self->locked, randomID));
-				TraceEvent("FastRestore").detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
+				                                       self->locked, randomID, self->addPrefix, self->removePrefix));
+				TraceEvent("BackupAndParallelRestoreWorkload")
+				    .detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
 				// Sometimes kill and restart the restore
 				// In real cluster, aborting a restore needs:
@@ -508,16 +541,23 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestoreWorkload").detail("WaitForRestoreToFinish", randomID);
-				wait(backupAgent.parallelRestoreFinish(cx, randomID));
+				// Do not unlock DB when restore finish because we need to transformDatabaseContents
+				wait(backupAgent.parallelRestoreFinish(cx, randomID, !self->hasPrefix()));
 				TraceEvent("FastRestoreWorkload").detail("RestoreFinished", randomID);
 
 				for (auto& restore : restores) {
 					ASSERT(!restore.isError());
 				}
+
+				// If addPrefix or removePrefix set, we want to transform the effect by copying data
+				if (self->hasPrefix()) {
+					wait(transformRestoredDatabase(cx, self->backupRanges, self->addPrefix, self->removePrefix));
+					wait(unlockDatabase(cx, randomID));
+				}
 			}
 
 			// Q: What is the extra backup and why do we need to care about it?
-			if (extraBackup.isValid()) {
+			if (extraBackup.isValid()) { // SOMEDAY: Handle this case
 				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
 				extraTasks = true;
 				try {
