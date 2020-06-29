@@ -118,8 +118,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 	batchData->receiveMutationReqs += 1;
 	// Trace when the receive phase starts at a VB and when it finishes.
-	// This can help check if receiveMutations block applyMutation phase. If so, we need more sophisticated schedule to
-	// ensure priority execution
+	// This can help check if receiveMutations block applyMutation phase.
+	// If so, we need more sophisticated scheduler to ensure priority execution
 	printTrace = (batchData->receiveMutationReqs % 100 == 1);
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
@@ -493,6 +493,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 		if (txnSize > SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
 			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
 			                                         &batchData->counters));
+			batchData->counters.appliedBytes += txnSize;
 			begin = cur;
 			txnSize = 0;
 			txnBatches++;
@@ -502,6 +503,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 	if (begin != batchData->stagingKeys.end()) {
 		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
 		                                         &batchData->counters));
+		batchData->counters.appliedBytes += txnSize;
 		txnBatches++;
 	}
 
