@@ -32,8 +32,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
 
-#include "flow/IRandom.h"
-#include "flow/Tracing.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
@@ -431,9 +429,8 @@ struct BackupData {
 	}
 
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
-		state Span span(deterministicRandom()->randomUniqueID(), "BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(span->context, 1, TransactionPriority::DEFAULT,
+			GetReadVersionRequest request(1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}

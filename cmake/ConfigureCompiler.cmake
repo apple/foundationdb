@@ -212,11 +212,21 @@ else()
   # Tentatively re-enabling vector instructions
   set(USE_AVX512F OFF CACHE BOOL "Enable AVX 512F instructions")
   if (USE_AVX512F)
-    add_compile_options(-mavx512f)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx512f)
+    else()
+      message(STATUS "USE_AVX512F is supported on x86 or x86_64 only")
+      set(USE_AVX512F OFF)
+    endif()
   endif()
   set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
   if (USE_AVX)
-    add_compile_options(-mavx)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx)
+    else()
+      message(STATUS "USE_AVX is supported on x86 or x86_64 only")
+      set(USE_AVX OFF)
+    endif()
   endif()
 
   # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
@@ -286,7 +296,9 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
+  endif()
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(
       -fno-builtin-malloc

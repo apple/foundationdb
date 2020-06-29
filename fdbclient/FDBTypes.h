@@ -36,7 +36,6 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
-typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1,
@@ -660,6 +659,7 @@ struct KeyValueStoreType {
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
 		MEMORY_RADIXTREE,
+		SSD_ROCKSDB_V1,
 		END
 	};
 
@@ -679,6 +679,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
+			case SSD_ROCKSDB_V1: return "ssd-rocksdb-experimental";
 			case MEMORY: return "memory";
 			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";

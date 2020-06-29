@@ -114,6 +114,7 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 		if (memory < memoryThresholdBytes || self->finishedBatch.get() + 1 == actorBatchIndex) {
 			if (memory >= memoryThresholdBytes) {
 				TraceEvent(SevWarn, "FastRestoreMemoryUsageAboveThreshold", self->id())
+				    .suppressFor(5.0)
 				    .detail("Role", getRoleStr(self->role))
 				    .detail("BatchIndex", actorBatchIndex)
 				    .detail("FinishedBatch", self->finishedBatch.get())
@@ -124,6 +125,7 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 			break;
 		} else {
 			TraceEvent(SevInfo, "FastRestoreMemoryUsageAboveThresholdWait", self->id())
+			    .suppressFor(5.0)
 			    .detail("Role", getRoleStr(self->role))
 			    .detail("BatchIndex", actorBatchIndex)
 			    .detail("Actor", name)

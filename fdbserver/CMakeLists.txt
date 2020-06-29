@@ -29,6 +29,7 @@ set(FDBSERVER_SRCS
   IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
+  KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
@@ -217,6 +218,14 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
 
+if (WITH_ROCKSDB_EXPERIMENTAL)
+  add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
+  # Set this to 0 if you want to compile RocksDB with `-march=native`.
+  set(PORTABLE_ROCKSDB 1)
+
+  include(CompileRocksDB)
+endif()
+
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
   target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
@@ -226,12 +235,20 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
+
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_BINARY_DIR}/workloads
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+if (WITH_ROCKSDB_EXPERIMENTAL)
+  add_dependencies(fdbserver rocksdb)
+  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
+else()
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+endif()
+
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)

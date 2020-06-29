@@ -470,15 +470,15 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 }
 
 TEST_CASE("/flow/FlatBuffers/Standalone") {
-	Standalone<VectorRef<StringRef>> vecIn;
+	std::vector<Standalone<StringRef>> vecIn;
 	auto numElements = deterministicRandom()->randomInt(1, 20);
 	for (int i = 0; i < numElements; ++i) {
 		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
-		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
+		vecIn.push_back(Standalone<StringRef>(str));
 	}
 	Standalone<StringRef> value = ObjectWriter::toValue(vecIn, Unversioned());
 	ArenaObjectReader reader(value.arena(), value, Unversioned());
-	VectorRef<Standalone<StringRef>> vecOut;
+	std::vector<Standalone<StringRef>> vecOut;
 	reader.deserialize(vecOut);
 	ASSERT(vecOut.size() == vecIn.size());
 	for (int i = 0; i < vecOut.size(); ++i) {

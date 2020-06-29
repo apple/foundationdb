@@ -1034,7 +1034,7 @@ static char *linenoiseNoTTY(void) {
 
 /* The high level function that is the main API of the linenoise library.
  * This function checks if the terminal has basic capabilities, just checking
- * for a blacklist of stupid terminals, and later either calls the line
+ * for a list of unsupported stupid terminals, and later either calls the line
  * editing function or uses dummy fgets() so that you will be able to type
  * something even in the most desperate of the conditions. */
 char *linenoise(const char *prompt) {

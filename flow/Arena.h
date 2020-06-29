@@ -313,6 +313,23 @@ private:
 	bool valid;
 };
 
+// This class is necessary because Optional<T> is effectively trivially
+// destructible if T is trivially destructible, but we can't SFINAE out
+// destructors until C++20, so we still define the destructor for
+// Optional<T> even if it's trivial
+template <class T>
+struct trivially_destructible : public std::is_trivially_destructible<T> {};
+
+template <class T>
+struct trivially_destructible<Optional<T>> : public trivially_destructible<T> {};
+
+// If std::is_trivially_destructible_v<T> is false only because T has a field
+// Optional<U> where U is trivially destructible, we can manually specify that
+// T is trivially_destructible
+#define TRIVIALLY_DESTRUCTIBLE(T)                                                                                      \
+	template <>                                                                                                        \
+	struct trivially_destructible<T> : std::true_type {}
+
 template<class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
 	static std::string toString(const Optional<T>& value) {
@@ -631,9 +648,6 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 };
 
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
-inline StringRef operator "" _sr(const char* str, size_t size) {
-	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
-}
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
@@ -733,7 +747,9 @@ class VectorRef : public ComposedIdentifier<T, 0x8> {
 public:
 	using value_type = T;
 
-	// T must be trivially destructible!
+	// T must be trivially copyable!
+	// T must be trivially destructible, because ~T is never called
+	static_assert(trivially_destructible<T>::value);
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
 	VectorRef(const VectorRef<T>& other) : data(other.data), m_size(other.m_size), m_capacity(other.m_capacity) {}

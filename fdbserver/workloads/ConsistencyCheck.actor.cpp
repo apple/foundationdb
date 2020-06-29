@@ -21,7 +21,6 @@
 #include <math.h>
 
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -377,16 +376,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state Key begin = keyServersKeys.begin;
 		state Key end = keyServersKeys.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
-		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
 			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture(false));
 			keyServerLocationFutures.clear();
 			for (int i = 0; i < proxyInfo->size(); i++)
-				keyServerLocationFutures.push_back(
-				    proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations)
-				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span->context, begin, end, limitKeyServers, false, Arena()), 2, 0));
+				keyServerLocationFutures.push_back(proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(begin, end, limitKeyServers, false, Arena()), 2, 0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {

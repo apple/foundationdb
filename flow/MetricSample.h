@@ -31,13 +31,13 @@ struct MetricSample {
 	
 	explicit MetricSample(int64_t metricUnitsPerSample) : metricUnitsPerSample(metricUnitsPerSample) {}
 
-	int64_t getMetric(const T& Key) {
+	int64_t getMetric(const T& Key) const {
 		auto i = sample.find(Key);
 		if (i == sample.end())
 			return 0;
 		else
 			return sample.getMetric(i);
-	}	
+	}
 };
 
 template <class T>
@@ -45,10 +45,6 @@ struct TransientMetricSample : MetricSample<T> {
 	Deque< std::tuple<double, T, int64_t> > queue;
 
 	explicit TransientMetricSample(int64_t metricUnitsPerSample) : MetricSample<T>(metricUnitsPerSample) { }
-
-	bool roll(int64_t metric) {
-		return nondeterministicRandom()->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
-	}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire(const T& key, int64_t metric, double expiration) {
@@ -75,6 +71,11 @@ struct TransientMetricSample : MetricSample<T> {
 	}
 
 private:
+	bool roll(int64_t metric) const {
+		return nondeterministicRandom()->random01() <
+		       (double)metric / this->metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
+	}
+
 	int64_t add(const T& key, int64_t metric) {
 		if (!metric) return 0;
 		int64_t mag = std::abs(metric);
@@ -101,12 +102,8 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 
 	TransientThresholdMetricSample(int64_t metricUnitsPerSample, int64_t threshold) : MetricSample<T>(metricUnitsPerSample), thresholdLimit(threshold) { }
 
-	bool roll(int64_t metric) {
-		return nondeterministicRandom()->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
-	}
-
 	template <class U>
-	bool isAboveThreshold(const U& key) {
+	bool isAboveThreshold(const U& key) const {
 		auto i = thresholdCrossedSet.find(key);
 		if (i == thresholdCrossedSet.end())
 			return false;
@@ -135,7 +132,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 			int64_t val = this->sample.addMetric(T(key), delta);
 			if (val < thresholdLimit && (val + std::abs(delta)) >= thresholdLimit) {
 				auto iter = thresholdCrossedSet.find(key);
-				ASSERT(iter != thresholdCrossedSet.end())
+				ASSERT(iter != thresholdCrossedSet.end());
 				thresholdCrossedSet.erase(iter);
 			}
 			if (val == 0)
@@ -146,6 +143,11 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 	}
 
 private:
+	bool roll(int64_t metric) const {
+		return nondeterministicRandom()->random01() <
+		       (double)metric / this->metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
+	}
+
 	template <class T_>
 	int64_t add(T_&& key, int64_t metric) {
 		if (!metric) return 0;

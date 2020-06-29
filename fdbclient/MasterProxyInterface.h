@@ -153,7 +153,6 @@ struct CommitTransactionRequest : TimedRequest {
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
 	
 	Arena arena;
-	SpanID spanContext;
 	CommitTransactionRef transaction;
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
@@ -163,7 +162,7 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID, spanContext);
+		serializer(ar, transaction, reply, arena, flags, debugID);
 	}
 };
 
@@ -210,7 +209,6 @@ struct GetReadVersionRequest : TimedRequest {
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};
 
-	SpanID spanContext;
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
@@ -221,11 +219,9 @@ struct GetReadVersionRequest : TimedRequest {
 	ReplyPromise<GetReadVersionReply> reply;
 
 	GetReadVersionRequest() : transactionCount(1), flags(0) {}
-	GetReadVersionRequest(SpanID spanContext, uint32_t transactionCount, TransactionPriority priority,
-	                      uint32_t flags = 0, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
-	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), priority(priority), flags(flags), tags(tags),
-	    debugID(debugID) {
+	GetReadVersionRequest(uint32_t transactionCount, TransactionPriority priority, uint32_t flags = 0, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(), Optional<UID> debugID = Optional<UID>()) 
+	    : transactionCount(transactionCount), priority(priority), flags(flags), tags(tags), debugID(debugID) 
+	{
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch(priority) {
 			case TransactionPriority::BATCH:
@@ -241,12 +237,12 @@ struct GetReadVersionRequest : TimedRequest {
 				ASSERT(false);
 		}
 	}
-
+	
 	bool operator < (GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
+		serializer(ar, transactionCount, flags, tags, debugID, reply);
 
 		if(ar.isDeserializing) {
 			if((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
@@ -279,7 +275,6 @@ struct GetKeyServerLocationsReply {
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
-	SpanID spanContext;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
@@ -287,28 +282,24 @@ struct GetKeyServerLocationsRequest {
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
-	GetKeyServerLocationsRequest(SpanID spanContext, KeyRef const& begin, Optional<KeyRef> const& end, int limit,
-	                             bool reverse, Arena const& arena)
-	  : spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse), arena(arena) {}
-
-	template <class Ar>
+	GetKeyServerLocationsRequest( KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse, Arena const& arena ) : begin( begin ), end( end ), limit( limit ), reverse( reverse ), arena( arena ) {}
+	
+	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, arena);
+		serializer(ar, begin, end, limit, reverse, reply, arena);
 	}
 };
 
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
-	SpanID spanContext;
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	explicit GetRawCommittedVersionRequest(SpanID spanContext, Optional<UID> const& debugID = Optional<UID>()) : spanContext(spanContext), debugID(debugID) {}
-	explicit GetRawCommittedVersionRequest() : spanContext(), debugID() {}
+	explicit GetRawCommittedVersionRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, debugID, reply, spanContext);
+		serializer(ar, debugID, reply);
 	}
 };
 

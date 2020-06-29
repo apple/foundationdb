@@ -109,7 +109,7 @@ public:
 	uint64_t sumTo(const_iterator to) const { return data.sumTo(to); }
 	uint64_t sumTo(iterator to) const { return data.sumTo(const_iterator{ to }); }
 
-	static int getElementBytes() { return IndexedSet<KeyValueMapPair, uint64_t>::getElementBytes(); }
+	static constexpr int getElementBytes() { return IndexedSet<KeyValueMapPair, uint64_t>::getElementBytes(); }
 
 private:
 	IKeyValueContainer(IKeyValueContainer const&); // unimplemented

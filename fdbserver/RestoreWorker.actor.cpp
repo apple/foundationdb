@@ -91,9 +91,13 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
+		DUMPTOKEN(recruited.updateRestoreSysInfo);
 		DUMPTOKEN(recruited.initVersionBatch);
 		DUMPTOKEN(recruited.loadFile);
 		DUMPTOKEN(recruited.sendMutations);
+		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.finishVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
@@ -105,6 +109,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface& recruited = self->applierInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
 		DUMPTOKEN(recruited.sendMutationVector);
 		DUMPTOKEN(recruited.applyToDB);
 		DUMPTOKEN(recruited.initVersionBatch);
