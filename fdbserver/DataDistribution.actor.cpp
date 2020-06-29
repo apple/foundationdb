@@ -812,7 +812,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found && teamList[j]->isHealthy()) {
-							req.reply.send( std::make_pair<Optional<Reference<IDataDistributionTeam>>,bool>( teamList[j], foundSrc) );
+							req.reply.send( std::make_pair( Optional<Reference<IDataDistributionTeam>>(teamList[j]), foundSrc) );
 							return Void();
 						}
 					}
@@ -903,7 +903,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found) {
-							req.reply.send( std::make_pair<Optional<Reference<IDataDistributionTeam>>,bool>(teamList[j], foundSrc) );
+							req.reply.send( std::make_pair(Optional<Reference<IDataDistributionTeam>(teamList[j]), foundSrc) );
 							return Void();
 						}
 					}
@@ -914,7 +914,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// 	self->traceAllInfo(true);
 			// }
 
-			req.reply.send( bestOption );
+			req.reply.send( std::make_pair(bestOption, foundSrc) );
 
 			return Void();
 		} catch( Error &e ) {
