@@ -944,30 +944,24 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, inflightPenalty);
+					req.src = rd.src;
 					req.completeSources = rd.completeSources;
-					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
+					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
 					// the unhealthy DC is healthy again or is excluded.
-					if(!bestTeam.present()) {
+					if(!bestTeam.first.present()) {
 						foundTeams = false;
 						break;
 					}
-					if(!bestTeam.get()->isHealthy()) {
+					if(!bestTeam.first.get()->isHealthy()) {
 						allHealthy = false;
 					} else {
 						anyHealthy = true;
 					}
-					bool foundSource = false;
-					if(!rd.wantsNewServers && self->teamCollections.size() > 1) {
-						for(auto& it : bestTeam.get()->getServerIDs()) {
-							if(std::find(rd.src.begin(), rd.src.end(), it) != rd.src.end()) {
-								foundSource = true;
-								anyWithSource = true;
-								break;
-							}
-						}
+					if(bestTeam.second) {
+						anyWithSource = true;
 					}
-					bestTeams.push_back(std::make_pair(bestTeam.get(), foundSource));
+					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
 					tciIndex++;
 				}
 				if (foundTeams && anyHealthy) {
