@@ -263,7 +263,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		Counter appliedTxns, appliedTxnRetries;
 		Counter fetchKeys, fetchTxns, fetchTxnRetries; // number of keys to fetch from dest. FDB cluster.
 		Counter clearOps, clearTxns;
-		// TODO: Add the counter in applying phase
+		// TODO: Count the receivedBytes and appliedBytes so that we can calculate the write throughput
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
