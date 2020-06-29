@@ -261,7 +261,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SQLITE_PAGE_SCAN_ERROR_LIMIT,                        10000 );
 	// TODO(sam): Does this 4096 need to reference STORAGE_PAGE_SIZE?
 	// If so, how do I reference flow knobs?
-	init( SQLITE_BTREE_PAGE_USABLE,                          FLOW_KNOBS->STORAGE_PAGE_SIZE - 8);  // pageSize - reserveSize for page checksum
+	init( SQLITE_BTREE_PAGE_USABLE,                          SERVER_STORAGE_PAGE_SIZE - 8);  // pageSize - reserveSize for page checksum
 	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
 	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
 
@@ -640,6 +640,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN,                   4 );
 	init( REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX,                  15 );
 	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
+
+	init( SERVER_STORAGE_PAGE_SIZE,                                  4096 ); if( randomize && BUGGIFY ) STORAGE_PAGE_SIZE = 8192; else if( randomize && BUGGIFY ) STORAGE_PAGE_SIZE = 16384;
 
 	// clang-format on
 

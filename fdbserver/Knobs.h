@@ -571,6 +571,8 @@ public:
 	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
 	double REDWOOD_LOGGING_INTERVAL;
 
+	int SERVER_STORAGE_PAGE_SIZE; // TODO(sam): Temporary workaround for allowing flow knobs in fdbserver
+
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
