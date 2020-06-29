@@ -1181,7 +1181,7 @@ ACTOR Future<Void> commitBatch(
 						self->metadataVersion = v.metadataVersion;
 						self->committedVersion.set(v.version);
 					}
-					
+
 					if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
 						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
 				}
@@ -1278,9 +1278,16 @@ ACTOR Future<Void> commitBatch(
 
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if( commitVersion > self->committedVersion.get() ) {
+		if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+			// Let master know this commit version so that every other proxy can know.
+			wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+		}
 		self->locked = lockedAfter;
 		self->metadataVersion = metadataVersionAfter;
-		self->committedVersion.set(commitVersion);
+		TEST(commitVersion < self->committedVersion.get());
+		if (commitVersion > self->committedVersion.get()) {
+			self->committedVersion.set(commitVersion);
+		}
 	}
 
 	if (forceRecovery) {
@@ -1381,7 +1388,7 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID
 	return Void();
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID, 
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID,
                                                           int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
@@ -1389,10 +1396,14 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	// (2) No proxy on our list reported committed a higher version before this request was received, because then its committedVersion would have been higher,
 	//     and no other proxy could have already committed anything without first ending the epoch
 	++commitData->stats.txnStartBatch;
-
 	state vector<Future<GetReadVersionReply>> proxyVersions;
-	for (auto const& p : *otherProxies)
-		proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
+	state Future<GetReadVersionReply> replyFromMasterFuture;
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::GetLiveCommittedVersionReply);
+	} else {
+		for (auto const& p : *otherProxies)
+			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
+	}
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(updateLastCommit(commitData, debugID));
@@ -1404,18 +1415,25 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.confirmEpochLive");
 	}
 
-	vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
-	GetReadVersionReply rep;
-	rep.version = commitData->committedVersion.get();
+	state GetReadVersionReply rep;
 	rep.locked = commitData->locked;
 	rep.metadataVersion = commitData->metadataVersion;
-	rep.recentRequests = commitData->stats.getRecentRequests();
+	rep.version = commitData->committedVersion.get();
 
-	for (auto v : versions) {
-		if(v.version > rep.version) {
-			rep = v;
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+		GetReadVersionReply replyFromMaster = wait(replyFromMasterFuture);
+		if (replyFromMaster.version > rep.version) {
+			rep = replyFromMaster;
+		}
+	} else {
+		vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
+		for (auto v : versions) {
+			if (v.version > rep.version) {
+				rep = v;
+			}
 		}
 	}
+	rep.recentRequests = commitData->stats.getRecentRequests();
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
