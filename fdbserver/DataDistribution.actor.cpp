@@ -812,7 +812,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found && teamList[j]->isHealthy()) {
-							req.reply.send( std::make_pair( Optional<Reference<IDataDistributionTeam>>(teamList[j]), foundSrc) );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
@@ -903,7 +904,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found) {
-							req.reply.send( std::make_pair(Optional<Reference<IDataDistributionTeam>(teamList[j]), foundSrc) );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
