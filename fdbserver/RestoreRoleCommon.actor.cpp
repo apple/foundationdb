@@ -147,10 +147,10 @@ ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self) {
 
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
 	loop {
-		// TODO: Add node ID and batchIndex
-		TraceEvent("FastRestoreTraceProcessMetrics")
+		TraceEvent("FastRestoreTraceProcessMetrics", self->nodeID)
 		    .detail("Role", role)
-		    .detail("Node", self->nodeID)
+		    .detail("PipelinedMaxVersionBatchIndex", self->versionBatchId.get())
+		    .detail("FinishedVersionBatchIndex", self->finishedBatch.get())
 		    .detail("CpuUsage", self->cpuUsage)
 		    .detail("UsedMemory", self->memory)
 		    .detail("ResidentMemory", self->residentMemory);

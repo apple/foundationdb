@@ -351,7 +351,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 
 	batchData->loadFileReqs += 1;
 	printTrace = (batchData->loadFileReqs % 10 == 1);
-	// TODO: Make priority lower than sendMutation priority.
+	// TODO: Make the actor priority lower than sendMutation priority. (Unsure it will help performance though)
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString())
@@ -449,7 +449,6 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 				fSendMutations.push_back(sendMutationsToApplier(&kvOps, req.batchIndex, loadParam.asset,
 				                                                loadParam.isRangeFile, &batchData->rangeToApplier,
 				                                                &self->appliersInterf));
-				// kvOps = VersionedMutationsMap(); // Clear memory for the LoadingParam
 			}
 		}
 		wait(waitForAll(fSendMutations));
