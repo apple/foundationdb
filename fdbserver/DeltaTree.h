@@ -32,7 +32,7 @@ typedef uint64_t Word;
 static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
 	int i = 0;
 
-	for (; i + 128 < cl; i += 128) {
+	for (; i + 16 < cl; i += 16) {
 		__m128i a = _mm_loadu_si128((__m128i*)(ap + i));
 		__m128i b = _mm_loadu_si128((__m128i*)(bp + i));
 		int r = _mm_movemask_epi8(_mm_cmpeq_epi8(a, b));
