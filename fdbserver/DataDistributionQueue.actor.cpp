@@ -1253,25 +1253,25 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				Optional<Reference<IDataDistributionTeam>> _randomTeam = wait(brokenPromiseToNever(
+				std::pair<Optional<Reference<IDataDistributionTeam>>,bool> _randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false))));
-				randomTeam = _randomTeam;
+				randomTeam = _randomTeam.first;
 				traceEvent.detail("DestTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
 				if (randomTeam.present()) {
-					Optional<Reference<IDataDistributionTeam>> loadedTeam =
+					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> loadedTeam =
 						wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 							GetTeamRequest(true, true, false, true))));
 
-					traceEvent.detail("SourceTeam", printable(loadedTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
+					traceEvent.detail("SourceTeam", printable(loadedTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 						return team->getDesc();
 					})));
 
-					if (loadedTeam.present()) {
+					if (loadedTeam.first.present()) {
 						bool _moved =
-							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(),
+							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.first.get(),
 												randomTeam.get(), teamCollectionIndex == 0, &traceEvent));
 						moved = _moved;	
 						if (moved) {
@@ -1353,25 +1353,25 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				Optional<Reference<IDataDistributionTeam>> _randomTeam = wait(brokenPromiseToNever(
+				std::pair<Optional<Reference<IDataDistributionTeam>>,bool> _randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false, true))));
-				randomTeam = _randomTeam;
+				randomTeam = _randomTeam.first;
 				traceEvent.detail("SourceTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
 				if (randomTeam.present()) {
-					Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
+					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> unloadedTeam = wait(brokenPromiseToNever(
 					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false))));
 
-					traceEvent.detail("DestTeam", printable(unloadedTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
+					traceEvent.detail("DestTeam", printable(unloadedTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 						return team->getDesc();
 					})));
 
-					if (unloadedTeam.present()) {
+					if (unloadedTeam.first.present()) {
 						bool _moved =
 							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
-												unloadedTeam.get(), teamCollectionIndex == 0, &traceEvent));
+												unloadedTeam.first.get(), teamCollectionIndex == 0, &traceEvent));
 						moved = _moved;
 						if (moved) {
 							resetCount = 0;
