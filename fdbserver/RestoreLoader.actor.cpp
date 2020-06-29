@@ -384,7 +384,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
-	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
+
 	return Void();
 }
 
