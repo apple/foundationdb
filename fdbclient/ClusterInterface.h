@@ -94,23 +94,15 @@ struct ClientVersionRef {
 
 	ClientVersionRef(Arena &arena, ClientVersionRef const& cv) : clientVersion(arena, cv.clientVersion), sourceVersion(arena, cv.sourceVersion), protocolVersion(arena, cv.protocolVersion) {}
 	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion) : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
-	ClientVersionRef(std::string versionString) {
-		size_t index = versionString.find(",");
-		if(index == versionString.npos) {
+	ClientVersionRef(StringRef versionString) {
+		std::vector<StringRef> parts = versionString.splitAny(LiteralStringRef(","));
+		if (parts.size() != 3) {
 			initUnknown();
 			return;
 		}
-
-		clientVersion = StringRef((uint8_t*)&versionString[0], index);
-
-		size_t nextIndex = versionString.find(",", index+1);
-		if(index == versionString.npos) {
-			initUnknown();
-			return;
-		}
-
-		sourceVersion = StringRef((uint8_t*)&versionString[index+1], nextIndex-(index+1));
-		protocolVersion = StringRef((uint8_t*)&versionString[nextIndex+1], versionString.length()-(nextIndex+1));
+		clientVersion = parts[0];
+		sourceVersion = parts[1];
+		protocolVersion = parts[2];
 	}
 
 	void initUnknown() {
