@@ -261,7 +261,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SQLITE_PAGE_SCAN_ERROR_LIMIT,                        10000 );
 	// TODO(sam): Does this 4096 need to reference STORAGE_PAGE_SIZE?
 	// If so, how do I reference flow knobs?
-	init( SQLITE_BTREE_PAGE_USABLE,                          4096 - 8);  // pageSize - reserveSize for page checksum
+	init( SQLITE_BTREE_PAGE_USABLE,                          FLOW_KNOBS->STORAGE_PAGE_SIZE - 8);  // pageSize - reserveSize for page checksum
 	init( SQLITE_CHUNK_SIZE_PAGES,                             25600 );  // 100MB
 	init( SQLITE_CHUNK_SIZE_PAGES_SIM,                          1024 );  // 4MB
 
