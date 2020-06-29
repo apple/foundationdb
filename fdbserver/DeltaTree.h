@@ -25,12 +25,26 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include <string.h>
+#include <emmintrin.h>
 
 typedef uint64_t Word;
 // Get the number of prefix bytes that are the same between a and b, up to their common length of cl
 static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
 	int i = 0;
+
+	for (; i + 128 < cl; i += 128) {
+		__m128i a = _mm_loadu_si128((__m128i*)(ap + i));
+		__m128i b = _mm_loadu_si128((__m128i*)(bp + i));
+		int r = _mm_movemask_epi8(_mm_cmpeq_epi8(a, b));
+		if (r != 0xFFFF) {
+			return clz(r) / 4 + i;
+		}
+	}
+
 	const int wordEnd = cl - sizeof(Word) + 1;
+
+	ap += i;
+	bp += i;
 
 	for (; i < wordEnd; i += sizeof(Word)) {
 		Word a = *(Word*)ap;
