@@ -87,8 +87,12 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
-	init( TLS_HANDSHAKE_THREADS,                                30 );
+	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
+	init( TLS_SERVER_HANDSHAKE_THREADS,                        100 );
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
+	init( TLS_MALLOC_ARENA_MAX,                                  6 );
+	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
+	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
@@ -147,8 +151,6 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
 	init( FLOW_TCP_QUICKACK,                                     0 );
-	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
-	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );

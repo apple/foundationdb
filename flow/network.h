@@ -514,8 +514,9 @@ public:
 	virtual void initMetrics() {}
 	// Metrics must be initialized after FlowTransport::createInstance has been called
 
-	virtual void initTLS() {}
 	// TLS must be initialized before using the network
+	enum ETLSInitState { NONE = 0, CONFIG = 1, CONNECT = 2, LISTEN = 3};
+	virtual void initTLS(ETLSInitState targetState = CONFIG) {}
 
 	virtual const TLSConfig& getTLSConfig() = 0;
 	// Return the TLS Configuration

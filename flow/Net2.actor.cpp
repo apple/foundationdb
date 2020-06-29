@@ -119,7 +119,7 @@ class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
-	void initTLS();
+	void initTLS(ETLSInitState targetState);
 	void run();
 	void initMetrics();
 
@@ -176,11 +176,12 @@ public:
 #ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
+	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
 #endif
 	TLSConfig tlsConfig;
 	Future<Void> backgroundCertRefresh;
-	bool tlsInitialized;
+	ETLSInitState tlsInitializedState;
 
 	INetworkConnections *network;  // initially this, but can be changed
 
@@ -655,7 +656,7 @@ public:
 			Future<Void> onHandshook;
 
 			// If the background handshakers are not all busy, use one
-			if(N2::g_net2->sslPoolHandshakesInProgress < FLOW_KNOBS->TLS_HANDSHAKE_THREADS) {
+			if(N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
 				onHandshook = handshake->done.getFuture();
@@ -708,7 +709,7 @@ public:
 
 			Future<Void> onHandshook;
 			// If the background handshakers are not all busy, use one
-			if(N2::g_net2->sslPoolHandshakesInProgress < FLOW_KNOBS->TLS_HANDSHAKE_THREADS) {
+			if(N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
 				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
 				onHandshook = handshake->done.getFuture();
@@ -934,12 +935,12 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  numYields(0),
 	  lastPriorityStats(nullptr),
-	  tlsInitialized(false),
+	  tlsInitializedState(ETLSInitState::NONE),
 	  tlsConfig(tlsConfig),
 	  started(false)
 #ifndef TLS_DISABLED
 	  ,sslContextVar({ReferencedObject<boost::asio::ssl::context>::from(boost::asio::ssl::context(boost::asio::ssl::context::tls))}),
-	  sslPoolHandshakesInProgress(0)
+	  sslPoolHandshakesInProgress(0), sslHandshakerThreadsStarted(0)
 #endif
 
 {
@@ -1036,34 +1037,66 @@ ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, std::fun
 }
 #endif
 
-void Net2::initTLS() {
-	if(tlsInitialized) {
+void Net2::initTLS(ETLSInitState targetState) {
+	if(tlsInitializedState >= targetState) {
 		return;
 	}
 #ifndef TLS_DISABLED
-	auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
-	try {
-		sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
-		for(int i = 0; i < FLOW_KNOBS->TLS_HANDSHAKE_THREADS; ++i) {
-			sslHandshakerPool->addThread(new SSLHandshakerThread());
+	// Any target state must be higher than NONE so if the current state is NONE
+	// then initialize the TLS config
+	if(tlsInitializedState == ETLSInitState::NONE) {
+		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
+		try {
+			boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
+			const LoadedTLSConfig& loaded = tlsConfig.loadSync();
+			TraceEvent("Net2TLSConfig")
+				.detail("CAPath", tlsConfig.getCAPathSync())
+				.detail("CertificatePath", tlsConfig.getCertificatePathSync())
+				.detail("KeyPath", tlsConfig.getKeyPathSync())
+				.detail("HasPassword", !loaded.getPassword().empty())
+				.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
+			ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
+			sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
+		} catch (Error& e) {
+			TraceEvent("Net2TLSInitError").error(e);
 		}
-
-		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-		const LoadedTLSConfig& loaded = tlsConfig.loadSync();
-		TraceEvent("Net2TLSConfig")
-			.detail("CAPath", tlsConfig.getCAPathSync())
-			.detail("CertificatePath", tlsConfig.getCertificatePathSync())
-			.detail("KeyPath", tlsConfig.getKeyPathSync())
-			.detail("HasPassword", !loaded.getPassword().empty())
-			.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
-		ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
-		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-	} catch (Error& e) {
-		TraceEvent("Net2TLSInitError").error(e);
+		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 	}
-	backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
+
+	// If a TLS connection is actually going to be used then start background threads if configured
+	if(targetState > ETLSInitState::CONFIG) {
+		int threadsToStart;
+		switch(targetState) {
+			case ETLSInitState::CONNECT:
+				threadsToStart = FLOW_KNOBS->TLS_CLIENT_HANDSHAKE_THREADS;
+				break;
+			case ETLSInitState::LISTEN:
+				threadsToStart = FLOW_KNOBS->TLS_SERVER_HANDSHAKE_THREADS;
+				break;
+			default:
+				threadsToStart = 0;
+		};
+		threadsToStart -= sslHandshakerThreadsStarted;
+
+		if(threadsToStart > 0) {
+			if(sslHandshakerThreadsStarted == 0) {
+				#if defined(__linux__)
+				if(mallopt(M_ARENA_MAX, FLOW_KNOBS->TLS_MALLOC_ARENA_MAX) != 1) {
+					TraceEvent(SevWarn, "TLSMallocSetMaxArenasFailure").detail("MaxArenas", FLOW_KNOBS->TLS_MALLOC_ARENA_MAX);
+				};
+				#endif
+				sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+			}
+
+			for(int i = 0; i < threadsToStart; ++i) {
+				++sslHandshakerThreadsStarted;
+				sslHandshakerPool->addThread(new SSLHandshakerThread());
+			}
+		}
+	}
 #endif
-	tlsInitialized = true;
+
+	tlsInitializedState = targetState;
 }
 
 ACTOR Future<Void> Net2::logTimeOffset() {
@@ -1461,7 +1494,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 
 Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
 #ifndef TLS_DISABLED
-	initTLS();
+	initTLS(ETLSInitState::CONNECT);
 	if ( toAddr.isTLS() ) {
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
 	}
@@ -1541,7 +1574,7 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	try {
 #ifndef TLS_DISABLED
-		initTLS();
+		initTLS(ETLSInitState::LISTEN);
 		if ( localAddr.isTLS() ) {
 			return Reference<IListener>(new SSLListener( reactor.ios, &this->sslContextVar, localAddr ));
 		}
