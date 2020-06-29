@@ -37,7 +37,7 @@ static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int c
 		__m128i b = _mm_loadu_si128((__m128i*)(bp + i));
 		int r = _mm_movemask_epi8(_mm_cmpeq_epi8(a, b));
 		if (r != 0xFFFF) {
-			return clz(r) / 4 + i;
+			return ctz(~r) + i;
 		}
 	}
 
