@@ -22,7 +22,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::readModuleToBoundary = {
+std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
 	{ SpecialKeySpace::MODULE::WORKERINTERFACE,

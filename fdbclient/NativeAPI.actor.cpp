@@ -695,8 +695,8 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
 
-void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeReadImpl> impl) {
-	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get());
+void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeReadImpl> impl, bool rw) {
+	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get(), rw);
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 

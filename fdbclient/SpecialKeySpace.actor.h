@@ -65,12 +65,13 @@ private:
 	ManagementAPIError(){};
 };
 
-class SpecialKeyRangeRWImpl : SpecialKeyRangeReadImpl{
+class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {
 public:
-	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) = 0;
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) = 0;
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) = 0;
-	virtual Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
+	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) = 0;
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) = 0;
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) = 0;
+	virtual Future<Optional<std::string>> commit(
+	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
@@ -137,52 +138,40 @@ public:
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
 	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), readImpls(nullptr, spaceEndKey),
-	    readModules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
-		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
+	    writeImpls(nullptr, spaceEndKey),
+	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
+		// Default begin of KeyRangeMap is Key(), insert the range to update start key
 		readImpls.insert(range, nullptr);
-		if (!testOnly) readModulesBoundaryInit(); // testOnly is used in the correctness workload
-		writeImpls = KeyRangeMap<SpecialKeyRangeRWImpl*>(nullptr, spaceEndKey);
+		writeImpls.insert(range, nullptr);
+		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
 	}
 
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
 	                                            GetRangeLimits limits, bool reverse = false);
-												
+
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
 
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) {
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 		auto impl = writeImpls[key];
-		if (impl == nullptr)
-			throw special_keys_no_module_found(); // TODO : change the error type here
+		if (impl == nullptr) throw special_keys_no_module_found(); // TODO : change the error type here
 		return impl->set(ryw, key, value);
 	}
 	// void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range );
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) {
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 		auto impl = writeImpls[key];
-		if (impl == nullptr)
-			throw special_keys_no_module_found(); // TODO : change the error type here
+		if (impl == nullptr) throw special_keys_no_module_found(); // TODO : change the error type here
 		return impl->clear(ryw, key);
 	}
-	// Initialize module boundaries, used to handle cross_module_read
-	void readModulesBoundaryInit() {
-		for (const auto& pair : readModuleToBoundary) {
-			ASSERT(range.contains(pair.second));
-			// Make sure the module is not overlapping with any registered read modules
-			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
-			ASSERT(readModules.rangeContaining(pair.second.begin) == readModules.rangeContaining(pair.second.end) &&
-			       readModules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
-			readModules.insert(pair.second, pair.first);
-			readImpls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
-			                                        // important to make cross_module_read being handled correctly
-		}
-	}
-	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl) {
+	// TODO : do we need to move it to .cpp file
+	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl,
+	                      bool rw = false) {
 		// module boundary check
 		if (module == SpecialKeySpace::MODULE::TESTONLY)
 			ASSERT(normalKeys.contains(kr))
 		else
-			ASSERT(readModuleToBoundary.at(module).contains(kr));
+			ASSERT(moduleToBoundary.at(module).contains(kr));
 		// make sure the registered range is not overlapping with existing ones
 		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
 		for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
@@ -191,33 +180,54 @@ public:
 				break; // Note: relax the condition that the end can be another range's start, if needed
 		}
 		readImpls.insert(kr, impl);
+		// if rw, it means the module can do both read and write
+		if (rw) {
+			// since write impls are always subset of read impls,
+			// no need to check overlapped registration
+			auto rwImpl = dynamic_cast<SpecialKeyRangeRWImpl*>(impl);
+			ASSERT(rwImpl);
+			writeImpls.insert(kr, rwImpl);
+		}
 	}
-	// void registerRWKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeRWImpl* impl) {
-
-	// }
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
-	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return readModules; }
+	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks,
-	                                                                 ReadYourWritesTransaction* ryw, KeySelector begin,
-	                                                                 KeySelector end, GetRangeLimits limits,
-	                                                                 bool reverse);
-	ACTOR static Future<Standalone<RangeResultRef>>
-	getRangeAggregationActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
-	                         GetRangeLimits limits, bool reverse);
+	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw,
+	                                                              KeySelector begin, KeySelector end,
+	                                                              GetRangeLimits limits, bool reverse);
+	ACTOR static Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* sks,
+	                                                                         ReadYourWritesTransaction* ryw,
+	                                                                         KeySelector begin, KeySelector end,
+	                                                                         GetRangeLimits limits, bool reverse);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
-	KeyRangeMap<SpecialKeySpace::MODULE> readModules;
+	KeyRangeMap<SpecialKeySpace::MODULE> modules;
 	KeyRangeMap<SpecialKeyRangeRWImpl*> writeImpls;
-	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test 
+	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test
 
-	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> readModuleToBoundary;
+	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
+
+	// Initialize module boundaries, used to handle cross_module_read
+	void modulesBoundaryInit() {
+		for (const auto& pair : moduleToBoundary) {
+			ASSERT(range.contains(pair.second));
+			// Make sure the module is not overlapping with any registered read modules
+			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
+			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
+			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
+			modules.insert(pair.second, pair.first);
+			// Note: Due to underlying implementation, the insertion here is important to make cross_module_read being
+			// handled correctly
+			readImpls.insert(pair.second, nullptr);
+			writeImpls.insert(pair.second, nullptr);
+		}
+	}
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
@@ -254,9 +264,9 @@ class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value ) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key ) override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
