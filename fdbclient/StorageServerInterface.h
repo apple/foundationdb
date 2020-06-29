@@ -276,7 +276,7 @@ public:
 	template <class Context>
 	static void save(uint8_t* out, const SortedKeyValueVectorRef& t, Context& c) {
 		if (t.size() == 0) return;
-		ASSERT(t.cachedSize.present())
+		ASSERT(t.cachedSize.present());
 		size_t finalSizeExpected = t.cachedSize.get();
 		uint8_t* begin = out;
 		t.cachedSize = Optional<size_t>();
