@@ -1282,11 +1282,13 @@ ACTOR Future<Void> commitBatch(
 			// Let master know this commit version so that every other proxy can know.
 			wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
 		}
-		self->locked = lockedAfter;
-		self->metadataVersion = metadataVersionAfter;
-		TEST(commitVersion < self->committedVersion.get());
+
+		// After we report the commit version above, other batch commitBatch executions may have updated 'self->committedVersion'
+		// to be a larger commitVersion.
 		if (commitVersion > self->committedVersion.get()) {
 			self->committedVersion.set(commitVersion);
+			self->locked = lockedAfter;
+			self->metadataVersion = metadataVersionAfter;
 		}
 	}
 
