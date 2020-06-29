@@ -1864,6 +1864,10 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (lat_total[op]) {
 				dataPoints[op] = (uint64_t*)malloc(sizeof(uint64_t) * lat_samples[op]);
+				if (dataPoints[op] == NULL) {
+					printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
+					continue;
+				}
 				k = 0;
 				for (i = 0; i < args->num_processes; i++) {
 					for (j = 0; j < args->num_threads; j++) {
@@ -1883,7 +1887,7 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 					}
 				}
 				num_points[op] = k;
-				radix_sort(dataPoints[op], num_points[op]);
+				quick_sort(dataPoints[op], num_points[op]);
 				if (num_points[op] & 1) {
 					median = dataPoints[op][num_points[op] / 2];
 				} else {
@@ -1901,6 +1905,10 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "95.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+			if (dataPoints[op] == NULL) {
+				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
+				continue;
+			}
 			if (lat_total[op]) {
 				point_95pct = ((float)(num_points[op]) * 0.95) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_95pct]);
@@ -1915,6 +1923,10 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.0 pctile");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+			if (dataPoints[op] == NULL) {
+				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
+				continue;
+			}
 			if (lat_total[op]) {
 				point_99pct = ((float)(num_points[op]) * 0.99) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99pct]);
@@ -1929,6 +1941,10 @@ void print_report(mako_args_t* args, mako_stats_t* stats, struct timespec* timer
 	printf("%-" STR(STATS_TITLE_WIDTH) "s ", "99.9 pctile");
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+			if (dataPoints[op] == NULL) {
+				printf("%" STR(STATS_FIELD_WIDTH) "s ", "N/A");
+				continue;
+			}
 			if (lat_total[op]) {
 				point_99_9pct = ((float)(num_points[op]) * 0.999) - 1;
 				printf("%" STR(STATS_FIELD_WIDTH) "lld ", dataPoints[op][point_99_9pct]);

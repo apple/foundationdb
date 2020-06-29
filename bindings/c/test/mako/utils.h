@@ -50,12 +50,15 @@ int digits(int num);
 /* len is the buffer size, key length + null */
 void genkey(char* str, int num, int rows, int len);
 
-
-// The main function to that sorts arr[] of size n using  
-// Radix Sort 
+#if 0
+// The main function is to sort arr[] of size n using Radix Sort
 void radix_sort(uint64_t arr[], int n);
-void bucket_data(uint64_t arr[], int n, uint64_t exp) ;
-uint64_t get_max(uint64_t arr[], int n) ;
+void bucket_data(uint64_t arr[], int n, uint64_t exp);
+uint64_t get_max(uint64_t arr[], int n);
+#endif
 
+// The main function is to sort arr[] of size n using Quick Sort
+void quick_sort(uint64_t arr[], int n);
+int compare(const void* a, const void* b);
 
 #endif /* UTILS_H */
