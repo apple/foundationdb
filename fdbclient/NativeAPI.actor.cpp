@@ -529,8 +529,13 @@ ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTr
 		JsonBuilderObject statsObj;
 		statsObj["ShardBytes"] = ddMetricsRef.shardBytes;
 		JsonBuilderArray storages;
+		std::vector<UID> uids;
 		for (int i = 0; i < ssi.second->size(); ++i) {
-			storages.push_back(ssi.second->getId(i).toString());
+			uids.push_back(ssi.second->getId(i));
+		}
+		std::sort(uids.begin(), uids.end());
+		for (const auto& uid : uids) {
+			storages.push_back(uid.toString());
 		}
 		statsObj["Storages"] = storages;
 		std::string statsString = statsObj.getJson();
