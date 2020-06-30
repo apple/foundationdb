@@ -561,7 +561,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
 		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
-		wait(getBackupProgress(self->cx, self->myId, progress));
+		wait(getBackupProgress(self->cx, self->myId, progress, /*logging=*/false));
 		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		state std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
@@ -1087,7 +1087,11 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
 			self.stop();
-			wait(done);
+			try {
+				wait(done);
+			} catch (Error& e) {
+				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
+			}
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
