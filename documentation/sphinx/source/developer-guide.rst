@@ -850,14 +850,14 @@ Reads in the metrics module are not transactional and may require rpcs to comple
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/', limit=3):
   ...     print(k, v)
   ...
-  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":3828000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"ShardBytes":2013000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"ShardBytes":3201000}')
+  ('\xff\xff/metrics/data_distribution_stats/', '{"shard_bytes":3828000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"shard_bytes":2013000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"shard_bytes":3201000}')
 
 ========================= ======== ===============
 **Field**                 **Type** **Description**
 ------------------------- -------- ---------------
-ShardBytes                number   An estimate of the sum of kv sizes for this shard.
+shard_bytes               number   An estimate of the sum of kv sizes for this shard.
 ========================= ======== ===============
 
 Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for application-level throttling.
@@ -866,23 +866,23 @@ Some of this information is also available in ``\xff\xff/status/json``, but thes
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/health/'):
   ...     print(k, v)
   ...
-  ('\xff\xff/metrics/health/aggregate', '{"batchLimited":false,"tpsLimit":483988.66315011407,"worstStorageDurabilityLag":5000001,"worstStorageQueue":2036,"worstTLogQueue":300}')
-  ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"tLogQueue":300}')
-  ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpuUsage":2.398696781487125,"diskUsage":0.059995917598039405,"storageDurabilityLag":5000001,"storageQueue":2036}')
+  ('\xff\xff/metrics/health/aggregate', '{"batch_limited":false,"tps_limit":483988.66315011407,"worst_storage_durability_lag":5000001,"worst_storage_queue":2036,"worst_log_queue":300}')
+  ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"log_queue":300}')
+  ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpu_usage":2.398696781487125,"disk_usage":0.059995917598039405,"storage_durability_lag":5000001,"storage_queue":2036}')
 
 ``\xff\xff/metrics/health/aggregate``
 
 Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.
 
-========================= ======== ===============
-**Field**                 **Type** **Description**
-------------------------- -------- ---------------
-batchLimited              boolean  Whether or not the cluster is limiting batch priority transactions
-tpsLimit                  number   The rate at which normal priority transactions are allowed to start
-worstStorageDurabilityLag number   See the description for storageDurabilityLag
-worstStorageQueue         number   See the description for storageQueue
-worstTLogQueue            number   See the description for tLogQueue
-========================= ======== ===============
+============================ ======== ===============
+**Field**                    **Type** **Description**
+---------------------------- -------- ---------------
+batch_limited                boolean  Whether or not the cluster is limiting batch priority transactions
+tps_limit                    number   The rate at which normal priority transactions are allowed to start
+worst_storage_durability_lag number   See the description for storage_durability_lag
+worst_storage_queue          number   See the description for storage_queue
+worst_log_queue              number   See the description for log_queue
+============================ ======== ===============
 
 ``\xff\xff/metrics/health/log/<id>``
 
@@ -891,21 +891,21 @@ Stats about the health of a particular transaction log process
 ========================= ======== ===============
 **Field**                 **Type** **Description**
 ------------------------- -------- ---------------
-tLogQueue                 number   The number of bytes of mutations that need to be stored in memory on this transaction log process
+log_queue                 number   The number of bytes of mutations that need to be stored in memory on this transaction log process
 ========================= ======== ===============
 
 ``\xff\xff/metrics/health/storage/<id>``
 
 Stats about the health of a particular storage process
 
-========================= ======== ===============
-**Field**                 **Type** **Description**
-------------------------- -------- ---------------
-cpuUsage                  number   The cpu percentage used by this storage process
-diskUsage                 number   The disk IO percentage used by this storage process
-storageDurabilityLag      number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000.
-storageQueue              number   The number of bytes of mutations that need to be stored in memory on this storage process
-========================= ======== ===============
+========================== ======== ===============
+**Field**                  **Type** **Description**
+-------------------------- -------- ---------------
+cpu_usage                  number   The cpu percentage used by this storage process
+disk_usage                 number   The disk IO percentage used by this storage process
+storage_durability_lag     number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000.
+storage_queue              number   The number of bytes of mutations that need to be stored in memory on this storage process
+========================== ======== ===============
 
 Caveats
 ~~~~~~~

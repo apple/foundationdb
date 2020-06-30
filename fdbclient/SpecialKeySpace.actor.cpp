@@ -360,7 +360,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTr
 			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
 			// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
 			json_spirit::mObject statsObj;
-			statsObj["ShardBytes"] = ddMetricsRef.shardBytes;
+			statsObj["shard_bytes"] = ddMetricsRef.shardBytes;
 			std::string statsString =
 			    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 			ValueRef bytes(result.arena(), statsString);

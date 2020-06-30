@@ -557,11 +557,11 @@ static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& me
 	if (CLIENT_BUGGIFY) return result;
 	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate")) && metrics.worstStorageDurabilityLag != 0) {
 		json_spirit::mObject statsObj;
-		statsObj["batchLimited"] = metrics.batchLimited;
-		statsObj["tpsLimit"] = metrics.tpsLimit;
-		statsObj["worstStorageDurabilityLag"] = metrics.worstStorageDurabilityLag;
-		statsObj["worstStorageQueue"] = metrics.worstStorageQueue;
-		statsObj["worstTLogQueue"] = metrics.worstTLogQueue;
+		statsObj["batch_limited"] = metrics.batchLimited;
+		statsObj["tps_limit"] = metrics.tpsLimit;
+		statsObj["worst_storage_durability_lag"] = metrics.worstStorageDurabilityLag;
+		statsObj["worst_storage_queue"] = metrics.worstStorageQueue;
+		statsObj["worst_log_queue"] = metrics.worstTLogQueue;
 		std::string statsString =
 		    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 		ValueRef bytes(result.arena(), statsString);
@@ -580,7 +580,7 @@ static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& me
 			if (phase == 1) {
 				if (k < kr.end) {
 					json_spirit::mObject statsObj;
-					statsObj["tLogQueue"] = logStats;
+					statsObj["log_queue"] = logStats;
 					std::string statsString =
 					    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 					ValueRef bytes(result.arena(), statsString);
@@ -603,10 +603,10 @@ static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& me
 			if (phase == 1) {
 				if (k < kr.end) {
 					json_spirit::mObject statsObj;
-					statsObj["storageDurabilityLag"] = storageStats.storageDurabilityLag;
-					statsObj["storageQueue"] = storageStats.storageQueue;
-					statsObj["cpuUsage"] = storageStats.cpuUsage;
-					statsObj["diskUsage"] = storageStats.diskUsage;
+					statsObj["storage_durability_lag"] = storageStats.storageDurabilityLag;
+					statsObj["storage_queue"] = storageStats.storageQueue;
+					statsObj["cpu_usage"] = storageStats.cpuUsage;
+					statsObj["disk_usage"] = storageStats.diskUsage;
 					std::string statsString =
 					    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 					ValueRef bytes(result.arena(), statsString);
@@ -1458,9 +1458,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 }
 
 template <class F>
-Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx, Key const& key,
-                                                               F StorageServerInterface::*member,
-                                                               TransactionInfo const& info, bool isBackward = false) {
+Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation( Database const& cx, Key const& key, F StorageServerInterface::*member, TransactionInfo const& info, bool isBackward = false ) {
 	auto ssi = cx->getCachedLocation( key, isBackward );
 	if (!ssi.second) {
 		return getKeyLocation_internal( cx, key, info, isBackward );
