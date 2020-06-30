@@ -746,8 +746,8 @@ struct RawCursor {
 				seekResult = moveTo(kv.key, true);
 			}
 
-			const int primaryPageUsable = SERVER_KNOBS->SQLITE_FRAGMENT_PRIMARY_PAGE_USABLE;
-			const int overflowPageUsable = SERVER_KNOBS->SQLITE_FRAGMENT_OVERFLOW_PAGE_USABLE;
+			const int primaryPageUsable = FLOW_KNOBS->SQLITE_FRAGMENT_PRIMARY_PAGE_USABLE;
+			const int overflowPageUsable = FLOW_KNOBS->SQLITE_FRAGMENT_OVERFLOW_PAGE_USABLE;
 
 			int fragments = 1;
 			int valuePerFragment = kv.value.size();

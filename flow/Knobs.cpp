@@ -223,7 +223,31 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
+
 	init( STORAGE_PAGE_SIZE,                                  4096 );
+	init( SQLITE_BTREE_PAGE_USABLE,                          STORAGE_PAGE_SIZE - 8);  // pageSize - reserveSize for page checksum
+
+	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
+	// These formulas are copied from SQLite, using its hardcoded constants, so if you are
+	// changing this you should also be changing SQLite.
+	init( SQLITE_BTREE_CELL_MAX_LOCAL,  (SQLITE_BTREE_PAGE_USABLE - 12) * 64/255 - 23 );
+	init( SQLITE_BTREE_CELL_MIN_LOCAL,  (SQLITE_BTREE_PAGE_USABLE - 12) * 32/255 - 23 );
+
+	// Maximum FDB fragment key and value bytes that can fit in a primary btree page
+	init( SQLITE_FRAGMENT_PRIMARY_PAGE_USABLE,
+					SQLITE_BTREE_CELL_MAX_LOCAL
+					 - 1 // vdbeRecord header length size
+					 - 2 // max key length size
+					 - 4 // max index length size
+					 - 2 // max value fragment length size
+	);
+
+	// Maximum FDB fragment value bytes in an overflow page
+	init( SQLITE_FRAGMENT_OVERFLOW_PAGE_USABLE,
+					SQLITE_BTREE_PAGE_USABLE
+					 - 4 // next pageNumber size
+	);
+
 }
 // clang-format on
 
