@@ -224,7 +224,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
 
-	init( STORAGE_PAGE_SIZE,                                  4096 );
+	init( STORAGE_PAGE_SIZE,                                  4096 ); if( randomize && BUGGIFY ) STORAGE_PAGE_SIZE = 8192; else if( randomize && BUGGIFY ) STORAGE_PAGE_SIZE = 16384;
 	init( SQLITE_BTREE_PAGE_USABLE,                          STORAGE_PAGE_SIZE - 8);  // pageSize - reserveSize for page checksum
 
 	// Maximum and minimum cell payload bytes allowed on primary page as calculated in SQLite.
