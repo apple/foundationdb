@@ -4551,7 +4551,8 @@ public:
 		loop {
 			try {
 				Optional<Version> restoreVersion = wait( backupConfig.getLatestRestorableVersion(ryw_tr) );
-				if(restoreVersion.present() && restoreVersion.get() >= commitVersion) {
+				if (restoreVersion.present() &&
+				    restoreVersion.get() >= commitVersion) { // Can it be larger than commitVersion?
 					TraceEvent("AS_RestoreVersion").detail("RestoreVer", restoreVersion.get());
 					break;
 				} else {

@@ -78,6 +78,10 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			out[p+key] = value;
 		}
 
+		if (key == "readTxnLifetime") {
+			out[p + key] = value; // value in versions
+		}
+
 		if( key == "regions" ) {
 			json_spirit::mValue mv;
 			json_spirit::read_string( value, mv );
@@ -843,6 +847,7 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 				if (r != ConfigurationResult::SUCCESS)
 					return r;
 
+				// TODO: add config for txnLifetime
 				for(auto& kv : m)
 					tr.set(kv.first, kv.second);
 			}

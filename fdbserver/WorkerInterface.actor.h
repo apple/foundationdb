@@ -371,11 +371,13 @@ struct InitializeLogRouterRequest {
 	std::vector<LocalityData> tLogLocalities;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int8_t locality;
+	Version readTxnLifetime; // Q: Should we use the old readTxnLifetime in the old generations?
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, reply);
+		serializer(ar, recoveryCount, routerTag, startVersion, tLogLocalities, tLogPolicy, locality, readTxnLifetime,
+		           reply);
 	}
 };
 
@@ -436,12 +438,13 @@ struct InitializeMasterProxyRequest {
 	MasterInterface master;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
+	Version readTxnLifetime;
 	bool firstProxy;
 	ReplyPromise<MasterProxyInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+		serializer(ar, master, recoveryCount, recoveryTransactionVersion, readTxnLifetime, firstProxy, reply);
 	}
 };
 

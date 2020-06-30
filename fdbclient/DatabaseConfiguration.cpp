@@ -42,11 +42,18 @@ void DatabaseConfiguration::resetInternal() {
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
+	readTxnLifetime = 5 * CLIENT_KNOBS->VERSIONS_PER_SECOND; // Move it from server_knobs to client_knobs?
+	txnLifetimeChangeTime = 0;
 }
 
 void parse( int* i, ValueRef const& v ) {
 	// FIXME: Sanity checking
 	*i = atoi(v.toString().c_str());
+}
+
+void parse(Version* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atol(v.toString().c_str());
 }
 
 void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef const& v) {
@@ -327,6 +334,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		}
 
 		result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
+		result["readTxnLifetime"] = (int64_t)readTxnLifetime;
+		// Q: Set simulation global variable?
 	}
 
 	return result;
@@ -443,6 +452,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);
 	else if (ck == LiteralStringRef("repopulate_anti_quorum")) parse(&repopulateRegionAntiQuorum, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);
+	else if (ck == LiteralStringRef("readTxnLifetime"))
+		parse(&readTxnLifetime, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
 }

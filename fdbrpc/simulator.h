@@ -304,6 +304,8 @@ public:
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 
+	int64_t readTxnLifetime;
+
 	//Used by workloads that perform reconfigurations
 	int testerCount;
 	std::string connectionString;

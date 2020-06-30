@@ -513,7 +513,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 						writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
 					}
 				}
-
+				// Do we ever test this?
 				TEST( true ); // Simulated machine rebooted with data loss
 			}
 
@@ -908,7 +908,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 			if (deterministicRandom()->random01() < 0.25) primaryObj["satellite_logs"] =  deterministicRandom()->randomInt(1,7);
 			if (deterministicRandom()->random01() < 0.25) remoteObj["satellite_logs"] =  deterministicRandom()->randomInt(1,7);
 
-			//We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log routers will not be able to keep up.
+			// Q: MAX_READ_TRANSACTION_LIFE_VERSIONS can not be configured to be small value in HA setting? Then we
+			// should sanity check this in ManagementAPI? Q: Why log routers cannot catch up?
+			// We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log
+			// routers will not be able to keep up.
 			if (minimumRegions <= 1 && (deterministicRandom()->random01() < 0.25 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND)) {
 				TEST( true );  // Simulated cluster using one region
 				needsRemote = false;

@@ -90,6 +90,8 @@ struct LogRouterData {
 	double getMoreTime = 0;
 	double maxGetMoreTime = 0;
 
+	Version readTxnLifetime = 5 * SERVER_KNOBS->VERSIONS_PER_SECOND; // 5s versions
+
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
 		double lastUpdate;
@@ -119,9 +121,13 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
-	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
-		cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc), getMoreBlockedCount("GetMoreBlockedCount", cc) {
+	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
+	  : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()),
+	    version(req.startVersion - 1), minPopped(0), startVersion(req.startVersion), allowPops(false),
+	    minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false), cc("LogRouter", dbgid.toString()),
+	    getMoreCount("GetMoreCount", cc), getMoreBlockedCount("GetMoreBlockedCount", cc),
+	    readTxnLifetime(req.readTxnLifetime) {
+		ASSERT_WE_THINK(req.readTxnLifetime > 0);
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -140,7 +146,10 @@ struct LogRouterData {
 
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
-		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
+		specialCounter(cc, "FetchedVersions", [this]() {
+			return std::max<Version>(
+			    0, std::min<Version>(this->readTxnLifetime, this->version.get() - this->minPopped.get()));
+		}); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
 		specialCounter(cc, "FoundEpochEnd", [this](){ return this->foundEpochEnd; });
@@ -216,11 +225,15 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 		return Void();
 	}
 	if(!self->foundEpochEnd) {
-		wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
+		wait(self->minPopped.whenAtLeast(std::min(
+		    self->version.get(), ver - self->readTxnLifetime))); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 	} else {
-		while(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < ver) {
-			if(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS > self->version.get()) {
-				self->version.set( self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS );
+		while (self->minPopped.get() + self->readTxnLifetime <
+		       ver) { //  SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+			if (self->minPopped.get() + self->readTxnLifetime >
+			    self->version.get()) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+				self->version.set(self->minPopped.get() +
+				                  self->readTxnLifetime); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 				wait(yield(TaskPriority::TLogCommit));
 			} else {
 				wait(self->minPopped.whenAtLeast((self->minPopped.get()+1)));
@@ -235,6 +248,7 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	return Void();
 }
 
+// Pull data from the last epoch
 ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;

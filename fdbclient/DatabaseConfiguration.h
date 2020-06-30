@@ -186,6 +186,10 @@ struct DatabaseConfiguration {
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
+	// Txn lifetime
+	Version readTxnLifetime;
+	Version txnLifetimeChangeTime; // when a new transaction lifetime is changed. May not need it here
+
 	// Excluded servers (no state should be here)
 	bool isExcludedServer( NetworkAddressList ) const;
 	std::set<AddressExclusion> getExcludedServers() const;

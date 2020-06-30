@@ -443,7 +443,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 
-		// Increment the backup agent requets
+		// Increment the backup agent requests
 		if (self->agentRequest) {
 			BackupToDBCorrectnessWorkload::drAgentRequests++;
 		}

@@ -471,21 +471,19 @@ struct RatekeeperLimits {
 	TransactionPriority priority;
 	std::string context;
 
-	RatekeeperLimits(TransactionPriority priority, std::string context, int64_t storageTargetBytes, int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes, double maxVersionDifference, int64_t durabilityLagTargetVersions) :
-		priority(priority),
-		tpsLimit(std::numeric_limits<double>::infinity()),
-		tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
-		reasonMetric(StringRef("Ratekeeper.Reason" + context)),
-		storageTargetBytes(storageTargetBytes),
-		storageSpringBytes(storageSpringBytes),
-		logTargetBytes(logTargetBytes),
-		logSpringBytes(logSpringBytes),
-		maxVersionDifference(maxVersionDifference),
-		durabilityLagTargetVersions(durabilityLagTargetVersions + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not be durable on the storage servers
-		durabilityLagLimit(std::numeric_limits<double>::infinity()),
-		lastDurabilityLag(0),
-		context(context)
-	{}
+	RatekeeperLimits(TransactionPriority priority, std::string context, int64_t storageTargetBytes,
+	                 int64_t storageSpringBytes, int64_t logTargetBytes, int64_t logSpringBytes,
+	                 double maxVersionDifference, int64_t durabilityLagTargetVersions, Version readTxnLifetime)
+	  : priority(priority), tpsLimit(std::numeric_limits<double>::infinity()),
+	    tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
+	    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
+	    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
+	    maxVersionDifference(maxVersionDifference),
+	    durabilityLagTargetVersions(
+	        durabilityLagTargetVersions +
+	        readTxnLifetime), // The read transaction life versions are expected to not be durable on the storage
+	                          // servers // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+	    durabilityLagLimit(std::numeric_limits<double>::infinity()), lastDurabilityLag(0), context(context) {}
 };
 
 struct ProxyInfo {
@@ -530,8 +528,10 @@ struct RatekeeperData {
 
 	bool autoThrottlingEnabled;
 
-	RatekeeperData(UID id, Database db)
-	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	Version readTxnLifetime;
+
+	RatekeeperData(UID id, Database db, Version readTxnLifetime)
+	  : id(id), db(db), readTxnLifetime(readTxnLifetime), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
@@ -539,13 +539,14 @@ struct RatekeeperData {
 	    normalLimits(TransactionPriority::DEFAULT, "", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
 	                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
 	                 SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-	                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS),
+	                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS, readTxnLifetime),
 	    batchLimits(TransactionPriority::BATCH, "Batch", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
 	                SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH, SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
 	                SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
+	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH, readTxnLifetime),
 	    autoThrottlingEnabled(false) {
 		expiredTagThrottleCleanup = recurring([this](){ ThrottleApi::expire(this->db); }, SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+		ASSERT_WE_THINK(this->readTxnLifetime > 0);
 	}
 };
 
@@ -917,7 +918,10 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RkTagThrottleCol
 		}*/
 
 		// Don't let any storage server use up its target bytes faster than its MVCC window!
-		double maxBytesPerSecond = (targetBytes - springBytes) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)/SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0);
+		// What if we do, what will happen? Client will not get transaction too old error although it should not?
+		double maxBytesPerSecond =
+		    (targetBytes - springBytes) / ((((double)self->readTxnLifetime) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
+		                                   2.0); // MAX_READ_TRANSACTION_LIFE_VERSIONS
 		double limitTps = std::min(actualTps * maxBytesPerSecond / std::max(1.0e-8, inputRate), maxBytesPerSecond * SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
 		if (ssLimitReason == limitReason_t::unlimited)
 			ssLimitReason = limitReason_t::storage_server_write_bandwidth_mvcc;
@@ -1101,7 +1105,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RkTagThrottleCol
 		}
 		if (inputRate > 0) {
 			// Don't let any tlogs use up its target bytes faster than its MVCC window!
-			double x = ((targetBytes - springBytes) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)/SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0)) / inputRate;
+			double x = ((targetBytes - springBytes) /
+			            ((((double)self->readTxnLifetime) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0)) /
+			           inputRate; // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 			double lim = actualTps * x;
 			if (lim < limits->tpsLimit){
 				limits->tpsLimit = lim;
@@ -1181,7 +1187,10 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData *self) {
 
 				self->configuration.fromKeyValues( (VectorRef<KeyValueRef>) results );
 
-				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) || tr.watch(failedServersVersionKey);
+				// Note: We may not need to monitor readTxnLifetimeKey because it will trigger recovery and kill the RK
+				state Future<Void> watchFuture = tr.watch(moveKeysLockOwnerKey) ||
+				                                 tr.watch(excludedServersVersionKey) ||
+				                                 tr.watch(failedServersVersionKey) || tr.watch(readTxnLifetimeKey);
 				wait( tr.commit() );
 				wait( watchFuture );
 				break;
@@ -1193,7 +1202,8 @@ ACTOR Future<Void> configurationMonitor(RatekeeperData *self) {
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true));
+	state RatekeeperData self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true),
+	                          dbInfo->get().readTxnLifetime);
 	state Future<Void> timeout = Void();
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
@@ -1211,11 +1221,22 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 	self.addActor.send(monitorThrottlingChanges(&self));
 
-	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id()).detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
-		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
+	ASSERT_WE_THINK(self.readTxnLifetime > 0);
+	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
+	    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
+	    .detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
+	    .detail("ReadTransactionLifetime", self.readTxnLifetime)
+	    .detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) /
+	                        ((((double)self.readTxnLifetime) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
+	                         2.0)); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 
-	TraceEvent("RkStorageServerQueueSizeParameters", rkInterf.id()).detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER).detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER).detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
-		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
+	TraceEvent("RkStorageServerQueueSizeParameters", rkInterf.id())
+	    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER)
+	    .detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)
+	    .detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
+	    .detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) /
+	                        ((((double)self.readTxnLifetime) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
+	                         2.0)); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 
 	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 	for( int i = 0; i < tlogInterfs.size(); i++ )

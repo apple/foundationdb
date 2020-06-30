@@ -171,7 +171,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	double lastCommitTime;
 
 	DatabaseConfiguration originalConfiguration;
-	DatabaseConfiguration configuration;
+	DatabaseConfiguration configuration; // Has readTxnLifetime
 	std::vector<Optional<Key>> primaryDcId;
 	std::vector<Optional<Key>> remoteDcIds;
 	bool hasConfiguration;
@@ -274,6 +274,7 @@ ACTOR Future<Void> newProxies( Reference<MasterData> self, RecruitFromConfigurat
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
+		req.readTxnLifetime = self->configuration.readTxnLifetime;
 		TraceEvent("ProxyReplies",self->dbgid).detail("WorkerID", recr.proxies[i].id());
 		initializationReplies.push_back( transformErrors( throwErrorOr( recr.proxies[i].masterProxy.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 	}
@@ -495,6 +496,7 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 	}
 }
 
+// TODO: where
 ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<MasterData> parent, Future<Void> activate ) {
 	wait(activate);
 
@@ -572,17 +574,18 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 		return Never();
 	} else
 		TraceEvent("MasterRecoveryState", self->dbgid)
-			.detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
-			.detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
-			.detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
-			.detail("DesiredTLogs", self->configuration.getDesiredLogs())
-			.detail("RequiredProxies", 1)
-			.detail("DesiredProxies", self->configuration.getDesiredProxies())
-			.detail("RequiredResolvers", 1)
-			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
-			.detail("StoreType", self->configuration.storageServerStoreType)
-			.trackLatest("MasterRecoveryState");
-	
+		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
+		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
+		    .detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
+		    .detail("DesiredTLogs", self->configuration.getDesiredLogs())
+		    .detail("RequiredProxies", 1)
+		    .detail("DesiredProxies", self->configuration.getDesiredProxies())
+		    .detail("RequiredResolvers", 1)
+		    .detail("DesiredResolvers", self->configuration.getDesiredResolvers())
+		    .detail("StoreType", self->configuration.storageServerStoreType)
+		    .detail("ReadTransactionLifetime", self->configuration.readTxnLifetime)
+		    .trackLatest("MasterRecoveryState");
+
 	//FIXME: we only need log routers for the same locality as the master
 	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
 	for(auto& old : self->cstate.prevDBState.oldTLogData) {
@@ -634,6 +637,7 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId, Reference<ILogSyste
 	}
 }
 
+// Get txnStateStore info
 ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem, Version txsPoppedVersion ) {
 	state Reference<AsyncVar<PeekTxsInfo>> myLocality = Reference<AsyncVar<PeekTxsInfo>>( new AsyncVar<PeekTxsInfo>(PeekTxsInfo(tagLocalityInvalid,tagLocalityInvalid,invalidVersion) ) );
 	state Future<Void> localityUpdater = updateLocalityForDcId(self->myInterface.locality.dcId(), oldLogSystem, myLocality);
@@ -644,6 +648,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	// Sets self->lastEpochEnd and self->recoveryTransactionVersion
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
+	// TODO: Recover transaction state store
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, myLocality, txsPoppedVersion );
@@ -834,6 +839,7 @@ void updateConfigForForcedRecovery(Reference<MasterData> self, vector<Standalone
 	initialConfChanges->push_back(regionCommit);
 }
 
+// TODO: Master recovery: Critical path. Txn lifetime should be propogated from here.
 ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem, vector<StorageServerInterface>* seedServers, vector<Standalone<CommitTransactionRef>>* initialConfChanges, Future<Version> poppedTxsVersion ) {
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
@@ -946,10 +952,16 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				t1 = self->lastVersionTime;
 			}
 			rep.prevVersion = self->version;
-			self->version += std::max<Version>(1, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, SERVER_KNOBS->VERSIONS_PER_SECOND*(t1-self->lastVersionTime)));
+			self->version += std::max<Version>(
+			    1, std::min<Version>(
+			           self->configuration.readTxnLifetime,
+			           SERVER_KNOBS->VERSIONS_PER_SECOND *
+			               (t1 - self->lastVersionTime))); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 
 			TEST( self->version - rep.prevVersion == 1 );  // Minimum possible version gap
-			TEST( self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS );  // Maximum possible version gap
+			TEST(self->version - rep.prevVersion ==
+			     self->configuration.readTxnLifetime); // Maximum possible version gap //
+			                                           // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 			self->lastVersionTime = t1;
 
 			if(self->resolverNeedingChanges.count(req.requestingProxy)) {
@@ -1525,6 +1537,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		}
 	}
 
+	// TODO: we may need to add the new txn lifetime
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, nullptr, nullptr);
 	mmApplied = tr.mutations.size();
 

@@ -167,6 +167,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				}
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
+				// DB config info is changed in metadataStore
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().castTo<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
 					if((!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) &&
 						(!m.param1.startsWith( failedServersPrefix ) && m.param1 != failedServersVersionKey)) {
@@ -258,6 +259,9 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				}
 			}
 			else if (m.param1.startsWith(globalKeysPrefix)) {
+				// Send config to all SS
+				// TODO: Mimic this one to change SS config and minRequiredCommitVersionKey to change txnStateStore for
+				// txn roles
 				if(toCommit) {
 					// Notifies all servers that a Master's server epoch ends
 					auto allServers = txnStateStore->readRange(serverTagKeys).get();

@@ -85,6 +85,8 @@ public:
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this cache server
 	bool behind;
 
+	Version readTxnLifetime = 5.0 * SERVER_KNOBS->VERSIONS_PER_SECOND;
+
 	// TODO double check which ones we need for storageCache servers
 	struct Counters {
 		CounterCollection cc;
@@ -782,6 +784,11 @@ private:
 			// We expect changes in pairs, [begin,end), This mutation is for start key of the range
 			cacheStartKey = m.param1;
 			processedCacheStartKey = true;
+		} else if (m.type == MutationRef::SetValue && m.param1 == readTxnLifetimeKey) {
+			TraceEvent("SetStorageCacheReadTransactionLifetime", data->thisServerID)
+			    .detail("OldReadTxnLifetime", data->readTxnLifetime)
+			    .detail("NewReadTxnLifetime", BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned()));
+			data->readTxnLifetime = BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned());
 		} else {
 			fprintf(stderr, "SCPrivateCacheMutation: Unknown private mutation\n");
 			ASSERT(false);  // Unknown private mutation
@@ -933,7 +940,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			// we can get rid of versions beyond maxVerionsInMemory at any point. Update the
 			//desiredOldestVersion and that may invoke the compaction actor
-			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version maxVersionsInMemory = data->readTxnLifetime; // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 			Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			data->desiredOldestVersion.set(proposedOldestVersion);

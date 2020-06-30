@@ -383,7 +383,7 @@ struct ProxyCommitData {
 	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version
 	                                  // during recovery
 	Version version;  // The version at which txnStateStore is up to date
-	Promise<Void> validState;  // Set once txnStateStore and version are valid
+	Promise<Void> validState; // Set once txnStateStore and version are valid //TODO: Set txnLifetime before it is set
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;
 	uint64_t commitVersionRequestNumber;
@@ -422,6 +422,8 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
+
+	Version readTxnLifetime;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -480,17 +482,20 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
-	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
-		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-			logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false),
-			committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0),
-			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
-			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
-			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
-			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
-			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0)
-	{
+	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	                Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit,
+	                Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy, Version readTxnLifetime)
+	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
+	    logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
+	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
+	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
+	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
+	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
+	    readTxnLifetime(readTxnLifetime), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
+	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
+	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS,0.0);
+		ASSERT_WE_THINK(readTxnLifetime > 0);
 	}
 };
 
@@ -796,7 +801,10 @@ ACTOR Future<Void> commitBatch(
 	}
 	state int latencyBucket = batchOperations == 0 ? 0 : std::min<int>(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS-1,SERVER_KNOBS->PROXY_COMPUTE_BUCKETS*batchBytes/(batchOperations*(CLIENT_KNOBS->VALUE_SIZE_LIMIT+CLIENT_KNOBS->KEY_SIZE_LIMIT)));
 
-	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
+	// SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+	ASSERT(self->readTxnLifetime <=
+	       SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT); // since we are using just the former to limit the number of versions
+	                                              // actually in flight!
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches) so we need to downgrade here
 	wait(delay(0, TaskPriority::ProxyCommit));
@@ -1166,16 +1174,20 @@ ACTOR Future<Void> commitBatch(
 
 	// Storage servers mustn't make durable versions which are not fully committed (because then they are impossible to roll back)
 	// We prevent this by limiting the number of versions which are semi-committed but not fully committed to be less than the MVCC window
-	if(self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+	if (self->committedVersion.get() <
+	    commitVersion - self->readTxnLifetime) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 		computeDuration += g_network->timer() - computeStart;
-		while (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-			// This should be *extremely* rare in the real world, but knob buggification should make it happen in simulation
+		while (self->committedVersion.get() <
+		       commitVersion - self->readTxnLifetime) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+			// This should be *extremely* rare in the real world, but knob buggification should make it happen in
+			// simulation
 			TEST(true);  // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
 			choose{
-				when(wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
+				when(wait(self->committedVersion.whenAtLeast(
+				    commitVersion - self->readTxnLifetime))) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 					wait(yield());
-					break; 
+					break;
 				}
 				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 					if(v.version > self->committedVersion.get()) {
@@ -1183,8 +1195,9 @@ ACTOR Future<Void> commitBatch(
 						self->metadataVersion = v.metadataVersion;
 						self->committedVersion.set(v.version);
 					}
-					
-					if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+
+					if (self->committedVersion.get() <
+					    commitVersion - self->readTxnLifetime) // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
 				}
 			}
@@ -1974,16 +1987,12 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	return Void();
 }
 
-ACTOR Future<Void> masterProxyServerCore(
-	MasterProxyInterface proxy,
-	MasterInterface master,
-	Reference<AsyncVar<ServerDBInfo>> db,
-	LogEpoch epoch,
-	Version recoveryTransactionVersion,
-	bool firstProxy,
-	std::string whitelistBinPaths)
-{
-	state ProxyCommitData commitData(proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
+ACTOR Future<Void> masterProxyServerCore(MasterProxyInterface proxy, MasterInterface master,
+                                         Reference<AsyncVar<ServerDBInfo>> db, LogEpoch epoch,
+                                         Version recoveryTransactionVersion, bool firstProxy,
+                                         std::string whitelistBinPaths, Version readTxnLifetime) {
+	state ProxyCommitData commitData(proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion,
+	                                 proxy.commit, db, firstProxy, readTxnLifetime);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
 	state PromiseStream< std::pair<vector<CommitTransactionRequest>, int> > batchedCommits;
@@ -2192,7 +2201,9 @@ ACTOR Future<Void> masterProxyServer(
 	std::string whitelistBinPaths)
 {
 	try {
-		state Future<Void> core = masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, whitelistBinPaths);
+		state Future<Void> core =
+		    masterProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion,
+		                          req.firstProxy, whitelistBinPaths, req.readTxnLifetime);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	}
 	catch (Error& e) {

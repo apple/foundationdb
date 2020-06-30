@@ -35,6 +35,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: May add TXN lifetime here
 struct ServerDBInfo {
 	constexpr static FileIdentifier file_identifier = 13838807;
 	// This structure contains transient information which is broadcast to all workers for a database,
@@ -57,6 +58,7 @@ struct ServerDBInfo {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	std::vector<std::pair<uint16_t,StorageServerInterface>> storageCaches;
 	int64_t infoGeneration;
+	Version readTxnLifetime;
 
 	ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
 
@@ -65,7 +67,9 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, storageCaches, infoGeneration);
+		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount,
+		           recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig,
+		           storageCaches, infoGeneration, readTxnLifetime);
 	}
 };
 

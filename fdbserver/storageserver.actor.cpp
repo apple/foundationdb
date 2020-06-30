@@ -440,6 +440,8 @@ public:
 	bool behind;
 	bool versionBehind;
 
+	Version readTxnLifetime = 5 * SERVER_KNOBS->VERSIONS_PER_SECOND;
+
 	bool debug_inApplyUpdate;
 	double debug_lastValidateTime;
 
@@ -2697,6 +2699,11 @@ private:
 			data->primaryLocality = BinaryReader::fromStringRef<int8_t>(m.param2, Unversioned());
 			auto& mLV = data->addVersionToMutationLog( data->data().getLatestVersion() );
 			data->addMutationToMutationLog( mLV, MutationRef(MutationRef::SetValue, persistPrimaryLocality, m.param2) );
+		} else if (m.type == MutationRef::SetValue && m.param1 == readTxnLifetimeKey) {
+			TraceEvent("SetReadTransactionLifetime", data->thisServerID)
+			    .detail("OldReadTxnLifetime", data->readTxnLifetime)
+			    .detail("NewReadTxnLifetime", BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned()));
+			data->readTxnLifetime = BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned());
 		} else {
 			ASSERT(false);  // Unknown private mutation
 		}
@@ -2970,7 +2977,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
-			Version maxVersionsInMemory = SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version maxVersionsInMemory = data->readTxnLifetime; // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 			for(int i = 0; i < data->recoveryVersionSkips.size(); i++) {
 				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}

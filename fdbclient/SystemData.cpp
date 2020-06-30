@@ -606,6 +606,20 @@ std::string encodeFailedServersKey( AddressExclusion const& addr ) {
 	return failedServersPrefix.toString() + addr.toString();
 }
 
+// TODO: Add writeTxnLifetimeKey
+const KeyRef readTxnLifetimeKey = LiteralStringRef("\xff/conf/readTxnLifetime");
+const Version decodeReadTxnLifetime(ValueRef const& value) {
+	Version lifetime;
+	BinaryReader reader(value, Unversioned());
+	reader >> lifetime;
+	return lifetime;
+}
+const Value encodeReadTxnLifetime(Version lifetime) {
+	BinaryWriter wr(Unversioned());
+	wr << lifetime;
+	return wr.toValue();
+}
+
 const KeyRangeRef workerListKeys( LiteralStringRef("\xff/worker/"), LiteralStringRef("\xff/worker0") );
 const KeyRef workerListPrefix = workerListKeys.begin;
 
@@ -1029,7 +1043,5 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& value) {
 	return std::make_pair(zoneId, version);
 }
 
-const KeyRangeRef testOnlyTxnStateStorePrefixRange(
-    LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
-    LiteralStringRef("\xff/TESTONLYtxnStateStore0")
-);
+const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
+                                                   LiteralStringRef("\xff/TESTONLYtxnStateStore0"));

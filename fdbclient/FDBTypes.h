@@ -1056,4 +1056,15 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 	throw internal_error();
 }
 
+struct TransactionLifetime {
+	Version readTxnLifeVersions; // how long (in versions) a read transaction can run
+	Version changeTime; // when is the new txnlife changed?
+	// Version writeTxnLifeVersions; //TODO
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, readTxnLifeVersions, changeTime);
+	}
+};
+
 #endif

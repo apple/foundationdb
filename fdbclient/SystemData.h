@@ -184,6 +184,10 @@ extern const KeyRef failedServersVersionKey;  // The value of this key shall be 
 const AddressExclusion decodeFailedServersKey( KeyRef const& key ); // where key.startsWith(failedServersPrefix)
 std::string encodeFailedServersKey( AddressExclusion const& );
 
+extern const KeyRef readTxnLifetimeKey;
+const Version decodeReadTxnLifetime(ValueRef const& value);
+const Value encodeReadTxnLifetime(Version lifetime);
+
 //    "\xff/workers/[[processID]]" := ""
 //    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
 //    and are currently (recently) available
@@ -386,7 +390,7 @@ const Value healthyZoneValue( StringRef const& zoneId, Version version );
 std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 
 // All mutations done to this range are blindly copied into txnStateStore.
-// Used to create artifically large txnStateStore instances in testing.
+// Used to create artificially large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 #pragma clang diagnostic pop
