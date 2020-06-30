@@ -853,3 +853,37 @@ const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"co
         "max_commit_bytes":0
     }
 })configSchema");
+
+const KeyRef JSONSchemas::dataDistributionStatsSchema = LiteralStringRef(R"""(
+{
+  "ShardBytes": 1947000,
+  "Storages": [
+    "697f39751849d70067eabd1b079478a5"
+  ]
+}
+)""");
+
+const KeyRef JSONSchemas::logHealthSchema = LiteralStringRef(R"""(
+{
+  "tLogQueue": 156
+}
+)""");
+
+const KeyRef JSONSchemas::storageHealthSchema = LiteralStringRef(R"""(
+{
+  "cpuUsage": 3.28629447047675,
+  "diskUsage": 0.19997897369207954,
+  "storageDurabilityLag": 5050809,
+  "storageQueue": 2030
+}
+)""");
+
+const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
+{
+  "batchLimited": false,
+  "tpsLimit": 457082.8105811302,
+  "worstStorageDurabilityLag": 5050809,
+  "worstStorageQueue": 2030,
+  "worstTLogQueue": 156
+}
+)""");

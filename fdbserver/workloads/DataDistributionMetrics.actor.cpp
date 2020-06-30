@@ -20,7 +20,9 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Schemas.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
@@ -144,9 +146,16 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			self->numShards = result.size();
 			if (self->numShards < 1) return false;
 			state int64_t totalBytes = 0;
+			auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
 			for (int i = 0; i < result.size(); ++i) {
 				ASSERT(result[i].key.startsWith(ddStatsRange.begin));
-				totalBytes += readJSONStrictly(result[i].value.toString()).get_obj()["ShardBytes"].get_int64();
+				std::string errorStr;
+				auto valueObj = readJSONStrictly(result[i].value.toString()).get_obj();
+				if (!schemaMatch(schema, valueObj, errorStr, SevError, true))
+					TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
+					    .detail("ErrorStr", errorStr.c_str())
+					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
+				totalBytes += valueObj["ShardBytes"].get_int64();
 			}
 			self->avgBytes = totalBytes / self->numShards;
 			// fetch data-distribution stats for a smaller range
