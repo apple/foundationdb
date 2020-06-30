@@ -23,7 +23,7 @@ package com.apple.foundationdb;
 import java.util.ArrayList;
 import java.util.List;
 
-class KeyArrayResult {
+public class KeyArrayResult {
 	final List<byte[]> keys;
 
 	KeyArrayResult(byte[] keyBytes, int[] keyLengths) {

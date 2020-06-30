@@ -100,8 +100,10 @@ struct StorageServerInterface {
 				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
 				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
 				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
-				getRangeSplitPoints =
-				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
+				if(ar.protocolVersion().hasRangeSplit()) {
+					getRangeSplitPoints =
+						RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
+				}
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -129,6 +131,7 @@ struct StorageServerInterface {
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
+		streams.push_back(getRangeSplitPoints.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

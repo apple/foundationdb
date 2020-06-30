@@ -474,7 +474,7 @@ struct StorageServerMetrics {
 		std::vector<KeyRangeRef> v = getReadHotRanges(req.keys, SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
 		                                              SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
 		                                              SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
-		reply.readHotRanges = VectorRef<KeyRangeRef>(v.data(), v.size());
+		reply.readHotRanges.append_deep(reply.readHotRanges.arena(), v.data(), v.size());
 		req.reply.send(reply);
 	}
 
@@ -503,7 +503,7 @@ struct StorageServerMetrics {
 		SplitRangeReply reply;
 		std::vector<KeyRef> points = getSplitPoints(req.keys, req.chunkSize);
 
-		reply.splitPoints = VectorRef<KeyRef>(points.data(), points.size());
+		reply.splitPoints.append_deep(reply.splitPoints.arena(), points.data(), points.size());
 		req.reply.send(reply);
 	}
 
@@ -569,6 +569,28 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoint
 
 	return Void();
 }
+
+TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/noneSplitable") {
+
+	int64_t sampleUnit = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
+	StorageServerMetrics ssm;
+
+	ssm.byteSample.sample.insert(LiteralStringRef("A"), 200 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Absolute"), 800 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Apple"), 1000 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bah"), 20 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Banana"), 80 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Bob"), 200 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
+	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
+
+	vector<KeyRef> t = ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 10000 * sampleUnit);
+
+	ASSERT(t.size() == 0);
+
+	return Void();
+}
+
 
 TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 

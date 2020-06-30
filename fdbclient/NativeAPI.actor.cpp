@@ -4018,7 +4018,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, K
 					partEnd = locations[i].first.end;
 				}
 				ReadHotSubRangeRequest req(KeyRangeRef(partBegin, partEnd));
-				fReplies[i] = loadBalance(locations[i].second, &StorageServerInterface::getReadHotRanges, req,
+				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getReadHotRanges, req,
 				                          TaskPriority::DataDistribution);
 			}
 
@@ -4156,7 +4156,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 					partEnd = locations[i].first.end;
 				}
 				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
-				fReplies[i] = loadBalance(locations[i].second, &StorageServerInterface::getRangeSplitPoints, req,
+				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getRangeSplitPoints, req,
 				                          TaskPriority::DataDistribution);
 			}
 
