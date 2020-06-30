@@ -320,7 +320,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
 			fClearRanges.push_back(
 			    applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex, &batchData->counters));
-			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_DELAY_OFFSET;
+			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
 			clearRanges = Standalone<VectorRef<KeyRangeRef>>();
 			curTxnSize = 0;
 		}
@@ -379,7 +379,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
 			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
 			                                                      batchIndex, &batchData->counters));
-			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_DELAY_OFFSET;
+			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
 			numKeysInBatch = 0;
 			incompleteStagingKeys.clear();
 		}
