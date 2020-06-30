@@ -147,11 +147,11 @@ extern "C" {
 
 #if FDB_API_VERSION >= 14
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_keyvalue_array( FDBFuture* f, FDBKeyValue const** out_key_array,
+    fdb_future_get_keyvalue_array( FDBFuture* f, FDBKeyValue const** out_kv,
                                    int* out_count, fdb_bool_t* out_more );
 #endif
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_k,
+    fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array,
                                    int* out_count);
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* f,
