@@ -850,15 +850,14 @@ Reads in the metrics module are not transactional and may require rpcs to comple
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/', limit=3):
   ...     print(k, v)
   ...
-  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":3828000,"Storages":["697f39751849d70067eabd1b079478a5"]}')
-  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"ShardBytes":2013000,"Storages":["697f39751849d70067eabd1b079478a5"]}')
-  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"ShardBytes":3201000,"Storages":["697f39751849d70067eabd1b079478a5"]}')
+  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":3828000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"ShardBytes":2013000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"ShardBytes":3201000}')
 
 ========================= ======== ===============
 **Field**                 **Type** **Description**
 ------------------------- -------- ---------------
 ShardBytes                number   An estimate of the sum of kv sizes for this shard.
-Storages                  [string] A list of the storage process ids currently responsible for this shard.
 ========================= ======== ===============
 
 Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for application-level throttling.

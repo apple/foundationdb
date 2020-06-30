@@ -856,10 +856,7 @@ const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"co
 
 const KeyRef JSONSchemas::dataDistributionStatsSchema = LiteralStringRef(R"""(
 {
-  "ShardBytes": 1947000,
-  "Storages": [
-    "697f39751849d70067eabd1b079478a5"
-  ]
+  "ShardBytes": 1947000
 }
 )""");
 

@@ -502,54 +502,7 @@ void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE modu
 
 ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
 ACTOR Future<Optional<Value>> getJSON(Database db);
-template <class F>
-Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx, Key const& key,
-                                                               F StorageServerInterface::*member,
-                                                               TransactionInfo const& info, bool isBackward = false);
 
-class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
-public:
-	explicit DDStatsRangeImpl(KeyRangeRef kr);
-	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
-};
-
-ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state KeyRangeRef keys = kr.removePrefix(ddStatsRange.begin);
-	state Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
-	    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
-	state Standalone<RangeResultRef> result;
-	ryw->getDatabase()->invalidateCache(keys);
-	for (const auto& ddMetricsRef_ : resultWithoutPrefix) {
-		state DDMetricsRef ddMetricsRef = ddMetricsRef_;
-		// each begin key is the previous end key, thus we only encode the begin key in the result
-		state KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait(getKeyLocation(
-		    ryw->getDatabase(), ddMetricsRef.beginKey, &StorageServerInterface::getValue, ryw->getTransactionInfo()));
-		// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
-		JsonBuilderObject statsObj;
-		statsObj["ShardBytes"] = ddMetricsRef.shardBytes;
-		JsonBuilderArray storages;
-		std::vector<UID> uids;
-		for (int i = 0; i < ssi.second->size(); ++i) {
-			uids.push_back(ssi.second->getId(i));
-		}
-		std::sort(uids.begin(), uids.end());
-		for (const auto& uid : uids) {
-			storages.push_back(uid.toString());
-		}
-		statsObj["Storages"] = storages;
-		std::string statsString = statsObj.getJson();
-		ValueRef bytes(result.arena(), statsString);
-		result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
-	}
-	return result;
-}
-
-DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
-
-Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
-	return ddMetricsGetRangeActor(ryw, kr);
-}
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
@@ -1507,7 +1460,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 template <class F>
 Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx, Key const& key,
                                                                F StorageServerInterface::*member,
-                                                               TransactionInfo const& info, bool isBackward) {
+                                                               TransactionInfo const& info, bool isBackward = false) {
 	auto ssi = cx->getCachedLocation( key, isBackward );
 	if (!ssi.second) {
 		return getKeyLocation_internal( cx, key, info, isBackward );

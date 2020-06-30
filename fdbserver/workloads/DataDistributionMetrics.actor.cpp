@@ -157,13 +157,15 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 					    .detail("ErrorStr", errorStr.c_str())
 					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
 				totalBytes += valueObj["ShardBytes"].get_int64();
-				for (const auto& s : valueObj["Storages"].get_array()) {
-					UID::fromString(s.get_str()); // Will throw if it's not a valid uid
-				}
 			}
 			self->avgBytes = totalBytes / self->numShards;
 			// fetch data-distribution stats for a smaller range
 			ASSERT(result.size());
+			state int idx = deterministicRandom()->randomInt(0, result.size());
+			Standalone<RangeResultRef> res = wait(tr->getRange(
+			    KeyRangeRef(result[idx].key, idx + 1 < result.size() ? result[idx + 1].key : ddStatsRange.end), 100));
+			ASSERT_WE_THINK(res.size() == 1 && res[0] == result[idx]); // It works good now. However, not sure in any
+			                                                           // case of data-distribution, the number changes
 		} catch (Error& e) {
 			TraceEvent(SevError, "FailedToRetrieveDDMetrics").detail("Error", e.what());
 			throw;

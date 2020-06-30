@@ -190,5 +190,11 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
+class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit DDStatsRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif
