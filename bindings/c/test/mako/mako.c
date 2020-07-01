@@ -254,7 +254,9 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 
 		/* commit every 100 inserts (default) */
 		if (i % args->txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
-			if (stats->xacts % args->sampling == 0) clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+			if (stats->xacts % args->sampling == 0) {
+				clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+			}
 			if (commit_transaction(transaction) != FDB_SUCCESS) goto failExit;
 
 			/* xact latency stats */
@@ -276,7 +278,9 @@ int populate(FDBTransaction* transaction, mako_args_t* args, int worker_id, int 
 		}
 	}
 
-	if (stats->xacts % args->sampling == 0) clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+	if (stats->xacts % args->sampling == 0) {
+		clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+	}
 	if (commit_transaction(transaction) != FDB_SUCCESS) goto failExit;
 
 	/* xact latency stats */
@@ -524,7 +528,9 @@ retryTxn:
 					if (rc == FDB_SUCCESS) {
 						/* commit insert so mutation goes to storage */
 						/* to measure commit latency */
-						if (stats->xacts % args->sampling == 0) clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+						if (stats->xacts % args->sampling == 0) {
+							clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+						}
 						rc = commit_transaction(transaction);
 						if (rc == FDB_SUCCESS) {
 							stats->ops[OP_COMMIT]++;
@@ -581,7 +587,9 @@ retryTxn:
 						}
 					}
 					/* commit insert so mutation goes to storage */
-					if (stats->xacts % args->sampling == 0) clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+					if (stats->xacts % args->sampling == 0) {
+						clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+					}
 					rc = commit_transaction(transaction);
 					if (rc == FDB_SUCCESS) {
 						stats->ops[OP_COMMIT]++;
@@ -647,7 +655,9 @@ retryTxn:
 
 	/* commit only successful transaction */
 	if (docommit | args->commit_get) {
-		if (stats->xacts % args->sampling == 0) clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+		if (stats->xacts % args->sampling == 0) {
+			clock_gettime(CLOCK_MONOTONIC, &timer_start_commit);
+		}
 		rc = commit_transaction(transaction);
 		if (rc == FDB_SUCCESS) {
 			/* success */
