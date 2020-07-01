@@ -334,9 +334,9 @@ public:
 	}
 
 	MutationRef addMutationToMutationLog(Standalone<VersionUpdateRef> &mLV, MutationRef const& m){
-		TraceEvent(SevDebug, "AddMutationToMutationLog")
-			.detail("Key", m.param1)
-			.detail("Value",m.param2);
+		//TraceEvent(SevDebug, "AddMutationToMutationLog")
+		//	.detail("Key", m.param1)
+		//	.detail("Value",m.param2);
 		byteSampleApplyMutation( m, mLV.version );
 		counters.bytesInput += mvccStorageBytes(m);
 		return mLV.mutations.push_back_deep( mLV.arena(), m );
@@ -2078,9 +2078,9 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 }
 
 void StorageCacheData::byteSampleApplyMutation( MutationRef const& m, Version ver ){
-		TraceEvent(SevDebug, "ByteSampleApplyMutation")
-			.detail("Key", m.param1)
-			.detail("Value",m.param2);
+	//TraceEvent(SevDebug, "ByteSampleApplyMutation")
+	//		.detail("Key", m.param1)
+	//		.detail("Value",m.param2);
 	if (m.type == MutationRef::ClearRange)
 		byteSampleApplyClear( KeyRangeRef(m.param1, m.param2), ver );
 	else if (m.type == MutationRef::SetValue)
@@ -2111,9 +2111,11 @@ ByteSampleInfo isKVInSample(KeyValueRef keyValue) {
 void StorageCacheData::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 	// Update byteSample in memory  and notify waiting metrics
 
-	TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Version", ver);
+	//TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Version", ver);
 
 	ByteSampleInfo sampleInfo = isKVInSample(kv);
+	//TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("InSample", sampleInfo.inSample).
+	//	detail("Size", sampleInfo.size).detail("SampleSize", sampleInfo.sampledSize);
 	auto& byteSample = metrics.byteSample.sample;
 
 	int64_t delta = 0;
@@ -2129,7 +2131,8 @@ void StorageCacheData::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 												   BinaryWriter::toValue( sampleInfo.sampledSize, Unversioned() )) );
 	} else {
 		bool any = old != byteSample.end();
-		if(!byteSampleClears.rangeContaining(key).value()) {
+		TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Any", any);
+		if(false && !byteSampleClears.rangeContaining(key).value()) {
 			byteSampleClears.insert(key, true);
 			byteSampleClearsTooLarge.set(byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
 			any = true;
@@ -2142,7 +2145,7 @@ void StorageCacheData::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 		}
 	}
 
-	TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Delta", delta);
+	//TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Delta", delta);
 	if (delta) metrics.notifyBytes( key, delta );
 }
 
@@ -2163,12 +2166,15 @@ void StorageCacheData::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
 			metrics.notifyBytes(shard, -bytes);
 			any = any || bytes > 0;
+			TraceEvent(SevDebug, "SCByteSampleApplyClear", this->thisServerID).detail("Any", any).
+				detail("Bytes", bytes);
 		}
 	}
 
 	if(range.end > allKeys.end && byteSample.sumRange(std::max(allKeys.end, range.begin), range.end) > 0)
 		any = true;
 
+	if (false) {
 	auto clearRanges = byteSampleClears.intersectingRanges(range);
 	for(auto it : clearRanges) {
 		if(!it.value()) {
@@ -2177,6 +2183,7 @@ void StorageCacheData::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 			any = true;
 			break;
 		}
+	}
 	}
 
 	if (any) {
@@ -2323,6 +2330,7 @@ ACTOR Future<Void> metricsCore( StorageCacheData* self, StorageServerInterface s
 			when (wait(doPollMetrics) ) {
 				//printf("\nSCDOPollMetrics\n");
 				self->metrics.poll();
+				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
 			}
 		}
 	}

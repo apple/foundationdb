@@ -1,3 +1,4 @@
+./bin/fdbserver -r simulation -f ../foundationdb/tests/fast/CacheTest.txt
 testTitle=Cached
     testName=Cache
     keyPrefix=foo/

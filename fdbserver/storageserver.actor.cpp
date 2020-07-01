@@ -3432,6 +3432,8 @@ void StorageServer::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 	// Update byteSample in memory and (eventually) on disk and notify waiting metrics
 
 	ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
+	//TraceEvent(SevDebug, "SSByteSampleApplySet", this->thisServerID).detail("InSample", sampleInfo.inSample).
+	//	detail("Size", sampleInfo.size).detail("SampleSize", sampleInfo.sampledSize);
 	auto& byteSample = metrics.byteSample.sample;
 
 	int64_t delta = 0;
@@ -3445,11 +3447,13 @@ void StorageServer::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 		addMutationToMutationLogOrStorage( ver, MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), BinaryWriter::toValue( sampleInfo.sampledSize, Unversioned() )) );
 	} else {
 		bool any = old != byteSample.end();
+		TraceEvent(SevDebug, "SSByteSampleApplySet", this->thisServerID).detail("Any", any);
 		if(!byteSampleRecovery.isReady() ) {
 			if(!byteSampleClears.rangeContaining(key).value()) {
 				byteSampleClears.insert(key, true);
 				byteSampleClearsTooLarge.set(byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
 				any = true;
+				TraceEvent(SevDebug, "SSByteSampleApplySetInside", this->thisServerID).detail("Any", any);
 			}
 		}
 		if (any) {
@@ -3459,6 +3463,7 @@ void StorageServer::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 		}
 	}
 
+	//TraceEvent(SevDebug, "SSByteSampleApplySet", this->thisServerID).detail("Delta", delta);
 	if (delta) metrics.notifyBytes( key, delta );
 }
 
@@ -3479,6 +3484,8 @@ void StorageServer::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
 			metrics.notifyBytes(shard, -bytes);
 			any = any || bytes > 0;
+			TraceEvent(SevDebug, "SSByteSampleApplyClear", this->thisServerID).detail("Any", any).
+				detail("Bytes", bytes);
 		}
 	}
 
@@ -3495,6 +3502,7 @@ void StorageServer::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 				break;
 			}
 		}
+		TraceEvent(SevDebug, "SSByteSampleApplyClearInside", this->thisServerID).detail("Any", any);
 	}
 
 	if (any) {
