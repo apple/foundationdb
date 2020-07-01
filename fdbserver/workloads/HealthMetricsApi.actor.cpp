@@ -24,12 +24,12 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // workload description
 // This workload can be attached to other workload to collect health information about the FDB cluster.
-struct HealthMetricsApiWorkload: TestWorkload {
-	// Performance Metrics
+struct HealthMetricsApiWorkload : TestWorkload {
+    // Performance Metrics
     int64_t worstStorageQueue;
     int64_t worstStorageDurabilityLag;
     int64_t worstTLogQueue;
@@ -39,25 +39,23 @@ struct HealthMetricsApiWorkload: TestWorkload {
     double detailedWorstCpuUsage;
     double detailedWorstDiskUsage;
 
-	// Test configuration
+    // Test configuration
     double testDuration;
     double healthMetricsCheckInterval;
     double maxAllowedStaleness;
     bool sendDetailedHealthMetrics;
 
-	// internal states
+    // internal states
     bool healthMetricsStoppedUpdating;
 
-	HealthMetricsApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+    HealthMetricsApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
         testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
         healthMetricsCheckInterval = getOption(options, LiteralStringRef("healthMetricsCheckInterval"), 1.0);
         sendDetailedHealthMetrics = getOption(options, LiteralStringRef("sendDetailedHealthMetrics"), true);
         maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 10.0);
-	}
-
-    virtual std::string description() {
-        return "HealthMetricsApiWorkload";
     }
+
+    virtual std::string description() { return "HealthMetricsApiWorkload"; }
 
     ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
         if (!self->sendDetailedHealthMetrics) {
@@ -66,30 +64,30 @@ struct HealthMetricsApiWorkload: TestWorkload {
             cx->healthMetrics.storageStats.clear();
             cx->healthMetrics.tLogQueue.clear();
         }
-		return Void();
-	}
+        return Void();
+    }
     virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
     ACTOR static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
         wait(timeout(healthMetricsChecker(cx, self), self->testDuration, Void()));
-		return Void();
-	}
+        return Void();
+    }
     virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 
     virtual Future<bool> check(Database const& cx) {
-		if (healthMetricsStoppedUpdating) {
-			TraceEvent(SevError, "HealthMetricsStoppedUpdating");
-			return false;
-		}
+        if (healthMetricsStoppedUpdating) {
+            TraceEvent(SevError, "HealthMetricsStoppedUpdating");
+            return false;
+        }
         bool correctHealthMetricsState = true;
         if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0)
             correctHealthMetricsState = false;
         if (sendDetailedHealthMetrics) {
-            if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 || detailedWorstTLogQueue == 0 ||
-                detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
+            if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 ||
+                detailedWorstTLogQueue == 0 || detailedWorstCpuUsage == 0.0 || detailedWorstDiskUsage == 0.0)
                 correctHealthMetricsState = false;
         } else {
-            if (detailedWorstStorageQueue != 0 || detailedWorstStorageDurabilityLag != 0 || detailedWorstTLogQueue != 0 ||
-                detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
+            if (detailedWorstStorageQueue != 0 || detailedWorstStorageDurabilityLag != 0 ||
+                detailedWorstTLogQueue != 0 || detailedWorstCpuUsage != 0.0 || detailedWorstDiskUsage != 0.0)
                 correctHealthMetricsState = false;
         }
         if (!correctHealthMetricsState) {
@@ -104,8 +102,8 @@ struct HealthMetricsApiWorkload: TestWorkload {
                 .detail("DetailedWorstDiskUsage", detailedWorstDiskUsage)
                 .detail("SendingDetailedHealthMetrics", sendDetailedHealthMetrics);
         }
-		return correctHealthMetricsState;
-	}
+        return correctHealthMetricsState;
+    }
 
     virtual void getMetrics(vector<PerfMetric>& m) {
         m.push_back(PerfMetric("WorstStorageQueue", worstStorageQueue, true));
@@ -116,7 +114,7 @@ struct HealthMetricsApiWorkload: TestWorkload {
         m.push_back(PerfMetric("DetailedWorstTLogQueue", detailedWorstTLogQueue, true));
         m.push_back(PerfMetric("DetailedWorstCpuUsage", detailedWorstCpuUsage, true));
         m.push_back(PerfMetric("DetailedWorstDiskUsage", detailedWorstDiskUsage, true));
-	}
+    }
 
     ACTOR static Future<Void> healthMetricsChecker(Database cx, HealthMetricsApiWorkload* self) {
         state int repeated = 0;
@@ -124,17 +122,16 @@ struct HealthMetricsApiWorkload: TestWorkload {
         loop {
             wait(delay(self->healthMetricsCheckInterval));
             HealthMetrics newHealthMetrics = wait(cx->getHealthMetrics(self->sendDetailedHealthMetrics));
-            if (healthMetrics == newHealthMetrics)
-            {
+            if (healthMetrics == newHealthMetrics) {
                 if (++repeated > self->maxAllowedStaleness / self->healthMetricsCheckInterval)
                     self->healthMetricsStoppedUpdating = true;
-            }
-            else
+            } else
                 repeated = 0;
             healthMetrics = newHealthMetrics;
 
             self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
-            self->worstStorageDurabilityLag = std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
+            self->worstStorageDurabilityLag =
+                std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
             self->worstTLogQueue = std::max(self->worstTLogQueue, healthMetrics.worstTLogQueue);
 
             TraceEvent("HealthMetrics")
@@ -153,8 +150,10 @@ struct HealthMetricsApiWorkload: TestWorkload {
                 auto storageStats = ss.second;
                 self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
                 traceStorageQueue.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageQueue);
-                self->detailedWorstStorageDurabilityLag = std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
-                traceStorageDurabilityLag.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageDurabilityLag);
+                self->detailedWorstStorageDurabilityLag =
+                    std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
+                traceStorageDurabilityLag.detail(format("Storage/%s", ss.first.toString().c_str()),
+                                                 storageStats.storageDurabilityLag);
                 self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, storageStats.cpuUsage);
                 traceCpuUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.cpuUsage);
                 self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
@@ -166,6 +165,6 @@ struct HealthMetricsApiWorkload: TestWorkload {
                 traceTLogQueue.detail(format("TLog/%s", ss.first.toString().c_str()), ss.second);
             }
         };
-	}
+    }
 };
 WorkloadFactory<HealthMetricsApiWorkload> HealthMetricsApiWorkloadFactory("HealthMetricsApi");
