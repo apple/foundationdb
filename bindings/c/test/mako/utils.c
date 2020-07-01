@@ -78,6 +78,9 @@ void genkey(char* str, int num, int rows, int len) {
 	str[len - 1] = '\0';
 }
 
+/* This is another sorting algorithm used to calculate latency parameters */
+/* We moved from radix sort to quick sort to avoid extra space used in radix sort */
+
 #if 0
 uint64_t get_max(uint64_t arr[], int n) {
 	uint64_t mx = arr[0];
