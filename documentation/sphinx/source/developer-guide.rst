@@ -903,7 +903,7 @@ Stats about the health of a particular storage process
 -------------------------- -------- ---------------
 cpu_usage                  number   The cpu percentage used by this storage process
 disk_usage                 number   The disk IO percentage used by this storage process
-storage_durability_lag     number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000.
+storage_durability_lag     number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000 [#max_read_transaction_life_versions]_.
 storage_queue              number   The number of bytes of mutations that need to be stored in memory on this storage process
 ========================== ======== ===============
 
@@ -1113,3 +1113,4 @@ If you see one of those errors, the best way of action is to fail the client.
 At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.
 
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
+.. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
