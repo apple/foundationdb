@@ -148,6 +148,7 @@ set(FDBSERVER_SRCS
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
+  workloads/HealthMetricsApi.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
@@ -207,7 +208,9 @@ set(FDBSERVER_SRCS
   workloads/WorkerErrors.actor.cpp
   workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
-  workloads/WriteDuringRead.actor.cpp)
+  workloads/WriteDuringRead.actor.cpp
+  workloads/WriteTagThrottling.actor.cpp
+)
 
 add_library(fdb_sqlite STATIC
   sqlite/btree.h
