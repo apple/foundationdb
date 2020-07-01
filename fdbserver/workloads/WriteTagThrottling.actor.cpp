@@ -26,7 +26,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // workload description:
-// NOTE: this workload may not be proper for simulation
 // This workload aims to test whether we can throttling some bad clients that doing penetrating write on write hot-spot
 // range. There are several good clientActor just randomly do read and write ops in transaction. Also, some bad
 // clientActor has high probability to read and write a particular hot-spot. If the tag-based throttling works right on
@@ -70,10 +69,10 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
 		goodActorPerClient = actorPerClient - badActorPerClient;
 		keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
-		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount / 2)));
+		readKey = StringRef(format("testKey%010d", deterministicRandom()->randomInt(0, keyCount / 2)));
 
 		clearKeyInt = deterministicRandom()->randomInt(keyCount / 2, keyCount);
-		clearKey = StringRef(format("testkey%08x", clearKeyInt));
+		clearKey = StringRef(format("testKey%010d", clearKeyInt));
 		txBackoffDelay = actorPerClient * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
 	}
 
@@ -81,8 +80,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 
 	// choose a tag
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
-		self->myTag =
-		    TransactionTagRef(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
+		self->myTag = TransactionTagRef("WriteTag");
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
 		state double rate = deterministicRandom()->random01() * 20;
 		TagSet tagSet;
@@ -125,30 +123,32 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 		m.push_back(tooOldRetries.getMetric());
 		m.push_back(commitFailedRetries.getMetric());
 		m.push_back(PerfMetric("Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true));
-		m.push_back(PerfMetric("Read rows/simsec (approx)", transactions.getValue() * numReadPerTx / testDuration, false));
-		m.push_back(PerfMetric("Write rows/simsec (approx)", transactions.getValue() * numWritePerTx / testDuration, false));
+		m.push_back(
+		    PerfMetric("Read rows/simsec (approx)", transactions.getValue() * numReadPerTx / testDuration, false));
+		m.push_back(
+		    PerfMetric("Write rows/simsec (approx)", transactions.getValue() * numWritePerTx / testDuration, false));
 	}
 
 	// return a key based on useReadKey
 	static StringRef generateKey(bool useReadKey, WriteTagThrottlingWorkload* self) {
 		if (useReadKey) return self->readKey;
-		return StringRef(format("testKey%08x", deterministicRandom()->randomInt(0, self->keyCount)));
+		return StringRef(format("testKey%010d", deterministicRandom()->randomInt(0, self->keyCount)));
 	}
 	// return a range based on useClearKey
 	static KeyRangeRef generateRange(bool useClearKey, WriteTagThrottlingWorkload* self) {
 		int a = deterministicRandom()->randomInt(0, self->keyCount);
 		if (useClearKey) {
 			if (a < self->clearKeyInt) {
-				return KeyRangeRef(KeyRef(format("testKey%08x", a)), self->clearKey);
+				return KeyRangeRef(KeyRef(format("testKey%010d", a)), self->clearKey);
 			} else if (a > self->clearKeyInt) {
-				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%08x", a)));
+				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%010d", a)));
 			} else
-				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%08x", a + 1)));
+				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%010d", a + 1)));
 		}
 		int b = deterministicRandom()->randomInt(0, self->keyCount);
 		if (a > b) std::swap(a, b);
-		if (a == b) return KeyRangeRef(KeyRef(format("testKey%08x", a)), KeyRef(format("testKey%08x", b + 1)));
-		return KeyRangeRef(KeyRef(format("testKey%08x", a)), KeyRef(format("testKey%08x", b)));
+		if (a == b) return KeyRangeRef(KeyRef(format("testKey%010d", a)), KeyRef(format("testKey%010d", b + 1)));
+		return KeyRangeRef(KeyRef(format("testKey%010d", a)), KeyRef(format("testKey%010d", b)));
 	}
 	static ValueRef generateVal() {
 		int64_t n = deterministicRandom()->randomInt64(0, LLONG_MAX);
@@ -165,12 +165,12 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 			loop {
 				wait(poisson(&lastTime, self->txBackoffDelay));
 				tstart = now();
-				state ReadYourWritesTransaction tx(cx);
+				state Transaction tx(cx);
 				state int i;
-				// TODO open writeThrottle tag after ReadYourWritesTransaction has this api
-				//				if(self->writeThrottle && badOpRate == self->badOpRate) {
-				//                    tx.options.tags.addTag(tag);
-				//				}
+				// give tag to bad client
+				if (self->writeThrottle && badOpRate == self->badOpRate) {
+					tx.options.tags.addTag(self->myTag);
+				}
 				while (true) {
 					try {
 						for (i = 0; i < self->numWritePerTx; ++i) {
