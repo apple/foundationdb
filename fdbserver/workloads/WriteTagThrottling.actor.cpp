@@ -152,7 +152,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
         return KeyRangeRef(KeyRef(format("testKey%08x", a)), KeyRef(format("testKey%08x", b)));
     }
     static ValueRef generateVal() {
-        int64_t n = deterministicRandom()->randomInt64(0, LONG_LONG_MAX);
+        int64_t n = deterministicRandom()->randomInt64(0, LLONG_MAX);
         ValueRef val((uint8_t*)&n, sizeof(int64_t));
         return val;
     }
