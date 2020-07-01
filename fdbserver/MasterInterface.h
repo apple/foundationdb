@@ -184,7 +184,7 @@ struct ReportRawCommittedVersionRequest {
 	bool locked;
 	Optional<Value> metadataVersion;
 
-	ReplyPromise<Void> reply;
+	ReplyPromise<GetReadVersionReply> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false) {}
 	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion) : version(version), locked(locked), metadataVersion(metadataVersion) {}

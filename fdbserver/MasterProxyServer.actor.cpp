@@ -1278,18 +1278,33 @@ ACTOR Future<Void> commitBatch(
 
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if( commitVersion > self->committedVersion.get() ) {
+//		TraceEvent("YoungClientReport")
+//			.detail("CommittedVersion", self->committedVersion.get())
+//			.detail("CommitVersion", commitVersion)
+//			.detail("LockedAfter", lockedAfter)
+//			.detail("MetadataVersion", metadataVersionAfter.present() ? metadataVersionAfter.get().toString() : "" );
+
+		self->committedVersion.set(commitVersion);
+		self->locked = lockedAfter;
+		self->metadataVersion = metadataVersionAfter;
+
 		if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
 			// Let master know this commit version so that every other proxy can know.
-			wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+			GetReadVersionReply reply = wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+			if (reply.version > self->committedVersion.get()) {
+				self->committedVersion.set(reply.version);
+				self->locked = reply.locked;
+				self->metadataVersion = reply.metadataVersion;
+			}
 		}
 
-		// After we report the commit version above, other batch commitBatch executions may have updated 'self->committedVersion'
-		// to be a larger commitVersion.
-		if (commitVersion > self->committedVersion.get()) {
-			self->committedVersion.set(commitVersion);
-			self->locked = lockedAfter;
-			self->metadataVersion = metadataVersionAfter;
-		}
+//		// After we report the commit version above, other batch commitBatch executions may have updated 'self->committedVersion'
+//		// to be a larger commitVersion.
+//		if (commitVersion > self->committedVersion.get()) {
+//			self->committedVersion.set(commitVersion);
+//			self->locked = lockedAfter;
+//			self->metadataVersion = metadataVersionAfter;
+//		}
 	}
 
 	if (forceRecovery) {
@@ -1424,6 +1439,15 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
 		GetReadVersionReply replyFromMaster = wait(replyFromMasterFuture);
+//		TraceEvent("YoungClientReceiveReport")
+//			.detail("CurrentLiveCommittedVersion", rep.version)
+//			.detail("CurrentLocked", rep.locked)
+//			.detail("CurrentMetadataVersion", rep.metadataVersion.present() ? rep.metadataVersion.get().toString() : "")
+//			.detail("FromMasterCommitVersion", replyFromMaster.version)
+//			.detail("FromMasterLocked", replyFromMaster.locked)
+//			.detail("FromMasterMetadataVersion", replyFromMaster.metadataVersion.present() ? replyFromMaster.metadataVersion.get().toString() : "" )
+//		    .detail("Override", replyFromMaster.version > rep.version);
+
 		if (replyFromMaster.version > rep.version) {
 			rep = replyFromMaster;
 		}

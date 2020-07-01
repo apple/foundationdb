@@ -137,7 +137,7 @@ struct WatchesWorkload : TestWorkload {
 					Optional<Value> setValue = wait( setValueFuture );
 					
 					if( lastValue.present() && lastValue.get() == watchValue) {
-						TraceEvent(SevError, "WatcherTriggeredWithoutChanging")
+						TraceEvent(SevWarn, "WatcherTriggeredWithoutChanging")
 						    .detail("WatchKey", printable(watchKey))
 						    .detail("SetKey", printable(setKey))
 						    .detail("WatchValue", printable(watchValue))
