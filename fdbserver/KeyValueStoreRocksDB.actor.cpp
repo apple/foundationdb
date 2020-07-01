@@ -117,6 +117,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		void action(CommitAction& a) {
 			rocksdb::WriteOptions options;
 			options.sync = true;
+			std::cout << "Begin commit.\n";
 			auto s = db->Write(options, a.batchToCommit.get());
 			for (const auto& key : a.keys) {
 				if (key.rfind("mako", 0) == 0) {
@@ -425,7 +426,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		for (const auto& key : keys) {
 			if (key.rfind("mako", 0) == 0) {
-				std::cout << "About to commit: " << key << "\n";
+				// std::cout << "About to commit: " << key << "\n";
 			}
 		}
 		auto a = new Writer::CommitAction();
