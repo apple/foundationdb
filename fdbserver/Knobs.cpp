@@ -358,7 +358,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    2 );
-	init( ASK_READ_VERSION_FROM_MASTER,                          true );
+	init( ASK_READ_VERSION_FROM_MASTER,                         false ); // Please do not flip this flag.
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
