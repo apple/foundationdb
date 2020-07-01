@@ -80,7 +80,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 
 	// choose a tag
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
-		self->myTag = TransactionTagRef("WriteTag");
+		self->myTag = TransactionTagRef(std::string("WriteTag"));
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
 		state double rate = deterministicRandom()->random01() * 20;
 		TagSet tagSet;
