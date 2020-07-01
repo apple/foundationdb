@@ -23,6 +23,8 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // workload description:
@@ -32,6 +34,7 @@
 // If the tag-based throttling works right on write-heavy tags, it will only limit the bad clientActor without influence other normal actors.
 // This workload also output TPS and latency of read/set/clear operations to do eyeball check. We want this new feature would not cause more load to the cluster
 // (Maybe some visualization tools is needed to show the trend of metrics)
+// Note: this workload may not be proper for simulation
 struct WriteTagThrottlingWorkload : TestWorkload {
     // Performance metrics
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
@@ -41,15 +44,17 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 
 	// Test configuration
 	int actorPerClient, goodActorPerClient, badActorPerClient;
-    int numWritePerTx, numReadPerTx;
+    int numWritePerTx, numReadPerTx, numClearPerTx;
     int keyCount;
 	double badOpRate;
 	double testDuration;
 	bool writeThrottle;
 
 	// internal states
-	Key readKey;
+	Key readKey, clearKey;
+	int clearKeyInt;
     double txBackoffDelay;
+	TransactionTag myTag;
 
     WriteTagThrottlingWorkload(WorkloadContext const& wcx)
 	    : TestWorkload(wcx),
@@ -61,12 +66,17 @@ struct WriteTagThrottlingWorkload : TestWorkload {
         badOpRate = getOption(options, LiteralStringRef("badOpRate"), 0.9);
 		numWritePerTx = getOption(options, LiteralStringRef("numWritePerTx"), 1);
         numReadPerTx = getOption(options, LiteralStringRef("numReadPerTx"), 1);
+        numClearPerTx = getOption(options, LiteralStringRef("numClearPerTx"), 1);
+
         writeThrottle = getOption(options, LiteralStringRef("writeThrottle"), false);
         actorPerClient = getOption(options, LiteralStringRef("actorPerClient"), 10);
         badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
 		goodActorPerClient = actorPerClient - badActorPerClient;
         keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
-        readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
+        readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount / 2)));
+
+		clearKeyInt = deterministicRandom()->randomInt(keyCount/2, keyCount);
+        clearKey = StringRef(format("testkey%08x", clearKeyInt));
         txBackoffDelay = actorPerClient * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
     }
 
@@ -74,6 +84,24 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 		return "WriteThrottlingWorkload";
 	}
 
+	// choose a tag
+	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
+        self->myTag = TransactionTagRef(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
+        state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
+        state double rate = deterministicRandom()->random01() * 20;
+        TagSet tagSet;
+        tagSet.addTag(self->myTag);
+
+        try {
+            wait(ThrottleApi::throttleTags(cx, tagSet, rate, self->testDuration+120, TagThrottleType::MANUAL, priority));
+        }
+        catch(Error &e) {
+            state Error err = e;
+            throw err;
+        }
+		return Void();
+	}
+	Future<Void> setup(const Database& cx) override { return _setup(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, WriteTagThrottlingWorkload* self) {
         state vector<Future<Void>> clientActors;
 		state int actorId;
@@ -108,7 +136,26 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 	// return a key based on useReadKey
 	static StringRef generateKey(bool useReadKey, WriteTagThrottlingWorkload* self) {
 		if(useReadKey) return self->readKey;
-		return StringRef((format("testKey%08x", deterministicRandom()->randomInt(0, self->keyCount))));
+		return StringRef(format("testKey%08x", deterministicRandom()->randomInt(0, self->keyCount)));
+	}
+	// return a key based on useClearKey
+	static KeyRangeRef generateRange(bool useClearKey, WriteTagThrottlingWorkload* self) {
+		int a = deterministicRandom()->randomInt(0, self->keyCount);
+		if(useClearKey) {
+			if(a < self->clearKeyInt) {
+				return KeyRangeRef(KeyRef(format("testKey%08x",a)), self->clearKey);
+			}
+			else if(a > self->clearKeyInt) {
+				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%08x",a)));
+			}
+			else
+				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%08x",a+1)));
+		}
+		int b = deterministicRandom()->randomInt(0, self->keyCount);
+		if(a > b) std::swap(a, b);
+		if(a == b)
+			return KeyRangeRef(KeyRef(format("testKey%08x",a)), KeyRef(format("testKey%08x",b + 1)));
+		return KeyRangeRef(KeyRef(format("testKey%08x",a)), KeyRef(format("testKey%08x",b)));
 	}
     static ValueRef generateVal() {
         int64_t n = deterministicRandom()->randomInt64(0, LONG_LONG_MAX);
@@ -127,9 +174,9 @@ struct WriteTagThrottlingWorkload : TestWorkload {
                 tstart = now();
                 state ReadYourWritesTransaction tx(cx);
                 state int i;
-				// TODO open writeThrottle tag
-//				if(self->writeThrottle) {
-//
+				// TODO open writeThrottle tag after ReadYourWritesTransaction has this api
+//				if(self->writeThrottle && badOpRate == self->badOpRate) {
+//                    tx.options.tags.addTag(tag);
 //				}
                 while(true) {
                     try {
@@ -152,6 +199,10 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 							self->clientReadLatency = a;
 							self->readOpLatency += a;
                         }
+						for(i = 0; i < self->numClearPerTx; ++ i) {
+                            bool useClearKey = deterministicRandom()->random01() < badOpRate;
+							tx.clear(generateRange(useClearKey, self));
+						}
 						tmp_start = now();
                         wait(tx.commit());
 						double a = now() - tmp_start;

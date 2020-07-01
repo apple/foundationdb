@@ -1,4 +1,13 @@
 testTitle=withoutWriteThrottling
     testName=WriteTagThrottling
+    txPerSecond=1000000
+    keyCount=5000
+    testName=HealthMetricsApi
+
+testTitle=withWriteThrottling
+    testName=WriteTagThrottling
+    txPerSecond=1000000
+    keyCount=5000
+    writeThrottle=true
 
     testName=HealthMetricsApi
