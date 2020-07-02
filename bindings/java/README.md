@@ -31,7 +31,7 @@ make packages
 #### Multi-Platform Jar-File
 
 If you want to create a jar file that can run on more than one supported
-architecture (the offical one supports MacOS, Linux, and Windows), you can do
+architecture (the official one supports MacOS, Linux, and Windows), you can do
 that by executing the following steps:
 
 1. Create a directory called `lib` somewhere on your file system.

@@ -3690,8 +3690,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
+	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+		partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+		partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {

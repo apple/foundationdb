@@ -214,7 +214,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	                                                                   int rangeIdx,
 	                                                                   const std::vector<RestoreFileFR>& logFiles) {
 		double size = 0;
-		TraceEvent("FastRestoreGetVersionSize")
+		TraceEvent(SevDebug, "FastRestoreGetVersionSize")
 		    .detail("PreviousVersion", prevVersion)
 		    .detail("NextVersion", nextVersion)
 		    .detail("RangeFiles", rangeFiles.size())
@@ -281,7 +281,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					if (logIdx < logFiles.size()) {
 						nextVersion = logFiles[logIdx].endVersion;
 					} else {
-						TraceEvent("FastRestoreBuildVersionBatch")
+						TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 						    .detail("FinishAllLogFiles", logIdx)
 						    .detail("CurBatchIndex", vb.batchIndex)
 						    .detail("CurBatchSize", vb.size);
@@ -309,7 +309,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			std::tie(nextVersionSize, nextRangeIdx, curLogFiles) =
 			    getVersionSize(prevEndVersion, nextVersion, rangeFiles, rangeIdx, logFiles);
 
-			TraceEvent("FastRestoreBuildVersionBatch")
+			TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 			    .detail("BatchIndex", vb.batchIndex)
 			    .detail("VersionBatchBeginVersion", vb.beginVersion)
 			    .detail("PreviousEndVersion", prevEndVersion)
@@ -378,13 +378,13 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					ASSERT(prevEndVersion < nextVersion); // Ensure progress
 					nextVersion = (prevEndVersion + nextVersion) / 2;
 					rewriteNextVersion = true;
-					TraceEvent("FastRestoreBuildVersionBatch")
+					TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 					    .detail("NextVersionIntervalSize", nextVersionSize); // Duplicate Trace
 					continue;
 				}
 				// Finalize the current version batch
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
-				TraceEvent("FastRestoreBuildVersionBatch")
+				TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 				    .detail("FinishBatchIndex", vb.batchIndex)
 				    .detail("VersionBatchBeginVersion", vb.beginVersion)
 				    .detail("VersionBatchEndVersion", vb.endVersion)
