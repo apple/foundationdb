@@ -2,7 +2,11 @@ testTitle=withoutWriteThrottling
     testName=WriteTagThrottling
     txPerSecond=1000000
     keyCount=5000
-    absentFrac=0.1
+    absentFrac=0.01
+    numWritePerTx=1
+    numReadPerTx=1
+    actorCount=10
+    badActorPerClient=5
 
     testName=HealthMetricsApi
 
@@ -11,6 +15,10 @@ testTitle=withWriteThrottling
     txPerSecond=1000000
     keyCount=5000
     writeThrottle=true
-    absentFrac=0.1
+    absentFrac=0.01
+    numWritePerTx=1
+    numReadPerTx=1
+    actorCount=10
+    badActorPerClient=5
 
     testName=HealthMetricsApi
