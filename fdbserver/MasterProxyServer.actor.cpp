@@ -1252,14 +1252,7 @@ ACTOR Future<Void> commitBatch(
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version as soon as possible.
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
-
-	if (commitVersion == 2025676190) {
-		TraceEvent("Hehehe").detail("CommittedVersion", self->committedVersion.get());
-	}
-
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		TraceEvent("PReport").detail("CV", commitVersion);
-		// Let master know this commit version so that every other proxy can know.
 		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
 	}
 	if( commitVersion > self->committedVersion.get() ) {
@@ -1267,7 +1260,6 @@ ACTOR Future<Void> commitBatch(
 		self->metadataVersion = metadataVersionAfter;
 		self->committedVersion.set(commitVersion);
 	}
-	TraceEvent("PAfterReport").detail("CV", commitVersion);
 
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);

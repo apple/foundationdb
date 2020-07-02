@@ -155,7 +155,6 @@ struct SidebandWorkload : TestWorkload {
 					tr.set( messageKey, LiteralStringRef("deadbeef") );
 					wait( tr.commit() );
 					commitVersion = tr.getCommittedVersion();
-					TraceEvent("CCommit").detail("CV", commitVersion);
 					break;
 				}
 				catch( Error& e ) {
