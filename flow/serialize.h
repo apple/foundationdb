@@ -666,11 +666,12 @@ private:
 };
 
 class SendBuffer {
+protected:
 	uint8_t* _data;
 
 public:
 	inline uint8_t const* data() const { return _data; }
-	inline uint8_t*& data() { return _data; }
+	inline uint8_t* data() { return _data; }
 	SendBuffer* next;
 	int bytes_written, bytes_sent;
 };
@@ -688,7 +689,7 @@ private:
 	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
 		next = nullptr;
 		bytes_written = bytes_sent = 0;
-		data() = reinterpret_cast<uint8_t*>(this + 1);
+		_data = reinterpret_cast<uint8_t*>(this + 1);
 		static_assert(sizeof(PacketBuffer) == PACKET_BUFFER_OVERHEAD);
 	}
 
