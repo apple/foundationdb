@@ -143,7 +143,7 @@ private:
 	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
-	double halfLatency() {
+	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
 		if (a <= pFast) {
@@ -245,7 +245,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		int leftToSend = toSend;
 		for(auto p = buffer; p && leftToSend>0; p=p->next) {
 			int ts = std::min(leftToSend, p->bytes_written - p->bytes_sent);
-			peer->recvBuf.insert( peer->recvBuf.end(), p->data + p->bytes_sent, p->data + p->bytes_sent + ts );
+			peer->recvBuf.insert(peer->recvBuf.end(), p->data() + p->bytes_sent, p->data() + p->bytes_sent + ts);
 			leftToSend -= ts;
 		}
 		ASSERT( leftToSend == 0 );
@@ -255,8 +255,8 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not
 	// be an address we can connect to!
-	virtual NetworkAddress getPeerAddress() { return peerEndpoint; }
-	virtual UID getDebugID() { return dbgid; }
+	virtual NetworkAddress getPeerAddress() const override { return peerEndpoint; }
+	virtual UID getDebugID() const override { return dbgid; }
 
 	bool opened, closedByCaller;
 
@@ -712,7 +712,7 @@ struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
 		return popOne( nextConnection.getFuture() );
 	}
 
-	virtual NetworkAddress getListenAddress() { return address; }
+	virtual NetworkAddress getListenAddress() const override { return address; }
 
 private:
 	ISimulator::ProcessInfo* process;
@@ -743,7 +743,7 @@ class Sim2 : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
-	virtual double now() { return time; }
+	virtual double now() const override { return time; }
 
 	// timer() can be up to 0.1 seconds ahead of now()
 	virtual double timer() {
@@ -795,9 +795,7 @@ public:
 		}
 		return yielded = BUGGIFY_WITH_PROB(0.01);
 	}
-	virtual TaskPriority getCurrentTask() {
-		return currentTaskID;
-	}
+	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
 	virtual void setCurrentTask(TaskPriority taskID ) {
 		currentTaskID = taskID;
 	}
@@ -857,7 +855,7 @@ public:
 			}
 		}
 	}
-	virtual const TLSConfig& getTLSConfig() {
+	virtual const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
@@ -936,7 +934,7 @@ public:
 		if(free == 0)
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace").detail("TotalSpace", diskSpace.totalSpace).detail("BaseFreeSpace", diskSpace.baseFreeSpace).detail("TotalFileSize", totalFileSize).detail("NumFiles", numFiles);
 	}
-	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) {
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
 

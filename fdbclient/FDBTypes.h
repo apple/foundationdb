@@ -648,9 +648,10 @@ struct GetRangeLimits {
 	bool hasRowLimit();
 
 	bool hasSatisfiedMinRows();
-	bool isValid() { return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED)
-							&& (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED)
-							&& minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED); }
+	bool isValid() const {
+		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
+		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
+	}
 };
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
