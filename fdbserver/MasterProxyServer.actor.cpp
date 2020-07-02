@@ -1249,18 +1249,6 @@ ACTOR Future<Void> commitBatch(
 		throw;
 	}
 
-	// After logging finishes, we report the commit version to master so that every other proxy can get the most
-	// up-to-date live committed version as soon as possible.
-	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
-	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
-	}
-	if( commitVersion > self->committedVersion.get() ) {
-		self->locked = lockedAfter;
-		self->metadataVersion = metadataVersionAfter;
-		self->committedVersion.set(commitVersion);
-	}
-
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
 	wait(yield(TaskPriority::ProxyCommitYield2));
@@ -1287,6 +1275,18 @@ ACTOR Future<Void> commitBatch(
 		ASSERT(!p.second.isReady());
 		p.first.get().acknowledge.send(Void());
 		ASSERT(p.second.isReady());
+	}
+
+	// After logging finishes, we report the commit version to master so that every other proxy can get the most
+	// up-to-date live committed version.
+	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+	}
+	if( commitVersion > self->committedVersion.get() ) {
+		self->locked = lockedAfter;
+		self->metadataVersion = metadataVersionAfter;
+		self->committedVersion.set(commitVersion);
 	}
 
 	if (forceRecovery) {
@@ -1424,7 +1424,6 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 		if (replyFromMaster.version > rep.version) {
 			rep = replyFromMaster;
 		}
-		TraceEvent("PRecieve").detail("RV", rep.version);
 	} else {
 		vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
 		for (auto v : versions) {
