@@ -32,7 +32,7 @@
 // write-heavy tags, it will only limit the bad clientActor without influence other normal actors. This workload also
 // output TPS and latency of read/set/clear operations to do eyeball check. We want this new feature would not cause
 // more load to the cluster (Maybe some visualization tools is needed to show the trend of metrics)
-struct WriteTagThrottlingWorkload : TestWorkload {
+struct WriteTagThrottlingWorkload : KVWorkload {
 	// Performance metrics
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency, readOpLatency, commitOpLatency;
@@ -40,7 +40,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 	double clientCommitLatency = 0, worstCommitLatency = 0;
 
 	// Test configuration
-	int actorPerClient, goodActorPerClient, badActorPerClient;
+	int goodActorPerClient, badActorPerClient;
 	int numWritePerTx, numReadPerTx, numClearPerTx;
 	int keyCount;
 	double badOpRate;
@@ -55,7 +55,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 	static constexpr const char* NAME = "WriteTagThrottling";
 
 	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
+	  : KVWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
 	    tooOldRetries("Retries.too_old"), commitFailedRetries("Retires.commit_failed"), readOpLatency("ReadOpLatency"),
 	    commitOpLatency("CommitOpLatency") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
@@ -65,15 +65,14 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 		numClearPerTx = getOption(options, LiteralStringRef("numClearPerTx"), 1);
 
 		writeThrottle = getOption(options, LiteralStringRef("writeThrottle"), false);
-		actorPerClient = getOption(options, LiteralStringRef("actorPerClient"), 10);
 		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
-		goodActorPerClient = actorPerClient - badActorPerClient;
+		goodActorPerClient = actorCount - badActorPerClient;
 
 		keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
-		readKey = StringRef(format("testKey%010d", deterministicRandom()->randomInt(0, keyCount / 2)));
+		readKey = keyForIndex(deterministicRandom()->randomInt(0, keyCount / 2), false);
 		clearKeyInt = deterministicRandom()->randomInt(keyCount / 2, keyCount);
-		clearKey = StringRef(format("testKey%010d", clearKeyInt));
-		txBackoffDelay = actorPerClient * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
+		clearKey = keyForIndex(clearKeyInt);
+		txBackoffDelay = actorCount * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
 
 		badReadTag = TransactionTag(std::string("badReadTag"));
 		badWriteTag = TransactionTag(std::string("badWriteTag"));
@@ -137,31 +136,31 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 	}
 
 	// return a key based on useReadKey
-	static StringRef generateKey(bool useReadKey, WriteTagThrottlingWorkload* self) {
-		if (useReadKey) return self->readKey;
-		return StringRef(format("testKey%010d", deterministicRandom()->randomInt(0, self->keyCount)));
+	Key generateKey(bool useReadKey) {
+		if (useReadKey) return readKey;
+		return getRandomKey();
 	}
 	// return a range based on useClearKey
-	static KeyRangeRef generateRange(bool useClearKey, WriteTagThrottlingWorkload* self) {
-		int a = deterministicRandom()->randomInt(0, self->keyCount);
+	KeyRange generateRange(bool useClearKey) {
+		int a = deterministicRandom()->randomInt(0, keyCount);
 		if (useClearKey) {
-			if (a < self->clearKeyInt) {
-				return KeyRangeRef(KeyRef(format("testKey%010d", a)), self->clearKey);
-			} else if (a > self->clearKeyInt) {
-				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%010d", a)));
+			if (a < clearKeyInt) {
+				return KeyRange(KeyRangeRef(keyForIndex(a, false), clearKey));
+			} else if (a > clearKeyInt) {
+				return KeyRange(KeyRangeRef(clearKey, keyForIndex(a, false)));
 			} else
-				return KeyRangeRef(self->clearKey, KeyRef(format("testKey%010d", a + 1)));
+				return KeyRange(KeyRangeRef(clearKey, keyForIndex(a+1, false)));
 		}
-		int b = deterministicRandom()->randomInt(0, self->keyCount);
+		int b = deterministicRandom()->randomInt(0, keyCount);
 		if (a > b) std::swap(a, b);
-		if (a == b) return KeyRangeRef(KeyRef(format("testKey%010d", a)), KeyRef(format("testKey%010d", b + 1)));
-		return KeyRangeRef(KeyRef(format("testKey%010d", a)), KeyRef(format("testKey%010d", b)));
+		if (a == b)
+			return KeyRange(KeyRangeRef(keyForIndex(a, false), keyForIndex(a+1, false)));
+		return KeyRange(KeyRangeRef(keyForIndex(a, false), keyForIndex(b, false)));
 	}
-	static ValueRef generateVal() {
-		int64_t n = deterministicRandom()->randomInt64(0, LLONG_MAX);
-		ValueRef val((uint8_t*)&n, sizeof(int64_t));
-		return val;
+	Value generateVal() {
+		return Value(deterministicRandom()->randomAlphaNumeric(maxValueBytes));
 	}
+
 	// read and write value on particular/random Key
 	ACTOR static Future<Void> clientActor(double badOpRate, Database cx, WriteTagThrottlingWorkload* self) {
 		state double lastTime = now();
@@ -187,17 +186,17 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 					try {
 						for (i = 0; i < self->numWritePerTx; ++i) {
 							bool useReadKey = deterministicRandom()->random01() < badOpRate;
-							key = generateKey(useReadKey, self);
+							key = self->generateKey(useReadKey);
 							tmp_start = now();
 							Optional<Value> v = wait(tx.get(key));
 							double a = now() - tmp_start;
 							self->clientReadLatency = a;
 							self->readOpLatency += a;
-							tx.set(key, generateVal());
+							tx.set(key, self->generateVal());
 						}
 						for (i = 0; i < self->numReadPerTx - 1; ++i) {
 							bool useReadKey = deterministicRandom()->random01() < badOpRate;
-							key = generateKey(useReadKey, self);
+							key = self->generateKey(useReadKey);
 							tmp_start = now();
 							Optional<Value> v = wait(tx.get(key));
 							double a = now() - tmp_start;
@@ -206,7 +205,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 						}
 						for (i = 0; i < self->numClearPerTx; ++i) {
 							bool useClearKey = deterministicRandom()->random01() < badOpRate;
-							tx.clear(generateRange(useClearKey, self));
+							tx.clear(self->generateRange(useClearKey));
 						}
 						tmp_start = now();
 						wait(tx.commit());
