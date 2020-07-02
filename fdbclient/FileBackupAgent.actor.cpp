@@ -3584,7 +3584,7 @@ public:
 	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true) {
 		state ReadYourWritesTransaction tr(cx);
 		state Optional<Value> restoreRequestDoneKeyValue;
-		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
+		TraceEvent("FastRestoreToolWaitForRestoreToFinish").detail("DBLock", randomUID);
 		// TODO: register watch first and then check if the key exist
 		loop {
 			try {
@@ -3592,7 +3592,7 @@ public:
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> _restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 				restoreRequestDoneKeyValue = _restoreRequestDoneKeyValue;
-				// Restore may finish before restoreAgent waits on the restore finish event.
+				// Restore may finish before restoreTool waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
 					break;
 				} else {
@@ -3606,7 +3606,7 @@ public:
 			}
 		}
 
-		TraceEvent("FastRestoreAgentRestoreFinished")
+		TraceEvent("FastRestoreToolRestoreFinished")
 		    .detail("ClearRestoreRequestDoneKey", restoreRequestDoneKeyValue.present());
 		// Only this agent can clear the restoreRequestDoneKey
 		wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
@@ -3617,11 +3617,11 @@ public:
 		}));
 
 		if (unlockDB) {
-			TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
+			TraceEvent("FastRestoreToolRestoreFinished").detail("UnlockDBStart", randomUID);
 			wait(unlockDatabase(cx, randomUID));
-			TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBFinish", randomUID);
+			TraceEvent("FastRestoreToolRestoreFinished").detail("UnlockDBFinish", randomUID);
 		} else {
-			TraceEvent("FastRestoreAgentRestoreFinished").detail("DBLeftLockedAfterRestore", randomUID);
+			TraceEvent("FastRestoreToolRestoreFinished").detail("DBLeftLockedAfterRestore", randomUID);
 		}
 
 		return Void();
@@ -3666,10 +3666,10 @@ public:
 				}
 				wait(checkDatabaseLock(tr, randomUID));
 
-				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
+				TraceEvent("FastRestoreToolSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreAgentSubmitRestoreRequestsMayFail")
+				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsMayFail")
 				    .detail("Reason", "DB is not properly locked")
 				    .detail("ExpectedLockID", randomUID)
 				    .error(e);
@@ -3700,7 +3700,7 @@ public:
 				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
-				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreAgentSubmitRestoreRequestsRetry")
+				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsRetry")
 				    .detail("RestoreIndex", restoreIndex)
 				    .error(e);
 				numTries++;
