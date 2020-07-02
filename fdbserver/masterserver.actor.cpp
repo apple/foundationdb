@@ -1017,31 +1017,15 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.version = self->liveCommittedVersion;
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
-//				TraceEvent("YoungServerSend")
-//					.detail("CurrentLiveCommittedVersion", self->liveCommittedVersion)
-//					.detail("CurrentLocked", self->databaseLocked)
-//					.detail("CurrentMetadataVersion", self->proxyMetadataVersion.present() ? self->proxyMetadataVersion.get().toString() : "" );
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-//				TraceEvent("YoungServerReceiveReport")
-//					.detail("CurrentLiveCommittedVersion", self->liveCommittedVersion)
-//					.detail("CurrentLocked", self->databaseLocked)
-//					.detail("CurrentMetadataVersion", self->proxyMetadataVersion.present() ? self->proxyMetadataVersion.get().toString() : "" )
-//					.detail("CommitVersion", req.version)
-//					.detail("Locked", req.locked)
-//					.detail("MetadataVersion", req.metadataVersion.present() ? req.metadataVersion.get().toString() : "" )
-//					.detail("Override", req.version > self->liveCommittedVersion);
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;
 				}
-				GetReadVersionReply reply;
-				reply.version = self->liveCommittedVersion;
-				reply.locked = self->databaseLocked;
-				reply.metadataVersion = self->proxyMetadataVersion;
-				req.reply.send(reply);
+				req.reply.send(Void());
 			}
 		}
 	}
