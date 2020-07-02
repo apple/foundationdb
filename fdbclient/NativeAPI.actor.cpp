@@ -3692,18 +3692,8 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	state StorageMetrics total;
 	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		if (i == 0) {
-			// Use the actual begin key instead of the shard begin
-			partBegin = keys.begin;
-		} else {
-			partBegin = locations[i].first.begin;
-		}
-		if (i == nLocs - 1) {
-			// Use the actual end key instead of the shard end
-			partEnd = keys.end;
-		} else {
-			partEnd = locations[i].first.end;
-		}
+		partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+		partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
 		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
 	}
 	wait(waitForAll(fx));
