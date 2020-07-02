@@ -51,7 +51,7 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 	Key readKey, clearKey;
 	int clearKeyInt;
 	double txBackoffDelay;
-	TransactionTag myTag;
+	TransactionTag badReadTag, badWriteTag, goodTag;
 	static constexpr const char* NAME = "WriteTagThrottling";
 
 	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
@@ -68,31 +68,38 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 		actorPerClient = getOption(options, LiteralStringRef("actorPerClient"), 10);
 		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
 		goodActorPerClient = actorPerClient - badActorPerClient;
+
 		keyCount = getOption(options, LiteralStringRef("keyCount"), 100);
 		readKey = StringRef(format("testKey%010d", deterministicRandom()->randomInt(0, keyCount / 2)));
-
 		clearKeyInt = deterministicRandom()->randomInt(keyCount / 2, keyCount);
 		clearKey = StringRef(format("testKey%010d", clearKeyInt));
 		txBackoffDelay = actorPerClient * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
+
+		badReadTag = TransactionTag(std::string("badReadTag"));
+		badWriteTag = TransactionTag(std::string("badWriteTag"));
+		goodTag = TransactionTag(std::string("goodTag"));
 	}
 
 	virtual std::string description() { return WriteTagThrottlingWorkload::NAME; }
 
 	// choose a tag
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
-		self->myTag = TransactionTagRef(std::string("WriteTag"));
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
 		state double rate = deterministicRandom()->random01() * 20;
-		TagSet tagSet;
-		tagSet.addTag(self->myTag);
+		state TagSet tagSet1;
+		state TagSet tagSet2;
+		state TagSet tagSet3;
+		tagSet1.addTag(self->badWriteTag);
+		tagSet2.addTag(self->badReadTag);
+		tagSet3.addTag(self->goodTag);
 
-		try {
-			wait(ThrottleApi::throttleTags(cx, tagSet, rate, self->testDuration + 120, TagThrottleType::MANUAL,
-			                               priority));
-		} catch (Error& e) {
-			state Error err = e;
-			throw err;
-		}
+        wait(ThrottleApi::throttleTags(cx, tagSet1, rate, self->testDuration + 120, TagThrottleType::MANUAL,
+                                       priority));
+        wait(ThrottleApi::throttleTags(cx, tagSet2, rate, self->testDuration + 120, TagThrottleType::MANUAL,
+                                       priority));
+        wait(ThrottleApi::throttleTags(cx, tagSet3, rate, self->testDuration + 120, TagThrottleType::MANUAL,
+                                       priority));
+
 		return Void();
 	}
 	Future<Void> setup(const Database& cx) override { return _setup(cx, this); }
@@ -167,9 +174,14 @@ struct WriteTagThrottlingWorkload : TestWorkload {
 				tstart = now();
 				state Transaction tx(cx);
 				state int i;
-				// give tag to bad client
-				if (self->writeThrottle && badOpRate == self->badOpRate) {
-					tx.options.tags.addTag(self->myTag);
+				// give tag to client
+				if (self->writeThrottle) {
+					if (badOpRate == self->badOpRate) {
+						tx.options.tags.addTag(self->badWriteTag);
+						tx.options.tags.addTag(self->badReadTag);
+					} else if (deterministicRandom()->coinflip()) {
+						tx.options.tags.addTag(self->goodTag);
+					}
 				}
 				while (true) {
 					try {
