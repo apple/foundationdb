@@ -157,8 +157,7 @@ class ApiTest(Test):
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
         txn_sizes = ['GET_APPROXIMATE_SIZE']
-        # storage_metrics = ['GET_ESTIMATED_RANGE_SIZE', 'GET_RANGE_SPLIT_POINTS']
-        storage_metrics = ['GET_ESTIMATED_RANGE_SIZE']
+        storage_metrics = ['GET_ESTIMATED_RANGE_SIZE', 'GET_RANGE_SPLIT_POINTS']
 
         op_choices += reads
         op_choices += mutations
