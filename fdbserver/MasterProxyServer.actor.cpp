@@ -1251,17 +1251,23 @@ ACTOR Future<Void> commitBatch(
 
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version as soon as possible.
-	if( commitVersion > self->committedVersion.get() ) {
-		if (commitVersion > self->committedVersion.get()) {
-			self->locked = lockedAfter;
-			self->metadataVersion = metadataVersionAfter;
-			self->committedVersion.set(commitVersion);
-		}
-		if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-			// Let master know this commit version so that every other proxy can know.
-			wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
-		}
+	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
+
+	if (commitVersion == 2025676190) {
+		TraceEvent("Hehehe").detail("CommittedVersion", self->committedVersion.get());
 	}
+
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+		TraceEvent("PReport").detail("CV", commitVersion);
+		// Let master know this commit version so that every other proxy can know.
+		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+	}
+	if( commitVersion > self->committedVersion.get() ) {
+		self->locked = lockedAfter;
+		self->metadataVersion = metadataVersionAfter;
+		self->committedVersion.set(commitVersion);
+	}
+	TraceEvent("PAfterReport").detail("CV", commitVersion);
 
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
@@ -1290,8 +1296,6 @@ ACTOR Future<Void> commitBatch(
 		p.first.get().acknowledge.send(Void());
 		ASSERT(p.second.isReady());
 	}
-
-	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 
 	if (forceRecovery) {
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "ProxyShutdown");
@@ -1428,6 +1432,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 		if (replyFromMaster.version > rep.version) {
 			rep = replyFromMaster;
 		}
+		TraceEvent("PRecieve").detail("RV", rep.version);
 	} else {
 		vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
 		for (auto v : versions) {

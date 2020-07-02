@@ -2538,6 +2538,7 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 			}
 
 			Version v = ver.get();
+			TraceEvent("ClientGetVersion").detail("RV", v);
 			int hi = cx->mvCacheInsertLocation;
 			int lo = (cx->mvCacheInsertLocation+1)%cx->metadataVersionCache.size();
 

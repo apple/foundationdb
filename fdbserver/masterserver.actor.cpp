@@ -1017,6 +1017,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.version = self->liveCommittedVersion;
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
+				TraceEvent("MSend").detail("CV", self->liveCommittedVersion);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
@@ -1025,6 +1026,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;
 				}
+				TraceEvent("MReceive").detail("CV", req.version);
 				req.reply.send(Void());
 			}
 		}
