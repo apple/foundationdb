@@ -249,11 +249,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	IKeyValueStore* sqlLite;
 
-	explicit RocksDBKeyValueStore(const std::string& path, UID id)
-		: path(path)
-		, id(id)
-	{
+	explicit RocksDBKeyValueStore(const std::string& path, UID id, IKeyValueStore* sqlLite)
+	  : path(path), id(id), sqlLite(sqlLite) {
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
 		writeThread->addThread(new Writer(db, id));
@@ -262,9 +261,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() override {
-		return errorPromise.getFuture();
-	}
+	Future<Void> getError() override { return join(errorPromise.getFuture(), sqlLite->getError()); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		wait(self->readThreads->stop());
@@ -278,15 +275,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		delete self;
 	}
 
-	Future<Void> onClosed() override {
-		return closePromise.getFuture();
+	ACTOR static Future<Void> join(Future<Void> a, Future<Void> b) {
+		wait(success(a) && success(b));
+		return Void();
 	}
 
+	Future<Void> onClosed() override { return join(closePromise.getFuture(), sqlLite->onClosed()); }
+
 	void dispose() override {
+		sqlLite->dispose();
 		doClose(this, true);
 	}
 
 	void close() override {
+		sqlLite->close();
 		doClose(this, false);
 	}
 
@@ -299,17 +301,25 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		a->path = path;
 		auto res = a->done.getFuture();
 		writeThread->post(a.release());
-		return res;
+		return join(res, sqlLite->init());
 	}
 
-	void set(KeyValueRef kv, const Arena*) override {
+	void set(KeyValueRef kv, const Arena* a) override {
+		// Writes to the special keyspace also go to SQLite.
+		if (kv.key[0] == 0xFF) {
+			sqlLite->set(kv, a);
+		}
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
 		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
 	}
 
-	void clear(KeyRangeRef keyRange, const Arena*) override {
+	void clear(KeyRangeRef keyRange, const Arena* a) override {
+		// Writes to the special keyspace also go to SQLite.
+		if (keyRange.begin[0] == 0xFF) {
+			sqlLite->clear(keyRange, a);
+		}
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
@@ -317,26 +327,36 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
 	}
 
-	Future<Void> commit(bool) override {
+	Future<Void> commit(bool b) override {
+		// TODO: We probably should check if there is anything to commit to SQLite.
+		auto sf = sqlLite->commit(b);
+
 		// If there is nothing to write, don't write.
 		if (writeBatch == nullptr) {
-			return Void();
+			return sf;
 		}
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
-		return res;
+		return join(res, sf);
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
+		if (key[0] == 0xFF) {
+			return sqlLite->readValue(key, debugID);
+		}
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
+
 		return res;
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
+		if (key[0] == 0xFF) {
+			return sqlLite->readValuePrefix(key, maxLength, debugID);
+		}
 		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
@@ -344,6 +364,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
+		if (keys.begin[0] == 0xFF) {
+			return sqlLite->readRange(keys, rowLimit, byteLimit);
+		}
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
@@ -366,7 +389,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-	return new RocksDBKeyValueStore(path, logID);
+	std::cout << "We created the Rock!\n";
+	return new RocksDBKeyValueStore(path, logID,
+	                                keyValueStoreSQLite(std::string(path) + "/sqlite", logID,
+	                                                    KeyValueStoreType::SSD_BTREE_V2, checkChecksums,
+	                                                    checkIntegrity));
 #else
 	TraceEvent(SevError, "RocksDBEngineInitFailure").detail("Reason", "Built without RocksDB");
 	ASSERT(false);
