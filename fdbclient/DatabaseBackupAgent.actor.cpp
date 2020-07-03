@@ -543,11 +543,11 @@ namespace dbBackup {
 
 		// store mutation data from results until the end of stream or the timeout. If breaks on timeout returns the first uncopied version
 		ACTOR static Future<Optional<Version>> dumpData(
-		  Database cx, Reference<Task> task, 
-		  PromiseStream<RCGroup> results, 
-		  FlowLock* lock, 
-		  Reference<TaskBucket> tb,
-		  double breakTime
+			Database cx, Reference<Task> task,
+			PromiseStream<RCGroup> results, 
+			FlowLock* lock, 
+			Reference<TaskBucket> tb,
+			double breakTime
 		) {
 			state bool endOfStream = false;
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
@@ -610,17 +610,16 @@ namespace dbBackup {
 							for(auto m : mutations) {
 								for(auto kv : m) {
 									if (isTimeoutOccured) {
-									  Version newVersion = getLogKeyVersion(kv.key);
+										Version newVersion = getLogKeyVersion(kv.key);
 									  
-									  if (newVersion > lastVersion) {
-									    nextVersionAfterBreak = newVersion;
-									    break;
-									  }
+										if (newVersion > lastVersion) {
+											nextVersionAfterBreak = newVersion;
+											break;
+										}
 									}
 									if(first) {
 										tr.addReadConflictRange(singleKeyRange(kv.key));
 										first = false;
-										// TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::dumpData.50").detail("store", kv.key.removePrefix(backupLogKeys.begin).removePrefix(task->params[BackupAgentBase::destUid]).withPrefix(task->params[BackupAgentBase::keyConfigLogUid]).withPrefix(applyLogKeys.begin));
 									}
 									tr.set(kv.key.removePrefix(backupLogKeys.begin).removePrefix(task->params[BackupAgentBase::destUid]).withPrefix(task->params[BackupAgentBase::keyConfigLogUid]).withPrefix(applyLogKeys.begin), kv.value);
 									bytesSet += kv.expectedSize() - backupLogKeys.begin.expectedSize() + applyLogKeys.begin.expectedSize();
@@ -637,16 +636,15 @@ namespace dbBackup {
 						}
 					}
 					if (nextVersionAfterBreak.present()) {
-					  return nextVersionAfterBreak;
+						return nextVersionAfterBreak;
 					}
 					if (! isTimeoutOccured && timer_monotonic() >= breakTime && lastKey.present()) {
-					  // timeout occured
-					  // continue to copy mutations with the 
-					  // same version before break because
-					  // the will filter them out basing on 
-					  // the version condition on the next run
-					  lastVersion = getLogKeyVersion(lastKey.get());
-					  isTimeoutOccured = true;
+						// timeout occured
+						// continue to copy mutations with the 
+						// same version before break because
+						// the next run should start from the beginning of a version > lastVersion.
+						lastVersion = getLogKeyVersion(lastKey.get());
+						isTimeoutOccured = true;
 					}
 				}
 				catch (Error &e) {
@@ -670,18 +668,16 @@ namespace dbBackup {
 			state Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
 			
 			Version newEndVersion = std::min(
-			  endVersion, 
-			  (
-			    ((beginVersion-1) / CLIENT_KNOBS->COPY_LOG_BLOCK_SIZE) + 1 
-			    + CLIENT_KNOBS->COPY_LOG_BLOCKS_PER_TASK 
-			    + (g_network->isSimulated() ? CLIENT_KNOBS->BACKUP_SIM_COPY_LOG_RANGES : 0)
-			  ) * CLIENT_KNOBS->COPY_LOG_BLOCK_SIZE
+				endVersion,
+				(
+					((beginVersion-1) / CLIENT_KNOBS->COPY_LOG_BLOCK_SIZE) + 1 
+						+ CLIENT_KNOBS->COPY_LOG_BLOCKS_PER_TASK 
+						+ (g_network->isSimulated() ? CLIENT_KNOBS->BACKUP_SIM_COPY_LOG_RANGES : 0)
+				) * CLIENT_KNOBS->COPY_LOG_BLOCK_SIZE
 			);
 
 			state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, newEndVersion, task->params[BackupAgentBase::destUid], CLIENT_KNOBS->COPY_LOG_BLOCK_SIZE);
 			state int nRanges = ranges.size();
-
-			// TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::_execute.10").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("newEndVersion", newEndVersion).detail("nRanges", nRanges);
 
 			state std::vector<PromiseStream<RCGroup>> results;
 			state std::vector<Future<Void>> rc;
@@ -689,55 +685,47 @@ namespace dbBackup {
 			state Version nextVersion = beginVersion;
 			state double breakTime = timer_monotonic() + CLIENT_KNOBS->COPY_LOG_TASK_DURATION_NANOS;
 			state int rangeN = 0;
-			
+
 			loop {
-			  if (rangeN >= nRanges)
-			    break;
+				if (rangeN >= nRanges)
+					break;
 
-			  // prefetch
-			  int prefetchTo = std::min(rangeN + CLIENT_KNOBS->COPY_LOG_PREFETCH_BLOCKS, nRanges);
-			  
-			  for (int j = results.size(); j < prefetchTo; j ++) {
-			    results.push_back(PromiseStream<RCGroup>());
-			    locks.push_back(Reference<FlowLock>(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES)));
-			    rc.push_back(readCommitted(taskBucket->src, results[j], Future<Void>(Void()), locks[j], ranges[j], decodeBKMutationLogKey, true, true, true));
-			  }
+				// prefetch
+				int prefetchTo = std::min(rangeN + CLIENT_KNOBS->COPY_LOG_PREFETCH_BLOCKS, nRanges);
 
-			  // copy the range
-			  Optional<Version> nextVersionBr = wait(
-			    dumpData(
-			      cx, task, results[rangeN], locks[rangeN].getPtr(), taskBucket, breakTime
-			    )
-			  );
+				for (int j = results.size(); j < prefetchTo; j ++) {
+					results.push_back(PromiseStream<RCGroup>());
+					locks.push_back(Reference<FlowLock>(new FlowLock(CLIENT_KNOBS->COPY_LOG_READ_AHEAD_BYTES)));
+					rc.push_back(readCommitted(taskBucket->src, results[j], Future<Void>(Void()), locks[j], ranges[j], decodeBKMutationLogKey, true, true, true));
+				}
 
-			  // exit from the task if a timeout occures
-			  if (nextVersionBr.present()) {
-			    nextVersion = nextVersionBr.get();
-			    // cancel prefetch
-			    TraceEvent(
-			      SevInfo, 
-			      "CopyLogRangeTaskFunc is broken on timeout")
-				.detail("durationNanos", CLIENT_KNOBS->COPY_LOG_TASK_DURATION_NANOS)
-				.detail("rangeN", rangeN)
-				.detail("bytesWritten", Params.bytesWritten().getOrDefault(task)
-			    );
-			    for (int j = results.size(); --j >= rangeN;)
-			      rc[j].cancel();
-			    break;
-			  }
-			  // the whole range has been dumped
-			  nextVersion = getLogKeyVersion(ranges[rangeN].end);
-			  rangeN ++;
+				// copy the range
+				Optional<Version> nextVersionBr = wait(
+					dumpData(
+						cx, task, results[rangeN], locks[rangeN].getPtr(), taskBucket, breakTime
+					)
+				);
+
+				// exit from the task if a timeout occurs
+				if (nextVersionBr.present()) {
+					nextVersion = nextVersionBr.get();
+					// cancel prefetch
+					TraceEvent(
+						SevInfo, 
+						"CopyLogRangeTaskFunc is broken on timeout")
+							.detail("DurationNanos", CLIENT_KNOBS->COPY_LOG_TASK_DURATION_NANOS)
+							.detail("RangeN", rangeN)
+							.detail("BytesWritten", Params.bytesWritten().getOrDefault(task)
+					);
+					for (int j = results.size(); --j >= rangeN;)
+						rc[j].cancel();
+					break;
+				}
+				// the whole range has been dumped
+				nextVersion = getLogKeyVersion(ranges[rangeN].end);
+				rangeN ++;
 			}
 			
-			/*
-			TraceEvent(SevInfo, "debug.CopyLogRangeTaskFunc::_execute.20")
-			  .detail("beginVersion", beginVersion)
-			  .detail("endVersion", endVersion)
-			  .detail("nextVersion", nextVersion)
-			  .detail("bytesWritten", Params.bytesWritten().getOrDefault(task));
-			 */
-
 			if (nextVersion < endVersion) {
 				task->params[CopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(nextVersion, Unversioned());
 			}

@@ -202,7 +202,7 @@ Key getApplyKey( Version version, Key backupUid ) {
 }
 
 Version getLogKeyVersion(Key key) {
-  return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
+	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
 }
 
 //Given a key from one of the ranges returned by get_log_ranges,
