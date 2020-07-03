@@ -479,7 +479,6 @@ struct P2PNetworkTest {
 				TraceEvent(SevError, "P2PIncomingError")
 					.detail("Listener", listener->getListenAddress())
 					.error(e);
-				wait(delay(1));
 			}
 		}
 	}
