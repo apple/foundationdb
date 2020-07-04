@@ -2177,7 +2177,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 			try {
 				TEST(true);		// Fetching keys for transferred shard
 
-				state Standalone<RangeResultRef> this_block = wait( tryGetRange( data->cx, fetchVersion, keys, GetRangeLimits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, fetchBlockBytes ), &isTooOld ) );
+				state Standalone<RangeResultRef> this_block =
+				    wait(tryGetRange(data->cx, fetchVersion, keys,
+				                     GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, fetchBlockBytes), &isTooOld));
 
 				int expectedSize = (int)this_block.expectedSize() + (8-(int)sizeof(KeyValueRef))*this_block.size();
 

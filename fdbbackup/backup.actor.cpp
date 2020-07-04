@@ -1554,7 +1554,8 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Standalone<RangeResultRef> kvPairs = wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), CLIENT_KNOBS->ROW_LIMIT_UNLIMITED));
+			state Standalone<RangeResultRef> kvPairs =
+			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), GetRangeLimits::ROW_LIMIT_UNLIMITED));
 			json_spirit::mObject statusDoc;
 			JSONDoc modifier(statusDoc);
 			for(auto &kv : kvPairs) {
