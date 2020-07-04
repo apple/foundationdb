@@ -1280,7 +1280,7 @@ ACTOR Future<Void> commitBatch(
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version.
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
-	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion > self->committedVersion.get()) {
 		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
 	}
 	if( commitVersion > self->committedVersion.get() ) {
