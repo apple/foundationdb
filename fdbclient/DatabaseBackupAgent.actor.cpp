@@ -712,7 +712,7 @@ namespace dbBackup {
 					// cancel prefetch
 					TraceEvent(
 						SevInfo, 
-						"CopyLogRangeTaskFunc is broken on timeout")
+						"CopyLogRangeTaskFuncAborted")
 							.detail("DurationNanos", CLIENT_KNOBS->COPY_LOG_TASK_DURATION_NANOS)
 							.detail("RangeN", rangeN)
 							.detail("BytesWritten", Params.bytesWritten().getOrDefault(task)
