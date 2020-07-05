@@ -114,6 +114,17 @@ else()
 endif()
 
 ################################################################################
+# TOML11
+################################################################################
+
+find_package(TOML11)
+if (TOML11_FOUND)
+  set(WITH_TOML ON)
+else()
+  set(WITH_TOML OFF)
+endif()
+
+################################################################################
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
@@ -131,6 +142,7 @@ function(print_components)
   message(STATUS "Build Bindings (depends on Python):   ${WITH_PYTHON}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
+  message(STATUS "Build with TOML testspecs:            ${WITH_TOML}")
   message(STATUS "=========================================")
 endfunction()
 
