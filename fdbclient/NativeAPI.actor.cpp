@@ -351,7 +351,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction *tr, int64_t 
 			if (txInfoSize < clientTxInfoSizeLimit)
 				return Void();
 			int getRangeByteLimit = (txInfoSize - clientTxInfoSizeLimit) < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT ? (txInfoSize - clientTxInfoSizeLimit) : CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-			GetRangeLimits limit(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, getRangeByteLimit);
+			GetRangeLimits limit(GetRangeLimits::ROW_LIMIT_UNLIMITED, getRangeByteLimit);
 			Standalone<RangeResultRef> txEntries = wait(tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit));
 			state int64_t numBytesToDel = 0;
 			KeyRef endKey;
@@ -1426,23 +1426,21 @@ Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool usePro
 }
 
 void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
-	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED ) {
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
 		ASSERT(data.size() <= rows);
 		rows -= data.size();
 	}
 
 	minRows = std::max(0, minRows - data.size());
 
-	if( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED )
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		bytes = std::max( 0, bytes - (int)data.expectedSize() - (8-(int)sizeof(KeyValueRef))*data.size() );
 }
 
 void GetRangeLimits::decrement( KeyValueRef const& data ) {
 	minRows = std::max(0, minRows - 1);
-	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED )
-		rows--;
-	if( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED )
-		bytes = std::max( 0, bytes - (int)8 - (int)data.expectedSize() );
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) rows--;
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED) bytes = std::max(0, bytes - (int)8 - (int)data.expectedSize());
 }
 
 // True if either the row or byte limit has been reached
@@ -1452,16 +1450,17 @@ bool GetRangeLimits::isReached() {
 
 // True if data would cause the row or byte limit to be reached
 bool GetRangeLimits::reachedBy( VectorRef<KeyValueRef> const& data ) {
-	return ( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED && data.size() >= rows )
-		|| ( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED && (int)data.expectedSize() + (8-(int)sizeof(KeyValueRef))*data.size() >= bytes && data.size() >= minRows );
+	return (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED && data.size() >= rows) ||
+	       (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
+	        (int)data.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * data.size() >= bytes && data.size() >= minRows);
 }
 
 bool GetRangeLimits::hasByteLimit() {
-	return bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+	return bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 }
 
 bool GetRangeLimits::hasRowLimit() {
-	return rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
+	return rows != GetRangeLimits::ROW_LIMIT_UNLIMITED;
 }
 
 bool GetRangeLimits::hasSatisfiedMinRows() {

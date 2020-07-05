@@ -33,9 +33,6 @@ ClientKnobs::ClientKnobs() {
 
 void ClientKnobs::initialize(bool randomize) {
 	// clang-format off
-	// FIXME: These are not knobs, get them out of ClientKnobs!
-	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
-	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;
 
 	init( TOO_MANY,                            1000000 );
 

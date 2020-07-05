@@ -349,7 +349,10 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 
 	loop{
 		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -413,7 +416,10 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 
 	loop{
 		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
