@@ -286,7 +286,7 @@ struct GlobalState
         serializer(ar, CLoad, CRun, CDelta, CId, COlIID);
     }
 
-    StringRef key() const { return LiteralStringRef("GlobalState"); }
+	Key key() const { return LiteralStringRef("GlobalState"); }
 };
 
 const std::vector<std::string> syllables = {
