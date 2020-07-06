@@ -3735,7 +3735,7 @@ int main(int argc, char* argv[]) {
 				    f = stopAfter(
 				        map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
 					        printf("RESTORE_ABORT Tag: %s  State: %s\n", tagName.c_str(),
-					               FileBackupAgent::restoreStateText(s).c_str());
+					               FileBackupAgent::restoreStateText(s).toString().c_str());
 					        return Void();
 				        }));
 				    break;
