@@ -74,12 +74,8 @@ public:
 	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
-	KeyRangeRef getKeyRange() const { return range; }
 
 	virtual ~SpecialKeyRangeRWImpl() {}
-
-protected:
-	KeyRange range;
 };
 
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
@@ -158,7 +154,7 @@ public:
 		if (impl == nullptr) throw special_keys_no_module_found(); // TODO : change the error type here
 		return impl->set(ryw, key, value);
 	}
-	// void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range );
+	// void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ); // TODO : ban cross module clear
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 		auto impl = writeImpls[key];
 		if (impl == nullptr) throw special_keys_no_module_found(); // TODO : change the error type here

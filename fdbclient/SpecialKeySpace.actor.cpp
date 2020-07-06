@@ -20,6 +20,8 @@
 
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/UnitTest.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/StatusClient.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
@@ -325,7 +327,9 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		if (entry.first) {
 			writeModulePtrs.insert(sks->getRWImpls().rangeContaining(iter->begin())->value());
 		}
+		++iter;
 	}
+	TraceEvent(SevInfo, "SKSCommitActor").detail("WriteModulesSize", writeModulePtrs.size());
 	state std::set<SpecialKeyRangeRWImpl*>::const_iterator it;
 	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 		Optional<std::string> msg = wait((*it)->commit(ryw));
@@ -476,7 +480,7 @@ Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWri
 }
 
 void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	// TODO : check value valid
+	// TODO : check key / value valid
 	Value val(value);
 	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(val)));
 }
@@ -489,8 +493,179 @@ void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRan
 	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
-Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
-	Optional<std::string> result;
+bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, KeyRangeRef range,
+                              std::vector<AddressExclusion>& addresses, std::set<AddressExclusion>& exclusions,
+                              Optional<std::string>& msg) {
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	auto iter = ranges.begin();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		// only check for exclude(set) operation, include(clear) are not checked
+		TraceEvent(SevInfo, "ParseNetworkAddress")
+		    .detail("Valid", entry.first)
+		    .detail("Set", entry.second.present())
+		    .detail("Key", iter->begin().toString());
+		if (entry.first && entry.second.present()) {
+			Key address = iter->begin().removePrefix(range.begin);
+			auto a = AddressExclusion::parse(address);
+			if (!a.isValid()) {
+				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
+				if (address.toString().find(":tls") != std::string::npos)
+					error += "        Do not include the `:tls' suffix when naming a process\n";
+				msg = ManagementAPIError::toJsonString(false, entry.second.present() ? "exclude" : "include", error);
+				return false;
+			}
+			addresses.push_back(a);
+			exclusions.insert(a);
+		}
+		++iter;
+	}
+	return true;
+}
+
+ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* addresses,
+                                  std::set<AddressExclusion>* exclusions, bool markFailed, Optional<std::string> msg) {
+
+	if (markFailed) {
+		state bool safe;
+		try {
+			bool _safe = wait(checkSafeExclusions(db, *addresses));
+			safe = _safe;
+		} catch (Error& e) {
+			TraceEvent("CheckSafeExclusionsError").error(e);
+			safe = false;
+		}
+		if (!safe) {
+			msg = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+			      "Please check that this exclusion does not bring down an entire storage team.\n"
+			      "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
+			      "You may add more storage processes or coordinators to make the operation safe.\n"
+			      "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.\n";
+			return false;
+		}
+	}
+	StatusObject status = wait(StatusClient::statusFetcher(db));
+	state std::string errorString =
+	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+	    "Please try the exclude again in 30 seconds.\n"
+	    "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update msg here
+
+	StatusObjectReader statusObj(status);
+
+	StatusObjectReader statusObjCluster;
+	if (!statusObj.get("cluster", statusObjCluster)) {
+		msg = errorString;
+		return false;
+	}
+
+	StatusObjectReader processesMap;
+	if (!statusObjCluster.get("processes", processesMap)) {
+		msg = errorString;
+		return false;
+	}
+
+	state int ssTotalCount = 0;
+	state int ssExcludedCount = 0;
+	state double worstFreeSpaceRatio = 1.0;
+	try {
+		for (auto proc : processesMap.obj()) {
+			bool storageServer = false;
+			StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+			for (StatusObjectReader role : rolesArray) {
+				if (role["role"].get_str() == "storage") {
+					storageServer = true;
+					break;
+				}
+			}
+			// Skip non-storage servers in free space calculation
+			if (!storageServer) continue;
+
+			StatusObjectReader process(proc.second);
+			std::string addrStr;
+			if (!process.get("address", addrStr)) {
+				msg = errorString;
+				return false;
+			}
+			NetworkAddress addr = NetworkAddress::parse(addrStr);
+			bool excluded =
+			    (process.has("excluded") && process.last().get_bool()) || addressExcluded(*exclusions, addr);
+			ssTotalCount++;
+			if (excluded) ssExcludedCount++;
+
+			if (!excluded) {
+				StatusObjectReader disk;
+				if (!process.get("disk", disk)) {
+					msg = errorString;
+					return false;
+				}
+
+				int64_t total_bytes;
+				if (!disk.get("total_bytes", total_bytes)) {
+					msg = errorString;
+					return false;
+				}
+
+				int64_t free_bytes;
+				if (!disk.get("free_bytes", free_bytes)) {
+					msg = errorString;
+					return false;
+				}
+
+				worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes) / total_bytes);
+			}
+		}
+	} catch (...) // std::exception
+	{
+		msg = errorString;
+		return false;
+	}
+
+	if (ssExcludedCount == ssTotalCount ||
+	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
+		msg =
+		    "ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
+		    "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update message here
+		return false;
+	}
+	return true;
+}
+
+void includeServers(ReadYourWritesTransaction* ryw) {
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(excludedServersKeys.withPrefix(normalKeys.end));
+	auto iter = ranges.begin();
+	Transaction& tr = ryw->getTransaction();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		if (entry.first && !entry.second.present()) {
+			// ignore failed
+			tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+			tr.set(excludedServersVersionKey, versionKey);
+			KeyRangeRef includingRange = iter->range().removePrefix(normalKeys.end);
+			tr.clear(includingRange);
+		}
+		++iter;
+	}
+}
+
+ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction* ryw) {
+	// parse network addresses
+	state Optional<std::string> result;
+	state std::vector<AddressExclusion> addresses;
+	state std::set<AddressExclusion> exclusions;
+	TraceEvent(SevInfo, "SKSExclude").detail("ExcludeCommitStart", "");
+	if (!parseNetWorkAddrFromKeys(ryw, excludedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result)) return result;
 	// TODO : all checks before exclude
+	TraceEvent(SevInfo, "SKSExclude").detail("ExcludeSafetyCheckStart", "");
+	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, false, result));
+	if (!safe) return result;
+	TraceEvent(SevInfo, "SKSExclude").detail("UpdateSystemKeys", "");
+	excludeServers(ryw->getTransaction(), addresses, false);
+	includeServers(ryw);
+
 	return result;
+}
+
+Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	return excludeCommitActor(ryw);
 }

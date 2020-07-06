@@ -153,6 +153,7 @@ public:
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
 	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
 	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
+	Transaction& getTransaction() { return tr; }
 
 private:
 	friend class RYWImpl;

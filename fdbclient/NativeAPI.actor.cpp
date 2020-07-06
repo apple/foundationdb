@@ -802,6 +802,23 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	if (apiVersionAtLeast(700)) {
+		registerSpecialKeySpaceModule(
+			SpecialKeySpace::MODULE::FAILURE,
+			std::make_unique<SingleSpecialKeyImpl>(
+				LiteralStringRef("\xff\xff/failure"),
+				[](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+					if (ryw->getSpecialKeySpaceErrorMsg().present())
+						return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
+					else
+						return Optional<Value>();
+				}
+		));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
+		std::make_unique<ExcludeServersRangeImpl>(KeyRangeRef(
+			LiteralStringRef("\xff\xff/conf/excluded"), LiteralStringRef("\xff\xff/conf/excluded0")
+		)), true);
+	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
@@ -853,18 +870,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 			        }
 			        return Optional<Value>();
 		        }));
-		// TODO : this module should be in version 700 ?
-		registerSpecialKeySpaceModule(
-			SpecialKeySpace::MODULE::FAILURE,
-			std::make_unique<SingleSpecialKeyImpl>(
-				LiteralStringRef("\xff\xff/failure"),
-				[](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-					if (ryw->getSpecialKeySpaceErrorMsg().present())
-						return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
-					else
-						return Optional<Value>();
-				}
-		));
 	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 

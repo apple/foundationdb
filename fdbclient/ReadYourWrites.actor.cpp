@@ -1758,16 +1758,23 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {
-	if (key == LiteralStringRef("\xff\xff/reboot_worker")){
-		BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest() );
-		return;
-	}
-	if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")){
-		BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
-		return;
-	}
+
 	if (key == metadataVersionKey) {
 		throw client_invalid_operation();
+	}
+
+	if (specialKeys.contains(key)) {
+		if (key == LiteralStringRef("\xff\xff/reboot_worker")){
+			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest() );
+			return;
+		}
+		if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")){
+			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
+			return;
+		}
+		if (getDatabase()->apiVersionAtLeast(700)) {
+			return getDatabase()->specialKeySpace->set(this, key, value);
+		}
 	}
 
 	bool addWriteConflict = !options.getAndResetWriteConflictDisabled();
@@ -1804,6 +1811,13 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
 	}
+
+	// TODO : enable later
+	// if (specialKeys.contains(range)) {
+	// 	if (getDatabase()->apiVersionAtLeast(700)) {
+	// 		return getDatabase()->specialKeySpace->clear(this, range);
+	// 	}
+	// }
 
 	KeyRef maxKey = getMaxWriteKey();
 	if(range.begin > maxKey || range.end > maxKey)
@@ -1842,6 +1856,12 @@ void ReadYourWritesTransaction::clear( const KeyRef& key ) {
 
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
+	}
+
+	if (specialKeys.contains(key)) {
+		if (getDatabase()->apiVersionAtLeast(700)) {
+			return getDatabase()->specialKeySpace->clear(this, key);
+		}
 	}
 
 	if(key >= getMaxWriteKey())
@@ -2109,7 +2129,7 @@ void ReadYourWritesTransaction::resetRyow() {
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
 	nativeWriteRanges = Standalone<VectorRef<KeyRangeRef>>();
 	specialKeySpaceWriteMap.rawErase(specialKeys); // TODO : check rawErase
-	specialKeySpaceErrorMsg.reset();
+	specialKeySpaceErrorMsg.reset(); // TODO : shoule we clear it every time?
 	watchMap.clear();
 	reading = AndFuture();
 	approximateSize = 0;
