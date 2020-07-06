@@ -3170,6 +3170,11 @@ ACTOR static Future<Void> tryCommitSingleTransaction(
 			auto& proxy = proxies[proxyIndex];
 
 			std::cout << "Commit on proxy " << proxyIndex << "  " << proxy.id().toString() << " with mutations: " << req.transaction.mutations.size() << std::endl;
+			if (req.splitID.present()) {
+				std::cout << " Split ID: " << req.splitID.get().toString() << std::endl;
+			} else {
+				std::cout << " no split id" << std::endl;
+			}
 			for(int i = 0; i < req.transaction.mutations.size(); ++i) {
 				std::cout<< req.transaction.mutations[i].param1.toString() << "  "<<req.transaction.mutations[i].param2.toString() <<std::endl;
 			}

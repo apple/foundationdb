@@ -157,13 +157,23 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
+
+	/// When a transaction has too many/too big mutations, split it to multiple
+	/// transactions to multiple proxies. Use splitID to identify the split txns
+	/// and rejoin them.
 	Optional<UID> splitID;
+	/// The number of parts in a split transaction.
+	Optional<int> numParts;
+	/// The index of the current part
+	Optional<int> partIndex;
 
 	CommitTransactionRequest() : flags(0) {}
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID);
+		serializer(
+			ar, transaction, reply, arena, flags,
+			debugID, splitID, numParts, partIndex);
 	}
 };
 
