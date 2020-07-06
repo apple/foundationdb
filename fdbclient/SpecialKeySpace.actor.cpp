@@ -622,9 +622,8 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 
 	if (ssExcludedCount == ssTotalCount ||
 	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
-		msg =
-		    "ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\n"
-		    "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update message here
+		msg = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\nType `exclude "
+		      "FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update message here
 		return false;
 	}
 	return true;
@@ -654,8 +653,8 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	state std::vector<AddressExclusion> addresses;
 	state std::set<AddressExclusion> exclusions;
 	TraceEvent(SevInfo, "SKSExclude").detail("ExcludeCommitStart", "");
-	if (!parseNetWorkAddrFromKeys(ryw, excludedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result)) return result;
-	// TODO : all checks before exclude
+	if (!parseNetWorkAddrFromKeys(ryw, excludedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result))
+		return result;
 	TraceEvent(SevInfo, "SKSExclude").detail("ExcludeSafetyCheckStart", "");
 	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, false, result));
 	if (!safe) return result;

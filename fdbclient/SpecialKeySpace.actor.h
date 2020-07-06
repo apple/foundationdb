@@ -150,14 +150,23 @@ public:
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
 
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+		// TODO : check value valid
 		auto impl = writeImpls[key];
-		if (impl == nullptr) throw special_keys_no_module_found(); // TODO : change the error type here
+		// TODO : do we need the separate error here to differentiate from read?
+		if (impl == nullptr) throw special_keys_no_write_module_found();
 		return impl->set(ryw, key, value);
 	}
-	// void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ); // TODO : ban cross module clear
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) {
+		if (range.empty()) return;
+		auto begin = writeImpls[range.begin];
+		auto end = writeImpls[range.end];
+		if (begin != end) throw special_keys_cross_module_clear(); // ban cross module clear
+		else if (begin == nullptr) throw special_keys_no_write_module_found();
+		return begin->clear(ryw, range);
+	}
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 		auto impl = writeImpls[key];
-		if (impl == nullptr) throw special_keys_no_module_found(); // TODO : change the error type here
+		if (impl == nullptr) throw special_keys_no_write_module_found();
 		return impl->clear(ryw, key);
 	}
 	// TODO : do we need to move it to .cpp file

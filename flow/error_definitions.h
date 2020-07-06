@@ -156,7 +156,9 @@ ERROR( tag_too_long, 2110, "Tag set on transaction is too long" )
 ERROR( too_many_tag_throttles, 2111, "Too many tag throttles have been created" )
 ERROR( special_keys_cross_module_read, 2112, "Special key space range read crosses modules. Refer to the `special_key_space_relaxed' transaction option for more details." )
 ERROR( special_keys_no_module_found, 2113, "Special key space range read does not intersect a module. Refer to the `special_key_space_relaxed' transaction option for more details." )
-ERROR( special_keys_management_api_failure, 2114, "Management Api call through special keys failed. For more information, call get(\"\xff\xff/confg/failure\") to get a json string of the error message." )
+ERROR( special_keys_no_write_module_found, 2114, "Special key space key or keyrange in set or clear does not intersect a module" )
+ERROR( special_keys_cross_module_clear, 2115, "Special key space clear crosses modules" )
+ERROR( special_keys_management_api_failure, 2116, "Management Api call through special keys failed. For more information, call get(\"\xff\xff/confg/failure\") to get a json string of the error message." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

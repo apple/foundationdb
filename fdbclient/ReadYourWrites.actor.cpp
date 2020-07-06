@@ -1812,12 +1812,11 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 		throw used_during_commit();
 	}
 
-	// TODO : enable later
-	// if (specialKeys.contains(range)) {
-	// 	if (getDatabase()->apiVersionAtLeast(700)) {
-	// 		return getDatabase()->specialKeySpace->clear(this, range);
-	// 	}
-	// }
+	if (specialKeys.contains(range)) {
+		if (getDatabase()->apiVersionAtLeast(700)) {
+			return getDatabase()->specialKeySpace->clear(this, range);
+		}
+	}
 
 	KeyRef maxKey = getMaxWriteKey();
 	if(range.begin > maxKey || range.end > maxKey)
