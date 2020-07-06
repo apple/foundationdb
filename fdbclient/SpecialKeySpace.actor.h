@@ -132,68 +132,23 @@ public:
 		WORKERINTERFACE,
 	};
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
-	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), readImpls(nullptr, spaceEndKey),
-	    writeImpls(nullptr, spaceEndKey),
-	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
-		// Default begin of KeyRangeMap is Key(), insert the range to update start key
-		readImpls.insert(range, nullptr);
-		writeImpls.insert(range, nullptr);
-		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
-	}
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
 
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
 	                                            GetRangeLimits limits, bool reverse = false);
 
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
+
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range );
+
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key);
+
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
 
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-		// TODO : check value valid
-		auto impl = writeImpls[key];
-		// TODO : do we need the separate error here to differentiate from read?
-		if (impl == nullptr) throw special_keys_no_write_module_found();
-		return impl->set(ryw, key, value);
-	}
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range ) {
-		if (range.empty()) return;
-		auto begin = writeImpls[range.begin];
-		auto end = writeImpls[range.end];
-		if (begin != end) throw special_keys_cross_module_clear(); // ban cross module clear
-		else if (begin == nullptr) throw special_keys_no_write_module_found();
-		return begin->clear(ryw, range);
-	}
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-		auto impl = writeImpls[key];
-		if (impl == nullptr) throw special_keys_no_write_module_found();
-		return impl->clear(ryw, key);
-	}
-	// TODO : do we need to move it to .cpp file
 	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl,
-	                      bool rw = false) {
-		// module boundary check
-		if (module == SpecialKeySpace::MODULE::TESTONLY)
-			ASSERT(normalKeys.contains(kr))
-		else
-			ASSERT(moduleToBoundary.at(module).contains(kr));
-		// make sure the registered range is not overlapping with existing ones
-		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
-		for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
-			ASSERT(iter->value() == nullptr);
-			if (iter == readImpls.rangeContaining(kr.end))
-				break; // Note: relax the condition that the end can be another range's start, if needed
-		}
-		readImpls.insert(kr, impl);
-		// if rw, it means the module can do both read and write
-		if (rw) {
-			// since write impls are always subset of read impls,
-			// no need to check overlapped registration
-			auto rwImpl = dynamic_cast<SpecialKeyRangeRWImpl*>(impl);
-			ASSERT(rwImpl);
-			writeImpls.insert(kr, rwImpl);
-		}
-	}
+	                      bool rw = false);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
@@ -219,20 +174,7 @@ private:
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 
 	// Initialize module boundaries, used to handle cross_module_read
-	void modulesBoundaryInit() {
-		for (const auto& pair : moduleToBoundary) {
-			ASSERT(range.contains(pair.second));
-			// Make sure the module is not overlapping with any registered read modules
-			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
-			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
-			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
-			modules.insert(pair.second, pair.first);
-			// Note: Due to underlying implementation, the insertion here is important to make cross_module_read being
-			// handled correctly
-			readImpls.insert(pair.second, nullptr);
-			writeImpls.insert(pair.second, nullptr);
-		}
-	}
+	void modulesBoundaryInit();
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
