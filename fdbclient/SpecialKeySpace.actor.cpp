@@ -488,12 +488,10 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 	return ddMetricsGetRangeActor(ryw, kr);
 }
 
-// Management API - exclude / include
-ACTOR Future<Standalone<RangeResultRef>> excludeServersGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
+// read from rwModule
+ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
                                                                      KeyRangeRef kr) {
-	// get all keys under \xff/conf/excluded, \xff/conf/excluded
 	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end);
-	ASSERT(excludedServersKeys.contains(krWithoutPrefix));
 	Standalone<RangeResultRef> resultWithoutPrefix = wait(ryw->getRange(krWithoutPrefix, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
 	Standalone<RangeResultRef> result;
@@ -550,7 +548,7 @@ ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRan
 
 Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                      KeyRangeRef kr) const {
-	return excludeServersGetRangeActor(ryw, getKeyRange(), kr);
+	return rwModuleGetRangeActor(ryw, getKeyRange(), kr);
 }
 
 void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
@@ -613,16 +611,14 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			msg = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
 			      "Please check that this exclusion does not bring down an entire storage team.\n"
 			      "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
-			      "You may add more storage processes or coordinators to make the operation safe.\n"
-			      "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.\n";
+			      "You may add more storage processes or coordinators to make the operation safe.\n";
 			return false;
 		}
 	}
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
 	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
-	    "Please try the exclude again in 30 seconds.\n"
-	    "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update msg here
+	    "Please try the exclude again in 30 seconds.\n"; // TODO : update msg here
 
 	StatusObjectReader statusObj(status);
 
@@ -726,13 +722,10 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	state Optional<std::string> result;
 	state std::vector<AddressExclusion> addresses;
 	state std::set<AddressExclusion> exclusions;
-	TraceEvent(SevInfo, "SKSExclude").detail("ExcludeCommitStart", "");
 	if (!parseNetWorkAddrFromKeys(ryw, excludedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result))
 		return result;
-	TraceEvent(SevInfo, "SKSExclude").detail("ExcludeSafetyCheckStart", "");
 	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, false, result));
 	if (!safe) return result;
-	TraceEvent(SevInfo, "SKSExclude").detail("UpdateSystemKeys", "");
 	excludeServers(ryw->getTransaction(), addresses, false);
 	includeServers(ryw);
 
@@ -741,4 +734,43 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 
 Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	return excludeCommitActor(ryw);
+}
+
+FailedServersRangeImpl::FailedServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                     KeyRangeRef kr) const {
+	return rwModuleGetRangeActor(ryw, getKeyRange(), kr);
+}
+
+void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// TODO : check key / value valid
+	Value val(value);
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(val)));
+}
+
+void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	// TODO : clear of failed ranges should be forbidden
+}
+
+void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	// TODO : clear of failed ranges should be forbidden
+}
+
+ACTOR Future<Optional<std::string>> failedServerCommitActor(ReadYourWritesTransaction* ryw) {
+	// parse network addresses
+	state Optional<std::string> result;
+	state std::vector<AddressExclusion> addresses;
+	state std::set<AddressExclusion> exclusions;
+	if (!parseNetWorkAddrFromKeys(ryw, failedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result))
+		return result;
+	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, true, result));
+	if (!safe) return result;
+	excludeServers(ryw->getTransaction(), addresses, true);
+
+	return result;
+}
+
+Future<Optional<std::string>> FailedServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	return failedServerCommitActor(ryw);
 }
