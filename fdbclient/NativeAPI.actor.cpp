@@ -3174,6 +3174,8 @@ ACTOR static Future<Optional<CommitID>> getCommitVersion(Database cx, Transactio
 			} else {
 				tr.set(key, LiteralStringRef(""));
 				wait(tr.commit());
+				err = transaction_aborted();
+				break;
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_transaction_aborted) throw;

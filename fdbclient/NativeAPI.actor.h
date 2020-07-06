@@ -160,7 +160,6 @@ struct TransactionInfo {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	explicit TransactionInfo(TaskPriority taskID)
-	  : txID(deterministicRandom()->randomUniqueID()), taskID(taskID), useProvisionalProxies(false) {}
       : txID(deterministicRandom()->randomUniqueID()), taskID(taskID), span(deterministicRandom()->randomUniqueID(), "Transaction"_loc), useProvisionalProxies(false) {
     }
 };
