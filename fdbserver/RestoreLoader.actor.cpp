@@ -26,6 +26,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/MutationTracking.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -65,8 +66,8 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
+	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreLoader"));
 
 	loop {
@@ -105,10 +106,6 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					if (req.terminate) {
 						exitRole = Void();
 					}
-				}
-				when(wait(updateProcessStatsTimer)) {
-					updateProcessStats(self);
-					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 				}
 				when(wait(actors.getResult())) {}
 				when(wait(exitRole)) {
@@ -348,11 +345,15 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state bool isDuplicated = true;
+	state bool printTrace = false;
 	ASSERT(batchData.isValid());
 	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
 	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
-	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
+	batchData->loadFileReqs += 1;
+	printTrace = (batchData->loadFileReqs % 10 == 1);
+	// TODO: Make the actor priority lower than sendMutation priority. (Unsure it will help performance though)
+	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFile", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString())
 	    .detail("NotProcessed", !paramExist)
@@ -381,10 +382,10 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(it->second); // wait on the processing of the req.param.
 
 	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
-	TraceEvent(SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
+	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
-	// TODO: clear self->sampleMutations[req.param] memory to save memory on loader
+
 	return Void();
 }
 
@@ -457,6 +458,11 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 		} else {
 			batchStatus->sendAllLogs = Void();
 		}
+		if ((batchStatus->sendAllRanges.present() && batchStatus->sendAllRanges.get().isReady()) &&
+		    (batchStatus->sendAllLogs.present() && batchStatus->sendAllLogs.get().isReady())) {
+			// Both log and range files have been sent.
+			batchData->kvOpsPerLP.clear();
+		}
 	}
 
 	TraceEvent("FastRestoreLoaderPhaseSendMutationsDone", self->id())
@@ -527,23 +533,23 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				              nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
 
-				if (debugMutation("RestoreLoader", commitVersion.version, kvm)) {
-					TraceEvent e("DebugSplit");
-					int i = 0;
-					for (auto& [key, uid] : *pRangeToApplier) {
-						e.detail(format("Range%d", i).c_str(), printable(key))
-						    .detail(format("UID%d", i).c_str(), uid.toString());
-						i++;
+				if (MUTATION_TRACKING_ENABLED) {
+					TraceEvent&& e = debugMutation("RestoreLoaderDebugSplit", commitVersion.version, kvm);
+					if (e.isEnabled()) {
+						int i = 0;
+						for (auto& [key, uid] : *pRangeToApplier) {
+							e.detail(format("Range%d", i).c_str(), printable(key))
+									.detail(format("UID%d", i).c_str(), uid.toString());
+							i++;
+						}
 					}
 				}
 				for (splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 					MutationRef mutation = mvector[splitMutationIndex];
 					UID applierID = nodeIDs[splitMutationIndex];
-					if (debugMutation("RestoreLoader", commitVersion.version, mutation)) {
-						TraceEvent("SplittedMutation")
-						    .detail("Version", commitVersion.toString())
-						    .detail("Mutation", mutation.toString());
-					}
+					DEBUG_MUTATION("RestoreLoaderSplittedMutation", commitVersion.version, mutation)
+					    .detail("Version", commitVersion.toString())
+					    .detail("Mutation", mutation);
 					// CAREFUL: The splitted mutations' lifetime is shorter than the for-loop
 					// Must use deep copy for splitted mutations
 					applierVersionedMutationsBuffer[applierID].push_back_deep(
@@ -559,12 +565,10 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				UID applierID = itlow->second;
 				kvCount++;
 
-				if (debugMutation("RestoreLoader", commitVersion.version, kvm)) {
-					TraceEvent("SendMutation")
-					    .detail("Applier", applierID)
-					    .detail("Version", commitVersion.toString())
-					    .detail("Mutation", kvm.toString());
-				}
+				DEBUG_MUTATION("RestoreLoaderSendMutation", commitVersion.version, kvm)
+				    .detail("Applier", applierID)
+				    .detail("Version", commitVersion.toString())
+				    .detail("Mutation", kvm);
 				// kvm data is saved in pkvOps in batchData, so shallow copy is ok here.
 				applierVersionedMutationsBuffer[applierID].push_back(applierVersionedMutationsBuffer[applierID].arena(),
 				                                                     VersionedMutation(kvm, commitVersion));

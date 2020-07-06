@@ -53,8 +53,12 @@ struct ProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
 
-	ProxyVersionReplies(ProxyVersionReplies&& r) BOOST_NOEXCEPT  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(ProxyVersionReplies&& r) BOOST_NOEXCEPT { replies = std::move(r.replies); latestRequestNum = std::move(r.latestRequestNum); }
+	ProxyVersionReplies(ProxyVersionReplies&& r) noexcept
+	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
+	void operator=(ProxyVersionReplies&& r) noexcept {
+		replies = std::move(r.replies);
+		latestRequestNum = std::move(r.latestRequestNum);
+	}
 
 	ProxyVersionReplies() : latestRequestNum(0) {}
 };
@@ -157,7 +161,7 @@ private:
 		} else {
 			self->fullyRecovered.send(Void());
 		}
-		
+
 		return Void();
 	}
 };
@@ -169,6 +173,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
 		recoveryTransactionVersion;  // The first version in this epoch
 	double lastCommitTime;
+
+	Version liveCommittedVersion; // The largest live committed version reported by proxies.
+	bool databaseLocked;
+	Optional<Value> proxyMetadataVersion;
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration; // Has readTxnLifetime
@@ -247,6 +255,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  primaryLocality(tagLocalityInvalid),
 		  neverCreated(false),
 		  lastEpochEnd(invalidVersion),
+		  liveCommittedVersion(invalidVersion),
+		  databaseLocked(false),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
 		  registrationCount(0),
@@ -374,7 +384,7 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 				dcId_tags[recruits.storageServers[idx].locality.dcId()] = Tag(nextLocality, 0);
 				nextLocality++;
 			}
-				
+
 			Tag& tag = dcId_tags[recruits.storageServers[idx].locality.dcId()];
 			tag.id++;
 			idx++;
@@ -1003,6 +1013,34 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	}
 }
 
+ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	loop {
+		choose {
+			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+				if (req.debugID.present())
+					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
+
+				if(self->liveCommittedVersion == invalidVersion) {
+					self->liveCommittedVersion = self->recoveryTransactionVersion;
+				}
+				GetReadVersionReply reply;
+				reply.version = self->liveCommittedVersion;
+				reply.locked = self->databaseLocked;
+				reply.metadataVersion = self->proxyMetadataVersion;
+				req.reply.send(reply);
+			}
+			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
+				if (req.version > self->liveCommittedVersion) {
+					self->liveCommittedVersion = req.version;
+					self->databaseLocked = req.locked;
+					self->proxyMetadataVersion = req.metadataVersion;
+				}
+				req.reply.send(Void());
+			}
+		}
+	}
+}
+
 std::pair<KeyRangeRef, bool> findRange( CoalescedKeyRangeMap<int>& key_resolver, Standalone<VectorRef<ResolverMoveRef>>& movedRanges, int src, int dest ) {
 	auto ranges = key_resolver.ranges();
 	auto prev = ranges.begin();
@@ -1296,7 +1334,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	state Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
-	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress);
+	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, /*logging=*/true);
 	state std::vector<Future<InitializeBackupReply>> initializationReplies;
 
 	state std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
@@ -1515,15 +1553,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
-	
-	//FIXME: remove this code, caching the entire normal keyspace as a test of functionality
-	//TODO: caching disabled for this merge
-	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.begin), storageCacheValue({0}));
-	//tr.set(recoveryCommitRequest.arena, storageCacheKey(normalKeys.end), storageCacheValue({}));
-	//tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.begin), serverKeysTrue);
-	//tr.set(recoveryCommitRequest.arena, cacheKeysKey(0, normalKeys.end), serverKeysFalse);
-	//tr.set(recoveryCommitRequest.arena, cacheChangeKeyFor(0), BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
-	//tr.set(recoveryCommitRequest.arena, cacheChangeKey, BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned()));
 
 	tr.clear(recoveryCommitRequest.arena, tLogDatacentersKeys);
 	for(auto& dc : self->primaryDcId) {
@@ -1547,6 +1576,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
 	self->addActor.send( waitProxyFailure( self->proxies ) );
 	self->addActor.send( provideVersions(self) );
+	self->addActor.send( serveLiveCommittedVersion(self) );
 	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
 
@@ -1665,7 +1695,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		while(!self->addActor.isEmpty()) {
 			self->addActor.getFuture().pop();
 		}
-			
+
 		TEST(err.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
 		TEST(err.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
 		TEST(err.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure

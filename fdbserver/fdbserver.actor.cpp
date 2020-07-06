@@ -196,63 +196,6 @@ bool enableFailures = true;
 
 #define test_assert(x) if (!(x)) { cout << "Test failed: " #x << endl; return false; }
 
-vector< Standalone<VectorRef<DebugEntryRef>> > debugEntries;
-int64_t totalDebugEntriesSize = 0;
-
-#if CENABLED(0, NOT_IN_CLEAN)
-StringRef debugKey = LiteralStringRef("");
-StringRef debugKey2 = LiteralStringRef("\xff\xff\xff\xff");
-
-bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
-	if ((mutation.type == mutation.SetValue || mutation.type == mutation.AddValue || mutation.type==mutation.DebugKey) && (mutation.param1 == debugKey || mutation.param1 == debugKey2))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "SetValue").detail("Key", mutation.param1).detail("Value", mutation.param2);
-	else if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) && ((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2)))
-		;//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", "ClearRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
-	else
-		return false;
-	const char* type =
-		mutation.type == MutationRef::SetValue ? "SetValue" :
-		mutation.type == MutationRef::ClearRange ? "ClearRange" :
-		mutation.type == MutationRef::AddValue ? "AddValue" :
-		mutation.type == MutationRef::DebugKeyRange ? "DebugKeyRange" :
-		mutation.type == MutationRef::DebugKey ? "DebugKey" :
-		"UnknownMutation";
-	printf("DEBUGMUTATION:\t%.6f\t%s\t%s\t%lld\t%s\t%s\t%s\n", now(), g_network->getLocalAddress().toString().c_str(), context, version, type, printable(mutation.param1).c_str(), printable(mutation.param2).c_str());
-
-	return true;
-}
-
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
-	if (keys.contains(debugKey) || keys.contains(debugKey2)) {
-		debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end) );
-		//TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
-		return true;
-	} else
-		return false;
-}
-
-#elif CENABLED(0, NOT_IN_CLEAN)
-bool debugMutation( const char* context, Version version, MutationRef const& mutation ) {
-	if (!debugEntries.size() || debugEntries.back().size() >= 1000) {
-		if (debugEntries.size()) totalDebugEntriesSize += debugEntries.back().arena().getSize() + sizeof(debugEntries.back());
-		debugEntries.push_back(Standalone<VectorRef<DebugEntryRef>>());
-		TraceEvent("DebugMutationBuffer").detail("Bytes", totalDebugEntriesSize);
-	}
-	auto& v = debugEntries.back();
-	v.push_back_deep( v.arena(), DebugEntryRef(context, version, mutation) );
-
-	return false;	// No auxiliary logging
-}
-
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) {
-	return debugMutation( context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end) );
-}
-
-#else // Default implementation.
-bool debugMutation( const char* context, Version version, MutationRef const& mutation ) { return false; }
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keys ) { return false; }
-#endif
-
 #ifdef _WIN32
 #include <sddl.h>
 
@@ -1979,20 +1922,6 @@ int main(int argc, char* argv[]) {
 			cout << "  " << i->second << " " << i->first << endl;*/
 		//	cout << "  " << Actor::allActors[i]->getName() << endl;
 
-		int total = 0;
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			total += i->second;
-		if (total)
-			printf("%d errors:\n", total);
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0)
-				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
-
-		if (&g_simulator == g_network) {
-			auto processes = g_simulator.getAllProcesses();
-			for(auto i = processes.begin(); i != processes.end(); ++i)
-				printf("%s %s: %0.3f Mclocks\n", (*i)->name, (*i)->address.toString().c_str(), (*i)->cpuTicks / 1e6);
-		}
 		if (role == Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {

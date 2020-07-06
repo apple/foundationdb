@@ -58,7 +58,6 @@ public:
 		bool failed;
 		bool excluded;
 		bool cleared;
-		int64_t cpuTicks;
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
 
@@ -68,12 +67,11 @@ public:
 		double fault_injection_p1, fault_injection_p2;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
-					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass),
-			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-			  fault_injection_r(0), machine(0), cleared(false) {}
+		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
+		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
+		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
+		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+		    fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -116,7 +114,7 @@ public:
 			return listener->second;
 		}
 
-		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
+		inline flowGlobalType global(int id) const { return (globals.size() > id) ? globals[id] : nullptr; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
@@ -145,6 +143,7 @@ public:
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
+	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
@@ -317,7 +316,7 @@ public:
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 
-	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
+	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
 	virtual void disableFor(const std::string& desc, double time) {
