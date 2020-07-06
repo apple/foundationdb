@@ -20,5 +20,6 @@ testTitle=withWriteThrottling
     numReadPerTx=1
     numClearPerTx=1
     badOpRate = 0.9
+    tpsRate=20
 
     testName=HealthMetricsApi

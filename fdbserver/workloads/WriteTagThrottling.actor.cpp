@@ -25,6 +25,7 @@
 #include "fdbclient/TagThrottle.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+constexpr int SAMPLE_SIZE = 10000;
 // workload description:
 // This workload aims to test whether we can throttling some bad clients that doing penetrating write on write hot-spot
 // range. There are several good clientActor just randomly do read and write ops in transaction. Also, some bad
@@ -36,10 +37,10 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	// Performance metrics
 	int goodActorTxNum = 0, goodActorRetries = 0, goodActorTooOldRetries = 0, goodActorCommitFailedRetries = 0;
 	int badActorTxNum = 0, badActorRetries = 0, badActorTooOldRetries = 0, badActorCommitFailedRetries = 0;
+	int goodActorThrottleRetries = 0, badActorThrottleRetries = 0;
 	double badActorTotalLatency = 0.0, goodActorTotalLatency = 0.0;
-	std::unique_ptr<ContinuousSample<double>> badActorReadLatency, goodActorReadLatency;
-	std::unique_ptr<ContinuousSample<double>> badActorCommitLatency, goodActorCommitLatency;
-
+	ContinuousSample<double> badActorReadLatency, goodActorReadLatency;
+	ContinuousSample<double> badActorCommitLatency, goodActorCommitLatency;
 	// Test configuration
 	// KVWorkload::actorCount
 	int goodActorPerClient, badActorPerClient;
@@ -47,33 +48,34 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	int keyCount, hotKeyCount;
 	int sampleSize;
 	double badOpRate;
-	double testDuration;
+	double testDuration, throttleDuration;
+	double tpsRate;
 	bool writeThrottle;
 
 	// internal states
-	double txBackoffDelay;
+	double txInterval;
 	TransactionTag badReadTag, badWriteTag, goodTag;
 	static constexpr const char* NAME = "WriteTagThrottling";
 
-	WriteTagThrottlingWorkload(WorkloadContext const& wcx) : KVWorkload(wcx) {
+	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
+	  : KVWorkload(wcx), badActorCommitLatency(SAMPLE_SIZE), badActorReadLatency(SAMPLE_SIZE),
+	    goodActorCommitLatency(SAMPLE_SIZE), goodActorReadLatency(SAMPLE_SIZE) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
+		throttleDuration = getOption(options, LiteralStringRef("throttleDuration"), testDuration + 120.0);
 		badOpRate = getOption(options, LiteralStringRef("badOpRate"), 0.9);
+		tpsRate = getOption(options, LiteralStringRef("tpsRate"), 300.0);
 		numWritePerTx = getOption(options, LiteralStringRef("numWritePerTx"), 1);
 		numReadPerTx = getOption(options, LiteralStringRef("numReadPerTx"), 1);
 		numClearPerTx = getOption(options, LiteralStringRef("numClearPerTx"), 1);
-		sampleSize = getOption(options, LiteralStringRef("sampleSize"), 10000);
-		badActorReadLatency.reset(new ContinuousSample<double>(sampleSize));
-		goodActorReadLatency.reset(new ContinuousSample<double>(sampleSize));
-		badActorCommitLatency.reset(new ContinuousSample<double>(sampleSize));
-		goodActorCommitLatency.reset(new ContinuousSample<double>(sampleSize));
 
 		writeThrottle = getOption(options, LiteralStringRef("writeThrottle"), false);
 		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
 		goodActorPerClient = getOption(options, LiteralStringRef("goodActorPerClient"), 1);
 		actorCount = goodActorPerClient + badActorPerClient;
 
-		keyCount = getOption(options, LiteralStringRef("keyCount"), 3000);
-		txBackoffDelay = actorCount * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
+		keyCount = getOption(options, LiteralStringRef("keyCount"),
+		                     std::max(3000, actorCount * 3)); // enough keys to avoid too many conflicts
+		txInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
 
 		badReadTag = TransactionTag(std::string("badReadTag"));
 		badWriteTag = TransactionTag(std::string("badWriteTag"));
@@ -85,7 +87,6 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	// choose a tag
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
-		state double rate = deterministicRandom()->random01() * 20;
 		state TagSet tagSet1;
 		state TagSet tagSet2;
 		state TagSet tagSet3;
@@ -93,16 +94,19 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		tagSet2.addTag(self->badReadTag);
 		tagSet3.addTag(self->goodTag);
 
-		wait(ThrottleApi::throttleTags(cx, tagSet1, rate, self->testDuration + 120, TagThrottleType::MANUAL, priority));
-		wait(ThrottleApi::throttleTags(cx, tagSet2, rate, self->testDuration + 120, TagThrottleType::MANUAL, priority));
-		wait(ThrottleApi::throttleTags(cx, tagSet3, rate, self->testDuration + 120, TagThrottleType::MANUAL, priority));
+		wait(ThrottleApi::throttleTags(cx, tagSet1, self->tpsRate, self->throttleDuration, TagThrottleType::MANUAL,
+		                               priority));
+		wait(ThrottleApi::throttleTags(cx, tagSet2, self->tpsRate, self->throttleDuration, TagThrottleType::MANUAL,
+		                               priority));
+		wait(ThrottleApi::throttleTags(cx, tagSet3, self->tpsRate, self->throttleDuration, TagThrottleType::MANUAL,
+		                               priority));
 
 		return Void();
 	}
-	Future<Void> setup(const Database& cx) override { return _setup(cx, this); }
+	Future<Void> setup(const Database& cx) override { return clientId ? Void() : _setup(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, WriteTagThrottlingWorkload* self) {
 		state vector<Future<Void>> clientActors;
-		state int actorId;
+		int actorId;
 		for (actorId = 0; actorId < self->goodActorPerClient; ++actorId) {
 			clientActors.push_back(clientActor(false, actorId, 0, cx, self));
 		}
@@ -122,38 +126,41 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		return true;
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) {
-		m.push_back(PerfMetric("Transactions (badActor)", badActorTxNum, true));
-		m.push_back(PerfMetric("Transactions (goodActor)", goodActorTxNum, true));
+		m.push_back(PerfMetric("Transactions (badActor)", badActorTxNum, false));
+		m.push_back(PerfMetric("Transactions (goodActor)", goodActorTxNum, false));
 		m.push_back(PerfMetric("Avg Latency (ms, badActor)", 1000 * badActorTotalLatency / badActorTxNum, true));
 		m.push_back(PerfMetric("Avg Latency (ms, goodActor)", 1000 * goodActorTotalLatency / goodActorTxNum, true));
 
-		m.push_back(PerfMetric("Retries (badActor)", badActorRetries, true));
-		m.push_back(PerfMetric("Retries (goodActor)", goodActorRetries, true));
+		m.push_back(PerfMetric("Retries (badActor)", badActorRetries, false));
+		m.push_back(PerfMetric("Retries (goodActor)", goodActorRetries, false));
 
-		m.push_back(PerfMetric("Retries.too_old (badActor)", badActorTooOldRetries, true));
-		m.push_back(PerfMetric("Retries.too_old (goodActor)", goodActorTooOldRetries, true));
+		m.push_back(PerfMetric("Retries.throttle (badActor)", badActorThrottleRetries, false));
+		m.push_back(PerfMetric("Retries.throttle (goodActor)", goodActorThrottleRetries, false));
 
-		m.push_back(PerfMetric("Retries.commit_failed (badActor)", badActorCommitFailedRetries, true));
-		m.push_back(PerfMetric("Retries.commit_failed (goodActor)", goodActorCommitFailedRetries, true));
+		m.push_back(PerfMetric("Retries.too_old (badActor)", badActorTooOldRetries, false));
+		m.push_back(PerfMetric("Retries.too_old (goodActor)", goodActorTooOldRetries, false));
+
+		m.push_back(PerfMetric("Retries.commit_failed (badActor)", badActorCommitFailedRetries, false));
+		m.push_back(PerfMetric("Retries.commit_failed (goodActor)", goodActorCommitFailedRetries, false));
 
 		// Read Sampleing
-		m.push_back(PerfMetric("Avg Read Latency (ms, badActor)", 1000 * badActorReadLatency->mean(), false));
-		m.push_back(PerfMetric("Avg Read Latency (ms, goodActor)", 1000 * goodActorReadLatency->mean(), false));
-		m.push_back(PerfMetric("95% Read Latency (ms, badActor)", 1000 * badActorReadLatency->percentile(0.95), false));
+		m.push_back(PerfMetric("Avg Read Latency (ms, badActor)", 1000 * badActorReadLatency.mean(), true));
+		m.push_back(PerfMetric("Avg Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.mean(), true));
+		m.push_back(PerfMetric("95% Read Latency (ms, badActor)", 1000 * badActorReadLatency.percentile(0.95), true));
 		m.push_back(
-		    PerfMetric("95% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency->percentile(0.95), false));
-		m.push_back(PerfMetric("50% Read Latency (ms, badActor)", 1000 * badActorReadLatency->median(), false));
-		m.push_back(PerfMetric("50% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency->median(), false));
+		    PerfMetric("95% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.percentile(0.95), true));
+		m.push_back(PerfMetric("50% Read Latency (ms, badActor)", 1000 * badActorReadLatency.median(), true));
+		m.push_back(PerfMetric("50% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.median(), true));
 
 		// Commit Sampleing
-		m.push_back(PerfMetric("Avg Commit Latency (ms, badActor)", 1000 * badActorCommitLatency->mean(), false));
-		m.push_back(PerfMetric("Avg Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency->mean(), false));
+		m.push_back(PerfMetric("Avg Commit Latency (ms, badActor)", 1000 * badActorCommitLatency.mean(), true));
+		m.push_back(PerfMetric("Avg Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency.mean(), true));
 		m.push_back(
-		    PerfMetric("95% Commit Latency (ms, badActor)", 1000 * badActorCommitLatency->percentile(0.95), false));
+		    PerfMetric("95% Commit Latency (ms, badActor)", 1000 * badActorCommitLatency.percentile(0.95), true));
 		m.push_back(
-		    PerfMetric("95% Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency->percentile(0.95), false));
-		m.push_back(PerfMetric("50% Commit Latency (ms, badActor)", 1000 * badActorCommitLatency->median(), false));
-		m.push_back(PerfMetric("50% Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency->median(), false));
+		    PerfMetric("95% Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency.percentile(0.95), true));
+		m.push_back(PerfMetric("50% Commit Latency (ms, badActor)", 1000 * badActorCommitLatency.median(), true));
+		m.push_back(PerfMetric("50% Commit Latency (ms, goodActor)", 1000 * goodActorCommitLatency.median(), true));
 	}
 
 	// return a key based on useReadKey
@@ -172,11 +179,11 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			} else if (a > idx) {
 				return KeyRange(KeyRangeRef(keyForIndex(idx, false), keyForIndex(a, false)));
 			} else
-				return KeyRange(KeyRangeRef(keyForIndex(idx, false), keyForIndex(a + 1, false)));
+				return singleKeyRange(keyForIndex(a, false));
 		}
 		int b = deterministicRandom()->randomInt(0, keyCount / 3);
 		if (a > b) std::swap(a, b);
-		if (a == b) return KeyRange(KeyRangeRef(keyForIndex(a, false), keyForIndex(a + 1, false)));
+		if (a == b) return singleKeyRange(keyForIndex(a, false));
 		return KeyRange(KeyRangeRef(keyForIndex(a, false), keyForIndex(b, false)));
 	}
 	Value generateVal() { return Value(deterministicRandom()->randomAlphaNumeric(maxValueBytes)); }
@@ -189,7 +196,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		state StringRef key;
 		try {
 			loop {
-				wait(poisson(&lastTime, self->txBackoffDelay));
+				wait(poisson(&lastTime, self->txInterval));
 				state double txStart;
 				state Transaction tx(cx);
 				state int i;
@@ -216,24 +223,27 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 						}
 						for (i = 0; i < self->numReadPerTx; ++i) {
 							bool useReadKey = deterministicRandom()->random01() < badOpRate;
+							ASSERT(self->keyCount >= actorId);
 							key = self->generateKey(useReadKey, self->keyCount - actorId);
 							opStart = now();
 							Optional<Value> v = wait(tx.get(key));
 							double duration = now() - opStart;
-							isBadActor ? self->badActorReadLatency->addSample(duration)
-							           : self->goodActorReadLatency->addSample(duration);
+							isBadActor ? self->badActorReadLatency.addSample(duration)
+							           : self->goodActorReadLatency.addSample(duration);
 						}
 						opStart = now();
 						wait(tx.commit());
 						double duration = now() - opStart;
-						isBadActor ? self->badActorCommitLatency->addSample(duration)
-						           : self->goodActorCommitLatency->addSample(duration);
+						isBadActor ? self->badActorCommitLatency.addSample(duration)
+						           : self->goodActorCommitLatency.addSample(duration);
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old) {
 							isBadActor ? ++self->badActorTooOldRetries : ++self->goodActorTooOldRetries;
 						} else if (e.code() == error_code_not_committed) {
 							isBadActor ? ++self->badActorCommitFailedRetries : ++self->goodActorCommitFailedRetries;
+						} else if (e.code() == error_code_tag_throttled) {
+							isBadActor ? ++self->badActorThrottleRetries : ++self->goodActorThrottleRetries;
 						}
 						wait(tx.onError(e));
 					}
