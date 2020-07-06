@@ -438,18 +438,17 @@ FDBFuture* fdb_transaction_get_range_impl(
 	}
 
 	/* Zero at the C API maps to "infinity" at lower levels */
-	if (!limit)
-		limit = CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
-	if (!target_bytes)
-		target_bytes = CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+	if (!limit) limit = GetRangeLimits::ROW_LIMIT_UNLIMITED;
+	if (!target_bytes) target_bytes = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 
 	/* Unlimited/unlimited with mode _EXACT isn't permitted */
-	if (limit == CLIENT_KNOBS->ROW_LIMIT_UNLIMITED && target_bytes == CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED && mode == FDB_STREAMING_MODE_EXACT)
+	if (limit == GetRangeLimits::ROW_LIMIT_UNLIMITED && target_bytes == GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
+	    mode == FDB_STREAMING_MODE_EXACT)
 		return TSAV_ERROR(Standalone<RangeResultRef>, exact_mode_without_limits);
 
 	/* _ITERATOR mode maps to one of the known streaming modes
 	   depending on iteration */
-	const int mode_bytes_array[] = { CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000 };
+	const int mode_bytes_array[] = { GetRangeLimits::BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000 };
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
 	   Goes from small -> medium -> large.  Then 1.5 * previous until serial. */
@@ -474,9 +473,9 @@ FDBFuture* fdb_transaction_get_range_impl(
 	else
 		return TSAV_ERROR(Standalone<RangeResultRef>, client_invalid_operation);
 
-	if(target_bytes == CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED)
+	if (target_bytes == GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = mode_bytes;
-	else if(mode_bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED)
+	else if (mode_bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = std::min(target_bytes, mode_bytes);
 
 	return (FDBFuture*)( TXN(tr)->getRange(

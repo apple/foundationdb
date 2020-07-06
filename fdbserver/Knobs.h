@@ -288,6 +288,7 @@ public:
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
+	bool ASK_READ_VERSION_FROM_MASTER;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -558,6 +559,7 @@ public:
 	bool FASTRESTORE_REQBATCH_LOG; // verbose log information for getReplyBatches
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
+	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.

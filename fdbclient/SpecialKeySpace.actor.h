@@ -139,6 +139,7 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
 	                                            GetRangeLimits limits, bool reverse = false);
 
+<<<<<<< HEAD
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
 
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range );
@@ -146,6 +147,43 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key);
 
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
+=======
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
+	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(nullptr, spaceEndKey),
+	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
+		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
+		impls.insert(range, nullptr);
+		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
+	}
+	// Initialize module boundaries, used to handle cross_module_read
+	void modulesBoundaryInit() {
+		for (const auto& pair : moduleToBoundary) {
+			ASSERT(range.contains(pair.second));
+			// Make sure the module is not overlapping with any registered modules
+			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
+			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
+			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
+			modules.insert(pair.second, pair.first);
+			impls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
+			                                    // important to make cross_module_read being handled correctly
+		}
+	}
+	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
+		// module boundary check
+		if (module == SpecialKeySpace::MODULE::TESTONLY)
+			ASSERT(normalKeys.contains(kr));
+		else
+			ASSERT(moduleToBoundary.at(module).contains(kr));
+		// make sure the registered range is not overlapping with existing ones
+		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
+		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
+			ASSERT(iter->value() == nullptr);
+			if (iter == impls.rangeContaining(kr.end))
+				break; // relax the condition that the end can be another range's start, if needed
+		}
+		impls.insert(kr, impl);
+	}
+>>>>>>> upstream/master
 
 	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl,
 	                      bool rw = false);

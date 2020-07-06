@@ -36,6 +36,15 @@
 
 // Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
+template <>
+inline Tuple Codec<ERestoreState>::pack(ERestoreState const& val) {
+	return Tuple().append(val);
+}
+template <>
+inline ERestoreState Codec<ERestoreState>::unpack(Tuple const& val) {
+	return (ERestoreState)val.getInt(0);
+}
+
 KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
 	return configSpace.pack(LiteralStringRef(__FUNCTION__));
 }
