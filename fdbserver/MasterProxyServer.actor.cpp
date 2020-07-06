@@ -1278,7 +1278,9 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
-	// up-to-date live committed version.
+	// up-to-date live committed version. We also maintain the invariant that master's committed version >= self->committedVersion
+	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
+	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion > self->committedVersion.get()) {
 		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
