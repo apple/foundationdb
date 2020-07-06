@@ -30,10 +30,10 @@ testTitle=Unclogged
     expectedRate=0.80
 
 testTitle=Moving
-	testName=Increment
-	transactionsPerSecond=50.0
-	testDuration=10.0
-	expectedRate=0.70
+    testName=Increment
+    transactionsPerSecond=50.0
+    testDuration=10.0
+    expectedRate=0.70
 
-	testName=RandomMoveKeys
-	testDuration=10.0
+    testName=RandomMoveKeys
+    testDuration=10.0

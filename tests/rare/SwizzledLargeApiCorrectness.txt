@@ -1,7 +1,9 @@
 testTitle=ApiCorrectnessTest
+clearAfterTest=true
+timeout=2100
+runSetup=true
+
     testName=ApiCorrectness
-    runSetup=true
-    clearAfterTest=true
     numKeys=2000
     onlyLowerCase=true
     shortKeysRatio=0.5
@@ -19,7 +21,6 @@ testTitle=ApiCorrectnessTest
     numClearRanges=10
     maxTransactionBytes=5000000
     randomTestDuration=30
-    timeout=2100
 
     testName=RandomClogging
     testDuration=120.0
