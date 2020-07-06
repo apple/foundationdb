@@ -105,7 +105,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 	Future<Void> setup(const Database& cx) override { return clientId ? Void() : _setup(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, WriteTagThrottlingWorkload* self) {
-		state vector<Future<Void>> clientActors;
+		vector<Future<Void>> clientActors;
 		int actorId;
 		for (actorId = 0; actorId < self->goodActorPerClient; ++actorId) {
 			clientActors.push_back(clientActor(false, actorId, 0, cx, self));
@@ -113,7 +113,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		for (actorId = 0; actorId < self->badActorPerClient; ++actorId) {
 			clientActors.push_back(clientActor(true, actorId, self->badOpRate, cx, self));
 		}
-		wait(delay(self->testDuration));
+		wait(timeout(waitForAll(clientActors), self->testDuration, Void()));
 		return Void();
 	}
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
@@ -147,8 +147,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		m.push_back(PerfMetric("Avg Read Latency (ms, badActor)", 1000 * badActorReadLatency.mean(), true));
 		m.push_back(PerfMetric("Avg Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.mean(), true));
 		m.push_back(PerfMetric("95% Read Latency (ms, badActor)", 1000 * badActorReadLatency.percentile(0.95), true));
-		m.push_back(
-		    PerfMetric("95% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.percentile(0.95), true));
+		m.push_back(PerfMetric("95% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.percentile(0.95), true));
 		m.push_back(PerfMetric("50% Read Latency (ms, badActor)", 1000 * badActorReadLatency.median(), true));
 		m.push_back(PerfMetric("50% Read Latency (ms, goodActor)", 1000 * goodActorReadLatency.median(), true));
 
