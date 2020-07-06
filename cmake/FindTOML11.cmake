@@ -2,7 +2,9 @@ find_path(TOML11_INCLUDE_DIR
   NAMES
     toml.hpp
   PATH_SUFFIXES
+    include
     toml11
+    include/toml11
    HINTS
     "${_TOML11_HINTS}"
 )
@@ -17,7 +19,7 @@ if (NOT TOML11_INCLUDE_DIR)
       -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/toml11
       -Dtoml11_BUILD_TEST:BOOL=OFF)
 
-  set(TOML11_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/toml11)
+  set(TOML11_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/toml11/include")
 endif()
 
 find_package_handle_standard_args(TOML11
