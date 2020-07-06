@@ -801,7 +801,6 @@ ACTOR Future<Void> commitBatch(
 	}
 	state int latencyBucket = batchOperations == 0 ? 0 : std::min<int>(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS-1,SERVER_KNOBS->PROXY_COMPUTE_BUCKETS*batchBytes/(batchOperations*(CLIENT_KNOBS->VALUE_SIZE_LIMIT+CLIENT_KNOBS->KEY_SIZE_LIMIT)));
 
-	// SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
 	ASSERT(self->readTxnLifetime <=
 	       SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT); // since we are using just the former to limit the number of versions
 	                                              // actually in flight!
@@ -1174,18 +1173,15 @@ ACTOR Future<Void> commitBatch(
 
 	// Storage servers mustn't make durable versions which are not fully committed (because then they are impossible to roll back)
 	// We prevent this by limiting the number of versions which are semi-committed but not fully committed to be less than the MVCC window
-	if (self->committedVersion.get() <
-	    commitVersion - self->readTxnLifetime) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+	if (self->committedVersion.get() < commitVersion - self->readTxnLifetime) {
 		computeDuration += g_network->timer() - computeStart;
-		while (self->committedVersion.get() <
-		       commitVersion - self->readTxnLifetime) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+		while (self->committedVersion.get() < commitVersion - self->readTxnLifetime) {
 			// This should be *extremely* rare in the real world, but knob buggification should make it happen in
 			// simulation
 			TEST(true);  // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
 			choose{
-				when(wait(self->committedVersion.whenAtLeast(
-				    commitVersion - self->readTxnLifetime))) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+				when(wait(self->committedVersion.whenAtLeast(commitVersion - self->readTxnLifetime))) {
 					wait(yield());
 					break;
 				}
@@ -1196,8 +1192,7 @@ ACTOR Future<Void> commitBatch(
 						self->committedVersion.set(v.version);
 					}
 
-					if (self->committedVersion.get() <
-					    commitVersion - self->readTxnLifetime) // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+					if (self->committedVersion.get() < commitVersion - self->readTxnLifetime)
 						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
 				}
 			}

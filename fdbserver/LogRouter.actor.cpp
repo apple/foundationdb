@@ -149,7 +149,7 @@ struct LogRouterData {
 		specialCounter(cc, "FetchedVersions", [this]() {
 			return std::max<Version>(
 			    0, std::min<Version>(this->readTxnLifetime, this->version.get() - this->minPopped.get()));
-		}); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+		});
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
 		specialCounter(cc, "FoundEpochEnd", [this](){ return this->foundEpochEnd; });
@@ -225,15 +225,11 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 		return Void();
 	}
 	if(!self->foundEpochEnd) {
-		wait(self->minPopped.whenAtLeast(std::min(
-		    self->version.get(), ver - self->readTxnLifetime))); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+		wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - self->readTxnLifetime)));
 	} else {
-		while (self->minPopped.get() + self->readTxnLifetime <
-		       ver) { //  SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
-			if (self->minPopped.get() + self->readTxnLifetime >
-			    self->version.get()) { // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
-				self->version.set(self->minPopped.get() +
-				                  self->readTxnLifetime); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+		while (self->minPopped.get() + self->readTxnLifetime < ver) {
+			if (self->minPopped.get() + self->readTxnLifetime > self->version.get()) {
+				self->version.set(self->minPopped.get() + self->readTxnLifetime);
 				wait(yield(TaskPriority::TLogCommit));
 			} else {
 				wait(self->minPopped.whenAtLeast((self->minPopped.get()+1)));

@@ -3433,8 +3433,7 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			// we cannot remove a server immediately after adding it, because a perfectly timed master recovery could
 			// cause us to not store the mutations sent to the short lived storage server.
 			// Q: Why is it the case? Is it because the SS may not have made it durable?
-			if (ver > addedVersion +
-			              teams->configuration.readTxnLifetime) { //  SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+			if (ver > addedVersion + teams->configuration.readTxnLifetime) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
 				// TraceEvent("WaitForAllDataRemoved")
 				//     .detail("Server", serverID)

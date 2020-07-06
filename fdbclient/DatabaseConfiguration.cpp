@@ -42,8 +42,8 @@ void DatabaseConfiguration::resetInternal() {
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 	backupWorkerEnabled = false;
-	readTxnLifetime = 5 * CLIENT_KNOBS->VERSIONS_PER_SECOND; // Move it from server_knobs to client_knobs?
-	txnLifetimeChangeTime = 0;
+	readTxnLifetime = 5 * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+	txnLifetimeChangeTime = 0; // Unused for now
 }
 
 void parse( int* i, ValueRef const& v ) {

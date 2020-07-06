@@ -940,7 +940,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			// we can get rid of versions beyond maxVerionsInMemory at any point. Update the
 			//desiredOldestVersion and that may invoke the compaction actor
-			Version maxVersionsInMemory = data->readTxnLifetime; // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			Version maxVersionsInMemory = data->readTxnLifetime;
 			Version proposedOldestVersion = data->version.get() - maxVersionsInMemory;
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			data->desiredOldestVersion.set(proposedOldestVersion);

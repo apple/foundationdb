@@ -953,15 +953,13 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			}
 			rep.prevVersion = self->version;
 			self->version += std::max<Version>(
-			    1, std::min<Version>(
-			           self->configuration.readTxnLifetime,
-			           SERVER_KNOBS->VERSIONS_PER_SECOND *
-			               (t1 - self->lastVersionTime))); // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+			    1, std::min<Version>(self->configuration.readTxnLifetime,
+			                         SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
 
 			TEST( self->version - rep.prevVersion == 1 );  // Minimum possible version gap
 			TEST(self->version - rep.prevVersion ==
-			     self->configuration.readTxnLifetime); // Maximum possible version gap //
-			                                           // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+			     self->configuration.readTxnLifetime); // Maximum possible version gap
+
 			self->lastVersionTime = t1;
 
 			if(self->resolverNeedingChanges.count(req.requestingProxy)) {

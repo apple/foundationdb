@@ -2977,7 +2977,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			setDataVersion(data->thisServerID, data->version.get());
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
-			Version maxVersionsInMemory = data->readTxnLifetime; // SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS
+			Version maxVersionsInMemory = data->readTxnLifetime;
 			for(int i = 0; i < data->recoveryVersionSkips.size(); i++) {
 				maxVersionsInMemory += data->recoveryVersionSkips[i].second;
 			}
