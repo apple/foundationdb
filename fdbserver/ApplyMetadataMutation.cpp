@@ -180,6 +180,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 					}
 				}
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				// TODO: Create a private mutation sent to all SSes for txnLifetime change
 			}
 			else if (m.param1.startsWith(serverListPrefix)) {
 				if(!initialCommit) {
