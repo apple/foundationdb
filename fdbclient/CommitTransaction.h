@@ -22,6 +22,8 @@
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #pragma once
 
+#include <vector>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 
@@ -81,9 +83,10 @@ struct MutationRef {
 	uint8_t type;
 	StringRef param1, param2;
 
-	MutationRef() {}
+	MutationRef() : type(NoOp), param1(), param2() {}
 	MutationRef( Type t, StringRef a, StringRef b ) : type(t), param1(a), param2(b) {}
 	MutationRef( Arena& to, const MutationRef& from ) : type(from.type), param1( to, from.param1 ), param2( to, from.param2 ) {}
+
 	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
 	int weightedTotalSize() const {
@@ -148,41 +151,45 @@ static inline std::string getTypeString(uint8_t type) {
 }
 
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
-static inline bool isSingleKeyMutation(MutationRef::Type type) {
+static constexpr inline bool isSingleKeyMutation(MutationRef::Type type) {
 	return (MutationRef::SINGLE_KEY_MASK & (1<<type)) != 0;
 }
 
 // Returns true if the given type can be safely cast to MutationRef::Type and used as a parameter to
 // isSingleKeyMutation, isAtomicOp, etc.  It does NOT mean that the type is a valid type of a MutationRef in any
 // particular context.
-static inline bool isValidMutationType(uint32_t type) {
+static constexpr inline bool isValidMutationType(uint32_t type) {
 	return (type < MutationRef::MAX_ATOMIC_OP);
 }
 
 // An 'atomic operation' is a single key mutation which sets the key specified by its param1 to a 
 //   nontrivial function of the previous value of the key and param2, and thus requires a 
 //   read/modify/write to implement.  (Basically a single key mutation other than a set)
-static inline bool isAtomicOp(MutationRef::Type mutationType) {
+static constexpr inline bool isAtomicOp(MutationRef::Type mutationType) {
 	return (MutationRef::ATOMIC_MASK & (1<<mutationType)) != 0;
 }
 
 // Returns true for operations which do not obey the associative law (i.e. a*(b*c) == (a*b)*c) in all cases
 // unless a, b, and c have equal lengths, in which case even these operations are associative.
-static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
+static constexpr inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 	return (MutationRef::NON_ASSOCIATIVE_MASK & (1<<mutationType)) != 0;
 }
 
 struct CommitTransactionRef {
-	CommitTransactionRef() : read_snapshot(0), report_conflicting_keys(false) {}
-	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
-	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
-	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
-	    report_conflicting_keys(from.report_conflicting_keys) {}
 	VectorRef< KeyRangeRef > read_conflict_ranges;
 	VectorRef< KeyRangeRef > write_conflict_ranges;
 	VectorRef< MutationRef > mutations;
-	Version read_snapshot;
-	bool report_conflicting_keys;
+	Version read_snapshot = 0;
+	bool report_conflicting_keys = false;
+
+	CommitTransactionRef() {}
+	
+	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
+	  : read_conflict_ranges(a, from.read_conflict_ranges), 
+	    write_conflict_ranges(a, from.write_conflict_ranges),
+	    mutations(a, from.mutations),
+		read_snapshot(from.read_snapshot),
+	    report_conflicting_keys(from.report_conflicting_keys) {}
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {

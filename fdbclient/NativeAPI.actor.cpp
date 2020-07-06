@@ -414,7 +414,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 				}
 			}
 
-			// Commit the chunks splitting into different transactions if needed
+			// Commit the chunks splitting into different tr if needed
 			state int64_t dataSizeLimit = BUGGIFY ? deterministicRandom()->randomInt(200e3, 1.5 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT) : 0.8 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			state std::vector<TrInfoChunk>::iterator tracking_iter = trChunksQ.begin();
 			tr = Transaction(Database(Reference<DatabaseContext>::addRef(cx)));
@@ -1388,7 +1388,7 @@ void runNetwork() {
 }
 
 void stopNetwork() {
-	if(!g_network)
+	if(!g_network) 
 		throw network_not_setup();
 
 	g_network->stop();
@@ -2777,7 +2777,7 @@ void Transaction::set( const KeyRef& key, const ValueRef& value, bool addConflic
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, value );
 	t.mutations.push_back( req.arena, MutationRef( MutationRef::SetValue, r.begin, v ) );
-
+	
 	if( addConflictRange ) {
 		t.write_conflict_ranges.push_back( req.arena, r );
 	}
@@ -3125,24 +3125,25 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
+ACTOR static Future<Void> tryCommitSingleTransaction(
+		Database cx,
+		Reference<TransactionLogInfo> trLogInfo,
+		CommitTransactionRequest req,
+		Future<Version> readVersion, 
+		TransactionInfo info,
+		TransactionOptions options,
+		int transactionStartTime,
+		Version* pCommittedVersion,
+		int* numErrors,
+		Promise<Standalone<StringRef>> versionstampPromise) {
+
+	state double startTime = g_network->now();
 	state TraceInterval interval( "TransactionCommit" );
-	state double startTime = now();
+
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
+
 	try {
-		if(CLIENT_BUGGIFY) {
-			throw deterministicRandom()->randomChoice(std::vector<Error>{
-					not_committed(),
-					transaction_too_old(),
-					proxy_memory_limit_exceeded(),
-					commit_unknown_result()});
-		}
-
-		Version v = wait( readVersion );
-		req.transaction.read_snapshot = v;
-
-		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
 		if(info.debugID.present()) {
 			commitID = nondeterministicRandom()->randomUniqueID();
@@ -3153,13 +3154,33 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
 		if (options.commitOnFirstProxy) {
+			std::cout << "Commit on first proxy" << std::endl;
 			if(cx->clientInfo->get().firstProxy.present()) {
 				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
 			} else {
 				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
+		} else if (options.commitOnGivenProxy) {
+			const int proxyIndex = options.proxyIndex;
+			const auto& proxies = cx->clientInfo->get().proxies;
+			
+			ASSERT(0 <= proxyIndex && proxyIndex < proxies.size());
+
+			auto& proxy = proxies[proxyIndex];
+
+			std::cout << "Commit on proxy " << proxyIndex << "  " << proxy.id().toString() << " with mutations: " << req.transaction.mutations.size() << std::endl;
+			for(int i = 0; i < req.transaction.mutations.size(); ++i) {
+				std::cout<< req.transaction.mutations[i].param1.toString() << "  "<<req.transaction.mutations[i].param2.toString() <<std::endl;
+			}
+
+			reply = throwErrorOr(
+				brokenPromiseToMaybeDelivered(
+					proxy.commit.tryGetReply(req)
+				)
+			);
 		} else {
+			std::cout << "Commit via load balance" << std::endl;
 			reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 		}
 
@@ -3169,6 +3190,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				throw request_maybe_delivered();
 			}
 			when (CommitID ci = wait( reply )) {
+				std::cout << "retrieved commit id version " << ci.version << " with txnBatchId " << ci.txnBatchId << std::endl;
+
 				Version v = ci.version;
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
@@ -3184,9 +3207,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 
 					Standalone<StringRef> ret = makeString(10);
 					placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
-					tr->versionstampPromise.send(ret);
+					versionstampPromise.send(ret);
 
-					tr->numErrors = 0;
+					*numErrors = 0;
 					++cx->transactionsCommitCompleted;
 					cx->transactionCommittedMutations += req.transaction.mutations.size();
 					cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
@@ -3196,15 +3219,16 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 
 					double latency = now() - startTime;
 					cx->commitLatencies.addSample(latency);
-					cx->latencies.addSample(now() - tr->startTime);
+					cx->latencies.addSample(now() - transactionStartTime);
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventCommit_V2(startTime, cx->clientLocality.dcId(), latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), ci.version, req));
+										
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
-					tr->info.conflictingKeys.reset();
+					info.conflictingKeys.reset();
 					if (ci.conflictingKRIndices.present()) {
-						tr->info.conflictingKeys =
+						info.conflictingKeys =
 						    std::make_shared<CoalescedKeyRangeMap<Value>>(conflictingKeysFalse, specialKeys.end);
 						state Standalone<VectorRef<int>> conflictingKRIndices = ci.conflictingKRIndices.get();
 						// drop duplicate indices and merge overlapped ranges
@@ -3215,7 +3239,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 							const KeyRangeRef kr = req.transaction.read_conflict_ranges[rCRIndex];
 							const KeyRange krWithPrefix = KeyRangeRef(kr.begin.withPrefix(conflictingKeysRange.begin),
 							                                          kr.end.withPrefix(conflictingKeysRange.begin));
-							tr->info.conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
+							info.conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
 						}
 					}
 
@@ -3230,6 +3254,102 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			}
 		}
 	} catch (Error& e) {
+		std::cout << "Error on tryCommitSingleTransaction: " << e.what() << std::endl;
+		throw;
+	}
+}
+
+ACTOR static Future<Void> tryCommit(
+		Database cx,
+		Reference<TransactionLogInfo> trLogInfo,
+		CommitTransactionRequest req,
+		Future<Version> readVersion, 
+		TransactionInfo info,
+		Version* pCommittedVersion,
+		Transaction* tr,
+		TransactionOptions options) {
+
+	state double startTime = now();
+	state const int NUM_PROXIES = cx->clientInfo->get().proxies.size();
+
+	try {
+		// Trigger errors for testing purpose.
+		if(CLIENT_BUGGIFY) {
+			throw deterministicRandom()->randomChoice(std::vector<Error>{
+					not_committed(),
+					transaction_too_old(),
+					proxy_memory_limit_exceeded(),
+					commit_unknown_result()});
+		}
+
+		Version v = wait( readVersion );
+		req.transaction.read_snapshot = v;
+
+		if (!shouldSplitCommitTransaction(req, NUM_PROXIES)) {
+			std::cout << "Use single transaction" << std::endl;
+			wait(tryCommitSingleTransaction(
+				cx, trLogInfo, req, readVersion, info,
+				options, tr->startTime,
+				pCommittedVersion,
+				&tr->numErrors,
+				tr->versionstampPromise
+			));
+			
+			return Void();
+		}
+
+		std::cout << "Use multiple transactions: " << NUM_PROXIES << std::endl;
+
+		state std::vector<Version> committedVersions;
+		state std::vector<int> errorsPerCommit;
+		state std::vector<Promise<Standalone<StringRef>>> versionstampPromises;
+		state std::vector<Future<Void>> responses;
+
+		std::vector<CommitTransactionRequest>
+				requests = splitTransaction(req, NUM_PROXIES);
+		committedVersions.reserve(NUM_PROXIES);
+		errorsPerCommit.reserve(NUM_PROXIES);
+		versionstampPromises.reserve(NUM_PROXIES);
+		responses.reserve(NUM_PROXIES);
+		
+		for (int i = 0; i < NUM_PROXIES; ++i) {
+			auto optionsWithProxyInfo(options);
+
+			optionsWithProxyInfo.commitOnGivenProxy = true;
+			optionsWithProxyInfo.proxyIndex = i;
+
+			committedVersions.emplace_back(Version());
+			errorsPerCommit.emplace_back(0);
+			versionstampPromises.emplace_back(Promise<Standalone<StringRef>>());
+
+			responses.emplace_back(
+				tryCommitSingleTransaction(
+					cx, trLogInfo, requests[i], readVersion, info,
+					optionsWithProxyInfo, tr->startTime,
+					&committedVersions.back(),
+					&errorsPerCommit.back(),
+					versionstampPromises.back()
+				)
+			);
+		}
+
+		wait(waitForAll(responses));
+
+		assert(std::adjacent_find(
+			committedVersions.begin(),
+			committedVersions.end(),
+			std::not_equal_to<>()) == committedVersions.end()
+		);
+
+		*pCommittedVersion = committedVersions.front();
+		tr->numErrors = std::accumulate(
+			errorsPerCommit.begin(), errorsPerCommit.end(), 0
+		);
+		tr->versionstampPromise.swap(versionstampPromises.front());
+
+		return Void();
+	} catch (Error& e) {
+		std::cout << "ERROR: " << e.what() << std::endl;
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
@@ -3266,6 +3386,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 	}
 }
+
 
 Future<Void> Transaction::commitMutations() {
 	try {

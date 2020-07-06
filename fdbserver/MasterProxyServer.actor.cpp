@@ -50,6 +50,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
+	printf("broadcastTxnRequest\n");
 	state ReplyPromise<Void> reply = req.reply;
 	resetReply( req );
 	std::vector<Future<Void>> replies;
@@ -227,6 +228,7 @@ struct TransactionRateInfo {
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, TransactionRateInfo *transactionRateInfo,
 						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
 						   TransactionTagMap<uint64_t>* transactionTagCounter, PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
+	printf("getRate\n");
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -791,6 +793,15 @@ ACTOR Future<Void> commitBatch(
 	state bool forceRecovery = false;
 	state int batchOperations = 0;
 	int64_t batchBytes = 0;
+
+	std::cout << "Mutations: " << std::endl;
+ 	for (int i = 0; i < trs.size(); ++i) {
+		for (int j = 0; j < trs[i].transaction.mutations.size(); ++j) {
+			auto& mutation = trs[i].transaction.mutations[j];
+			std::cout << mutation.param1.toString() << "  " << mutation.param2.toString() << std::endl;
+		}
+	}
+
 	for (int t = 0; t<trs.size(); t++) {
 		batchOperations += trs[t].transaction.mutations.size();
 		batchBytes += trs[t].transaction.mutations.expectedSize();
@@ -798,7 +809,7 @@ ACTOR Future<Void> commitBatch(
 	state int latencyBucket = batchOperations == 0 ? 0 : std::min<int>(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS-1,SERVER_KNOBS->PROXY_COMPUTE_BUCKETS*batchBytes/(batchOperations*(CLIENT_KNOBS->VALUE_SIZE_LIMIT+CLIENT_KNOBS->KEY_SIZE_LIMIT)));
 
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);  // since we are using just the former to limit the number of versions actually in flight!
-
+	
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches) so we need to downgrade here
 	wait(delay(0, TaskPriority::ProxyCommit));
 
@@ -1380,6 +1391,7 @@ ACTOR Future<Void> commitBatch(
 }
 
 ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
+	//printf("updateLastCommit\n");
 	state double confirmStart = now();
 	self->lastStartCommit = confirmStart;
 	self->updateCommitRequests++;
@@ -1393,6 +1405,7 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID
 ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID,
                                                           int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
+	//printf("getLiveCommittedVersion\n");
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 	// (1) The version returned is the committedVersion of some proxy at some point before the request returns, so it is committed.
 	// (2) No proxy on our list reported committed a higher version before this request was received, because then its committedVersion would have been higher,
@@ -1451,6 +1464,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
                                   ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags) {
+	//printf("sendGrvReplies\n");
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
 	Version replyVersion = reply.version;
@@ -1521,6 +1535,8 @@ ACTOR static Future<Void> transactionStarter(
 	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> replyTimes;
+
+	printf("transactionStarter");
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
@@ -1596,7 +1612,8 @@ ACTOR static Future<Void> transactionStarter(
 			else
 				batchPriTransactionsStarted[req.flags & 1] += tc;
 
-			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
+			start[req.flags & 1].push_back(std::move(req));
+			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
 		}
@@ -1647,6 +1664,8 @@ ACTOR static Future<Void> transactionStarter(
 }
 
 ACTOR static Future<Void> doKeyServerLocationRequest( GetKeyServerLocationsRequest req, ProxyCommitData* commitData ) {
+	printf("doKeyServerLocationRequest\n");
+
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
@@ -1694,6 +1713,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest( GetKeyServerLocationsReque
 }
 
 ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, PromiseStream<Future<Void>> addActor, ProxyCommitData* commitData ) {
+	printf("readRequestServer");
 	loop {
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
 		//WARNING: this code is run at a high priority, so it needs to do as little work as possible
@@ -2117,6 +2137,10 @@ ACTOR Future<Void> masterProxyServerCore(
 			addActor.send(proxyCheckSafeExclusion(db, exclCheckReq));
 		}
 		when(state TxnStateRequest req = waitNext(proxy.txnState.getFuture())) {
+			std::cout << "masterProxyServerCore -> TxnStateRequest Request" << std::endl;
+			for (int i = 0; i < req.data.size(); ++i) {
+				std::cout<<req.data[i].key.toString()<<'\t'<<req.data[i].value.toString()<<std::endl;
+			}
 			state ReplyPromise<Void> reply = req.reply;
 			if(req.last) maxSequence = req.sequence + 1;
 			if (!txnSequences.count(req.sequence)) {

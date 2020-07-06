@@ -32,6 +32,7 @@ set(FDBCLIENT_SRCS
   Knobs.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
+  MasterProxyInterface.cpp
   MasterProxyInterface.h
   MetricLogger.actor.cpp
   MetricLogger.h

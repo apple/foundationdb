@@ -923,6 +923,9 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state std::map<UID, ProxyVersionReplies>::iterator proxyItr = self->lastProxyVersionReplies.find(req.requestingProxy); // lastProxyVersionReplies never changes
 
+
+	printf("getVersion\n");
+
 	if (proxyItr == self->lastProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
 		req.reply.send(Never());
@@ -936,10 +939,13 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 	if (itr != proxyItr->second.replies.end()) {
 		TEST(true); // Duplicate request for sequence
 		req.reply.send(itr->second);
+		std::cout<<"itr != proxyItr->second.replies.end()  "<<itr->second.version<<std::endl;
 	}
 	else if(req.requestNum <= proxyItr->second.latestRequestNum.get()) {
 		TEST(true); // Old request for previously acknowledged sequence - may be impossible with current FlowTransport implementation
 		ASSERT( req.requestNum < proxyItr->second.latestRequestNum.get() );  // The latest request can never be acknowledged
+		std::cout<<"req.requestNum <= proxyItr->second.latestRequestNum.get()  NEVER"<<std::endl;
+
 		req.reply.send(Never());
 	}
 	else {
@@ -979,6 +985,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		proxyItr->second.replies[req.requestNum] = rep;
 		ASSERT(rep.prevVersion >= 0);
 		req.reply.send(rep);
+		std::cout<<"getVersion req.reply.send  "<<rep.version<<std::endl;
 
 		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
 		proxyItr->second.latestRequestNum.set(req.requestNum);
@@ -990,6 +997,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
+	printf("provideVersions\n");
 	for (auto& p : self->proxies)
 		self->lastProxyVersionReplies[p.id()] = ProxyVersionReplies();
 
@@ -1007,6 +1015,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	loop {
 		choose {
 			when(GetRawCommittedVersionRequest req = waitNext(self->myInterface.getLiveCommittedVersion.getFuture())) {
+				printf("serveLiveCommittedVersion.GetRawCommittedVersionRequest\n");
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion");
 
@@ -1020,6 +1029,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
+				printf("serveLiveCommittedVersion.ReportRawCommittedVersionRequest\n");
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;

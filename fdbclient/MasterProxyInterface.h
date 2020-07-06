@@ -157,6 +157,7 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
+	Optional<UID> splitID;
 
 	CommitTransactionRequest() : flags(0) {}
 
@@ -178,6 +179,33 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 		total += i->expectedSize();
 	return total;
 }
+
+
+
+/// When the values in all KV pairs in a given transaction is larger than this
+/// value, the transaction will be split and distributed to multiple proxies,
+/// if possible.
+/// FIXME: change it to 1048576
+constexpr int MAX_SINGLE_TRANSACTION_VALUES_SIZE = 110 * 1024;
+
+/**
+ * Check if a transaction is large and should be split.
+ * 
+ * @param commitTxnRequest Commit transaction request 
+ * @param numProxies Number of proxies
+ */
+extern bool shouldSplitCommitTransaction(
+	const CommitTransactionRequest&, const int);
+
+/**
+ * Evenly split mutations in a given transaction into multiple transactions 
+ * per proxy.
+ * 
+ * @param commitTransactionRequest
+ * @param numProxies Number of proxies
+ */
+extern std::vector<CommitTransactionRequest> splitTransaction(
+		const CommitTransactionRequest&, const int);
 
 struct GetReadVersionReply : public BasicLoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 15709388;

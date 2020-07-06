@@ -125,12 +125,15 @@ struct TransactionOptions {
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
+	bool commitOnGivenProxy : 1;
 	bool debugDump : 1;
 	bool lockAware : 1;
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
+
+	int proxyIndex = 0;
 
 	TransactionPriority priority;
 
@@ -276,8 +279,6 @@ public:
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
-	Promise<Standalone<StringRef>> versionstampPromise;
-
 	uint32_t getSize();
 	[[nodiscard]] Future<Void> onError(Error const& e);
 	void flushTrLogsIfEnabled();
@@ -295,11 +296,6 @@ public:
 	void setupWatches();
 	void cancelWatches(Error const& e = transaction_cancelled());
 
-	TransactionInfo info;
-	int numErrors;
-
-	std::vector<Reference<Watch>> watches;
-
 	int apiVersionAtLeast(int minVersion) const;
 
 	void checkDeferredError();
@@ -308,9 +304,6 @@ public:
 		return cx;
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
-	TransactionOptions options;
-	double startTime;
-	Reference<TransactionLogInfo> trLogInfo;
 
 	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
@@ -319,6 +312,14 @@ public:
 	Standalone<VectorRef<KeyRangeRef>> writeConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
+
+	TransactionInfo info;
+	int numErrors;
+	TransactionOptions options;
+	double startTime;
+	Reference<TransactionLogInfo> trLogInfo;
+	Promise<Standalone<StringRef>> versionstampPromise;
+	std::vector<Reference<Watch>> watches;
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);
