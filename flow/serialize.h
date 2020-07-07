@@ -568,8 +568,12 @@ public:
 		check = nullptr;
 	}
 
+	_Reader(const char* begin, const char* end) : begin(begin), end(end) {}
+	_Reader(const char* begin, const char* end, const Arena& arena) : begin(begin), end(end), m_pool(arena) {}
+
 protected:
-	const char *begin, *end, *check;
+	const char *begin, *end;
+	const char* check = nullptr;
 	Arena m_pool;
 	ProtocolVersion m_protocolVersion;
 };
@@ -593,11 +597,8 @@ public:
 	}
 
 	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) {
-		m_pool = arena;
-		check = nullptr;
-		begin = (const char*)input.begin();
-		end = begin + input.size();
+	ArenaReader(Arena const& arena, const StringRef& input, VersionOptions vo)
+	  : _Reader(reinterpret_cast<const char*>(input.begin()), reinterpret_cast<const char*>(input.end()), arena) {
 		vo.read(*this);
 	}
 };
@@ -629,30 +630,23 @@ public:
 	void assertEnd() { ASSERT(begin == end); }
 
 	template <class VersionOptions>
-	BinaryReader( const void* data, int length, VersionOptions vo ) {
-		begin = (const char*)data;
-		end = begin + length;
-		check = nullptr;
+	BinaryReader(const void* data, int length, VersionOptions vo)
+	  : _Reader(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data) + length) {
 		vo.read(*this);
 		if (m_protocolVersion.hasObjectSerializerFlag()) {
 			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
 		}
 	}
 	template <class VersionOptions>
-	BinaryReader( const StringRef& s, VersionOptions vo ) {
-		begin = (const char*)s.begin();
-		end = begin + s.size();
-		check = nullptr;
+	BinaryReader(const StringRef& s, VersionOptions vo)
+	  : _Reader(reinterpret_cast<const char*>(s.begin()), reinterpret_cast<const char*>(s.end())) {
 		vo.read(*this);
 		if (m_protocolVersion.hasObjectSerializerFlag()) {
 			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
 		}
 	}
 	template <class VersionOptions>
-	BinaryReader( const std::string& v, VersionOptions vo ) {
-		begin = v.c_str();
-		end = begin + v.size();
-		check = nullptr;
+	BinaryReader(const std::string& s, VersionOptions vo) : _Reader(s.c_str(), s.c_str() + s.size()) {
 		vo.read(*this);
 		if (m_protocolVersion.hasObjectSerializerFlag()) {
 			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
