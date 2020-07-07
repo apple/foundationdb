@@ -520,131 +520,41 @@ private:
 	}
 };
 
-
-class ArenaReader {
+template<class Impl>
+class _Reader {
 public:
 	static const int isDeserializing = 1;
 	static constexpr bool isSerializing = false;
-	typedef ArenaReader READER;
+	using READER = Impl;
 
-	const void* readBytes( int bytes ) {
-		const char* b = begin;
-		const char* e = b + bytes;
-		ASSERT( e <= end );
-		begin = e;
-		return b;
-	}
-
-	const void* peekBytes( int bytes ) {
-		ASSERT( begin + bytes <= end );
+	const void *peekBytes(int bytes) {
+		ASSERT(begin + bytes <= end);
 		return begin;
 	}
 
-	void serializeBytes(void* data, int bytes) {
-		memcpy(data, readBytes(bytes), bytes);
-	}
-	
-	const uint8_t* arenaRead( int bytes ) {
-		return (const uint8_t*)readBytes(bytes);
-	}
-
-	StringRef arenaReadAll() const {
-		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
+	void serializeBytes(void *data, int bytes) {
+		memcpy(data, static_cast<Impl*>(this)->readBytes(bytes), bytes);
 	}
 
 	template <class T>
 	void serializeBinaryItem( T& t ) {
-		t = *(T*)readBytes(sizeof(T));
-	}
-
-	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena), check(NULL) {
-		begin = (const char*)input.begin();
-		end = begin + input.size();
-		vo.read(*this);
-	}
-
-	Arena& arena() { return m_pool; }
-
-	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
-	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
-
-	bool empty() const { return begin == end; }
-
-	void checkpoint() {
-		check = begin;
-	}
-
-	void rewind() {
-		ASSERT(check != NULL);
-		begin = check;
-		check = NULL;
-	}
-
-private:
-	const char *begin, *end, *check;
-	Arena m_pool;
-	ProtocolVersion m_protocolVersion;
-};
-
-class BinaryReader {
-public:
-	static const int isDeserializing = 1;
-	static constexpr bool isSerializing = false;
-	typedef BinaryReader READER;
-
-	const void* readBytes( int bytes );
-
-	const void* peekBytes( int bytes ) {
-		ASSERT( begin + bytes <= end );
-		return begin;
-	}
-
-	void serializeBytes(void* data, int bytes) {
-		memcpy(data, readBytes(bytes), bytes);
-	}
-	
-	template <class T>
-	void serializeBinaryItem( T& t ) {
-		t = *(T*)readBytes(sizeof(T));
+		t = *(T*)(static_cast<Impl*>(this)->readBytes(sizeof(T)));
 	}
 
 	const uint8_t* arenaRead( int bytes ) {
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
-		if (!bytes) return NULL;
+		if (!bytes) return nullptr;
 		uint8_t* dat = new (arena()) uint8_t[ bytes ];
 		serializeBytes( dat, bytes );
 		return dat;
 	}
 
-	template <class VersionOptions>
-	BinaryReader( const void* data, int length, VersionOptions vo ) {
-		begin = (const char*)data;
-		end = begin + length;
-		check = nullptr;
-		vo.read(*this);
-	}
-	template <class VersionOptions>
-	BinaryReader( const StringRef& s, VersionOptions vo ) { begin = (const char*)s.begin(); end = begin + s.size(); vo.read(*this); }
-	template <class VersionOptions>
-	BinaryReader( const std::string& v, VersionOptions vo ) { begin = v.c_str(); end = begin + v.size(); vo.read(*this); }
-
-	Arena& arena() { return m_pool; }
-
-	template <class T, class VersionOptions>
-	static T fromStringRef( StringRef sr, VersionOptions vo ) {
-		T t;
-		BinaryReader r(sr, vo);
-		r >> t;
-		return t;
-	}
+	Arena &arena() { return m_pool; }
 
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
-
-	void assertEnd() { ASSERT( begin == end ); }
 
 	bool empty() const { return begin == end; }
 
@@ -658,11 +568,83 @@ public:
 		check = nullptr;
 	}
 
-
-private:
+protected:
 	const char *begin, *end, *check;
 	Arena m_pool;
 	ProtocolVersion m_protocolVersion;
+};
+
+class ArenaReader : public _Reader<ArenaReader> {
+public:
+	const void* readBytes( int bytes ) {
+		const char* b = begin;
+		const char* e = b + bytes;
+		ASSERT( e <= end );
+		begin = e;
+		return b;
+	}
+
+	const uint8_t* arenaRead( int bytes ) {
+		return (const uint8_t*)readBytes(bytes);
+	}
+
+	StringRef arenaReadAll() const {
+		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
+	}
+
+	template <class VersionOptions>
+	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) {
+		m_pool = arena;
+		check = nullptr;
+		begin = (const char*)input.begin();
+		end = begin + input.size();
+		vo.read(*this);
+	}
+};
+
+class BinaryReader : public _Reader<BinaryReader> {
+public:
+	const void* readBytes( int bytes );
+
+	const uint8_t* arenaRead( int bytes ) {
+		// Reads and returns the next bytes.
+		// The returned pointer has the lifetime of this.arena()
+		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
+		if (!bytes) return nullptr;
+		uint8_t* dat = new (arena()) uint8_t[ bytes ];
+		serializeBytes( dat, bytes );
+		return dat;
+	}
+
+	template <class T, class VersionOptions>
+	static T fromStringRef( StringRef sr, VersionOptions vo ) {
+		T t;
+		BinaryReader r(sr, vo);
+		r >> t;
+		return t;
+	}
+
+	void assertEnd() { ASSERT(begin == end); }
+
+	template <class VersionOptions>
+	BinaryReader( const void* data, int length, VersionOptions vo ) {
+		begin = (const char*)data;
+		end = begin + length;
+		check = nullptr;
+		vo.read(*this);
+	}
+	template <class VersionOptions>
+	BinaryReader( const StringRef& s, VersionOptions vo ) {
+		begin = (const char*)s.begin();
+		end = begin + s.size();
+		vo.read(*this);
+	}
+	template <class VersionOptions>
+	BinaryReader( const std::string& v, VersionOptions vo ) {
+		begin = v.c_str();
+		end = begin + v.size();
+		vo.read(*this);
+	}
 };
 
 struct SendBuffer {
