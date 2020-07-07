@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 	#include "fdbclient/NativeAPI.actor.g.h"
@@ -152,13 +154,16 @@ class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
+	Span span;
 	bool useProvisionalProxies;
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo(TaskPriority taskID)
+	  : taskID(taskID), span(deterministicRandom()->randomUniqueID(), "Transaction"_loc), useProvisionalProxies(false) {
+	}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -334,7 +339,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit);
 
