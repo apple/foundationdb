@@ -2736,7 +2736,8 @@ public:
 	                                      Database cx,
 	                                      Key tagName,
 	                                      bool partial,
-	                                      bool abortOldBackup) {
+	                                      bool abortOldBackup,
+	                                      bool dstOnly) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Key logUidValue, destUidValue;
 		state UID logUid, destUid;
@@ -2829,27 +2830,27 @@ public:
 			}
 		}
 
-		state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
+		if (! dstOnly) {
+			state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
+			state Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
+			state Version beginVersion;
+			state Version endVersion;
 
-		state Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
-		state Version beginVersion;
-		state Version endVersion;
-
-		loop {
-			try {
-				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			loop {
+				try {
+					srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Future<Optional<Value>> backupVersionF =
 				    srcTr->get(backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId));
 				wait(success(backupVersionF) || partialTimeout);
-				if (partialTimeout.isReady()) {
-					return Void();
+					if(partialTimeout.isReady()) {
+						return Void();
 				}
 
 				if (backupVersionF.get().present() &&
 				    BinaryReader::fromStringRef<Version>(backupVersionF.get().get(), Unversioned()) >
 				        BinaryReader::fromStringRef<Version>(backupUid, Unversioned())) {
-					break;
+						break;
 				}
 
 				if (abortOldBackup) {
@@ -2869,7 +2870,6 @@ public:
 				if (partialTimeout.isReady()) {
 					return Void();
 				}
-
 				if (bVersionF.get().present()) {
 					beginVersion = BinaryReader::fromStringRef<Version>(bVersionF.get().get(), Unversioned());
 				} else {
@@ -2880,7 +2880,6 @@ public:
 				           StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED)));
 				srcTr->set(backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId),
 				           backupUid);
-
 				wait(eraseLogData(srcTr, logUidValue, destUidValue) || partialTimeout);
 				if (partialTimeout.isReady()) {
 					return Void();
@@ -3148,8 +3147,8 @@ Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTran
 	return DatabaseBackupAgentImpl::discontinueBackup(this, tr, tagName);
 }
 
-Future<Void> DatabaseBackupAgent::abortBackup(Database cx, Key tagName, bool partial, bool abortOldBackup) {
-	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup);
+Future<Void> DatabaseBackupAgent::abortBackup(Database cx, Key tagName, bool partial, bool abortOldBackup, bool dstOnly){
+	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly);
 }
 
 Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
