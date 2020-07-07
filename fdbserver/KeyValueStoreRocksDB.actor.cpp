@@ -30,11 +30,11 @@ StringRef toStringRef(rocksdb::Slice s) {
 }
 
 std::string_view toStringView(rocksdb::Slice slice) {
-  return std::string_view(slice.data(), slice.size());
+	return std::string_view(slice.data(), slice.size());
 }
 
 std::string_view toStringView(StringRef s) {
-  return std::string_view(reinterpret_cast<const char*>(s.begin()), s.size());
+	return std::string_view(reinterpret_cast<const char*>(s.begin()), s.size());
 }
 
 rocksdb::Options getOptions(const std::string& path) {
@@ -56,7 +56,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		DB& db;
 		UID id;
 		absl::btree_map<std::string, std::string> data;
-    std::unique_ptr<rocksdb::Iterator> cursor = nullptr;
+		std::unique_ptr<rocksdb::Iterator> cursor = nullptr;
 
 		explicit Writer(DB& db, UID id) : db(db), id(id) {}
 
@@ -80,9 +80,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			ThreadReturnPromise<Void> done;
 
-			double getTimeEstimate() {
-				return SERVER_KNOBS->COMMIT_TIME_ESTIMATE;
-			}
+			double getTimeEstimate() { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
 			auto opt = getOptions(a.path);
@@ -129,10 +127,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
-      data.merge(a.updates);
-      for (auto& update : a.updates) {
-        data[update.first] = std::move(update.second);
-      }
+			data.merge(a.updates);
+			for (auto& update : a.updates) {
+				data[update.first] = std::move(update.second);
+			}
 			rocksdb::WriteOptions options;
 			options.sync = true;
 			// std::cout << "Begin commit.\n";
@@ -172,9 +170,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(KeyRef key, Optional<UID> debugID)
-				: key(key), debugID(debugID)
-			{}
+			ReadValueAction(KeyRef key, Optional<UID> debugID) : key(key), debugID(debugID) {}
 			double getTimeEstimate() override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -204,7 +200,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int maxLength;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID) : key(key), maxLength(maxLength), debugID(debugID) {};
+			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
+			  : key(key), maxLength(maxLength), debugID(debugID){};
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -223,71 +220,72 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (s.ok()) {
 				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
-											  std::min(value.size(), size_t(a.maxLength)))));
+				                              std::min(value.size(), size_t(a.maxLength)))));
 			} else {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix");
 				a.result.send(Optional<Value>());
 			}
 		}
 
-    static void compare(KeyValueRef ref, const std::pair<const std::string, std::string>& map) {
-      if (map.first != ref.key) {
-        std::cout << "Found key mismatch. Read: " << ref.key.printable()
-                  << " Should be: " << StringRef(map.first).printable() << "\n";
-        throw internal_error();
-      }
-      if (map.second != ref.value) {
-        std::cout << "Found value mismatch. Key: " << ref.key.printable() << " Read: " << ref.value.printable()
-                  << " Should be: " << StringRef(map.second).printable() << "\n";
-        throw internal_error();
-      }
-    }
+		static void compare(KeyValueRef ref, const std::pair<const std::string, std::string>& map) {
+			if (map.first != ref.key) {
+				std::cout << "Found key mismatch. Read: " << ref.key.printable()
+				          << " Should be: " << StringRef(map.first).printable() << "\n";
+				throw internal_error();
+			}
+			if (map.second != ref.value) {
+				std::cout << "Found value mismatch. Key: " << ref.key.printable() << " Read: " << ref.value.printable()
+				          << " Should be: " << StringRef(map.second).printable() << "\n";
+				throw internal_error();
+			}
+		}
 
 		struct ReadRangeAction : TypedAction<Writer, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<Standalone<RangeResultRef>> result;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
+			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
 			// std::cout << "Starting begin: " << a.keys.begin.printable() << "\n";
 			rocksdb::ReadOptions options;
 			// options.snapshot = db->GetSnapshot();
-      if (cursor == nullptr) {
-        cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
-      } else {
-        cursor->Refresh();
-      }
+			if (cursor == nullptr) {
+				cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+			} else {
+				cursor->Refresh();
+			}
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
 			if (a.rowLimit >= 0) {
 				cursor->Seek(toSlice(a.keys.begin));
-        auto it = data.lower_bound(toStringView(a.keys.begin));
+				auto it = data.lower_bound(toStringView(a.keys.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end && result.size() < a.rowLimit &&
 				       accumulatedBytes < a.byteLimit) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-          compare(kv, *it);
+					compare(kv, *it);
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back_deep(result.arena(), kv);
 					cursor->Next();
-          ++it;
+					++it;
 				}
 			} else {
 				cursor->SeekForPrev(toSlice(a.keys.end));
 				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
 				}
-        auto it = data.lower_bound(toStringView(a.keys.end));
-        --it;
+				auto it = data.lower_bound(toStringView(a.keys.end));
+				--it;
 				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin && result.size() < -a.rowLimit &&
 				       accumulatedBytes < a.byteLimit) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-          compare(kv, *it);
+					compare(kv, *it);
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back_deep(result.arena(), kv);
 					cursor->Prev();
-          --it;
+					--it;
 				}
 			}
 			auto s = cursor->status();
@@ -305,7 +303,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			result.more = (result.size() == a.rowLimit);
 			if (result.more) {
-			  result.readThrough = result[result.size()-1].key;
+				result.readThrough = result[result.size() - 1].key;
 			}
 			a.result.send(result);
 		}
@@ -418,17 +416,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> onClosed() override { return closePromise.getFuture(); }
 
-	void dispose() override {
-		doClose(this, true);
-	}
+	void dispose() override { doClose(this, true); }
 
-	void close() override {
-		doClose(this, false);
-	}
+	void close() override { doClose(this, false); }
 
-	KeyValueStoreType getType() override {
-		return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1);
-	}
+	KeyValueStoreType getType() override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
 
 	Future<Void> init() override {
 		std::unique_ptr<Writer::OpenAction> a(new Writer::OpenAction());
@@ -508,7 +500,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
-IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
+IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType,
+                                     bool checkChecksums, bool checkIntegrity) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 	return new RocksDBKeyValueStore(path, logID);
 #else
