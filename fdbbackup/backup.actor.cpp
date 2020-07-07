@@ -1149,6 +1149,7 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
+	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
