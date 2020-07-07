@@ -234,10 +234,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
       if (map.first != ref.key) {
         std::cout << "Found key mismatch. Read: " << ref.key.printable()
                   << " Should be: " << StringRef(map.first).printable() << "\n";
+        throw internal_error();
       }
       if (map.second != ref.value) {
         std::cout << "Found value mismatch. Key: " << ref.key.printable() << " Read: " << ref.value.printable()
                   << " Should be: " << StringRef(map.second).printable() << "\n";
+        throw internal_error();
       }
     }
 
