@@ -10,7 +10,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/Platform.h"
 
-#include "absl/container/flat_hash_map.h"
+#include "absl/container/btree_map.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -55,7 +55,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
 		UID id;
-		absl::flat_hash_map<std::string, std::string> data;
+		absl::btree_map<std::string, std::string> data;
     std::unique_ptr<rocksdb::Iterator> cursor = nullptr;
 
 		explicit Writer(DB& db, UID id) : db(db), id(id) {}
@@ -124,16 +124,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
 			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
-			absl::flat_hash_map<std::string, std::string> updates;
+			absl::btree_map<std::string, std::string> updates;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
-      auto it = a.updates.begin();
-      while (it != a.updates.end()) {
-        auto n = a.updates.extract(it++);
-        data.insert_or_assign(std::move(n.key()), std::move(n.mapped()));
-			}
+      data.merge(a.updates);
+      for (auto& update : a.updates) {
+        data[update.first] = std::move(update.second);
+      }
 			rocksdb::WriteOptions options;
 			options.sync = true;
 			// std::cout << "Begin commit.\n";
@@ -231,6 +230,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
+    static void compare(KeyValueRef ref, const std::pair<const std::string, std::string>& map) {
+      if (map.first != ref.key) {
+        std::cout << "Found key mismatch. Read: " << ref.key.printable()
+                  << " Should be: " << StringRef(map.first).printable() << "\n";
+      }
+      if (map.second != ref.value) {
+        std::cout << "Found value mismatch. Key: " << ref.key.printable() << " Read: " << ref.value.printable()
+                  << " Should be: " << StringRef(map.second).printable() << "\n";
+      }
+    }
+
 		struct ReadRangeAction : TypedAction<Writer, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
 			int rowLimit, byteLimit;
@@ -251,25 +261,31 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int accumulatedBytes = 0;
 			if (a.rowLimit >= 0) {
 				cursor->Seek(toSlice(a.keys.begin));
+        auto it = data.lower_bound(toStringView(a.keys.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end && result.size() < a.rowLimit &&
 				       accumulatedBytes < a.byteLimit) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+          compare(kv, *it);
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back_deep(result.arena(), kv);
 					cursor->Next();
+          ++it;
 				}
 			} else {
 				cursor->SeekForPrev(toSlice(a.keys.end));
 				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
 				}
-
+        auto it = data.lower_bound(toStringView(a.keys.end));
+        --it;
 				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin && result.size() < -a.rowLimit &&
 				       accumulatedBytes < a.byteLimit) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+          compare(kv, *it);
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 					result.push_back_deep(result.arena(), kv);
 					cursor->Prev();
+          --it;
 				}
 			}
 			auto s = cursor->status();
@@ -282,10 +298,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				if (it == data.end()) {
 					std::cout << "Missing key: " << toStringView(kv.key) << "\n";
 				} else {
-					if (it->second != kv.value) {
-						std::cout << "Found value mismatch. Key: " << toStringView(kv.key) << " Read: " << toStringView(kv.value)
-						          << " Should be: " << it->second << "\n";
-					}
 				}
 			}
 
@@ -307,7 +319,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
-	absl::flat_hash_map<std::string, std::string> updates;
+	absl::btree_map<std::string, std::string> updates;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id) : path(path), id(id) {
 		writeThread = createGenericThreadPool();
