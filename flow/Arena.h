@@ -217,14 +217,17 @@ inline void save( Archive& ar, const Arena& p ) {
 //    std::optional was available.
 // 2) When you call get but no value is present Optional gives an
 //    assertion failure. std::optional, on the other hand, would
-//    throw std::bad_optional_access.
+//    throw std::bad_optional_access. It is easier to debug assertion
+//    failures, and FDB generally does not handle std exceptions, so
+//    assertion failures are preferable. This is the main reason we
+//    don't intend to use std::optional directly.
 template <class T>
 class Optional : public ComposedIdentifier<T, 0x10> {
 public:
 	Optional() = default;
 
 	template <class U>
-	Optional(const U& t) : impl(t) {}
+	Optional(const U& t) : impl(std::in_place, t) {}
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
 	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
