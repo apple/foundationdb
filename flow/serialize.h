@@ -603,6 +603,8 @@ public:
 };
 
 class BinaryReader : public _Reader<BinaryReader> {
+	std::unique_ptr<ObjectReader> objectReader;
+
 public:
 	const void* readBytes( int bytes );
 
@@ -632,18 +634,47 @@ public:
 		end = begin + length;
 		check = nullptr;
 		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
+		}
 	}
 	template <class VersionOptions>
 	BinaryReader( const StringRef& s, VersionOptions vo ) {
 		begin = (const char*)s.begin();
 		end = begin + s.size();
+		check = nullptr;
 		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
+		}
 	}
 	template <class VersionOptions>
 	BinaryReader( const std::string& v, VersionOptions vo ) {
 		begin = v.c_str();
 		end = begin + v.size();
+		check = nullptr;
 		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
+		}
+	}
+
+	template<class T>
+	void deserialize(T &t) {
+		if (objectReader) {
+			objectReader->deserialize(t);
+		} else {
+			t.serialize(*this);
+		}
+	}
+};
+
+template<class T>
+class Serializer<BinaryReader, T, typename std::enable_if_t<HasFileIdentifier<T>::value>> {
+public:
+	static void serialize( BinaryReader& ar, T& t ) {
+		ar.deserialize(t);
+		ASSERT( ar.protocolVersion().isValid() );
 	}
 };
 
