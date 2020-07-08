@@ -15,7 +15,7 @@ Features
 Performance
 -----------
 
-
+* Increased performance of dr_agent when copying the mutation log. The ``COPY_LOG_BLOCK_SIZE``, ``COPY_LOG_BLOCKS_PER_TASK``, ``COPY_LOG_PREFETCH_BLOCKS``, ``COPY_LOG_READ_AHEAD_BYTES`` and ``COPY_LOG_TASK_DURATION_NANOS`` knobs can be set. `(PR 3436) <https://github.com/apple/foundationdb/pull/3436>`_
 
 Reliability
 -----------
@@ -39,8 +39,6 @@ Bindings
 
 Other Changes
 -------------
-
-
 
 Earlier release notes
 ---------------------

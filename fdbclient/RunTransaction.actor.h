@@ -37,6 +37,7 @@ runRYWTransaction(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop{
 		try {
+			// func should be idempodent; otherwise, retry will get undefined result
 			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
 			wait(tr->commit());
 			return result;

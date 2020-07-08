@@ -128,12 +128,12 @@ public:
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
 	// INetwork interface
-	virtual double now() { return currentTime; };
-	virtual double timer() { return ::timer(); };
-	virtual Future<Void> delay( double seconds, TaskPriority taskId );
-	virtual Future<class Void> yield( TaskPriority taskID );
-	virtual bool check_yield(TaskPriority taskId);
-	virtual TaskPriority getCurrentTask() { return currentTaskID; }
+	virtual double now() const override { return currentTime; };
+	virtual double timer() override { return ::timer(); };
+	virtual Future<Void> delay(double seconds, TaskPriority taskId) override;
+	virtual Future<class Void> yield(TaskPriority taskID) override;
+	virtual bool check_yield(TaskPriority taskId) override;
+	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
 	virtual void setCurrentTask(TaskPriority taskID ) { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
 	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID );
 	bool isOnMainThread() const override {
@@ -156,16 +156,16 @@ public:
 	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg);
 
 	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total );
-	virtual bool isAddressOnThisHost( NetworkAddress const& addr );
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override;
 	void updateNow(){ currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
+	virtual flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 	std::vector<flowGlobalType>		globals;
 
-	virtual const TLSConfig& getTLSConfig() { return tlsConfig; }
+	virtual const TLSConfig& getTLSConfig() const override { return tlsConfig; }
 
-	virtual bool checkRunnable();
+	virtual bool checkRunnable() override;
 
 	bool useThreadPool;
 //private:
@@ -187,7 +187,7 @@ public:
 	TDMetricCollection tdmetrics;
 	double currentTime;
 	bool stopped;
-	std::map<IPAddress, bool> addressOnHostCache;
+	mutable std::map<IPAddress, bool> addressOnHostCache;
 
 	std::atomic<bool> started;
 
@@ -321,7 +321,7 @@ struct SendBufferIterator {
 	}
 
 	boost::asio::const_buffer operator*() const {
-		return boost::asio::const_buffer( p->data + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent) );
+		return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
 	}
 };
 
@@ -439,9 +439,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() { return peer_address; }
+	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() { return id; }
+	virtual UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 private:
@@ -502,7 +502,7 @@ public:
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() { return listenAddress; }
+	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
@@ -753,9 +753,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() { return peer_address; }
+	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() { return id; }
+	virtual UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 
@@ -814,7 +814,7 @@ public:
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() { return listenAddress; }
+	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( SSLListener* self ) {
@@ -1434,7 +1434,7 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, 
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
-bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
+bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 	auto it = addressOnHostCache.find( addr.ip );
 	if (it != addressOnHostCache.end())
 		return it->second;
@@ -1492,7 +1492,7 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	}
 }
 
-void Net2::getDiskBytes( std::string const& directory, int64_t& free, int64_t& total ) {
+void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	return ::getDiskBytes(directory, free, total);
 }
 

@@ -143,7 +143,7 @@ private:
 	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
-	double halfLatency() {
+	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
 		if (a <= pFast) {
@@ -245,7 +245,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		int leftToSend = toSend;
 		for(auto p = buffer; p && leftToSend>0; p=p->next) {
 			int ts = std::min(leftToSend, p->bytes_written - p->bytes_sent);
-			peer->recvBuf.insert( peer->recvBuf.end(), p->data + p->bytes_sent, p->data + p->bytes_sent + ts );
+			peer->recvBuf.insert(peer->recvBuf.end(), p->data() + p->bytes_sent, p->data() + p->bytes_sent + ts);
 			leftToSend -= ts;
 		}
 		ASSERT( leftToSend == 0 );
@@ -255,8 +255,8 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not
 	// be an address we can connect to!
-	virtual NetworkAddress getPeerAddress() { return peerEndpoint; }
-	virtual UID getDebugID() { return dbgid; }
+	virtual NetworkAddress getPeerAddress() const override { return peerEndpoint; }
+	virtual UID getDebugID() const override { return dbgid; }
 
 	bool opened, closedByCaller;
 
@@ -712,7 +712,7 @@ struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
 		return popOne( nextConnection.getFuture() );
 	}
 
-	virtual NetworkAddress getListenAddress() { return address; }
+	virtual NetworkAddress getListenAddress() const override { return address; }
 
 private:
 	ISimulator::ProcessInfo* process;
@@ -743,7 +743,7 @@ class Sim2 : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
-	virtual double now() { return time; }
+	virtual double now() const override { return time; }
 
 	// timer() can be up to 0.1 seconds ahead of now()
 	virtual double timer() {
@@ -760,7 +760,9 @@ public:
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if(!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 && deterministicRandom()->random01() < 0.25) { //FIXME: why doesnt this work when we are changing machines?
+		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
+		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY*pow(deterministicRandom()->random01(),1000.0);
 		}
 
@@ -793,9 +795,7 @@ public:
 		}
 		return yielded = BUGGIFY_WITH_PROB(0.01);
 	}
-	virtual TaskPriority getCurrentTask() {
-		return currentTaskID;
-	}
+	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
 	virtual void setCurrentTask(TaskPriority taskID ) {
 		currentTaskID = taskID;
 	}
@@ -855,7 +855,7 @@ public:
 			}
 		}
 	}
-	virtual const TLSConfig& getTLSConfig() {
+	virtual const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
@@ -934,7 +934,7 @@ public:
 		if(free == 0)
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace").detail("TotalSpace", diskSpace.totalSpace).detail("BaseFreeSpace", diskSpace.baseFreeSpace).detail("TotalFileSize", totalFileSize).detail("NumFiles", numFiles);
 	}
-	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) {
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
 
@@ -1669,10 +1669,6 @@ public:
 				killProcess(t.machine, KillInstantly);
 			}
 
-			//if( this->time > 45.522817 ) {
-			//	printf("foo\n");
-			//}
-
 			if (randLog)
 				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(deterministicRandom()->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
 		}
@@ -1736,7 +1732,16 @@ void startNewSimulator() {
 }
 
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
-	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
+	TraceEvent("RebootingProcessAttempt")
+	    .detail("ZoneId", p->locality.zoneId())
+	    .detail("KillType", kt)
+	    .detail("Process", p->toString())
+	    .detail("StartingClass", p->startingClass.toString())
+	    .detail("Failed", p->failed)
+	    .detail("Excluded", p->excluded)
+	    .detail("Cleared", p->cleared)
+	    .detail("Rebooting", p->rebooting)
+	    .detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
 	wait( g_sim2.delay( 0, TaskPriority::DefaultDelay, p ) ); // Switch to the machine in question
 
@@ -1750,7 +1755,16 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 		if( p->rebooting || !p->isReliable() )
 			return;
-		TraceEvent("RebootingProcess").detail("KillType", kt).detail("Address", p->address).detail("ZoneId", p->locality.zoneId()).detail("DataHall", p->locality.dataHallId()).detail("Locality", p->locality.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).backtrace();
+		TraceEvent("RebootingProcess")
+		    .detail("KillType", kt)
+		    .detail("Address", p->address)
+		    .detail("ZoneId", p->locality.zoneId())
+		    .detail("DataHall", p->locality.dataHallId())
+		    .detail("Locality", p->locality.toString())
+		    .detail("Failed", p->failed)
+		    .detail("Excluded", p->excluded)
+		    .detail("Cleared", p->cleared)
+		    .backtrace();
 		p->rebooting = true;
 		if ((kt == ISimulator::RebootAndDelete) || (kt == ISimulator::RebootProcessAndDelete)) {
 			p->cleared = true;

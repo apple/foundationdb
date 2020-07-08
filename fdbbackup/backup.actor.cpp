@@ -1554,7 +1554,8 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Standalone<RangeResultRef> kvPairs = wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), CLIENT_KNOBS->ROW_LIMIT_UNLIMITED));
+			state Standalone<RangeResultRef> kvPairs =
+			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), GetRangeLimits::ROW_LIMIT_UNLIMITED));
 			json_spirit::mObject statusDoc;
 			JSONDoc modifier(statusDoc);
 			for(auto &kv : kvPairs) {
@@ -2224,7 +2225,8 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 			    .detail("SubmitRestoreRequests", ranges.size())
 			    .detail("RestoreUID", randomUID);
 			wait(backupAgent.submitParallelRestore(db, KeyRef(tagName), ranges, KeyRef(container), dbVersion, true,
-			                                       randomUID));
+			                                       randomUID, LiteralStringRef(""), LiteralStringRef("")));
+			// TODO: Support addPrefix and removePrefix
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
 				TraceEvent("FastRestoreAgent").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
