@@ -1,24 +1,24 @@
 testTitle=BackupAndRestore
+clearAfterTest=false
+simBackupAgents=BackupToFile
+
     testName=Cycle
     transactionsPerSecond=500.0
     testDuration=20.0
     expectedRate=0
-    clearAfterTest=false
-	keyPrefix=a
+    keyPrefix=a
 
     testName=Cycle
     transactionsPerSecond=500.0
     testDuration=30.0
     expectedRate=0
-    clearAfterTest=false
-	keyPrefix=A
+    keyPrefix=A
 
     testName=Cycle
     transactionsPerSecond=500.0
     testDuration=40.0
     expectedRate=0
-    clearAfterTest=false
-	keyPrefix=m
+    keyPrefix=m
 
     testName=ReadWrite
     testDuration=30.0
@@ -31,29 +31,23 @@ testTitle=BackupAndRestore
     setup=false
 
     testName=BackupAndRestoreCorrectness
-	backupTag=backup1
+    backupTag=backup1
     backupAfter=10.0
     restoreAfter=60.0
     performRestore=false
-    clearAfterTest=false
-    simBackupAgents=BackupToFile
     allowPauses=false
 
     testName=BackupAndRestoreCorrectness
-	backupTag=backup2
+    backupTag=backup2
     backupAfter=15.0
     restoreAfter=60.0
     performRestore=true
-    clearAfterTest=false
-    simBackupAgents=BackupToFile
     allowPauses=false
     prefixesMandatory=a,A,m
 
     testName=BackupAndRestoreCorrectness
-	backupTag=backup3
+    backupTag=backup3
     backupAfter=20.0
     restoreAfter=60.0
     performRestore=false
-    clearAfterTest=false
-    simBackupAgents=BackupToFile
     allowPauses=false

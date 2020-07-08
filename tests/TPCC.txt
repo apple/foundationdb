@@ -1,17 +1,19 @@
 testTitle=PopulateTPCCTest
-testName=PopulateTPCC
-clientsUsed=2
-actorsPerClient=1
-warehousesPerActor=80
-timeout=3600000
 clearAfterTest=false
 runConsistencyCheck=false
+timeout=3600000
+
+    testName=PopulateTPCC
+    clientsUsed=2
+    actorsPerClient=1
+    warehousesPerActor=80
 
 testTitle=TPCCTest
-testName=TPCC
-warehousesPerClient=4
-testDuration=3600
-warmupTime=300
-clientsUsed=40
-expectedTransactionsPerMinute=1000
 timeout=14400
+
+    testName=TPCC
+    warehousesPerClient=4
+    testDuration=3600
+    warmupTime=300
+    clientsUsed=40
+    expectedTransactionsPerMinute=1000

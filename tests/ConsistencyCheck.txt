@@ -1,6 +1,6 @@
 testTitle=ConsistencyCheck
-testName=ConsistencyCheck
-performQuiescentChecks=true
-quiescentWaitTimeout=600.0
-distributed=true
-shardSampleFactor=1
+    testName=ConsistencyCheck
+    performQuiescentChecks=true
+    quiescentWaitTimeout=600.0
+    distributed=true
+    shardSampleFactor=1
