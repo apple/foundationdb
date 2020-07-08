@@ -92,7 +92,7 @@ public:
 			return defaultValue;
 		return get(task);
 	}
-	Key key;
+	StringRef key;
 };
 
 struct ReservedTaskParams {
