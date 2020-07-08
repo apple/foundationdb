@@ -1354,7 +1354,6 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getKeyServersLocations);
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getRawCommittedVersion);
 				DUMPTOKEN(recruited.txnState);
 
 				//printf("Recruited as masterProxyServer\n");
