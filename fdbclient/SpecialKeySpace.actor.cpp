@@ -341,6 +341,8 @@ Future<Optional<Value>> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, con
 }
 
 void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	if (!ryw->specialKeySpaceChangeConfiguration())
+		throw special_keys_write_disabled();
 	// TODO : check value valid
 	auto impl = writeImpls[key];
 	// TODO : do we need the separate error here to differentiate from read?
@@ -349,6 +351,8 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 }
 
 void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	if (!ryw->specialKeySpaceChangeConfiguration())
+		throw special_keys_write_disabled();
 	if (range.empty()) return;
 	auto begin = writeImpls[range.begin];
 	auto end = writeImpls[range.end];
@@ -360,6 +364,8 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 }
 
 void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	if (!ryw->specialKeySpaceChangeConfiguration())
+		throw special_keys_write_disabled();
 	auto impl = writeImpls[key];
 	if (impl == nullptr) throw special_keys_no_write_module_found();
 	return impl->clear(ryw, key);
@@ -700,6 +706,12 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 }
 
 void includeServers(ReadYourWritesTransaction* ryw) {
+	ryw->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+	ryw->setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+	ryw->setOption( FDBTransactionOptions::LOCK_AWARE );
+	ryw->setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+	// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
+	ryw->setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(excludedServersKeys.withPrefix(normalKeys.end));
 	auto iter = ranges.begin();

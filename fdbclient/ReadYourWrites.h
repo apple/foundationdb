@@ -38,6 +38,7 @@ struct ReadYourWritesTransactionOptions {
 	bool debugRetryLogging : 1;
 	bool disableUsedDuringCommitProtection : 1;
 	bool specialKeySpaceRelaxed : 1;
+	bool specialKeySpaceChangeConfiguration : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -148,6 +149,7 @@ public:
 	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
+	bool specialKeySpaceChangeConfiguration() const { return options.specialKeySpaceChangeConfiguration; }
 
 	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }

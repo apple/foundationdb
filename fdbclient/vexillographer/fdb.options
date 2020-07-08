@@ -264,6 +264,8 @@ description is not currently required but encouraged.
             description="The transaction can retrieve keys that are conflicting with other transactions." />
     <Option name="special_key_space_relaxed" code="713"
             description="By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space). Use this option to allow reading from zero or more modules. Users who set this option should be prepared for new modules, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error." />
+    <Option name="special_key_space_change_configuration" code="714"
+            description="By default, users are not allowed to write to special keys. Enable this option will implicitly enable all options required to achieve the configuration change." />        
     <Option name="tag" code="800" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction." />
     <Option name="auto_throttle_tag" code="801" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."

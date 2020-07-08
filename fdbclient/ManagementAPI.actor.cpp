@@ -1259,7 +1259,10 @@ struct AutoQuorumChange : IQuorumChange {
 Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuorumChange>(new AutoQuorumChange(desired)); }
 
 void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed) {
-	// TODO : do we set these options by default or not
+	tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+	tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+	tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+	tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 	std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
 	auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
 	tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
@@ -1280,10 +1283,6 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 
 	loop {
 		try {
-			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 			excludeServers(tr, servers, failed);
 			wait( tr.commit() );
 			return Void();
