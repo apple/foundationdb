@@ -1,4 +1,12 @@
+; Disable buggify for parallel restore
+;buggify=on
+
 testTitle=BackupAndParallelRestoreWithAtomicOp
+clearAfterTest=false
+simBackupAgents=BackupToFile
+;timeout is in seconds
+timeout=360000
+
     testName=AtomicOps
     nodeCount=30000
 ; Make ops space only 1 key per group
@@ -6,7 +14,6 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
 ;    nodeCount=4
 ;    transactionsPerSecond=250.0
     testDuration=30.0
-    clearAfterTest=false
 ; Specify a type of atomicOp
 ; Unset the following two options for debug purpose
 ;	opType=0
@@ -20,8 +27,6 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
     testName=BackupAndParallelRestoreCorrectness
     backupAfter=10.0
     restoreAfter=60.0
-    clearAfterTest=false
-    simBackupAgents=BackupToFile
     backupRangesCount=-1
 ;    use old backup
     usePartitionedLogs=false
@@ -47,8 +52,3 @@ testTitle=BackupAndParallelRestoreWithAtomicOp
     reboot=true
     testDuration=90.0
 
-; Disable buggify for parallel restore
-;buggify=on
-;testDuration=360000 ;not work
-;timeout is in seconds
-timeout=360000

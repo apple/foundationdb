@@ -1248,6 +1248,7 @@ ACTOR Future<Void> commitBatch(
 		}
 		throw;
 	}
+
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
 	wait(yield(TaskPriority::ProxyCommitYield2));
@@ -1276,18 +1277,18 @@ ACTOR Future<Void> commitBatch(
 		ASSERT(p.second.isReady());
 	}
 
+	// After logging finishes, we report the commit version to master so that every other proxy can get the most
+	// up-to-date live committed version. We also maintain the invariant that master's committed version >= self->committedVersion
+	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
+	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion > self->committedVersion.get()) {
+		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+	}
 	if( commitVersion > self->committedVersion.get() ) {
-		if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-			// Let master know this commit version so that every other proxy can know.
-			wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
-		}
 		self->locked = lockedAfter;
 		self->metadataVersion = metadataVersionAfter;
-		TEST(commitVersion < self->committedVersion.get());
-		if (commitVersion > self->committedVersion.get()) {
-			self->committedVersion.set(commitVersion);
-		}
+		self->committedVersion.set(commitVersion);
 	}
 
 	if (forceRecovery) {

@@ -1,4 +1,8 @@
+extraDB=2
+
 testTitle=VersionStampBackupToDB
+simBackupAgents=BackupToDB
+
     testName=VersionStamp
     failIfDataLost=false
     validateExtraDB=true
@@ -6,8 +10,6 @@ testTitle=VersionStampBackupToDB
 
     testName=BackupToDBAbort
     abortDelay=40.0
-    simBackupAgents=BackupToDB
-    extraDB=2
 
     testName=Attrition
     machinesToKill=10

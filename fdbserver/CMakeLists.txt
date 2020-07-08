@@ -171,6 +171,7 @@ set(FDBSERVER_SRCS
   workloads/RandomClogging.actor.cpp
   workloads/RandomMoveKeys.actor.cpp
   workloads/RandomSelector.actor.cpp
+  workloads/ReadAfterWrite.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp

@@ -1,5 +1,5 @@
 /*
- * Platform.cpp
+ * Platform.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,6 +26,7 @@
 #endif
 
 #include "flow/Platform.h"
+#include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
 #include "flow/Trace.h"
@@ -160,6 +161,8 @@
 #endif
 
 #endif
+
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 std::string removeWhitespace(const std::string &t)
 {
@@ -2350,55 +2353,46 @@ std::string getUserHomeDirectory() {
 #endif
 }
 
+
 #ifdef _WIN32
 #define FILE_ATTRIBUTE_DATA DWORD
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-#define FILE_ATTRIBUTE_DATA mode_t
-#else
-#error Port me!
-#endif
 
-bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
-#ifdef _WIN32
+bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
 	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
-#else
-	#error Port me!
-#endif
 }
 
-bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
-#ifdef _WIN32
+bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	return S_ISDIR(fileAttributes);
-#else
-	#error Port me!
-#endif
 }
 
-std::vector<std::string> findFiles( std::string const& directory, std::string const& extension,
-		bool (*accept_file)(FILE_ATTRIBUTE_DATA, std::string, std::string)) {
+ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
+                                             bool directoryOnly, bool async) {
 	INJECT_FAULT( platform_error, "findFiles" );
-	std::vector<std::string> result;
+	state vector<std::string> result;
+	state int64_t tsc_begin = __rdtsc();
 
-#ifdef _WIN32
-	WIN32_FIND_DATA fd;
-	HANDLE h = FindFirstFile( (directory + "/*" + extension).c_str(), &fd );
+
+	state WIN32_FIND_DATA fd;
+	state HANDLE h = FindFirstFile( (directory + "/*" + extension).c_str(), &fd );
 	if (h == INVALID_HANDLE_VALUE) {
 		if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
 			TraceEvent(SevError, "FindFirstFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
 			throw platform_error();
 		}
 	} else {
-		while (true) {
+		loop {
 			std::string name = fd.cFileName;
-			if ((*accept_file)(fd.dwFileAttributes, name, extension)) {
+			if ((directoryOnly && acceptDirectory(fd.dwFileAttributes, name, extension)) ||
+			    (!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
 				result.push_back( name );
 			}
 			if (!FindNextFile( h, &fd ))
 				break;
+			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
+				wait( yield() );
+				tsc_begin = __rdtsc();
+			}
+
 		}
 		if (GetLastError() != ERROR_NO_MORE_FILES) {
 			TraceEvent(SevError, "FindNextFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
@@ -2407,12 +2401,36 @@ std::vector<std::string> findFiles( std::string const& directory, std::string co
 		}
 		FindClose(h);
 	}
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	DIR *dip;
+	std::sort(result.begin(), result.end());
+	return result;
+}
+
+#elif (defined(__linux__) || defined(__APPLE__))
+#define FILE_ATTRIBUTE_DATA mode_t
+
+bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
+	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
+}
+
+bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {
+	return S_ISDIR(fileAttributes);
+}
+
+ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
+                                             bool directoryOnly, bool async) {
+	INJECT_FAULT( platform_error, "findFiles" );
+	state vector<std::string> result;
+	state int64_t tsc_begin = __rdtsc();
+
+	state DIR *dip = NULL;
 
 	if ((dip = opendir(directory.c_str())) != NULL) {
-		struct dirent *dit;
-		while ((dit = readdir(dip)) != NULL) {
+		loop {
+			struct dirent *dit;
+			dit = readdir(dip);
+			if (dit == NULL) {
+				break;
+			}
 			std::string name(dit->d_name);
 			struct stat buf;
 			if (stat(joinPath(directory, name).c_str(), &buf)) {
@@ -2427,28 +2445,43 @@ std::vector<std::string> findFiles( std::string const& directory, std::string co
 				else
 					continue;
 			}
-			if ((*accept_file)(buf.st_mode, name, extension))
+
+			if ((directoryOnly && acceptDirectory(buf.st_mode, name, extension)) ||
+			    (!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
 				result.push_back( name );
+			}
+			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
+				wait( yield() );
+				tsc_begin = __rdtsc();
+			}
 		}
 
 		closedir(dip);
 	}
-#else
-	#error Port me!
-#endif
 	std::sort(result.begin(), result.end());
 	return result;
 }
 
+#else
+	#error Port me!
+#endif
 
 namespace platform {
 
 std::vector<std::string> listFiles( std::string const& directory, std::string const& extension ) {
-	return findFiles( directory, extension, &acceptFile );
+	return findFiles( directory, extension, false /* directoryOnly */, false ).get();
+}
+
+Future<vector<std::string>> listFilesAsync( std::string const& directory, std::string const& extension ) {
+	return findFiles( directory, extension, false /* directoryOnly */, true );
 }
 
 std::vector<std::string> listDirectories( std::string const& directory ) {
-	return findFiles( directory, "", &acceptDirectory );
+	return findFiles( directory, "", true /* directoryOnly */, false ).get();
+}
+
+Future<vector<std::string>> listDirectoriesAsync( std::string const& directory ) {
+	return findFiles( directory, "", true /* directoryOnly */, true );
 }
 
 void findFilesRecursively(std::string path, std::vector<std::string> &out) {
@@ -2465,8 +2498,23 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 	}
 }
 
-} // namespace platform
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string> *out) {
+	// Add files to output, prefixing path
+	state vector<std::string> files = wait(listFilesAsync(path, ""));
+	for(auto const &f : files)
+		out->push_back(joinPath(path, f));
 
+	// Recurse for directories
+	state vector<std::string> directories = wait(listDirectoriesAsync(path));
+	for(auto const &dir : directories) {
+		if(dir != "." && dir != "..")
+			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
+	}
+	return Void();
+}
+
+
+} // namespace platform
 
 void threadSleep( double seconds ) {
 #ifdef _WIN32
@@ -2952,12 +3000,14 @@ ImageInfo getImageInfo(const void *symbol) {
 #ifdef __linux__
 		imageInfo.offset = (void*)linkMap->l_addr;
 		if(imageFile.length() >= 3 && imageFile.rfind(".so") == imageFile.length()-3) {
+			imageInfo.symbolFileName = imageFile + "-debug";
+		}
 #else
 		imageInfo.offset = info.dli_fbase;
 		if(imageFile.length() >= 6 && imageFile.rfind(".dylib") == imageFile.length()-6) {
-#endif
 			imageInfo.symbolFileName = imageFile + "-debug";
 		}
+#endif
 		else {
 			imageInfo.symbolFileName = imageFile + ".debug";
 		}
@@ -3565,6 +3615,31 @@ int testPathFunction2(const char *name, std::function<std::string(std::string, b
 	return r ? 0 : 1;
 }
 
+#ifndef _WIN32
+void platformSpecificDirectoryOpsTests(const std::string &cwd, int &errors) {
+	// Create some symlinks and test resolution (or non-resolution) of them
+	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
+	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
+
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/two"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, true, platform_error());
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/three"));
+	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/four"));
+
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true, platform_error());
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/"));
+	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/"));
+}
+#else
+void platformSpecificDirectoryOpsTests(const std::string &cwd, int &errors) {
+}
+#endif
+
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;
 
@@ -3597,27 +3672,7 @@ TEST_CASE("/flow/Platform/directoryOps") {
 	// Creating this directory in backups avoids some sanity checks
 	platform::createDirectory("simfdb/backups/one/two/three");
 	std::string cwd = platform::getWorkingDirectory();
-
-#ifndef _WIN32
-	// Create some symlinks and test resolution (or non-resolution) of them
-	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
-	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
-
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/two"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, true, platform_error());
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/three"));
-	errors += testPathFunction2("abspath", abspath, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/four"));
-
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/four/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, true, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../two", true, false, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, true, platform_error());
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three", true, false, joinPath(cwd, "simfdb/backups/one/"));
-	errors += testPathFunction2("parentDirectory", parentDirectory, "simfdb/backups/five/../three/../four", true, false, joinPath(cwd, "simfdb/backups/one/"));
-#endif
-
+	platformSpecificDirectoryOpsTests(cwd, errors);
 	errors += testPathFunction2("abspath", abspath, "/", false, false, "/");
 	errors += testPathFunction2("abspath", abspath, "/foo//bar//baz/.././", false, false, "/foo/bar");
 	errors += testPathFunction2("abspath", abspath, "/", true, false, "/");

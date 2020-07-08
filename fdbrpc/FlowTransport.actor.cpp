@@ -1382,7 +1382,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	SendBuffer *checkbuf = pb;
 	while (checkbuf) {
 		int size = checkbuf->bytes_written;
-		const uint8_t* data = checkbuf->data;
+		const uint8_t* data = checkbuf->data();
 		VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
 		checkbuf = checkbuf -> next;
 	}

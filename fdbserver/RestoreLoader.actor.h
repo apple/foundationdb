@@ -77,6 +77,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 
 	LoaderVersionBatchState vbState;
 
+	long loadFileReqs;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;

@@ -1,5 +1,5 @@
 testTitle=StreamingWrite
-testName=BulkLoad
-testDuration=60
-valueBytes=1024
-actorCount=100
+    testName=BulkLoad
+    testDuration=60
+    valueBytes=1024
+    actorCount=100
