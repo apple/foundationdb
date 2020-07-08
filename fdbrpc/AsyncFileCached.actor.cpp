@@ -104,13 +104,13 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl( std::string filename, 
 		} else {
 			// TODO(sam): Will need a rename -- the 4k page cache can be 8k or 16 ;)
 			if (!pc4k.present()) {
-				int64_t pcsz = FLOW_KNOBS->SIM_PAGE_CACHE_4K;
+				int64_t pcsz = FLOW_KNOBS->PAGE_CACHE_4K;
 				switch (FLOW_KNOBS->STORAGE_PAGE_SIZE) {
 				case 8192:
-					pcsz = FLOW_KNOBS->SIM_PAGE_CACHE_8K;
+					pcsz = FLOW_KNOBS->PAGE_CACHE_8K;
 					break;
 				case 16384:
-					pcsz = FLOW_KNOBS->SIM_PAGE_CACHE_16K;
+					pcsz = FLOW_KNOBS->PAGE_CACHE_16K;
 					break;
 				}
 				pc4k = Reference<EvictablePageCache>(new EvictablePageCache(FLOW_KNOBS->STORAGE_PAGE_SIZE, pcsz));
