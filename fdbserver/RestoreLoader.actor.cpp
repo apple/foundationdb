@@ -626,9 +626,13 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	return Void();
 }
 
+// Splits a clear range mutation for Appliers and puts results of splitted mutations and
+// Applier IDs into "mvector" and "nodeIDs" on return.
 void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
                    VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) {
 	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m.toString());
+	ASSERT(mvector.empty());
+	ASSERT(nodeIDs.empty());
 	KeyRangeMap<UID> krMap;
 	std::map<Key, UID>::iterator beginKey = pRangeToApplier->begin();
 	std::map<Key, UID>::iterator endKey = std::next(beginKey, 1);
