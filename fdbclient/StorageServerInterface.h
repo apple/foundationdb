@@ -28,6 +28,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
 #include "flow/Stats.h"
+#include "flow/Util.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbclient/TagThrottle.h"
 
@@ -216,24 +217,6 @@ struct WatchValueRequest {
 	}
 };
 
-inline int longCommonPrefix(StringRef x, StringRef y) {
-	int end = std::min(x.size(), y.size());
-	int i = 0;
-	constexpr auto kStepSize = 16;
-	for (; i + kStepSize < end; i += kStepSize) {
-		// Hopefully it compiles to a double-width compare instruction
-		if (std::memcmp(x.begin() + i, y.begin() + i, kStepSize)) {
-			break;
-		}
-	}
-	for (; i < end; ++i) {
-		if (x[i] != y[i]) {
-			break;
-		}
-	}
-	return i;
-}
-
 struct SortedKeyValueVectorRef : VectorRef<KeyValueRef> {
 private:
 	friend struct dynamic_size_traits<SortedKeyValueVectorRef>;
@@ -247,14 +230,14 @@ struct dynamic_size_traits<SortedKeyValueVectorRef> : std::true_type {
 	static size_t size(const SortedKeyValueVectorRef& t, Context&) {
 		if (t.cachedSize.present()) return t.cachedSize.get();
 		if (t.size() == 0) return 0;
-		int commonPrefixLength = longCommonPrefix(t.front().key, t.back().key);
+		int prefixLength = commonPrefixLength(t.front().key, t.back().key);
 		size_t result = 0;
 		result += 4; // size
 		result += 4; // prefixLength
-		result += commonPrefixLength; // prefixBytes
+		result += prefixLength; // prefixBytes
 		for (const auto& [k, v] : t) {
 			result += 4; // suffixLength
-			result += k.size() - commonPrefixLength; // suffixBytes
+			result += k.size() - prefixLength; // suffixBytes
 			result += 4; // valueLength
 			result += v.size(); // valueBytes
 		}
@@ -280,13 +263,13 @@ public:
 		size_t finalSizeExpected = t.cachedSize.get();
 		uint8_t* begin = out;
 		t.cachedSize = Optional<size_t>();
-		int commonPrefixLength = longCommonPrefix(t.front().key, t.back().key);
+		int prefixLength = commonPrefixLength(t.front().key, t.back().key);
 		int numElements = t.size();
 		memcpy(out, &numElements, sizeof(numElements));
 		out += sizeof(numElements);
-		out = copyStringRef(out, StringRef(t.front().key.begin(), commonPrefixLength));
+		out = copyStringRef(out, StringRef(t.front().key.begin(), prefixLength));
 		for (const auto& [k, v] : t) {
-			out = copyStringRef(out, StringRef(k.begin() + commonPrefixLength, k.size() - commonPrefixLength));
+			out = copyStringRef(out, StringRef(k.begin() + prefixLength, k.size() - prefixLength));
 			out = copyStringRef(out, v);
 		}
 		ASSERT(out - begin == finalSizeExpected);
