@@ -2447,7 +2447,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 			}
 
 			if ((directoryOnly && acceptDirectory(buf.st_mode, name, extension)) ||
-				(!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
+			    (!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
 				result.push_back( name );
 			}
 			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
