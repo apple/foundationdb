@@ -137,10 +137,15 @@ struct TransactionOptions {
 	TagSet tags; // All tags set on transaction
 	TagSet readTags; // Tags that can be sent with read requests
 
+	// update clear function if you add a new field
+
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
 
 	void reset(Database const& cx);
+
+private:
+	void clear();
 };
 
 class ReadYourWritesTransaction; // workaround cyclic dependency
@@ -169,7 +174,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
-			ASSERT(!identifier.empty())
+			ASSERT(!identifier.empty());
 			event.logEvent(identifier, maxFieldLength);
 		}
 

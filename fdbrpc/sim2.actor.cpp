@@ -760,7 +760,9 @@ public:
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if(!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 && deterministicRandom()->random01() < 0.25) { //FIXME: why doesnt this work when we are changing machines?
+		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
+		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY*pow(deterministicRandom()->random01(),1000.0);
 		}
 
@@ -1668,10 +1670,6 @@ public:
 				killProcess(t.machine, KillInstantly);
 			}
 
-			//if( this->time > 45.522817 ) {
-			//	printf("foo\n");
-			//}
-
 			if (randLog)
 				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(deterministicRandom()->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
 		}
@@ -1735,7 +1733,16 @@ void startNewSimulator() {
 }
 
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
-	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
+	TraceEvent("RebootingProcessAttempt")
+	    .detail("ZoneId", p->locality.zoneId())
+	    .detail("KillType", kt)
+	    .detail("Process", p->toString())
+	    .detail("StartingClass", p->startingClass.toString())
+	    .detail("Failed", p->failed)
+	    .detail("Excluded", p->excluded)
+	    .detail("Cleared", p->cleared)
+	    .detail("Rebooting", p->rebooting)
+	    .detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
 	wait( g_sim2.delay( 0, TaskPriority::DefaultDelay, p ) ); // Switch to the machine in question
 
@@ -1749,7 +1756,16 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 		if( p->rebooting || !p->isReliable() )
 			return;
-		TraceEvent("RebootingProcess").detail("KillType", kt).detail("Address", p->address).detail("ZoneId", p->locality.zoneId()).detail("DataHall", p->locality.dataHallId()).detail("Locality", p->locality.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).backtrace();
+		TraceEvent("RebootingProcess")
+		    .detail("KillType", kt)
+		    .detail("Address", p->address)
+		    .detail("ZoneId", p->locality.zoneId())
+		    .detail("DataHall", p->locality.dataHallId())
+		    .detail("Locality", p->locality.toString())
+		    .detail("Failed", p->failed)
+		    .detail("Excluded", p->excluded)
+		    .detail("Cleared", p->cleared)
+		    .backtrace();
 		p->rebooting = true;
 		if ((kt == ISimulator::RebootAndDelete) || (kt == ISimulator::RebootProcessAndDelete)) {
 			p->cleared = true;

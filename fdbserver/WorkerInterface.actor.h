@@ -639,6 +639,11 @@ struct DebugEntryRef {
 	}
 };
 
+// TODO: This is necessary because IPAddress uses boost::variant
+// instead of std::variant. If we switch to std::variant, we don't
+// need to explicitly mark DebugEntryRef trivially destructible
+TRIVIALLY_DESTRUCTIBLE(DebugEntryRef); // Allows VectorRef<DebugEntryRef>
+
 struct DiskStoreRequest {
 	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;

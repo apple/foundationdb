@@ -2364,7 +2364,6 @@ void Watch::setWatch(Future<Void> watchFuture) {
 
 //FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, TransactionInfo info) {
-	cx->addWatch();
 	try {
 		choose {
 			// RYOW write to value that is being watched (if applicable)
@@ -2710,22 +2709,31 @@ TransactionOptions::TransactionOptions(Database const& cx) {
 	}
 }
 
-TransactionOptions::TransactionOptions() {
-	memset(this, 0, sizeof(*this));
+void TransactionOptions::clear() {
 	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
+	getReadVersionFlags = 0;
 	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-	tags = TagSet();
-	readTags = TagSet();
+	maxTransactionLoggingFieldLength = 0;
+	checkWritesEnabled = false;
+	causalWriteRisky = false;
+	commitOnFirstProxy = false;
+	debugDump = false;
+	lockAware = false;
+	readOnly = false;
+	firstInBatch = false;
+	includePort = false;
+	reportConflictingKeys = false;
+	tags = TagSet{};
+	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 }
 
+TransactionOptions::TransactionOptions() {
+	clear();
+}
+
 void TransactionOptions::reset(Database const& cx) {
-	memset(this, 0, sizeof(*this));
-	maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
-	sizeLimit = CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-	tags = TagSet();
-	readTags = TagSet();
-	priority = TransactionPriority::DEFAULT;
+	clear();
 	lockAware = cx->lockAware;
 	if (cx->apiVersionAtLeast(630)) {
 		includePort = true;
@@ -3682,8 +3690,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
+	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+		partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+		partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {

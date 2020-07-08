@@ -91,9 +91,13 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
+		DUMPTOKEN(recruited.updateRestoreSysInfo);
 		DUMPTOKEN(recruited.initVersionBatch);
 		DUMPTOKEN(recruited.loadFile);
 		DUMPTOKEN(recruited.sendMutations);
+		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.finishVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
@@ -105,6 +109,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface& recruited = self->applierInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
 		DUMPTOKEN(recruited.sendMutationVector);
 		DUMPTOKEN(recruited.applyToDB);
 		DUMPTOKEN(recruited.initVersionBatch);
@@ -249,7 +254,6 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 }
 
 ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
-	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 	state Optional<Value> numRequests;
 
@@ -263,10 +267,10 @@ ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID())
 			Optional<Value> _numRequests = wait(tr.get(restoreRequestTriggerKey));
 			numRequests = _numRequests;
 			if (!numRequests.present()) {
-				watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
+				state Future<Void> watchForRestoreRequest = tr.watch(restoreRequestTriggerKey);
 				wait(tr.commit());
 				TraceEvent(SevInfo, "FastRestoreWaitOnRestoreRequestTriggerKey", nodeID);
-				wait(watch4RestoreRequest);
+				wait(watchForRestoreRequest);
 				TraceEvent(SevInfo, "FastRestoreDetectRestoreRequestTriggerKeyChanged", nodeID);
 			} else {
 				TraceEvent(SevInfo, "FastRestoreRestoreRequestTriggerKey", nodeID)

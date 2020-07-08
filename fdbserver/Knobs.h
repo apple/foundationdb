@@ -493,8 +493,8 @@ public:
 	double DEGRADED_WARNING_RESET_DELAY;
 	int64_t TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS;
 	double TRACE_LOG_PING_TIMEOUT_SECONDS;
-	double MIN_DELAY_STORAGE_CANDIDACY_SECONDS;  // Listen for a leader for N seconds, and if not heard, then try to become the leader.
-	double MAX_DELAY_STORAGE_CANDIDACY_SECONDS;
+	double MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;  // Listen for a leader for N seconds, and if not heard, then try to become the leader.
+	double MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS;
 	double DBINFO_FAILED_DELAY;
 
 	// Test harness
@@ -558,9 +558,11 @@ public:
 	bool FASTRESTORE_REQBATCH_LOG; // verbose log information for getReplyBatches
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
+	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
+	int REDWOOD_COMMIT_CONCURRENT_READS;   // Max number of concurrent reads done to support commit operations
 	double REDWOOD_PAGE_REBUILD_FILL_FACTOR; // When rebuilding pages, start a new page after this capacity
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty

@@ -1411,13 +1411,13 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	rep.version = commitData->committedVersion.get();
 	rep.locked = commitData->locked;
 	rep.metadataVersion = commitData->metadataVersion;
-	rep.recentRequests = commitData->stats.getRecentRequests();
 
 	for (auto v : versions) {
 		if(v.version > rep.version) {
 			rep = v;
 		}
 	}
+	rep.recentRequests = commitData->stats.getRecentRequests();
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");

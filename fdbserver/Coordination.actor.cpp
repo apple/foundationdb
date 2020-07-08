@@ -216,10 +216,6 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
-	if(db->clientInfo->get().read().id != req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
-		req.reply.send( db->clientInfo->get() );
-		return Void();
-	}
 	++(*clientCount);
 	hasConnectedClients->set(true);
 	
@@ -248,11 +244,6 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 }
 
 ACTOR Future<Void> remoteMonitorLeader( int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ElectionResultRequest req ) {
-	if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
-		req.reply.send( currentElectedLeader->get() );
-		return Void();
-	}
-
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
@@ -294,16 +285,24 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
-			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+			if (clientData.clientInfo->get().read().id != req.knownClientInfoID && !clientData.clientInfo->get().read().forward.present()) {
+				req.reply.send(clientData.clientInfo->get());
+			} else {
+				if(!leaderMon.isValid()) {
+					leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+				}
+				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 			}
-			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 		}
 		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
-			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+			if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
+				req.reply.send(currentElectedLeader->get());
+			} else {
+				if(!leaderMon.isValid()) {
+					leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+				}
+				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
-			actors.add( remoteMonitorLeader( &clientCount, hasConnectedClients, currentElectedLeader, req ) );
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {

@@ -31,6 +31,8 @@ struct LowLatencyWorkload : TestWorkload {
 	double maxLatency;
 	double checkDelay;
 	PerfIntCounter operations, retries;
+	bool testWrites;
+	Key testKey;
 	bool ok;
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
@@ -39,6 +41,8 @@ struct LowLatencyWorkload : TestWorkload {
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
 		maxLatency = getOption( options, LiteralStringRef("maxLatency"), 20.0 );
 		checkDelay = getOption( options, LiteralStringRef("checkDelay"), 1.0 );
+		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
+		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
 	}
 
 	virtual std::string description() { return "LowLatency"; }
@@ -65,7 +69,13 @@ struct LowLatencyWorkload : TestWorkload {
 					try {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						wait(success(tr.getReadVersion()));
+						bool doSet = self->testWrites && deterministicRandom()->coinflip();
+						if (doSet) {
+							tr.set(self->testKey, LiteralStringRef(""));
+							wait(tr.commit());
+						} else {
+							wait(success(tr.getReadVersion()));
+						}
 						break;
 					} catch( Error &e ) {
 						wait( tr.onError(e) );

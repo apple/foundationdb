@@ -45,8 +45,6 @@
 // TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
-template<> inline Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
-template<> inline ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
 struct RestoreFileFR;
 

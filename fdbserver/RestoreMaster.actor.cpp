@@ -54,7 +54,7 @@ ACTOR static Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> maste
 ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterData,
                                                    KeyRangeMap<Version>* pRangeVersions);
 
-ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx);
+ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex);
 ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchData> batchData,
@@ -81,6 +81,7 @@ ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker,
 
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
+		actors.add(updateProcessMetrics(self));
 		actors.add(traceProcessMetrics(self, "RestoreMaster"));
 
 		wait(startProcessRestoreRequests(self, cx));
@@ -193,22 +194,32 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterD
 //    and ask all restore roles to quit.
 ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx) {
 	state UID randomUID = deterministicRandom()->randomUniqueID();
-	state Standalone<VectorRef<RestoreRequest>> restoreRequests = wait(collectRestoreRequests(cx));
+	state std::vector<RestoreRequest> restoreRequests = wait(collectRestoreRequests(cx));
 	state int restoreIndex = 0;
 
 	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id()).detail("RestoreRequests", restoreRequests.size());
 
-	// DB has been locked where restore request is submitted
-	wait(clearDB(cx));
+	// TODO: Sanity check restoreRequests' key ranges do not overlap
 
 	// Step: Perform the restore requests
 	try {
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
-			RestoreRequest& request = restoreRequests[restoreIndex];
+			state RestoreRequest request = restoreRequests[restoreIndex];
+			state KeyRange range = request.range.removePrefix(request.removePrefix).withPrefix(request.addPrefix);
 			TraceEvent("FastRestoreMasterProcessRestoreRequests", self->id())
-			    .detail("RestoreRequestInfo", request.toString());
+			    .detail("RestoreRequestInfo", request.toString())
+			    .detail("TransformedKeyRange", range);
 			// TODO: Initialize MasterData and all loaders and appliers' data for each restore request!
 			self->resetPerRestoreRequest();
+
+			// clear the key range that will be restored
+			wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->clear(range);
+				return Void();
+			}));
+
 			wait(success(processRestoreRequest(self, cx, request)));
 			wait(notifyRestoreCompleted(self, false));
 		}
@@ -340,6 +351,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	std::set<RestoreFileFR>* files = isRangeFile ? &versionBatch.rangeFiles : &versionBatch.logFiles;
 
 	TraceEvent("FastRestoreMasterPhaseLoadFilesStart")
+	    .detail("RestoreRequestID", request.randomUid)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FileTypeLoadedInVersionBatch", isRangeFile)
 	    .detail("BeginVersion", versionBatch.beginVersion)
@@ -380,6 +392,8 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.endVersion = (isRangeFile || request.targetVersion == -1)
 		                             ? versionBatch.endVersion
 		                             : std::min(versionBatch.endVersion, request.targetVersion + 1);
+		param.asset.addPrefix = request.addPrefix;
+		param.asset.removePrefix = request.removePrefix;
 
 		TraceEvent("FastRestoreMasterPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)
@@ -498,7 +512,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 	state Reference<MasterBatchStatus> batchStatus = self->batchStatus[batchIndex];
 	state double startTime = now();
 
-	TraceEvent("FastRestoreMasterDispatchVersionBatchesStart")
+	TraceEvent("FastRestoreMasterDispatchVersionBatchesStart", self->id())
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get());
@@ -549,7 +563,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 		self->checkMemory.trigger();
 	}
 
-	TraceEvent("FastRestoreMasterDispatchVersionBatchesDone")
+	TraceEvent("FastRestoreMasterDispatchVersionBatchesDone", self->id())
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get())
@@ -628,8 +642,8 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	batchData->samples.clear();
 }
 
-ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequests(Database cx) {
-	state Standalone<VectorRef<RestoreRequest>> restoreRequests;
+ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx) {
+	state std::vector<RestoreRequest> restoreRequests;
 	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 
@@ -637,7 +651,6 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 	loop {
 		try {
 			TraceEvent("FastRestoreMasterPhaseCollectRestoreRequestsWait");
-			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -650,7 +663,7 @@ ACTOR static Future<Standalone<VectorRef<RestoreRequest>>> collectRestoreRequest
 			ASSERT(!restoreRequestValues.more);
 			if (restoreRequestValues.size()) {
 				for (auto& it : restoreRequestValues) {
-					restoreRequests.push_back(restoreRequests.arena(), decodeRestoreRequestValue(it.value));
+					restoreRequests.push_back(decodeRestoreRequestValue(it.value));
 					TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
 					    .detail("RestoreRequest", restoreRequests.back().toString());
 				}
@@ -702,22 +715,22 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	std::set<RestoreFileFR> uniqueLogFiles;
 	*minRangeVersion = MAX_VERSION;
 	for (const RangeFile& f : restorable.get().ranges) {
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFile", f.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFile", f.toString());
 		if (f.fileSize <= 0) {
 			continue;
 		}
 		RestoreFileFR file(f);
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
 		uniqueRangeFiles.insert(file);
 		*minRangeVersion = std::min(*minRangeVersion, file.version);
 	}
 	for (const LogFile& f : restorable.get().logs) {
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("LogFile", f.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("LogFile", f.toString());
 		if (f.fileSize <= 0) {
 			continue;
 		}
 		RestoreFileFR file(f);
-		TraceEvent("FastRestoreMasterPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
 		logFiles->push_back(file);
 		uniqueLogFiles.insert(file);
 	}
@@ -944,7 +957,7 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-	wait(notifyRestoreCompleted(self, true));
+	wait(notifyRestoreCompleted(self, true)); // notify workers the restore has completed
 
 	wait(delay(5.0)); // Give some time for loaders and appliers to exit
 

@@ -955,7 +955,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
-	printf("  -p, --partitioned_log  Starts with new type of backup system using partitioned logs.\n");
+	printf("  --partitioned_log_experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
@@ -2224,7 +2224,8 @@ ACTOR Future<Void> runFastRestoreAgent(Database db, std::string tagName, std::st
 			    .detail("SubmitRestoreRequests", ranges.size())
 			    .detail("RestoreUID", randomUID);
 			wait(backupAgent.submitParallelRestore(db, KeyRef(tagName), ranges, KeyRef(container), dbVersion, true,
-			                                       randomUID));
+			                                       randomUID, LiteralStringRef(""), LiteralStringRef("")));
+			// TODO: Support addPrefix and removePrefix
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
 				TraceEvent("FastRestoreAgent").detail("BackupAndParallelRestore", "WaitForRestoreToFinish");
@@ -3734,7 +3735,7 @@ int main(int argc, char* argv[]) {
 				    f = stopAfter(
 				        map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
 					        printf("RESTORE_ABORT Tag: %s  State: %s\n", tagName.c_str(),
-					               FileBackupAgent::restoreStateText(s).toString().c_str());
+					               FileBackupAgent::restoreStateText(s).c_str());
 					        return Void();
 				        }));
 				    break;

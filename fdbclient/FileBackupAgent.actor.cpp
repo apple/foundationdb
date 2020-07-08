@@ -41,6 +41,9 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#define SevFRTestInfo SevVerbose
+//#define SevFRTestInfo SevInfo
+
 static std::string boolToYesOrNo(bool val) { return val ? std::string("Yes") : std::string("No"); }
 
 static std::string versionToString(Optional<Version> version) {
@@ -84,15 +87,22 @@ const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
-StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
+std::string FileBackupAgent::restoreStateText(ERestoreState id) {
 	switch(id) {
-		case ERestoreState::UNITIALIZED: return LiteralStringRef("unitialized");
-		case ERestoreState::QUEUED: return LiteralStringRef("queued");
-		case ERestoreState::STARTING: return LiteralStringRef("starting");
-		case ERestoreState::RUNNING: return LiteralStringRef("running");
-		case ERestoreState::COMPLETED: return LiteralStringRef("completed");
-		case ERestoreState::ABORTED: return LiteralStringRef("aborted");
-		default: return LiteralStringRef("Unknown");
+	case ERestoreState::UNITIALIZED:
+		return "unitialized";
+	case ERestoreState::QUEUED:
+		return "queued";
+	case ERestoreState::STARTING:
+		return "starting";
+	case ERestoreState::RUNNING:
+		return "running";
+	case ERestoreState::COMPLETED:
+		return "completed";
+	case ERestoreState::ABORTED:
+		return "aborted";
+	default:
+		return "Unknown";
 	}
 }
 
@@ -3578,58 +3588,56 @@ public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
-	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID) {
+	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true) {
 		state ReadYourWritesTransaction tr(cx);
-		state Future<Void> watchForRestoreRequestDone;
-		state bool restoreDone = false;
+		state Optional<Value> restoreRequestDoneKeyValue;
 		TraceEvent("FastRestoreAgentWaitForRestoreToFinish").detail("DBLock", randomUID);
+		// TODO: register watch first and then check if the key exist
 		loop {
 			try {
-				tr.reset();
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				Optional<Value> _restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				restoreRequestDoneKeyValue = _restoreRequestDoneKeyValue;
 				// Restore may finish before restoreAgent waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
-					restoreDone = true; // In case commit clears the key but in unknown_state
-					tr.clear(restoreRequestDoneKey);
-					wait(tr.commit());
 					break;
-				} else if (!restoreDone) {
-					watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
+				} else {
+					state Future<Void> watchForRestoreRequestDone = tr.watch(restoreRequestDoneKey);
 					wait(tr.commit());
 					wait(watchForRestoreRequestDone);
-				} else {
 					break;
 				}
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
-		try {
+
+		TraceEvent("FastRestoreAgentRestoreFinished")
+		    .detail("ClearRestoreRequestDoneKey", restoreRequestDoneKeyValue.present());
+		// Only this agent can clear the restoreRequestDoneKey
+		wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->clear(restoreRequestDoneKey);
+			return Void();
+		}));
+
+		if (unlockDB) {
+			TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBStart", randomUID);
 			wait(unlockDatabase(cx, randomUID));
-		} catch (Error& e) {
-			if (e.code() == error_code_operation_cancelled) { // Should only happen in simulation
-				TraceEvent(SevWarnAlways, "FastRestoreAgentOnCancelingActor")
-				    .detail("DBLock", randomUID)
-				    .detail("ManualCheck", "Is DB locked");
-			} else {
-				TraceEvent(SevError, "FastRestoreAgentUnlockDBFailed")
-				    .detail("DBLock", randomUID)
-				    .detail("ErrorCode", e.code())
-				    .detail("Error", e.what());
-				ASSERT_WE_THINK(false); // This unlockDatabase should always succeed, we think.
-			}
+			TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBFinish", randomUID);
+		} else {
+			TraceEvent("FastRestoreAgentRestoreFinished").detail("DBLeftLockedAfterRestore", randomUID);
 		}
-		TraceEvent("FastRestoreAgentRestoreFinished").detail("UnlockDBFinish", randomUID);
+
 		return Void();
 	}
 
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
-	                                                Version targetVersion, bool lockDB, UID randomUID) {
+	                                                Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
+	                                                Key removePrefix) {
 		// Sanity check backup is valid
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString());
 		state BackupDescription desc = wait(bc->describeBackup());
@@ -3663,26 +3671,24 @@ public:
 				if (lockDB) {
 					wait(lockDatabase(cx, randomUID));
 				}
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkDatabaseLock(tr, randomUID));
 
 				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				TraceEvent("FastRestoreAgentSubmitRestoreRequests").detail("CheckLockError", e.what());
-				TraceEvent(numTries > 50 ? SevError : SevWarnAlways, "FastRestoreMayFail")
+				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreAgentSubmitRestoreRequestsMayFail")
 				    .detail("Reason", "DB is not properly locked")
-				    .detail("ExpectedLockID", randomUID);
+				    .detail("ExpectedLockID", randomUID)
+				    .error(e);
 				numTries++;
-				wait(delay(5.0));
+				wait(tr->onError(e));
 			}
 		}
 
 		// set up restore request
+		tr->reset();
+		numTries = 0;
 		loop {
-			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
@@ -3692,7 +3698,8 @@ public:
 					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					// Register the request request in DB, which will be picked up by restore worker leader
 					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, targetVersion, range,
-					                                     deterministicRandom()->randomUniqueID());
+					                                     deterministicRandom()->randomUniqueID(), addPrefix,
+					                                     removePrefix);
 					tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
 				}
 				tr->set(restoreRequestTriggerKey,
@@ -3700,6 +3707,10 @@ public:
 				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
+				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreAgentSubmitRestoreRequestsRetry")
+				    .detail("RestoreIndex", restoreIndex)
+				    .error(e);
+				numTries++;
 				wait(tr->onError(e));
 			}
 		}
@@ -3964,7 +3975,7 @@ public:
 				if(!current.present()) {
 					if(verbose)
 						printf("waitRestore: Tag: %s  State: %s\n", tagName.toString().c_str(),
-						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
+						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).c_str());
 					return ERestoreState::UNITIALIZED;
 				}
 
@@ -4444,7 +4455,10 @@ public:
 		return r;
 	}
 
-	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
+	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig,
+	                                     Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                     bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix,
+	                                     Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup());
@@ -4598,9 +4612,16 @@ public:
 			TraceEvent("AtomicParallelRestoreStartRestore");
 			Version targetVersion = -1;
 			bool lockDB = true;
-			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid));
-			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish");
-			wait(parallelRestoreFinish(cx, randomUid));
+			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid,
+			                           addPrefix, removePrefix));
+			state bool hasPrefix = (addPrefix.size() > 0 || removePrefix.size() > 0);
+			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish").detail("HasPrefix", hasPrefix);
+			wait(parallelRestoreFinish(cx, randomUid, !hasPrefix));
+			// If addPrefix or removePrefix set, we want to transform the effect by copying data
+			if (hasPrefix) {
+				wait(transformRestoredDatabase(cx, ranges, addPrefix, removePrefix));
+				wait(unlockDatabase(cx, randomUid));
+			}
 			return -1;
 		} else {
 			TraceEvent("AS_StartRestore");
@@ -4625,15 +4646,16 @@ const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
-Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID) {
-	return FileBackupAgentImpl::parallelRestoreFinish(cx, randomUID);
+Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB) {
+	return FileBackupAgentImpl::parallelRestoreFinish(cx, randomUID, unlockDB);
 }
 
 Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
-                                                    Version targetVersion, bool lockDB, UID randomUID) {
+                                                    Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
+                                                    Key removePrefix) {
 	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB,
-	                                                  randomUID);
+	                                                  randomUID, addPrefix, removePrefix);
 }
 
 Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
@@ -4705,4 +4727,246 @@ Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool s
 
 Future<Void> FileBackupAgent::changePause(Database db, bool pause) {
 	return FileBackupAgentImpl::changePause(this, db, pause);
+}
+
+// Fast Restore addPrefix test helper functions
+static std::pair<bool, bool> insideValidRange(KeyValueRef kv, Standalone<VectorRef<KeyRangeRef>> restoreRanges,
+                                              Standalone<VectorRef<KeyRangeRef>> backupRanges) {
+	bool insideRestoreRange = false;
+	bool insideBackupRange = false;
+	for (auto& range : restoreRanges) {
+		TraceEvent(SevFRTestInfo, "InsideValidRestoreRange")
+		    .detail("Key", kv.key)
+		    .detail("Range", range)
+		    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
+		if (kv.key >= range.begin && kv.key < range.end) {
+			insideRestoreRange = true;
+			break;
+		}
+	}
+	for (auto& range : backupRanges) {
+		TraceEvent(SevFRTestInfo, "InsideValidBackupRange")
+		    .detail("Key", kv.key)
+		    .detail("Range", range)
+		    .detail("Inside", (kv.key >= range.begin && kv.key < range.end));
+		if (kv.key >= range.begin && kv.key < range.end) {
+			insideBackupRange = true;
+			break;
+		}
+	}
+	return std::make_pair(insideBackupRange, insideRestoreRange);
+}
+
+// Write [begin, end) in kvs to DB
+ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs, int begin, int end) {
+	wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		int index = begin;
+		while (index < end) {
+			TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKV")
+			    .detail("Index", index)
+			    .detail("KVs", kvs.size())
+			    .detail("Key", kvs[index].key)
+			    .detail("Value", kvs[index].value);
+			tr->set(kvs[index].key, kvs[index].value);
+			++index;
+		}
+		return Void();
+	}));
+
+	// Sanity check data has been written to DB
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			KeyRef k1 = kvs[begin].key;
+			KeyRef k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
+			TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVReadBack")
+			    .detail("Range", KeyRangeRef(k1, k2))
+			    .detail("Begin", begin)
+			    .detail("End", end);
+			Standalone<RangeResultRef> readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+			ASSERT(readKVs.size() > 0 || begin == end);
+			break;
+		} catch (Error& e) {
+			TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVDone").detail("Begin", begin).detail("End", end);
+
+	return Void();
+}
+
+// restoreRanges is the actual range that has applied removePrefix and addPrefix processed by restore system
+// Assume: restoreRanges do not overlap which is achieved by ensuring backup ranges do not overlap
+ACTOR static Future<Void> transformDatabaseContents(Database cx, Key addPrefix, Key removePrefix,
+                                                    Standalone<VectorRef<KeyRangeRef>> restoreRanges) {
+	state ReadYourWritesTransaction tr(cx);
+	state Standalone<VectorRef<KeyValueRef>> oldData;
+
+	TraceEvent("FastRestoreWorkloadTransformDatabaseContents")
+	    .detail("AddPrefix", addPrefix)
+	    .detail("RemovePrefix", removePrefix);
+	state int i = 0;
+	loop { // Read all data from DB
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			for (i = 0; i < restoreRanges.size(); ++i) {
+				Standalone<RangeResultRef> kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!kvs.more);
+				for (auto kv : kvs) {
+					oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
+				}
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent("FastRestoreWorkloadTransformDatabaseContentsGetAllKeys")
+			    .detail("Index", i)
+			    .detail("RestoreRange", restoreRanges[i])
+			    .error(e);
+			oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
+			wait(tr.onError(e));
+		}
+	}
+
+	// Convert data by removePrefix and addPrefix in memory
+	state Standalone<VectorRef<KeyValueRef>> newKVs;
+	for (int i = 0; i < oldData.size(); ++i) {
+		Key newKey(oldData[i].key);
+		TraceEvent(SevFRTestInfo, "TransformDatabaseContents")
+		    .detail("Keys", oldData.size())
+		    .detail("Index", i)
+		    .detail("GetKey", oldData[i].key)
+		    .detail("GetValue", oldData[i].value);
+		if (newKey.size() < removePrefix.size()) { // If true, must check why.
+			TraceEvent(SevError, "TransformDatabaseContents")
+			    .detail("Key", newKey)
+			    .detail("RemovePrefix", removePrefix);
+			continue;
+		}
+		newKey = newKey.removePrefix(removePrefix).withPrefix(addPrefix);
+		newKVs.push_back_deep(newKVs.arena(), KeyValueRef(newKey.contents(), oldData[i].value));
+		TraceEvent(SevFRTestInfo, "TransformDatabaseContents")
+		    .detail("Keys", newKVs.size())
+		    .detail("Index", i)
+		    .detail("NewKey", newKVs.back().key)
+		    .detail("NewValue", newKVs.back().value);
+	}
+
+	state Standalone<VectorRef<KeyRangeRef>> backupRanges; // dest. ranges
+	for (auto& range : restoreRanges) {
+		KeyRange tmpRange = range;
+		backupRanges.push_back_deep(backupRanges.arena(), tmpRange.removePrefix(removePrefix).withPrefix(addPrefix));
+	}
+
+	// Clear the transformed data (original data with removePrefix and addPrefix) in restoreRanges
+	wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		for (int i = 0; i < restoreRanges.size(); i++) {
+			TraceEvent(SevFRTestInfo, "TransformDatabaseContents")
+			    .detail("ClearRestoreRange", restoreRanges[i])
+			    .detail("ClearBackupRange", backupRanges[i]);
+			tr->clear(restoreRanges[i]); // Clear the range.removePrefix().withPrefix()
+			tr->clear(backupRanges[i]);
+		}
+		return Void();
+	}));
+
+	// Sanity check to ensure no data in the ranges
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			for (int i = 0; i < emptyData.size(); ++i) {
+				TraceEvent(SevError, "ExpectEmptyData")
+				    .detail("Index", i)
+				    .detail("Key", emptyData[i].key)
+				    .detail("Value", emptyData[i].value);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	// Write transformed KVs (i.e., kv backup took) back to DB
+	state std::vector<Future<Void>> fwrites;
+	loop {
+		try {
+			state int begin = 0;
+			state int len = 0;
+			while (begin < newKVs.size()) {
+				len = std::min(100, newKVs.size() - begin);
+				fwrites.push_back(writeKVs(cx, newKVs, begin, begin + len));
+				begin = begin + len;
+			}
+			wait(waitForAll(fwrites));
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevError, "FastRestoreWorkloadTransformDatabaseContentsUnexpectedErrorOnWriteKVs").error(e);
+			wait(tr.onError(e));
+		}
+	}
+
+	// Sanity check
+	tr.reset();
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
+			for (int i = 0; i < allData.size(); ++i) {
+				std::pair<bool, bool> backupRestoreValid = insideValidRange(allData[i], restoreRanges, backupRanges);
+				TraceEvent(backupRestoreValid.first ? SevFRTestInfo : SevError, "SanityCheckData")
+				    .detail("Index", i)
+				    .detail("Key", allData[i].key)
+				    .detail("Value", allData[i].value)
+				    .detail("InsideBackupRange", backupRestoreValid.first)
+				    .detail("InsideRestoreRange", backupRestoreValid.second);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
+	    .detail("AddPrefix", addPrefix)
+	    .detail("RemovePrefix", removePrefix);
+
+	return Void();
+}
+
+// addPrefix and removePrefix are the options used in the restore request:
+// every backup key applied removePrefix and addPrefix in restore;
+// transformRestoredDatabase actor will revert it by remove addPrefix and add removePrefix.
+ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                             Key addPrefix, Key removePrefix) {
+	try {
+		Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+		for (int i = 0; i < backupRanges.size(); ++i) {
+			KeyRange range(backupRanges[i]);
+			Key begin = range.begin.removePrefix(removePrefix).withPrefix(addPrefix);
+			Key end = range.end.removePrefix(removePrefix).withPrefix(addPrefix);
+			TraceEvent("FastRestoreTransformRestoredDatabase")
+			    .detail("From", KeyRangeRef(begin.contents(), end.contents()))
+			    .detail("To", range);
+			restoreRanges.push_back_deep(restoreRanges.arena(), KeyRangeRef(begin.contents(), end.contents()));
+		}
+		wait(transformDatabaseContents(cx, removePrefix, addPrefix, restoreRanges));
+	} catch (Error& e) {
+		TraceEvent(SevError, "FastRestoreTransformRestoredDatabaseUnexpectedError").error(e);
+		throw;
+	}
+
+	return Void();
 }
