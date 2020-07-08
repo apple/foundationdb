@@ -152,11 +152,13 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				std::string errorStr;
 				auto valueObj = readJSONStrictly(result[i].value.toString()).get_obj();
 				TEST(true); // data_distribution_stats schema validation
-				if (!schemaMatch(schema, valueObj, errorStr, SevError, true))
+				if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
 					TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
 					    .detail("ErrorStr", errorStr.c_str())
 					    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
-				totalBytes += valueObj["ShardBytes"].get_int64();
+					return false;
+				}
+				totalBytes += valueObj["shard_bytes"].get_int64();
 			}
 			self->avgBytes = totalBytes / self->numShards;
 			// fetch data-distribution stats for a smaller range
