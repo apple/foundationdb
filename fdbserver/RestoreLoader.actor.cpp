@@ -36,8 +36,8 @@
 typedef std::map<Standalone<StringRef>, std::pair<Standalone<StringRef>, uint32_t>> SerializedMutationListMap;
 
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier);
-void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
-                   VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
+void splitMutation(const KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector,
+                   Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
 void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
                               std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* mutationMap,
@@ -472,6 +472,19 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	return Void();
 }
 
+void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToApplier) {
+	std::map<Key, UID>::iterator beginKey = pRangeToApplier->begin();
+	std::map<Key, UID>::iterator endKey = std::next(beginKey, 1);
+	while (endKey != pRangeToApplier->end()) {
+		krMap->insert(KeyRangeRef(beginKey->first, endKey->first), beginKey->second);
+		beginKey = endKey;
+		endKey++;
+	}
+	if (beginKey != pRangeToApplier->end()) {
+		krMap->insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
+	}
+}
+
 // Assume: kvOps data are from the same RestoreAsset.
 // Input: pkvOps: versioned kv mutation for the asset in the version batch (batchIndex)
 //   isRangeFile: is pkvOps from range file? Let receiver (applier) know if the mutation is log mutation;
@@ -516,6 +529,8 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	for (auto& applierID : applierIDs) {
 		applierVersionedMutationsBuffer[applierID] = VersionedMutationsVec();
 	}
+	KeyRangeMap<UID> krMap;
+	buildApplierRangeMap(&krMap, pRangeToApplier);
 	for (kvOp = kvOps.begin(); kvOp != kvOps.end(); kvOp++) {
 		commitVersion = kvOp->first;
 		ASSERT(commitVersion.version >= asset.beginVersion);
@@ -528,8 +543,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 				Standalone<VectorRef<UID>> nodeIDs;
 				// Because using a vector of mutations causes overhead, and the range mutation should happen rarely;
 				// We handle the range mutation and key mutation differently for the benefit of avoiding memory copy
-				splitMutation(pRangeToApplier, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(),
-				              nodeIDs.contents());
+				splitMutation(krMap, kvm, mvector.arena(), mvector.contents(), nodeIDs.arena(), nodeIDs.contents());
 				ASSERT(mvector.size() == nodeIDs.size());
 
 				if (debugMutation("RestoreLoader", commitVersion.version, kvm)) {
@@ -628,22 +642,11 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 
 // Splits a clear range mutation for Appliers and puts results of splitted mutations and
 // Applier IDs into "mvector" and "nodeIDs" on return.
-void splitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
-                   VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) {
+void splitMutation(const KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector,
+                   Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) {
 	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m.toString());
 	ASSERT(mvector.empty());
 	ASSERT(nodeIDs.empty());
-	KeyRangeMap<UID> krMap;
-	std::map<Key, UID>::iterator beginKey = pRangeToApplier->begin();
-	std::map<Key, UID>::iterator endKey = std::next(beginKey, 1);
-	while (endKey != pRangeToApplier->end()) {
-		krMap.insert(KeyRangeRef(beginKey->first, endKey->first), beginKey->second);
-		beginKey = endKey;
-		endKey++;
-	}
-	if (beginKey != pRangeToApplier->end()) {
-		krMap.insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
-	}
 	auto r = krMap.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 	for (auto i = r.begin(); i != r.end(); ++i) {
 		// Calculate the overlap range
