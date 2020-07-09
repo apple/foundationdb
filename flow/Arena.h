@@ -1026,14 +1026,22 @@ public:
 		using pointer = value_type*;
 		using reference = value_type&;
 		friend class SmallVectorRef<T, InlineMembers>;
-		friend bool operator<(const self_t&, const self_t&);
-		friend bool operator>(const self_t&, const self_t&);
-		friend bool operator<=(const self_t&, const self_t&);
-		friend bool operator>=(const self_t&, const self_t&);
-		friend self_t operator+(const self_t&, difference_type);
+		template<bool I>
+		friend bool operator<(const   iterator_impl<I>&, const iterator_impl<I>&);
+		template<bool I>
+		friend bool operator>(const   iterator_impl<I>&, const iterator_impl<I>&);
+		template<bool I>
+		friend bool operator<=(const  iterator_impl<I>&, const iterator_impl<I>&);
+		template<bool I>
+		friend bool operator>=(const  iterator_impl<I>&, const iterator_impl<I>&);
+		template<bool I>
+		friend self_t operator+(const iterator_impl<I>&, difference_type);
+		template<bool I>
 		friend self_t operator+(difference_type, const self_t&);
-		friend self_t operator-(const self_t&, difference_type);
-		friend difference_type operator-(self_t, self_t);
+		template<bool I>
+		friend self_t operator-(const iterator_impl<I>&, difference_type);
+		template<bool I>
+		friend difference_type operator-(iterator_impl<I>, self_t);
 
 		self_t& operator++() {
 			++idx;
@@ -1081,7 +1089,7 @@ public:
 	using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
 public: // Construction
-	static_assert(trivially_destructible<T>::value);
+	static_assert(std::is_trivially_destructible_v<T>);
 	SmallVectorRef() {}
 	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
 	  : m_size(other.m_size), m_capacity(std::max(other.m_capacity, InlineMembers)), arr(other.arr), data(other.data) {}
