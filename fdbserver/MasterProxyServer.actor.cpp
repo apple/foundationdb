@@ -329,11 +329,11 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				if (req.priority >= TransactionPriority::IMMEDIATE) {
 					stats->txnSystemPriorityStartIn += req.transactionCount;
 					systemQueue->push_back(req);
-					systemQueue->span->parents.insert(req.spanContext);
+					systemQueue->span.addParent(req.spanContext);
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
-					defaultQueue->span->parents.insert(req.spanContext);
+					systemQueue->span.addParent(req.spanContext);
 				} else {
 					// Return error for batch_priority GRV requests
 					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
@@ -345,7 +345,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 
 					stats->txnBatchPriorityStartIn += req.transactionCount;
 					batchQueue->push_back(req);
-					batchQueue->span->parents.insert(req.spanContext);
+					batchQueue->span.addParent(req.spanContext);
 				}
 			}
 		}
@@ -515,7 +515,7 @@ struct ResolutionRequestBuilder {
 	                         Span& parentSpan)
 	  : self(self), requests(self->resolvers.size()) {
 		for (auto& req : requests) {
-			req.spanContext = parentSpan->context;
+			req.spanContext = parentSpan.context;
 			req.prevVersion = prevVersion;
 			req.version = version;
 			req.lastReceivedVersion = lastReceivedVersion;
@@ -822,7 +822,7 @@ ACTOR Future<Void> commitBatch(
 				debugID = nondeterministicRandom()->randomUniqueID();
 			g_traceBatch.addAttach("CommitAttachID", trs[t].debugID.get().first(), debugID.get().first());
 		}
-		span->parents.insert(trs[t].spanContext);
+		span.addParent(trs[t].spanContext);
 	}
 
 	if(localBatchNumber == 2 && !debugID.present() && self->firstProxy && !g_network->isSimulated()) {
@@ -843,7 +843,7 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GettingCommitVersion");
 
-	GetCommitVersionRequest req(span->context, self->commitVersionRequestNumber++, self->mostRecentProcessedRequestNumber, self->dbgid);
+	GetCommitVersionRequest req(span.context, self->commitVersionRequestNumber++, self->mostRecentProcessedRequestNumber, self->dbgid);
 	GetCommitVersionReply versionReply = wait( brokenPromiseToNever(self->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)) );
 	self->mostRecentProcessedRequestNumber = versionReply.requestNum;
 
@@ -1182,14 +1182,14 @@ ACTOR Future<Void> commitBatch(
 			// This should be *extremely* rare in the real world, but knob buggification should make it happen in simulation
 			TEST(true);  // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
-			waitVersionSpan = Span(deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, {span->context});
+			waitVersionSpan = Span(deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, {span.context});
 			choose{
 				when(wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
 					wait(yield());
 					break; 
 				}
 				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(
-				         GetReadVersionRequest(waitVersionSpan->context, 0, TransactionPriority::IMMEDIATE,
+				         GetReadVersionRequest(waitVersionSpan.context, 0, TransactionPriority::IMMEDIATE,
 				                               GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 					if (v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
@@ -1405,7 +1405,7 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID
 	return Void();
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(Span parentSpan, ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID,
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID,
                                                           int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
@@ -1418,10 +1418,10 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(Span parentSpan, Proxy
 	state Future<GetReadVersionReply> replyFromMasterFuture;
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
 		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(
-		    GetRawCommittedVersionRequest(span->context, debugID), TaskPriority::GetLiveCommittedVersionReply);
+		    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
 	} else {
 		for (auto const& p : *otherProxies)
-			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(span->context, debugID), TaskPriority::TLogConfirmRunningReply)));
+			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::TLogConfirmRunningReply)));
 	}
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
@@ -1583,16 +1583,14 @@ ACTOR static Future<Void> transactionStarter(
 			SpannedDeque<GetReadVersionRequest>* transactionQueue;
 			if(!systemQueue.empty()) {
 				transactionQueue = &systemQueue;
-				span = systemQueue.resetSpan();
 			} else if(!defaultQueue.empty()) {
 				transactionQueue = &defaultQueue;
-				span = defaultQueue.resetSpan();
 			} else if(!batchQueue.empty()) {
 				transactionQueue = &batchQueue;
-				span = batchQueue.resetSpan();
 			} else {
 				break;
 			}
+			transactionQueue->span.swap(span);
 
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
@@ -1655,7 +1653,7 @@ ACTOR static Future<Void> transactionStarter(
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(
-				    span, commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i],
+				    span.context, commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i],
 				    defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
 				                             commitData->minKnownCommittedVersion, throttledTags));
@@ -1666,7 +1664,7 @@ ACTOR static Future<Void> transactionStarter(
 				}
 			}
 		}
-		span.reset();
+		span = Span(span.location);
 	}
 }
 

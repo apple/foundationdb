@@ -20,6 +20,8 @@
 
 #ifndef FLOW_ARENA_H
 #define FLOW_ARENA_H
+#include <array>
+#include <iterator>
 #pragma once
 
 #include "flow/FastAlloc.h"
@@ -1010,7 +1012,7 @@ public:
 
 	void extendUnsafeNoReallocNoInit(int amount) { m_size += amount; }
 
-private:
+protected:
 	T* data;
 	int m_size, m_capacity;
 
@@ -1026,7 +1028,342 @@ private:
 	}
 };
 
-template<class T>
+// This is a VectorRef that optimizes for tiny to small sizes.
+// It keeps the first #InlineMembers on the stack - which means
+// that all of them are always copied. This should be faster
+// when you expect the vector to be usually very small as it
+// won't need allocations in these cases.
+template <class T, int InlineMembers = 1>
+class SmallVectorRef {
+public:
+	// types
+	template <bool isConst>
+	class iterator_impl {
+		using self_t = iterator_impl<isConst>;
+		using VecType = SmallVectorRef<T, InlineMembers>;
+		std::conditional_t<isConst, const VecType*, VecType*> vec = nullptr;
+		int idx = 0;
+
+	public:
+		using Category = std::random_access_iterator_tag;
+		using value_type = std::conditional_t<isConst, const T, T>;
+		using difference_type = int;
+		using pointer = value_type*;
+		using reference = value_type&;
+		friend class SmallVectorRef<T, InlineMembers>;
+		friend bool operator<(const self_t&, const self_t&);
+		friend bool operator>(const self_t&, const self_t&);
+		friend bool operator<=(const self_t&, const self_t&);
+		friend bool operator>=(const self_t&, const self_t&);
+		friend self_t operator+(const self_t&, difference_type);
+		friend self_t operator+(difference_type, const self_t&);
+		friend self_t operator-(const self_t&, difference_type);
+		friend difference_type operator-(self_t, self_t);
+
+		self_t& operator++() {
+			++idx;
+			return *this;
+		}
+		self_t operator++(int) {
+			auto res = *this;
+			++res;
+			return res;
+		}
+		self_t& operator--() {
+			--idx;
+			return *this;
+		}
+		self_t operator--(int) {
+			auto res = *this;
+			--res;
+			return res;
+		}
+		self_t& operator+=(difference_type diff) {
+			idx += diff;
+			return *this;
+		}
+		self_t& operator-=(difference_type diff) {
+			idx -= diff;
+			return *this;
+		}
+		bool operator!=(self_t const& o) const { return vec != o.vec || idx != o.idx; }
+		bool operator==(self_t const& o) const { return vec == o.vec && idx == o.idx; }
+		reference operator[](difference_type i) const { return get(idx + i); }
+		reference& get(int i) const {
+			if (i < InlineMembers) {
+				return vec->arr[i];
+			} else {
+				return vec->data[i];
+			}
+		}
+		reference get() const { return get(idx); }
+		reference operator*() const { return get(); }
+		pointer operator->() const { return &get(); }
+	};
+	using const_iterator = iterator_impl<true>;
+	using iterator = iterator_impl<false>;
+	using reverse_iterator = std::reverse_iterator<iterator>;
+	using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+public: // Construction
+	static_assert(trivially_destructible<T>::value);
+	SmallVectorRef() {}
+	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
+	  : m_size(other.m_size), m_capacity(other.m_capacity), arr(other.arr), data(other.data) {}
+	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
+		m_size = other.m_size;
+		m_capacity = other.m_capacity;
+		arr = other.arr;
+		data = other.data;
+		return *this;
+	}
+
+	template <class T2 = T, int IM = InlineMembers>
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T, IM>& toCopy,
+	               typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
+	  : m_size(toCopy.m_size), m_capacity(toCopy.m_capacity),
+	    data(toCopy.m_size <= InlineMembers ? nullptr
+	                                        : (T*)new (arena) uint8_t[sizeof(T) * (toCopy.m_size - InlineMembers)]) {
+		std::copy(toCopy.cbegin(), toCopy.cend(), begin());
+	}
+
+	template <class T2 = T, int IM = InlineMembers>
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T2, IM>& toCopy,
+	               typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
+	  : m_size(toCopy.m_size), m_capacity(toCopy.m_capacity),
+	    data(toCopy.m_size <= InlineMembers ? nullptr
+	                                        : (T*)new (arena) uint8_t[sizeof(T) * (toCopy.m_size - InlineMembers)]) {
+		for (int i = 0; i < toCopy.m_size; ++i) {
+			if (i < arr.size()) {
+				new (&arr[i]) T(arena, toCopy[i]);
+			} else {
+				new (&data[i - InlineMembers]) T(arena, toCopy[i]);
+			}
+		}
+		std::copy(toCopy.cbegin(), toCopy.cend(), begin());
+	}
+
+	template <class It>
+	SmallVectorRef(Arena& arena, It first, It last)
+	  : m_size(0), m_capacity(std::distance(first, last)),
+	    data(m_capacity <= InlineMembers ? nullptr
+	                                     : (T*)new (arena) uint8_t[sizeof(T) * (m_capacity - InlineMembers)]) {
+		while (first != last && m_size < InlineMembers) {
+			new (&arr[m_size++]) T(*(first++));
+		}
+		while (first != last) {
+			new (&arr[m_size++ - InlineMembers]) T(*(first++));
+		}
+	}
+
+	SmallVectorRef(SmallVectorRef<T, InlineMembers>&& o)
+	  : m_size(o.m_size), m_capacity(o.m_capacity), arr(std::move(o.arr)), data(o.data) {
+		o.m_size = 0;
+		o.m_capacity = InlineMembers;
+		o.data = nullptr;
+	}
+
+public: // information
+	int size() const { return m_size; }
+	int capacity() const { return m_capacity; }
+	bool empty() const { return m_size == 0; }
+
+public: // element access
+	T const& front() const { return *cbegin(); }
+	T const& back() const { return *crbegin(); }
+	T& front() { return *begin(); }
+	T& back() { return *rbegin(); }
+	T const& operator[](int i) const {
+		if (i < InlineMembers) {
+			return arr[i];
+		} else {
+			return data[i - InlineMembers];
+		}
+	}
+
+public: // Modification
+	void push_back(Arena& arena, T const& value) {
+		if (m_size < InlineMembers) {
+			new (&arr[m_size++]) T(value);
+			return;
+		}
+		if (m_size == m_capacity) {
+			reallocate(arena, m_capacity + 1);
+		}
+		new (&data[m_size++ - InlineMembers]) T(value);
+	}
+
+	void push_back_deep(Arena& arena, T const& value) {
+		if (m_size < InlineMembers) {
+			new (&arr[m_size++]) T(arena, value);
+			return;
+		}
+		if (m_size == m_capacity) {
+			reallocate(arena, m_capacity + 1);
+		}
+		new (&data[m_size++ - InlineMembers]) T(arena, value);
+	}
+
+	void pop_back() { --m_size; }
+
+	template <class It>
+	void append(Arena& arena, It first, It last) {
+		if (first == last) {
+			return;
+		}
+		auto d = std::distance(first, last);
+		if (m_size + d < m_capacity) {
+			reallocate(arena, m_capacity);
+		}
+		while (first != last && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(*(first++));
+		}
+		while (first != last) {
+			new (&data[m_size++ - InlineMembers]) T(*(first++));
+		}
+	}
+
+	template <class It>
+	void append_deep(Arena& arena, It first, It last) {
+		if (first == last) {
+			return;
+		}
+		auto d = std::distance(first, last);
+		if (m_size + d < m_capacity) {
+			reallocate(arena, m_capacity);
+		}
+		while (first != last && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(arena, *(first++));
+		}
+		while (first != last) {
+			new (&data[m_size++ - InlineMembers]) T(arena, *(first++));
+		}
+	}
+
+public: // iterator access
+	iterator begin() {
+		iterator res;
+		res.vec = this;
+		res.idx = 0;
+		return res;
+	}
+
+	const_iterator cbegin() const {
+		const_iterator res;
+		res.vec = this;
+		res.idx = 0;
+		return res;
+	}
+
+	const_iterator begin() const { return cbegin(); }
+
+	iterator end() {
+		iterator res;
+		res.vec = this;
+		res.idx = m_size;
+		return res;
+	}
+
+	const_iterator cend() const {
+		const_iterator res;
+		res.vec = this;
+		res.idx = m_size;
+		return res;
+	}
+
+	const_iterator end() const { return cend(); }
+
+	reverse_iterator rbegin() { return reverse_iterator(end()); }
+
+	const_reverse_iterator crbegin() const { return const_reverse_iterator(cend()); }
+
+	const_reverse_iterator rbegin() const { return crbegin(); }
+
+	reverse_iterator rend() { return reverse_iterator(begin()); }
+
+	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
+
+	const_reverse_iterator rend() const { return crend(); }
+
+private: // memory management
+	void reallocate(Arena& p, int requiredCapacity) {
+		requiredCapacity = std::max(m_capacity * 2, requiredCapacity);
+		// SOMEDAY: Maybe we are right at the end of the arena and can expand cheaply
+		T* newData = new (p) T[requiredCapacity - InlineMembers];
+		if (m_size > InlineMembers) {
+			std::move(data, data + m_size - InlineMembers, newData);
+		}
+		data = newData;
+		m_capacity = requiredCapacity;
+	}
+
+private:
+	int m_size = 0, m_capacity = InlineMembers;
+	std::array<T, InlineMembers> arr;
+	T* data = nullptr;
+};
+
+template <class T, int InlineMembers, bool isConst>
+bool operator<(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+               const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx < rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+bool operator>(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+               const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx > rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+bool operator<=(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+                const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx <= rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+bool operator>=(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+                const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx >= rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator+(
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter,
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff) {
+	auto res = iter;
+	res.idx += diff;
+	return res;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator+(
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff,
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter) {
+	auto res = iter;
+	res.idx += diff;
+	return res;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator-(
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter,
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff) {
+	auto res = iter;
+	res.idx -= diff;
+	return res;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator-(
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff,
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter) {
+	auto res = iter;
+	res.idx -= diff;
+	return res;
+}
+
+template <class T>
 struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 

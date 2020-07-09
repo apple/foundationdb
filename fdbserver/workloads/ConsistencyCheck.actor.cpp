@@ -386,7 +386,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				keyServerLocationFutures.push_back(
 				    proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations)
 				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span->context, begin, end, limitKeyServers, false, Arena()), 2, 0));
+				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()), 2, 0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {

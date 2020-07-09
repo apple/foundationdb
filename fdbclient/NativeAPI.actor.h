@@ -154,16 +154,15 @@ class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
-	Span span;
+	SpanID spanID;
 	bool useProvisionalProxies;
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
-	explicit TransactionInfo(TaskPriority taskID)
-	  : taskID(taskID), span(deterministicRandom()->randomUniqueID(), "Transaction"_loc), useProvisionalProxies(false) {
-	}
+	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
+	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -288,7 +287,9 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
+	Transaction()
+	  : info(TaskPriority::DefaultEndpoint, deterministicRandom()->randomUniqueID()),
+	    span(info.spanID, "Transaction"_loc) {}
 	void operator=(Transaction&& r) noexcept;
 
 	void reset();
@@ -314,6 +315,7 @@ public:
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 	TransactionOptions options;
+	Span span;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
 

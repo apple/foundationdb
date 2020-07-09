@@ -24,19 +24,19 @@ namespace {
 
 struct NoopTracer : ITracer {
 	TracerType type() const { return TracerType::DISABLED; }
-	void trace(SpanImpl* span) override { delete span; }
+	void trace(Span const& span) override {}
 };
 
 struct LogfileTracer : ITracer {
 	TracerType type() const { return TracerType::LOG_FILE; }
-	void trace(SpanImpl* span) override {
-		TraceEvent te(SevInfo, "TracingSpan", span->context);
-		te.detail("Location", span->location.name).detail("Begin", span->begin).detail("End", span->end);
-		if (span->parents.size() == 1) {
-			te.detail("Parent", *span->parents.begin());
+	void trace(Span const& span) override {
+		TraceEvent te(SevInfo, "TracingSpan", span.context);
+		te.detail("Location", span.location.name).detail("Begin", span.begin).detail("End", span.end);
+		if (span.parents.size() == 1) {
+			te.detail("Parent", *span.parents.begin());
 		} else {
-			for (auto parent : span->parents) {
-				TraceEvent(SevInfo, "TracingSpanAddParent", span->context).detail("AddParent", parent);
+			for (auto parent : span.parents) {
+				TraceEvent(SevInfo, "TracingSpanAddParent", span.context).detail("AddParent", parent);
 			}
 		}
 	}
@@ -63,20 +63,22 @@ void openTracer(TracerType type) {
 
 ITracer::~ITracer() {}
 
-SpanImpl::SpanImpl(UID context, Location location, std::unordered_set<UID> const& parents)
-  : context(context), location(location), parents(parents) {
-	begin = g_network->now();
-}
-
-SpanImpl::~SpanImpl() {}
-
-void SpanImpl::addref() {
-	++refCount;
-}
-
-void SpanImpl::delref() {
-	if (--refCount == 0) {
+Span& Span::operator=(Span&& o) {
+	if (begin > 0.0) {
 		end = g_network->now();
-		g_tracer->trace(this);
+		g_tracer->trace(*this);
+	}
+	arena = std::move(o.arena);
+	context = o.context;
+	begin = o.begin;
+	end = o.end;
+	location = o.location;
+	parents = std::move(o.parents);
+	return *this;
+}
+
+Span::~Span() {
+	if (begin > 0.0) {
+		g_tracer->trace(*this);
 	}
 }

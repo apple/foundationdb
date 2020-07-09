@@ -715,7 +715,7 @@ public:
 	}
 
 	template<class Request, class HandleFunction>
-	Future<Void> readGuard(const Span& parentSpan, const Request& request, const HandleFunction& fun) {
+	Future<Void> readGuard(const Request& request, const HandleFunction& fun) {
 		auto rate = currentRate();
 		if (rate < SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD && deterministicRandom()->random01() > std::max(SERVER_KNOBS->STORAGE_DURABILITY_LAG_MIN_RATE, rate/SERVER_KNOBS->STORAGE_DURABILITY_LAG_REJECT_THRESHOLD)) {
 			//request.error = future_version();
@@ -723,7 +723,7 @@ public:
 			++counters.readsRejected;
 			return Void();
 		}
-		return fun(this, request, parentSpan);
+		return fun(this, request);
 	}
 };
 
@@ -911,8 +911,9 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 	}
 }
 
-ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req, Span span ) {
+ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
+	Span span("SS:getValue"_loc, { req.spanContext });
 
 	try {
 		++data->counters.getValueQueries;
@@ -1013,7 +1014,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req, Span spa
 };
 
 ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, SpanID parent ) {
-	state Span span("SS:WatchValueImpl"_loc, { parent });
+	state Location spanLocation = "SS:WatchValueImpl"_loc;
+	state Span span(spanLocation, { parent });
 	try {
 		++data->counters.watchQueries;
 
@@ -1030,10 +1032,10 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, 
 			try {
 				state Version latest = data->version.get();
 				TEST(latest >= minVersion && latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
-				GetValueRequest getReq( span->context, req.key, latest, req.tags, req.debugID );
-				state Future<Void> getValue = getValueQ( data, getReq, span ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
+				GetValueRequest getReq( span.context, req.key, latest, req.tags, req.debugID );
+				state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
 				GetValueReply reply = wait( getReq.reply.getFuture() );
-				span.reset();
+				span = Span(spanLocation, parent);
 				//TraceEvent("WatcherCheckValue").detail("Key",  req.key  ).detail("Value",  req.value  ).detail("CurrentValue",  v  ).detail("Ver", latest);
 
 				if(reply.error.present()) {
@@ -1099,8 +1101,9 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, 
 	return Void();
 }
 
-ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req, Span span ) {
-	state Future<Void> watch = watchValue_impl( data, req, span->context );
+ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
+	state Span span("SS:watchValue"_loc, { req.spanContext });
+	state Future<Void> watch = watchValue_impl( data, req, span.context );
 	state double startTime = now();
 
 	loop {
@@ -1205,7 +1208,7 @@ void merge( Arena& arena, VectorRef<KeyValueRef, VecSerStrategy::String>& output
 
 // If limit>=0, it returns the first rows in the range (sorted ascending), otherwise the last rows (sorted descending).
 // readRange has O(|result|) + O(log |data|) cost
-ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version, KeyRange range, int limit, int* pLimitBytes, Span parentSpan ) {
+ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version, KeyRange range, int limit, int* pLimitBytes, SpanID parentSpan ) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
 	state StorageServer::VersionedData::iterator vCurrent = view.end();
@@ -1414,7 +1417,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 	state GetKeyValuesReply rep = wait(
 	    readRange(data, version,
 	              forward ? KeyRangeRef(sel.getKey(), range.end) : KeyRangeRef(range.begin, keyAfter(sel.getKey())),
-	              (distance + skipEqualKey) * sign, &maxBytes, span));
+	              (distance + skipEqualKey) * sign, &maxBytes, span.context));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
 	//If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in a loop
@@ -1422,7 +1425,7 @@ ACTOR Future<Key> findKey( StorageServer* data, KeySelectorRef sel, Version vers
 		TEST(true); //Reverse key selector returned only one result in range read
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 =
-		    wait(readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span));
+		    wait(readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes, span.context));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
 		ASSERT(rep.data.size() == 2 || !more);
@@ -1477,10 +1480,11 @@ KeyRange getShardKeyRange( StorageServer* data, const KeySelectorRef& sel )
 	return i->range();
 }
 
-ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req, Span span )
+ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
 // all data from being read in one range read
 {
+	state Span span("SS:getKeyValues"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
 
 	++data->counters.getRangeQueries;
@@ -1502,7 +1506,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req, 
 	try {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
-		state Version version = wait( waitForVersion( data, req.version, span->context ) );
+		state Version version = wait( waitForVersion( data, req.version, span.context ) );
 
 		state uint64_t changeCounter = data->shardChangeCounter;
 //		try {
@@ -1520,8 +1524,12 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req, 
 
 		state int offset1;
 		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual() ? Future<Key>(req.begin.getKey()) : findKey( data, req.begin, version, shard, &offset1, span->context );
-		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual() ? Future<Key>(req.end.getKey()) : findKey( data, req.end, version, shard, &offset2, span->context );
+		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
+		                               ? Future<Key>(req.begin.getKey())
+		                               : findKey(data, req.begin, version, shard, &offset1, span.context);
+		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
+		                             ? Future<Key>(req.end.getKey())
+		                             : findKey(data, req.end, version, shard, &offset2, span.context);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if( req.debugID.present() )
@@ -1555,7 +1563,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req, 
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
-			GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span) );
+			GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context) );
 			GetKeyValuesReply r = _r;
 
 			if( req.debugID.present() )
@@ -1617,7 +1625,8 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req, 
 	return Void();
 }
 
-ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req, Span span ) {
+ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
+	state Span span("SS:getKey"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
 
 	++data->counters.getKeyQueries;
@@ -3698,7 +3707,6 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetValueRequest> getValue ) {
 	loop {
 		GetValueRequest req = waitNext(getValue);
-		Span span("SS:getValue"_loc, { req.spanContext });
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
@@ -3706,35 +3714,32 @@ ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetV
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 			req.reply.send(GetValueReply());
 		else
-			self->actors.add(self->readGuard(span, req , getValueQ));
+			self->actors.add(self->readGuard(req , getValueQ));
 	}
 }
 
 ACTOR Future<Void> serveGetKeyValuesRequests( StorageServer* self, FutureStream<GetKeyValuesRequest> getKeyValues ) {
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
-		Span span("SS:getKeyValues"_loc, { req.spanContext });
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-		self->actors.add(self->readGuard(span, req, getKeyValuesQ));
+		self->actors.add(self->readGuard(req, getKeyValuesQ));
 	}
 }
 
 ACTOR Future<Void> serveGetKeyRequests( StorageServer* self, FutureStream<GetKeyRequest> getKey ) {
 	loop {
 		GetKeyRequest req = waitNext(getKey);
-		Span span("SS:getKey"_loc, { req.spanContext });
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade before doing real work
-		self->actors.add(self->readGuard(span, req , getKeyQ));
+		self->actors.add(self->readGuard(req , getKeyQ));
 	}
 }
 
 ACTOR Future<Void> serveWatchValueRequests( StorageServer* self, FutureStream<WatchValueRequest> watchValue ) {
 	loop {
 		WatchValueRequest req = waitNext(watchValue);
-		Span span("SS:watchValue"_loc, { req.spanContext });
 		// TODO: fast load balancing?
 		// SOMEDAY: combine watches for the same key/value into a single watch
-		self->actors.add(self->readGuard(span, req, watchValueQ));
+		self->actors.add(self->readGuard(req, watchValueQ));
 	}
 }
 

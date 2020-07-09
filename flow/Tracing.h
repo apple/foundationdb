@@ -33,50 +33,44 @@ inline Location operator"" _loc(const char* str, size_t size) {
 	return Location{ StringRef(reinterpret_cast<const uint8_t*>(str), size) };
 }
 
-struct SpanImpl {
-	explicit SpanImpl(UID contex, Location location,
-	                  std::unordered_set<UID> const& parents = std::unordered_set<UID>());
-	SpanImpl(const SpanImpl&) = delete;
-	SpanImpl(SpanImpl&&) = delete;
-	SpanImpl& operator=(const SpanImpl&) = delete;
-	SpanImpl& operator=(SpanImpl&&) = delete;
-	void addref();
-	void delref();
-
-	~SpanImpl();
-	UID context;
-	double begin, end;
-	Location location;
-	std::unordered_set<UID> parents;
-
-private:
-	std::atomic<unsigned> refCount = 1;
-};
-
-class Span {
-	Reference<SpanImpl> impl;
-
-public:
-	Span(UID context, Location location, std::unordered_set<UID> const& parents = std::unordered_set<UID>())
-	  : impl(new SpanImpl(context, location, parents)) {}
-	Span(Location location, std::unordered_set<UID> const& parents = std::unordered_set<UID>())
-	  : impl(new SpanImpl(deterministicRandom()->randomUniqueID(), location, parents)) {}
-	Span(Location location, Span const& parent)
-	  : impl(new SpanImpl(deterministicRandom()->randomUniqueID(), location, { parent->context })) {}
-	Span(Location location, std::initializer_list<Span> const& parents)
-	  : impl(new SpanImpl(deterministicRandom()->randomUniqueID(), location)) {
-		for (const auto& parent : parents) {
-			impl->parents.insert(parent->context);
-		}
+struct Span {
+	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
+	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {}
+	Span(Location location, std::initializer_list<SpanID> const& parents = {})
+	  : Span(deterministicRandom()->randomUniqueID(), location, parents) {}
+	Span(Location location, SpanID context) : Span(location, { context }) {}
+	Span(const Span&) = delete;
+	Span(Span&& o) {
+		arena = std::move(o.arena);
+		context = o.context;
+		begin = o.begin;
+		end = o.end;
+		location = o.location;
+		parents = std::move(o.parents);
+		o.context = UID();
+		o.begin = 0.0;
+		o.end = 0.0;
 	}
-	Span(const Span&) = default;
-	Span(Span&&) = default;
 	Span() {}
-	Span& operator=(Span&&) = default;
-	Span& operator=(const Span&) = default;
-	SpanImpl* operator->() const { return impl.getPtr(); }
-	SpanImpl& operator*() const { return *impl; }
-	void reset() { impl.clear(); }
+	~Span();
+	Span& operator=(Span&& o);
+	Span& operator=(const Span&) = delete;
+	void swap(Span& other) {
+		std::swap(arena, other.arena);
+		std::swap(context, other.context);
+		std::swap(begin, other.begin);
+		std::swap(end, other.end);
+		std::swap(location, other.location);
+		std::swap(parents, other.parents);
+	}
+
+	void addParent(SpanID span) { parents.push_back(arena, span); }
+
+	Arena arena;
+	UID context = UID();
+	double begin = 0.0, end = 0.0;
+	Location location;
+	SmallVectorRef<SpanID> parents;
 };
 
 enum class TracerType { DISABLED, LOG_FILE };
@@ -85,7 +79,7 @@ struct ITracer {
 	virtual ~ITracer();
 	virtual TracerType type() const = 0;
 	// passed ownership to the tracer
-	virtual void trace(SpanImpl* span) = 0;
+	virtual void trace(Span const& span) = 0;
 };
 
 void openTracer(TracerType type);
@@ -94,21 +88,11 @@ template <class T>
 struct SpannedDeque : Deque<T> {
 	Span span;
 	explicit SpannedDeque(Location loc) : span(deterministicRandom()->randomUniqueID(), loc) {}
-	explicit SpannedDeque(Span span) : span(span) {}
 	SpannedDeque(SpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
-	SpannedDeque(SpannedDeque const& other) : Deque<T>(other), span(other.span) {}
-	SpannedDeque& operator=(SpannedDeque const& other) {
-		*static_cast<Deque<T>*>(this) = other;
-		span = other.span;
-		return *this;
-	}
+	SpannedDeque(SpannedDeque const&) = delete;
+	SpannedDeque& operator=(SpannedDeque const&) = delete;
 	SpannedDeque& operator=(SpannedDeque&& other) {
 		*static_cast<Deque<T>*>(this) = std::move(other);
 		span = std::move(other.span);
-	}
-	Span resetSpan() {
-		auto res = span;
-		span = Span(span->location);
-		return res;
 	}
 };
