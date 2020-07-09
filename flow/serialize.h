@@ -286,7 +286,12 @@ struct _IncludeVersion {
 			TraceEvent(SevWarnAlways, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
 		}
-		// TODO: Add the add maximum readable version.
+		if (v >= minInvalidProtocolVersion) {
+			// Downgrades are only supported for one minor version
+			auto err = incompatible_protocol_version();
+			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
+			throw err;
+		}
 		ar.setProtocolVersion(v);
 	}
 };
