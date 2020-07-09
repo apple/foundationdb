@@ -572,8 +572,8 @@ namespace fileBackup {
 
 		// Functions for consuming big endian (network byte order) integers.
 		// Consumes a big endian number, swaps it to little endian, and returns it.
-		const int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
-		const uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
+		int32_t  consumeNetworkInt32()  { return (int32_t)bigEndian32((uint32_t)consume< int32_t>());}
+		uint32_t consumeNetworkUInt32() { return          bigEndian32(          consume<uint32_t>());}
 
 		bool eof() { return rptr == end; }
 
