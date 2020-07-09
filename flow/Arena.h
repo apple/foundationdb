@@ -1109,7 +1109,7 @@ public: // Construction
 	static_assert(trivially_destructible<T>::value);
 	SmallVectorRef() {}
 	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
-	  : m_size(other.m_size), m_capacity(other.m_capacity), arr(other.arr), data(other.data) {}
+	  : m_size(other.m_size), m_capacity(std::max(other.m_capacity, InlineMembers)), arr(other.arr), data(other.data) {}
 	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
 		m_size = other.m_size;
 		m_capacity = other.m_capacity;
@@ -1121,7 +1121,7 @@ public: // Construction
 	template <class T2 = T, int IM = InlineMembers>
 	SmallVectorRef(Arena& arena, const SmallVectorRef<T, IM>& toCopy,
 	               typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
-	  : m_size(toCopy.m_size), m_capacity(toCopy.m_capacity),
+	  : m_size(toCopy.m_size), m_capacity(std::max(InlineMembers, toCopy.m_capacity)),
 	    data(toCopy.m_size <= InlineMembers ? nullptr
 	                                        : (T*)new (arena) uint8_t[sizeof(T) * (toCopy.m_size - InlineMembers)]) {
 		std::copy(toCopy.cbegin(), toCopy.cend(), begin());
@@ -1130,7 +1130,7 @@ public: // Construction
 	template <class T2 = T, int IM = InlineMembers>
 	SmallVectorRef(Arena& arena, const SmallVectorRef<T2, IM>& toCopy,
 	               typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
-	  : m_size(toCopy.m_size), m_capacity(toCopy.m_capacity),
+	  : m_size(toCopy.m_size), m_capacity(std::max(toCopy.m_capacity, InlineMembers)),
 	    data(toCopy.m_size <= InlineMembers ? nullptr
 	                                        : (T*)new (arena) uint8_t[sizeof(T) * (toCopy.m_size - InlineMembers)]) {
 		for (int i = 0; i < toCopy.m_size; ++i) {
@@ -1145,7 +1145,7 @@ public: // Construction
 
 	template <class It>
 	SmallVectorRef(Arena& arena, It first, It last)
-	  : m_size(0), m_capacity(std::distance(first, last)),
+	  : m_size(0), m_capacity(std::max(int(std::distance(first, last)), InlineMembers)),
 	    data(m_capacity <= InlineMembers ? nullptr
 	                                     : (T*)new (arena) uint8_t[sizeof(T) * (m_capacity - InlineMembers)]) {
 		while (first != last && m_size < InlineMembers) {
@@ -1183,6 +1183,7 @@ public: // element access
 
 public: // Modification
 	void push_back(Arena& arena, T const& value) {
+		UNSTOPPABLE_ASSERT(m_capacity >= m_size && m_capacity >= InlineMembers);
 		if (m_size < InlineMembers) {
 			new (&arr[m_size++]) T(value);
 			return;
