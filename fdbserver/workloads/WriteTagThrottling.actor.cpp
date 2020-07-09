@@ -35,8 +35,8 @@ constexpr int SAMPLE_SIZE = 10000;
 // more load to the cluster (Maybe some visualization tools is needed to show the trend of metrics)
 struct WriteTagThrottlingWorkload : KVWorkload {
 	// Performance metrics
-	int goodActorTxNum = 0, goodActorRetries = 0, goodActorTooOldRetries = 0, goodActorCommitFailedRetries = 0;
-	int badActorTxNum = 0, badActorRetries = 0, badActorTooOldRetries = 0, badActorCommitFailedRetries = 0;
+	int goodActorTrNum = 0, goodActorRetries = 0, goodActorTooOldRetries = 0, goodActorCommitFailedRetries = 0;
+	int badActorTrNum = 0, badActorRetries = 0, badActorTooOldRetries = 0, badActorCommitFailedRetries = 0;
 	int goodActorThrottleRetries = 0, badActorThrottleRetries = 0;
 	double badActorTotalLatency = 0.0, goodActorTotalLatency = 0.0;
 	ContinuousSample<double> badActorReadLatency, goodActorReadLatency;
@@ -44,7 +44,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	// Test configuration
 	// KVWorkload::actorCount
 	int goodActorPerClient, badActorPerClient;
-	int numWritePerTx, numReadPerTx, numClearPerTx;
+	int numWritePerTr, numReadPerTr, numClearPerTr;
 	int keyCount, hotKeyCount;
 	int sampleSize;
 	double badOpRate;
@@ -53,7 +53,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	bool writeThrottle;
 
 	// internal states
-	double txInterval;
+	double trInterval;
 	TransactionTag badReadTag, badWriteTag, goodTag;
 	static constexpr const char* NAME = "WriteTagThrottling";
 
@@ -64,9 +64,9 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		throttleDuration = getOption(options, LiteralStringRef("throttleDuration"), testDuration + 120.0);
 		badOpRate = getOption(options, LiteralStringRef("badOpRate"), 0.9);
 		tpsRate = getOption(options, LiteralStringRef("tpsRate"), 300.0);
-		numWritePerTx = getOption(options, LiteralStringRef("numWritePerTx"), 1);
-		numReadPerTx = getOption(options, LiteralStringRef("numReadPerTx"), 1);
-		numClearPerTx = getOption(options, LiteralStringRef("numClearPerTx"), 1);
+		numWritePerTr = getOption(options, LiteralStringRef("numWritePerTr"), 1);
+		numReadPerTr = getOption(options, LiteralStringRef("numReadPerTr"), 1);
+		numClearPerTr = getOption(options, LiteralStringRef("numClearPerTr"), 1);
 
 		writeThrottle = getOption(options, LiteralStringRef("writeThrottle"), false);
 		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
@@ -75,7 +75,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 
 		keyCount = getOption(options, LiteralStringRef("keyCount"),
 		                     std::max(3000, actorCount * 3)); // enough keys to avoid too many conflicts
-		txInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("txPerSecond"), 1000);
+		trInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("trPerSecond"), 1000);
 
 		badReadTag = TransactionTag(std::string("badReadTag"));
 		badWriteTag = TransactionTag(std::string("badWriteTag"));
@@ -118,19 +118,30 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 	virtual Future<bool> check(Database const& cx) {
-		if (badActorTxNum == 0 && goodActorTxNum == 0) {
+		if (badActorTrNum == 0 && goodActorTrNum == 0) {
 			TraceEvent(SevError, "NoTransactionsCommitted");
 			return false;
 		}
-		// TODO check whether write throttling work correctly after enabling that feature
-		// NOTE also do eyeball check of Retries.throttle and Avg Latency
+		if (writeThrottle) {
+			if (!badActorThrottleRetries) {
+				TraceEvent(SevError, "NoThrottleTriggered");
+				return false;
+			}
+			if (badActorThrottleRetries < goodActorThrottleRetries) {
+				TraceEvent(SevError, "IncorrectThrottle");
+				return false;
+			}
+			// TODO check whether write throttled tag is correct after enabling that feature
+			// NOTE also do eyeball check of Retries.throttle and Avg Latency
+		}
+
 		return true;
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) {
-		m.push_back(PerfMetric("Transactions (badActor)", badActorTxNum, false));
-		m.push_back(PerfMetric("Transactions (goodActor)", goodActorTxNum, false));
-		m.push_back(PerfMetric("Avg Latency (ms, badActor)", 1000 * badActorTotalLatency / badActorTxNum, true));
-		m.push_back(PerfMetric("Avg Latency (ms, goodActor)", 1000 * goodActorTotalLatency / goodActorTxNum, true));
+		m.push_back(PerfMetric("Transactions (badActor)", badActorTrNum, false));
+		m.push_back(PerfMetric("Transactions (goodActor)", goodActorTrNum, false));
+		m.push_back(PerfMetric("Avg Latency (ms, badActor)", 1000 * badActorTotalLatency / badActorTrNum, true));
+		m.push_back(PerfMetric("Avg Latency (ms, goodActor)", 1000 * goodActorTotalLatency / goodActorTrNum, true));
 
 		m.push_back(PerfMetric("Retries (badActor)", badActorRetries, false));
 		m.push_back(PerfMetric("Retries (goodActor)", goodActorRetries, false));
@@ -196,43 +207,43 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		state StringRef key;
 		try {
 			loop {
-				wait(poisson(&lastTime, self->txInterval));
-				state double txStart;
-				state Transaction tx(cx);
+				wait(poisson(&lastTime, self->trInterval));
+				state double trStart;
+				state Transaction tr(cx);
 				state int i;
 				// give tag to client
 				if (self->writeThrottle) {
 					if (isBadActor) {
-						tx.options.tags.addTag(self->badWriteTag);
-						tx.options.tags.addTag(self->badReadTag);
+						tr.options.tags.addTag(self->badWriteTag);
+						tr.options.tags.addTag(self->badReadTag);
 					} else if (deterministicRandom()->coinflip()) {
-						tx.options.tags.addTag(self->goodTag);
+						tr.options.tags.addTag(self->goodTag);
 					}
 				}
-				txStart = now();
+				trStart = now();
 				while (true) {
 					try {
-						for (i = 0; i < self->numClearPerTx; ++i) {
+						for (i = 0; i < self->numClearPerTr; ++i) {
 							bool useClearKey = deterministicRandom()->random01() < badOpRate;
-							tx.clear(self->generateRange(useClearKey, actorId));
+							tr.clear(self->generateRange(useClearKey, actorId));
 						}
-						for (i = 0; i < self->numWritePerTx; ++i) {
+						for (i = 0; i < self->numWritePerTr; ++i) {
 							bool useReadKey = deterministicRandom()->random01() < badOpRate;
 							key = self->generateKey(useReadKey, actorId + self->keyCount / 3);
-							tx.set(key, self->generateVal());
+							tr.set(key, self->generateVal());
 						}
-						for (i = 0; i < self->numReadPerTx; ++i) {
+						for (i = 0; i < self->numReadPerTr; ++i) {
 							bool useReadKey = deterministicRandom()->random01() < badOpRate;
 							ASSERT(self->keyCount >= actorId);
 							key = self->generateKey(useReadKey, self->keyCount - actorId);
 							opStart = now();
-							Optional<Value> v = wait(tx.get(key));
+							Optional<Value> v = wait(tr.get(key));
 							double duration = now() - opStart;
 							isBadActor ? self->badActorReadLatency.addSample(duration)
 							           : self->goodActorReadLatency.addSample(duration);
 						}
 						opStart = now();
-						wait(tx.commit());
+						wait(tr.commit());
 						double duration = now() - opStart;
 						isBadActor ? self->badActorCommitLatency.addSample(duration)
 						           : self->goodActorCommitLatency.addSample(duration);
@@ -245,16 +256,16 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 						} else if (e.code() == error_code_tag_throttled) {
 							isBadActor ? ++self->badActorThrottleRetries : ++self->goodActorThrottleRetries;
 						}
-						wait(tx.onError(e));
+						wait(tr.onError(e));
 					}
 					isBadActor ? ++self->badActorRetries : ++self->goodActorRetries;
 				}
-				double duration = now() - txStart;
+				double duration = now() - trStart;
 				if (isBadActor) {
-					++self->badActorTxNum;
+					++self->badActorTrNum;
 					self->badActorTotalLatency += duration;
 				} else {
-					++self->goodActorTxNum;
+					++self->goodActorTrNum;
 					self->goodActorTotalLatency += duration;
 				}
 			}
