@@ -38,7 +38,6 @@
     <ClCompile Include="IndexedSet.cpp" />
     <ClCompile Include="Knobs.cpp" />
     <ClCompile Include="Net2Packet.cpp" />
-    <ActorCompiler Include="Stats.actor.cpp" />
     <ClCompile Include="SystemMonitor.cpp" />
     <ClCompile Include="TDMetric.cpp" />
     <ClCompile Include="ThreadHelper.cpp" />
@@ -88,7 +87,6 @@
     <ClInclude Include="serialize.h" />
     <ClInclude Include="SimpleOpt.h" />
     <ClInclude Include="stacktrace.h" />
-    <ClInclude Include="Stats.h" />
     <ClInclude Include="SystemMonitor.h" />
     <ClInclude Include="ThreadPrimitives.h" />
     <ClInclude Include="Platform.h" />
