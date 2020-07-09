@@ -1435,10 +1435,6 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 	return peer;
 }
 
-int FlowTransport::getEndpointCount() {
-	return -1;
-}
-
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
 }

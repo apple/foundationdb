@@ -23,6 +23,7 @@
 
 #ifndef FDBSERVER_RESTOREUTIL_H
 #define FDBSERVER_RESTOREUTIL_H
+
 #pragma once
 
 #include "fdbclient/Tuple.h"
@@ -37,6 +38,9 @@
 
 #define SevFRMutationInfo SevVerbose
 //#define SevFRMutationInfo SevInfo
+
+#define SevFRDebugInfo SevVerbose
+//#define SevFRDebugInfo SevInfo
 
 struct VersionedMutation {
 	MutationRef mutation;
@@ -109,4 +113,4 @@ struct RestoreSimpleRequest : TimedRequest {
 
 bool isRangeMutation(MutationRef m);
 
-#endif // FDBSERVER_RESTOREUTIL_ACTOR_H
+#endif // FDBSERVER_RESTOREUTIL_H
