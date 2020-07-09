@@ -78,7 +78,7 @@ inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
 
 template <class Archive, class Item>
 inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
-	load(ar, item);
+	ar.deserialize(item);
 	return ar;
 }
 
@@ -286,14 +286,7 @@ struct _IncludeVersion {
 			TraceEvent(SevWarnAlways, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
 		}
-		if (v > currentProtocolVersion) {
-			// For now, no forward compatibility whatsoever is supported.  In the future, this check may be weakened for
-			// particular data structures (e.g. to support mismatches between client and server versions when the client
-			// must deserialize zookeeper and database structures)
-			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
-			throw err;
-		}
+		// TODO: Add the add maximum readable version.
 		ar.setProtocolVersion(v);
 	}
 };
@@ -568,10 +561,10 @@ public:
 		check = nullptr;
 	}
 
+protected:
 	_Reader(const char* begin, const char* end) : begin(begin), end(end) {}
 	_Reader(const char* begin, const char* end, const Arena& arena) : begin(begin), end(end), m_pool(arena) {}
 
-protected:
 	const char *begin, *end;
 	const char* check = nullptr;
 	Arena m_pool;
@@ -579,6 +572,8 @@ protected:
 };
 
 class ArenaReader : public _Reader<ArenaReader> {
+	Optional<ArenaObjectReader> arenaObjectReader;
+
 public:
 	const void* readBytes( int bytes ) {
 		const char* b = begin;
@@ -600,11 +595,27 @@ public:
 	ArenaReader(Arena const& arena, const StringRef& input, VersionOptions vo)
 	  : _Reader(reinterpret_cast<const char*>(input.begin()), reinterpret_cast<const char*>(input.end()), arena) {
 		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			arenaObjectReader = ArenaObjectReader(arena, input, vo);
+		}
+	}
+
+	template <class T>
+	void deserialize(T& t) {
+		if constexpr (HasFileIdentifier<T>::value) {
+			if (arenaObjectReader.present()) {
+				arenaObjectReader.get().deserialize(t);
+			} else {
+				load(*this, t);
+			}
+		} else {
+			load(*this, t);
+		}
 	}
 };
 
 class BinaryReader : public _Reader<BinaryReader> {
-	std::unique_ptr<ObjectReader> objectReader;
+	Optional<ObjectReader> objectReader;
 
 public:
 	const void* readBytes( int bytes );
@@ -632,43 +643,38 @@ public:
 	template <class VersionOptions>
 	BinaryReader(const void* data, int length, VersionOptions vo)
 	  : _Reader(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data) + length) {
-		vo.read(*this);
-		if (m_protocolVersion.hasObjectSerializerFlag()) {
-			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
-		}
+		readVersion(vo);
 	}
 	template <class VersionOptions>
 	BinaryReader(const StringRef& s, VersionOptions vo)
 	  : _Reader(reinterpret_cast<const char*>(s.begin()), reinterpret_cast<const char*>(s.end())) {
-		vo.read(*this);
-		if (m_protocolVersion.hasObjectSerializerFlag()) {
-			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
-		}
+		readVersion(vo);
 	}
 	template <class VersionOptions>
 	BinaryReader(const std::string& s, VersionOptions vo) : _Reader(s.c_str(), s.c_str() + s.size()) {
-		vo.read(*this);
-		if (m_protocolVersion.hasObjectSerializerFlag()) {
-			objectReader = std::make_unique<ObjectReader>(reinterpret_cast<const uint8_t*>(begin), m_protocolVersion);
-		}
+		readVersion(vo);
 	}
 
 	template<class T>
 	void deserialize(T &t) {
-		if (objectReader) {
-			objectReader->deserialize(t);
+		if constexpr (HasFileIdentifier<T>::value) {
+			if (objectReader.present()) {
+				objectReader.get().deserialize(t);
+			} else {
+				load(*this, t);
+			}
 		} else {
-			t.serialize(*this);
+			load(*this, t);
 		}
 	}
-};
 
-template<class T>
-class Serializer<BinaryReader, T, typename std::enable_if_t<HasFileIdentifier<T>::value>> {
-public:
-	static void serialize( BinaryReader& ar, T& t ) {
-		ar.deserialize(t);
-		ASSERT( ar.protocolVersion().isValid() );
+private:
+	template <class VersionOptions>
+	void readVersion(VersionOptions vo) {
+		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			objectReader = ObjectReader(reinterpret_cast<const uint8_t*>(begin), AssumeVersion(m_protocolVersion));
+		}
 	}
 };
 

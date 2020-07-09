@@ -104,10 +104,6 @@ class ObjectReader : public _ObjectReader<ObjectReader> {
 public:
 	static constexpr bool ownsUnderlyingMemory = false;
 
-	ObjectReader(const uint8_t *data, ProtocolVersion protocolVersion) : _data(data) {
-		mProtocolVersion = protocolVersion;
-	}
-
 	template<class VersionOptions>
 	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
 		vo.read(*this);
