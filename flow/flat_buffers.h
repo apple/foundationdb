@@ -73,7 +73,7 @@ struct struct_like_traits<std::tuple<Ts...>> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static const void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, const Type& t, Context&) {
 		std::get<i>(m) = t;
 	}
 };

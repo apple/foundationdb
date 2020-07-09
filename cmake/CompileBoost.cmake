@@ -22,5 +22,5 @@ else()
 
   add_library(boost_target INTERFACE)
   add_dependencies(boost_target boostProject)
-  target_include_directories(boost_target INTERFACE ${BOOST_INCLUDE_DIR})
+  target_include_directories(boost_target SYSTEM INTERFACE ${BOOST_INCLUDE_DIR})
 endif()

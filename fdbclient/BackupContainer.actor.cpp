@@ -1242,7 +1242,7 @@ public:
 			std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
 			unlink(uniquePath.c_str());
 			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
-			fullPath = uniquePath = uniquePath;
+			fullPath = uniquePath;
 		}
 		// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
 		// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
