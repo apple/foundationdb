@@ -111,37 +111,37 @@ public:
 	}
 	Val const& operator[]( const Key& k ) { return rangeContaining(k).value(); }
 
-	Ranges ranges() const { return Ranges(Iterator(map.begin()), Iterator(map.lastItem())); }
+	Ranges ranges() { return Ranges( Iterator(map.begin()), Iterator(map.lastItem()) ); }
 	// intersectingRanges returns [begin, end] where begin <= r.begin and end >= r.end
-	Ranges intersectingRanges(const Range& r) const {
-		return Ranges(rangeContaining(r.begin), Iterator(map.lower_bound(r.end)));
-	}
+	Ranges intersectingRanges( const Range& r ) { return Ranges(rangeContaining(r.begin), Iterator(map.lower_bound(r.end))); }
 	// containedRanges() will return all ranges that are fully contained by the passed range (note that a range fully contains itself)
-	Ranges containedRanges(const Range& r) const {
+	Ranges containedRanges( const Range& r ) { 
 		auto s = Iterator( map.lower_bound( r.begin ) );
 		if ( s.begin() >= r.end ) return Ranges(s,s);
 		return Ranges(s, rangeContaining(r.end));
 	}
 	template <class ComparableToKey>
-	Iterator rangeContaining(const ComparableToKey& k) const {
-		return Iterator(map.lastLessOrEqual(k));
+	Iterator rangeContaining( const ComparableToKey& k ) { 
+		return Iterator(map.lastLessOrEqual(k)); 
 	}
 	// Returns the range containing a key infinitesimally before k, or the first range if k==Key()
 	template <class ComparableToKey>
-	Iterator rangeContainingKeyBefore(const ComparableToKey& k) const {
+	Iterator rangeContainingKeyBefore( const ComparableToKey& k ) {
 		Iterator i = map.lower_bound(k);
 		if ( !i->begin().size() ) return i;
 		--i;
 		return i;
 	}
-	Iterator lastItem() const {
+	Iterator lastItem() {
 		auto i = map.lastItem();
 		i.decrementNonEnd();
 		return Iterator(i);
 	}
 	int size() const { return map.size() - 1; } // We always have one range bounded by two entries
-	Iterator randomRange() const { return Iterator(map.index(deterministicRandom()->randomInt(0, map.size() - 1))); }
-	Iterator nthRange(int n) const { return Iterator(map.index(n)); }
+	Iterator randomRange() {
+		return Iterator( map.index( deterministicRandom()->randomInt(0, map.size()-1) ) );
+	}
+	Iterator nthRange(int n) { return Iterator(map.index(n)); }
 
 	bool allEqual( const Range& r, const Val& v );
 
