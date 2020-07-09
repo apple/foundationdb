@@ -1,5 +1,5 @@
 testTitle=Pure Network Test
-testName=ReadLatency
-testDuration=30.0
-actorCount=2000
-simultaneousReads=10
+    testName=ReadLatency
+    testDuration=30.0
+    actorCount=2000
+    simultaneousReads=10

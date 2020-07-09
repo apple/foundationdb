@@ -63,6 +63,7 @@ enum class TaskPriority {
 	TLogPeek = 8590,
 	TLogCommitReply = 8580,
 	TLogCommit = 8570,
+	ReportLiveCommittedVersion = 8567,
 	ProxyGetRawCommittedVersion = 8565,
 	ProxyMasterVersionReply = 8560,
 	ProxyCommitYield2 = 8557,
@@ -75,6 +76,8 @@ enum class TaskPriority {
 	TLogConfirmRunning = 8520,
 	ProxyGRVTimer = 8510,
 	GetConsistentReadVersion = 8500,
+	GetLiveCommittedVersionReply = 8490,
+	GetLiveCommittedVersion = 8480,
 	DefaultPromiseEndpoint = 8000,
 	DefaultOnMainThread = 7500,
 	DefaultDelay = 7010,
@@ -404,9 +407,9 @@ public:
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not
 	// be an address we can connect to!
-	virtual NetworkAddress getPeerAddress() = 0;
+	virtual NetworkAddress getPeerAddress() const = 0;
 
-	virtual UID getDebugID() = 0;
+	virtual UID getDebugID() const = 0;
 };
 
 class IListener {
@@ -417,7 +420,7 @@ public:
 	// Returns one incoming connection when it is available.  Do not cancel unless you are done with the listener!
 	virtual Future<Reference<IConnection>> accept() = 0;
 
-	virtual NetworkAddress getListenAddress() = 0;
+	virtual NetworkAddress getListenAddress() const = 0;
 };
 
 typedef void*	flowGlobalType;
@@ -453,7 +456,7 @@ public:
 
 	virtual void longTaskCheck( const char* name ) {}
 
-	virtual double now() = 0;
+	virtual double now() const = 0;
 	// Provides a clock that advances at a similar rate on all connected endpoints
 	// FIXME: Return a fixed point Time class
 
@@ -470,13 +473,13 @@ public:
 	virtual bool check_yield( TaskPriority taskID ) = 0;
 	// Returns true if a call to yield would result in a delay
 
-	virtual TaskPriority getCurrentTask() = 0;
+	virtual TaskPriority getCurrentTask() const = 0;
 	// Gets the taskID/priority of the current task
 
 	virtual void setCurrentTask(TaskPriority taskID ) = 0;
 	// Sets the taskID/priority of the current task, without yielding
 
-	virtual flowGlobalType global(int id) = 0;
+	virtual flowGlobalType global(int id) const = 0;
 	virtual void setGlobal(size_t id, flowGlobalType v) = 0;
 
 	virtual void stop() = 0;
@@ -507,13 +510,13 @@ public:
 	virtual void initTLS() {}
 	// TLS must be initialized before using the network
 
-	virtual const TLSConfig& getTLSConfig() = 0;
+	virtual const TLSConfig& getTLSConfig() const = 0;
 	// Return the TLS Configuration
 
 	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total) = 0;
 	//Gets the number of free and total bytes available on the disk which contains directory
 
-	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
 
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise, returns false.

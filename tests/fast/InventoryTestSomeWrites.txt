@@ -1,8 +1,8 @@
 testTitle=InventoryTestSomeWrites
-testName=InventoryTest
-transactionsPerSecond=10000.0
-testDuration=10.0
-fractionWriteTransactions=.1
+    testName=InventoryTest
+    transactionsPerSecond=10000.0
+    testDuration=10.0
+    fractionWriteTransactions=.1
 
     testName=Attrition
     machinesToKill=10

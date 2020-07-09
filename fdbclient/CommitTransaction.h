@@ -132,6 +132,13 @@ struct MutationRef {
 	};
 };
 
+template<>
+struct Traceable<MutationRef> : std::true_type {
+	static std::string toString(MutationRef const& value) {
+		return value.toString();
+	}
+};
+
 static inline std::string getTypeString(MutationRef::Type type) {
 	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
 }
@@ -205,8 +212,5 @@ struct CommitTransactionRef {
 		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize();
 	}
 };
-
-bool debugMutation( const char* context, Version version, MutationRef const& m );
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keyRange );
 
 #endif

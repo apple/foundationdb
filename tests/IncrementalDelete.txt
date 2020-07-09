@@ -1,6 +1,7 @@
 testTitle=UnitTests
-testName=UnitTests
 startDelay=0
 useDB=false
-maxTestCases=1
-testsMatching=/fileio
+
+    testName=UnitTests
+    maxTestCases=1
+    testsMatching=/fileio

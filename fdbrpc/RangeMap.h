@@ -150,7 +150,7 @@ public:
 	void coalesce( const Range& k );
 	void validateCoalesced();
 
-	void operator=(RangeMap&& r) BOOST_NOEXCEPT { map = std::move(r.map); }
+	void operator=(RangeMap&& r) noexcept { map = std::move(r.map); }
 	//void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
 
 	void insert( const Range& keys, const Val& value );
