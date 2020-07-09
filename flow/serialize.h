@@ -539,16 +539,6 @@ public:
 		t = *(T*)(static_cast<Impl*>(this)->readBytes(sizeof(T)));
 	}
 
-	const uint8_t* arenaRead( int bytes ) {
-		// Reads and returns the next bytes.
-		// The returned pointer has the lifetime of this.arena()
-		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
-		if (!bytes) return nullptr;
-		uint8_t* dat = new (arena()) uint8_t[ bytes ];
-		serializeBytes( dat, bytes );
-		return dat;
-	}
-
 	Arena &arena() { return m_pool; }
 
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }

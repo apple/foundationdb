@@ -122,12 +122,25 @@ struct DowngradeWorkload : TestWorkload {
 			}
 		}
 
-		BinaryReader reader(value, IncludeVersion());
-		std::vector<OldStruct> data;
-		reader >> data;
-		ASSERT(data.size() == 10);
-		for (const auto& oldObject : data) {
-			ASSERT(oldObject.oldField == 1);
+		{
+			// use BinaryReader
+			BinaryReader reader(value, IncludeVersion());
+			std::vector<OldStruct> data;
+			reader >> data;
+			ASSERT(data.size() == 10);
+			for (const auto& oldObject : data) {
+				ASSERT(oldObject.oldField == 1);
+			}
+		}
+		{
+			// use ArenaReader
+			ArenaReader reader(Arena(), value, IncludeVersion());
+			std::vector<OldStruct> data;
+			reader >> data;
+			ASSERT(data.size() == 10);
+			for (const auto& oldObject : data) {
+				ASSERT(oldObject.oldField == 1);
+			}
 		}
 		return Void();
 	}
