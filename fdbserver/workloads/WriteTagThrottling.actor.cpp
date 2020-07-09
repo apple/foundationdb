@@ -123,6 +123,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			return false;
 		}
 		// TODO check whether write throttling work correctly after enabling that feature
+		// NOTE also do eyeball check of Retries.throttle and Avg Latency
 		return true;
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) {
@@ -262,7 +263,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			throw;
 		}
 	}
-	// collect health metrics
+	// TODO periodically to ask which tag is throttled; collect other health metrics
 	//   ACTOR static Future<Void> healthMetricsChecker(Database cx, WriteTagThrottlingWorkload* self) {
 	//
 	//	}
