@@ -295,6 +295,4 @@ const std::vector<std::string> syllables = {
 
 } // namespace TPCCWorkload
 
-TRIVIALLY_DESTRUCTIBLE(TPCCWorkload::OrderLine); // Allows VectorRef<TPCCWorkload::OrderLine>
-
 #endif
