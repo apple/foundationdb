@@ -1,18 +1,18 @@
+extraDB=1
+
 testTitle=BackupAndRestore
+clearAfterTest=false
+simBackupAgents=BackupToDB
+
     testName=AtomicOps
     nodeCount=30000
     transactionsPerSecond=2500.0
     testDuration=30.0
-    clearAfterTest=false
- 
 
     testName=BackupToDBCorrectness
     backupAfter=10.0
     restoreAfter=60.0
-    clearAfterTest=false
-    simBackupAgents=BackupToDB
     backupRangesCount=-1
-    extraDB=1
 
     testName=RandomClogging
     testDuration=90.0

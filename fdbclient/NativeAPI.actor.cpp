@@ -36,6 +36,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -351,7 +352,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction *tr, int64_t 
 			if (txInfoSize < clientTxInfoSizeLimit)
 				return Void();
 			int getRangeByteLimit = (txInfoSize - clientTxInfoSizeLimit) < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT ? (txInfoSize - clientTxInfoSizeLimit) : CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-			GetRangeLimits limit(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, getRangeByteLimit);
+			GetRangeLimits limit(GetRangeLimits::ROW_LIMIT_UNLIMITED, getRangeByteLimit);
 			Standalone<RangeResultRef> txEntries = wait(tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit));
 			state int64_t numBytesToDel = 0;
 			KeyRef endKey;
@@ -746,6 +747,97 @@ private:
 	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
 };
 
+class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit HealthMetricsRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
+	Standalone<RangeResultRef> result;
+	if (CLIENT_BUGGIFY) return result;
+	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate")) && metrics.worstStorageDurabilityLag != 0) {
+		json_spirit::mObject statsObj;
+		statsObj["batch_limited"] = metrics.batchLimited;
+		statsObj["tps_limit"] = metrics.tpsLimit;
+		statsObj["worst_storage_durability_lag"] = metrics.worstStorageDurabilityLag;
+		statsObj["worst_storage_queue"] = metrics.worstStorageQueue;
+		statsObj["worst_log_queue"] = metrics.worstTLogQueue;
+		std::string statsString =
+		    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+		ValueRef bytes(result.arena(), statsString);
+		result.push_back(result.arena(), KeyValueRef(LiteralStringRef("\xff\xff/metrics/health/aggregate"), bytes));
+	}
+	// tlog stats
+	{
+		int phase = 0; // Avoid comparing twice per loop iteration
+		for (const auto& [uid, logStats] : metrics.tLogQueue) {
+			StringRef k{
+				StringRef(uid.toString()).withPrefix(LiteralStringRef("\xff\xff/metrics/health/log/"), result.arena())
+			};
+			if (phase == 0 && k >= kr.begin) {
+				phase = 1;
+			}
+			if (phase == 1) {
+				if (k < kr.end) {
+					json_spirit::mObject statsObj;
+					statsObj["log_queue"] = logStats;
+					std::string statsString =
+					    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+					ValueRef bytes(result.arena(), statsString);
+					result.push_back(result.arena(), KeyValueRef(k, bytes));
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	// Storage stats
+	{
+		int phase = 0; // Avoid comparing twice per loop iteration
+		for (const auto& [uid, storageStats] : metrics.storageStats) {
+			StringRef k{ StringRef(uid.toString())
+				             .withPrefix(LiteralStringRef("\xff\xff/metrics/health/storage/"), result.arena()) };
+			if (phase == 0 && k >= kr.begin) {
+				phase = 1;
+			}
+			if (phase == 1) {
+				if (k < kr.end) {
+					json_spirit::mObject statsObj;
+					statsObj["storage_durability_lag"] = storageStats.storageDurabilityLag;
+					statsObj["storage_queue"] = storageStats.storageQueue;
+					statsObj["cpu_usage"] = storageStats.cpuUsage;
+					statsObj["disk_usage"] = storageStats.diskUsage;
+					std::string statsString =
+					    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+					ValueRef bytes(result.arena(), statsString);
+					result.push_back(result.arena(), KeyValueRef(k, bytes));
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	return result;
+}
+
+ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                           KeyRangeRef kr) {
+	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
+	    /*detailed ("per process")*/ kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/storage/"),
+	                                                           LiteralStringRef("\xff\xff/metrics/health/storage0"))) ||
+	    kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/log/"),
+	                              LiteralStringRef("\xff\xff/metrics/health/log0")))));
+	return healthMetricsToKVPairs(metrics, kr);
+}
+
+HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                    KeyRangeRef kr) const {
+	return healthMetricsGetRangeActor(ryw, kr);
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
                                  TaskPriority taskID, LocalityData const& clientLocality,
@@ -808,6 +900,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
 		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::METRICS,
+		    std::make_unique<HealthMetricsRangeImpl>(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/"),
+		                                                         LiteralStringRef("\xff\xff/metrics/health0"))));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(
@@ -1334,14 +1430,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			ASSERT(value.present());
 
 			Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-			std::string versionString = value.get().toString();
-
-			size_t index = 0;
-			size_t nextIndex = 0;
-			while(nextIndex != versionString.npos) {
-				nextIndex = versionString.find(';', index);
-				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString.substr(index, nextIndex-index)));
-				index = nextIndex + 1;
+			std::vector<StringRef> supportedVersionsStrings = value.get().splitAny(LiteralStringRef(";"));
+			for (StringRef versionString: supportedVersionsStrings) {
+				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString));
 			}
 
 			ASSERT(supportedVersions.size() > 0);
@@ -1431,23 +1522,21 @@ Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool usePro
 }
 
 void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
-	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED ) {
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
 		ASSERT(data.size() <= rows);
 		rows -= data.size();
 	}
 
 	minRows = std::max(0, minRows - data.size());
 
-	if( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED )
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		bytes = std::max( 0, bytes - (int)data.expectedSize() - (8-(int)sizeof(KeyValueRef))*data.size() );
 }
 
 void GetRangeLimits::decrement( KeyValueRef const& data ) {
 	minRows = std::max(0, minRows - 1);
-	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED )
-		rows--;
-	if( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED )
-		bytes = std::max( 0, bytes - (int)8 - (int)data.expectedSize() );
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) rows--;
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED) bytes = std::max(0, bytes - (int)8 - (int)data.expectedSize());
 }
 
 // True if either the row or byte limit has been reached
@@ -1457,16 +1546,17 @@ bool GetRangeLimits::isReached() {
 
 // True if data would cause the row or byte limit to be reached
 bool GetRangeLimits::reachedBy( VectorRef<KeyValueRef> const& data ) {
-	return ( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED && data.size() >= rows )
-		|| ( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED && (int)data.expectedSize() + (8-(int)sizeof(KeyValueRef))*data.size() >= bytes && data.size() >= minRows );
+	return (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED && data.size() >= rows) ||
+	       (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
+	        (int)data.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * data.size() >= bytes && data.size() >= minRows);
 }
 
 bool GetRangeLimits::hasByteLimit() {
-	return bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+	return bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 }
 
 bool GetRangeLimits::hasRowLimit() {
-	return rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
+	return rows != GetRangeLimits::ROW_LIMIT_UNLIMITED;
 }
 
 bool GetRangeLimits::hasSatisfiedMinRows() {
@@ -3901,8 +3991,11 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRang
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
+	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+		partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+		partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {

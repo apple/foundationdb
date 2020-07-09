@@ -1,7 +1,8 @@
 testTitle=CommitBugTest
+clearAfterTest=true
+runSetup=true
+
     testName=CommitBug
-    runSetup=true
-    clearAfterTest=true
 
     testName=RandomClogging
     testDuration=120.0

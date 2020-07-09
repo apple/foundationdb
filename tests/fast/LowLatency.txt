@@ -1,4 +1,9 @@
+buggify=off
+minimumReplication=2
+
 testTitle=Clogged
+connectionFailuresDisableDuration=100000
+
     testName=Cycle
     transactionsPerSecond=1000.0
     testDuration=30.0
@@ -15,7 +20,3 @@ testTitle=Clogged
     waitForVersion=true
     allowFaultInjection=false
     killDc=false
-
-connectionFailuresDisableDuration=100000
-buggify=off
-minimumReplication=2

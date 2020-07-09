@@ -578,6 +578,9 @@ class ReadCounter(object):
         range_size = total // num_buckets
         output_range_counts = []
 
+        if total == 0:
+            return output_range_counts
+
         def add_boundary(start, end, started_count, total_count):
             if shard_finder:
                 shard_count = shard_finder.get_shard_count(start, end)

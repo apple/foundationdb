@@ -1382,7 +1382,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	SendBuffer *checkbuf = pb;
 	while (checkbuf) {
 		int size = checkbuf->bytes_written;
-		const uint8_t* data = checkbuf->data;
+		const uint8_t* data = checkbuf->data();
 		VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
 		checkbuf = checkbuf -> next;
 	}
@@ -1424,10 +1424,6 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 
 	sendPacket( self, peer, what, destination, false );
 	return peer;
-}
-
-int FlowTransport::getEndpointCount() {
-	return -1;
 }
 
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {

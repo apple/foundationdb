@@ -1,16 +1,19 @@
+StderrSeverity=30
+
 testTitle=WriteDuringReadTest
+clearAfterTest=false
+simBackupAgents=BackupToFile
+
     testName=WriteDuringRead
-	maximumTotalData=1000000
+    maximumTotalData=1000000
     testDuration=240.0
     slowModeStart=60.0
-	minNode=1
-	useSystemKeys=false
+    minNode=1
+    useSystemKeys=false
 
     testName=AtomicRestore
     startAfter=10.0
     restoreAfter=50.0
-    clearAfterTest=false
-    simBackupAgents=BackupToFile
     usePartitionedLogs=false
 
     testName=RandomClogging
@@ -31,5 +34,3 @@ testTitle=WriteDuringReadTest
     machinesToLeave=3
     reboot=true
     testDuration=60.0
-
-    StderrSeverity=30

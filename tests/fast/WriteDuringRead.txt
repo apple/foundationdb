@@ -1,4 +1,7 @@
+StderrSeverity=30
+
 testTitle=WriteDuringReadTest
+
     testName=WriteDuringRead
     testDuration=30.0
     
@@ -20,5 +23,3 @@ testTitle=WriteDuringReadTest
     machinesToLeave=3
     reboot=true
     testDuration=30.0
-
-    StderrSeverity=30

@@ -1,21 +1,21 @@
-testTitle=SnapCyclePre
 ;Take snap and do cycle test
-        clearAfterTest=false
-        testName=Cycle
-        transactionsPerSecond=2500.0
-        nodeCount=2500
-        testDuration=10.0
-        expectedRate=0
+testTitle=SnapCyclePre
+clearAfterTest=false
 
-        testName=SnapTest
-        numSnaps=1
-        maxSnapDelay=10.0
-        testID=1
-        clearAfterTest=false
+    testName=Cycle
+    transactionsPerSecond=2500.0
+    nodeCount=2500
+    testDuration=10.0
+    expectedRate=0
 
-testTitle=SnapCycleShutdown
+    testName=SnapTest
+    numSnaps=1
+    maxSnapDelay=10.0
+    testID=1
+
 ;save and shutdown
-        testName=SaveAndKill
-        restartInfoLocation=simfdb/restartInfo.ini
-        testDuration=10.0
-        isRestoring=1
+testTitle=SnapCycleShutdown
+    testName=SaveAndKill
+    restartInfoLocation=simfdb/restartInfo.ini
+    testDuration=10.0
+    isRestoring=1

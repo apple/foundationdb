@@ -451,7 +451,7 @@ public:
 
 		// Calculating request byte limit
 		if(requestLimit.bytes==0) {
-			requestLimit.bytes = CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+			requestLimit.bytes = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 			if(!requestLimit.hasRowLimit()) {
 				requestLimit.rows = (int)std::min(std::max(std::max(1,requestLimit.rows) + additionalRows, (int64_t)offset), (int64_t)std::numeric_limits<int>::max());
 			}
