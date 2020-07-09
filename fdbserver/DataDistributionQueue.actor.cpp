@@ -356,6 +356,7 @@ struct DDQueueData {
 
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
+	Reference<FlowLock> fetchSourceLock;
 
 	int activeRelocations;
 	int queuedRelocations;
@@ -422,7 +423,7 @@ struct DDQueueData {
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), distributorId( mid ), lock( lock ),
 			cx( cx ), teamSize( teamSize ), singleRegionTeamSize( singleRegionTeamSize ), output( output ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
-			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited),
+			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), fetchSourceLock( new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM) ), lastLimited(lastLimited),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
 	void validate() {
@@ -528,7 +529,7 @@ struct DDQueueData {
 		}
 	}
 
-	ACTOR Future<Void> getSourceServersForRange( Database cx, RelocateData input, PromiseStream<RelocateData> output ) {
+	ACTOR Future<Void> getSourceServersForRange( Database cx, RelocateData input, PromiseStream<RelocateData> output, Reference<FlowLock> fetchLock ) {
 		state std::set<UID> servers;
 		state Transaction tr(cx);
 
@@ -538,6 +539,9 @@ struct DDQueueData {
 		} else {
 			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
+
+		wait( fetchLock->take( TaskPriority::DataDistributionLaunch ) );
+		state FlowLock::Releaser releaser( *fetchLock );
 
 		loop {
 			servers.clear();
@@ -678,7 +682,7 @@ struct DDQueueData {
 				startRelocation(rrs.priority, rrs.healthPriority);
 
 				fetchingSourcesQueue.insert( rrs );
-				getSourceActors.insert( rrs.keys, getSourceServersForRange( cx, rrs, fetchSourceServersComplete ) );
+				getSourceActors.insert( rrs.keys, getSourceServersForRange( cx, rrs, fetchSourceServersComplete, fetchSourceLock ) );
 			} else {
 				RelocateData newData( rrs );
 				newData.keys = affectedQueuedItems[r];
