@@ -1,4 +1,6 @@
-testTitle=RandomReadWriteTest
-testName=ConflictRange
-connectionFailuresDisableDuration=100000
 buggify=off
+
+testTitle=RandomReadWriteTest
+connectionFailuresDisableDuration=100000
+
+    testName=ConflictRange

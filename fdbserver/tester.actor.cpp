@@ -872,6 +872,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	vector<TestSpec> result;
 	Standalone< VectorRef< KeyValueRef > > workloadOptions;
 	std::string cline;
+	bool beforeFirstTest = true;
+	bool parsingWorkloads = false;
 
 	while( ifs.good() ) {
 		getline(ifs, cline);
@@ -887,6 +889,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 		string value = removeWhitespace(line.substr( found + 1 ));
 
 		if( attrib == "testTitle" ) {
+			beforeFirstTest = false;
+			parsingWorkloads = false;
 			if( workloadOptions.size() ) {
 				spec.options.push_back_deep( spec.options.arena(), workloadOptions );
 				workloadOptions = Standalone< VectorRef< KeyValueRef > >();
@@ -899,10 +903,12 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			spec.title = StringRef( value );
 			TraceEvent("TestParserTest").detail("ParsedTest",  spec.title );
 		} else if( attrib == "timeout" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			sscanf( value.c_str(), "%d", &(spec.timeout) );
 			ASSERT( spec.timeout > 0 );
 			TraceEvent("TestParserTest").detail("ParsedTimeout", spec.timeout);
 		}  else if( attrib == "databasePingDelay" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			double databasePingDelay;
 			sscanf( value.c_str(), "%lf", &databasePingDelay );
 			ASSERT( databasePingDelay >= 0 );
@@ -915,44 +921,55 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			spec.databasePingDelay = databasePingDelay;
 			TraceEvent("TestParserTest").detail("ParsedPingDelay", spec.databasePingDelay);
 		} else if( attrib == "runSetup" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			spec.phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 			if( value == "true" )
 				spec.phases |= TestWorkload::SETUP;
 			TraceEvent("TestParserTest").detail("ParsedSetupFlag", (spec.phases & TestWorkload::SETUP) != 0);
 		} else if( attrib == "dumpAfterTest" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			spec.dumpAfterTest = ( value == "true" );
 			TraceEvent("TestParserTest").detail("ParsedDumpAfter", spec.dumpAfterTest);
 		} else if( attrib == "clearAfterTest" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			spec.clearAfterTest = ( value == "true" );
 			TraceEvent("TestParserTest").detail("ParsedClearAfter", spec.clearAfterTest);
 		} else if( attrib == "useDB" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			spec.useDB = ( value == "true" );
 			TraceEvent("TestParserTest").detail("ParsedUseDB", spec.useDB);
 			if( !spec.useDB )
 				spec.databasePingDelay = 0.0;
 		} else if( attrib == "startDelay" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			sscanf( value.c_str(), "%lf", &spec.startDelay );
 			TraceEvent("TestParserTest").detail("ParsedStartDelay", spec.startDelay);
 		} else if( attrib == "runConsistencyCheck" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			spec.runConsistencyCheck = ( value == "true" );
 			TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheck", spec.runConsistencyCheck);
 		} else if( attrib == "waitForQuiescence" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			bool toWait = value == "true";
 			spec.waitForQuiescenceBegin = toWait;
 			spec.waitForQuiescenceEnd = toWait;
 			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescence", toWait);
 		} else if( attrib == "waitForQuiescenceBegin" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			bool toWait = value == "true";
 			spec.waitForQuiescenceBegin = toWait;
 			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceBegin", toWait);
 		} else if( attrib == "waitForQuiescenceEnd" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			bool toWait = value == "true";
 			spec.waitForQuiescenceEnd = toWait;
 			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceEnd", toWait);
 		} else if( attrib == "simCheckRelocationDuration" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			spec.simCheckRelocationDuration = (value == "true");
 			TraceEvent("TestParserTest").detail("ParsedSimCheckRelocationDuration", spec.simCheckRelocationDuration);
 		} else if( attrib == "connectionFailuresDisableDuration" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			double connectionFailuresDisableDuration;
 			sscanf( value.c_str(), "%lf", &connectionFailuresDisableDuration );
 			ASSERT( connectionFailuresDisableDuration >= 0 );
@@ -961,6 +978,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 				g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
 			TraceEvent("TestParserTest").detail("ParsedSimConnectionFailuresDisableDuration", spec.simConnectionFailuresDisableDuration);
 		} else if( attrib == "simBackupAgents" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			if (value == "BackupToFile" || value == "BackupToFileAndDB")
 				spec.simBackupAgents = ISimulator::BackupToFile;
 			else
@@ -972,23 +990,31 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			else
 				spec.simDrAgents = ISimulator::NoBackupAgents;
 			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec.simDrAgents);
-		} else if( attrib == "extraDB" ) {
-			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
-		} else if ( attrib == "configureLocked" ) {
-			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
-		} else if( attrib == "minimumReplication" ) {
-			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
-		} else if( attrib == "minimumRegions" ) {
-			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
-		} else if( attrib == "buggify" ) {
-			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "checkOnly" ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			if(value == "true")
 				spec.phases = TestWorkload::CHECK;
+		} else if( attrib == "extraDB" ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
+			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		} else if ( attrib == "configureLocked" ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
+			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
+		} else if( attrib == "minimumReplication" ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
+			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		} else if( attrib == "minimumRegions" ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
+			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
+		} else if( attrib == "buggify" ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
+			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "StderrSeverity" ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
 			TraceEvent("StderrSeverity").detail("NewSeverity", value);
 		}
 		else if (attrib == "ClientInfoLogging") {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
 			if (value == "false") {
 				setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 			}
@@ -997,6 +1023,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 		}
 		else {
 			if( attrib == "testName" ) {
+				parsingWorkloads = true;
 				if( workloadOptions.size() ) {
 					TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
 					spec.options.push_back_deep( spec.options.arena(), workloadOptions );

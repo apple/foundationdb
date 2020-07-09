@@ -20,9 +20,17 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 
+#include <algorithm>
 #include <iterator>
 #include <regex>
 #include <unordered_set>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include "fdbclient/FDBTypes.h"
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/MultiInterface.h"
 
 #include "fdbclient/Atomic.h"
 #include "fdbclient/ClusterInterface.h"
@@ -42,13 +50,19 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Arena.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Error.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/serialize.h"
 
 #include "fdbclient/versions.h"
 
@@ -67,6 +81,33 @@ extern const char* getSourceVersion();
 using std::max;
 using std::min;
 using std::pair;
+
+namespace {
+
+ACTOR template <class T, class Fun>
+Future<T> runAfter(Future<T> in, Fun func) {
+	T res = wait(in);
+	return func(res);
+}
+
+template <class Interface, class Request>
+Future<REPLY_TYPE(Request)> loadBalance(
+	DatabaseContext* ctx, const Reference<LocationInfo> alternatives, RequestStream<Request> Interface::*channel,
+	const Request& request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+	QueueModel* model = NULL) {
+	if (alternatives->hasCaches) {
+		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
+	}
+	return runAfter(loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model),
+					[ctx](auto res) {
+						if (res.cached) {
+							ctx->updateCache.trigger();
+						}
+						return res;
+	                });
+}
+} // namespace
 
 NetworkOptions networkOptions;
 TLSConfig tlsConfig(TLSEndpointType::CLIENT);
@@ -311,7 +352,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction *tr, int64_t 
 			if (txInfoSize < clientTxInfoSizeLimit)
 				return Void();
 			int getRangeByteLimit = (txInfoSize - clientTxInfoSizeLimit) < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT ? (txInfoSize - clientTxInfoSizeLimit) : CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-			GetRangeLimits limit(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, getRangeByteLimit);
+			GetRangeLimits limit(GetRangeLimits::ROW_LIMIT_UNLIMITED, getRangeByteLimit);
 			Standalone<RangeResultRef> txEntries = wait(tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit));
 			state int64_t numBytesToDel = 0;
 			KeyRef endKey;
@@ -452,6 +493,166 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 			curProxies = clientDBInfo->get().proxies;
 			triggerVar->trigger();
 		}
+	}
+}
+
+void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, StorageServerInterface>& removed,
+								   const std::map<UID, StorageServerInterface>& added) {
+	// TODO: this needs to be more clever in the future
+	auto ranges = self->locationCache.ranges();
+	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+		if (iter->value() && iter->value()->hasCaches) {
+			auto& val = iter->value();
+			std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
+			interfaces.reserve(val->size() - removed.size() + added.size());
+			for (int i = 0; i < val->size(); ++i) {
+				const auto& interf = (*val)[i];
+				if (removed.count(interf->interf.id()) == 0) {
+					interfaces.emplace_back(interf);
+				}
+			}
+			for (const auto& p : added) {
+				interfaces.emplace_back(Reference<ReferencedInterface<StorageServerInterface>>{new ReferencedInterface<StorageServerInterface>{p.second}});
+			}
+			iter->value() = Reference<LocationInfo>{ new LocationInfo(interfaces, true) };
+		}
+	}
+}
+
+Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
+								  const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& other) {
+	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
+	interfaces.reserve(loc->size() + other.size());
+	for (int i = 0; i < loc->size(); ++i) {
+		interfaces.emplace_back((*loc)[i]);
+	}
+	interfaces.insert(interfaces.end(), other.begin(), other.end());
+	return Reference<LocationInfo>{ new LocationInfo{ interfaces, true } };
+}
+
+ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
+	state Database db(self);
+	state ReadYourWritesTransaction tr(db);
+	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
+	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
+	try {
+		loop {
+			wait(self->updateCache.onTrigger());
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			try {
+				Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!range.more);
+				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
+				cacheInterfaces.reserve(cacheServers->size());
+				for (const auto& p : *cacheServers) {
+					cacheInterfaces.emplace_back(Reference<ReferencedInterface<StorageServerInterface>>{
+					    new ReferencedInterface<StorageServerInterface>{ p.second } });
+				}
+				bool currCached = false;
+				KeyRef begin, end;
+				for (const auto& kv : range) {
+					// These booleans have to flip consistently
+					ASSERT(currCached == (kv.value == falseValue));
+					if (kv.value == trueValue) {
+						begin = kv.key.substr(storageCacheKeys.begin.size());
+						currCached = true;
+					} else {
+						currCached = false;
+						end = kv.key.substr(storageCacheKeys.begin.size());
+						KeyRangeRef cachedRange{begin, end};
+						auto ranges = self->locationCache.containedRanges(cachedRange);
+						KeyRef containedRangesBegin, containedRangesEnd, prevKey;
+						if (!ranges.empty()) {
+							containedRangesBegin = ranges.begin().range().begin;
+						}
+						for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
+							// We probably don't want to do the code below? Otherwise we would never
+							// fetch the corresponding storages - which would give us a different semantics
+							//if (containedRangesEnd > iter->range().begin) {
+							//	self->locationCache.insert(
+							//	    KeyRangeRef{ containedRangesEnd, iter->range().begin },
+							//	    Reference<LocationInfo>{ new LocationInfo{ cacheInterfaces, true } });
+							//}
+							containedRangesEnd = iter->range().end;
+							if (iter->value() && !iter->value()->hasCaches) {
+								iter->value() = addCaches(iter->value(), cacheInterfaces);
+							}
+						}
+						auto iter = self->locationCache.rangeContaining(begin);
+						if (iter->value() && !iter->value()->hasCaches) {
+							if (end>=iter->range().end) {
+								self->locationCache.insert(KeyRangeRef{ begin, iter->range().end },
+														   addCaches(iter->value(), cacheInterfaces));
+							} else {
+								self->locationCache.insert(KeyRangeRef{ begin, end },
+														   addCaches(iter->value(), cacheInterfaces));
+							}
+						}
+						iter = self->locationCache.rangeContainingKeyBefore(end);
+						if (iter->value() && !iter->value()->hasCaches) {
+							self->locationCache.insert(KeyRangeRef{iter->range().begin, end}, addCaches(iter->value(), cacheInterfaces));
+						}
+					}
+				}
+				wait(delay(2.0)); // we want to wait at least some small amount of time before
+				// updating this list again
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "UpdateCachedRangesFailed")
+			.error(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
+	state Database db(self);
+	state Transaction tr(db);
+	state std::map<UID, StorageServerInterface> cacheServerMap;
+	state Future<Void> updateRanges = updateCachedRanges(self, &cacheServerMap);
+	// if no caches are configured, we don't want to run this actor at all
+	// so we just wait for the first trigger from a storage server
+	wait(self->updateCache.onTrigger());
+	try {
+		loop {
+			tr.reset();
+			try {
+				Standalone<RangeResultRef> cacheList =
+				    wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!cacheList.more);
+				bool hasChanges = false;
+				std::map<UID, StorageServerInterface> allCacheServers;
+				for (auto kv : cacheList) {
+					auto ssi = BinaryReader::fromStringRef<StorageServerInterface>(kv.value, IncludeVersion());
+					allCacheServers.emplace(ssi.id(), ssi);
+				}
+				std::map<UID, StorageServerInterface> newCacheServers;
+				std::map<UID, StorageServerInterface> deletedCacheServers;
+				std::set_difference(allCacheServers.begin(), allCacheServers.end(), cacheServerMap.begin(),
+									cacheServerMap.end(),
+									std::insert_iterator<std::map<UID, StorageServerInterface>>(
+										newCacheServers, newCacheServers.begin()));
+				std::set_difference(cacheServerMap.begin(), cacheServerMap.end(), allCacheServers.begin(),
+									allCacheServers.end(),
+									std::insert_iterator<std::map<UID, StorageServerInterface>>(
+										deletedCacheServers, deletedCacheServers.begin()));
+				hasChanges = !(newCacheServers.empty() && deletedCacheServers.empty());
+				if (hasChanges) {
+					updateLocationCacheWithCaches(self, deletedCacheServers, newCacheServers);
+				}
+				cacheServerMap = std::move(allCacheServers);
+				wait(delay(5.0));
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "MonitorCacheListFailed").error(e);
+		throw;
 	}
 }
 
@@ -692,6 +893,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
+	cacheListMonitor = monitorCacheList(this);
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
@@ -777,14 +979,15 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 }
 
 DatabaseContext::~DatabaseContext() {
+	cacheListMonitor.cancel();
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
-	locationCache.insert( allKeys, Reference<LocationInfo>() );
+	locationCache.insert(allKeys, Reference<LocationInfo>());
 }
 
-pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const KeyRef& key, bool isBackward ) {
+pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation( const KeyRef& key, bool isBackward ) {
 	if( isBackward ) {
 		auto range = locationCache.rangeContainingKeyBefore(key);
 		return std::make_pair(range->range(), range->value());
@@ -836,23 +1039,24 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		attempts++;
 		auto r = locationCache.randomRange();
 		Key begin = r.begin(), end = r.end();  // insert invalidates r, so can't be passed a mere reference into it
-		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
+		locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 	}
 	locationCache.insert( keys, loc );
 	return loc;
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
-	if( isBackward )
+	if( isBackward ) {
 		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
-	else
+	} else {
 		locationCache.rangeContaining(key)->value() = Reference<LocationInfo>();
+	}
 }
 
 void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
 	auto rs = locationCache.intersectingRanges(keys);
 	Key begin = rs.begin().begin(), end = rs.end().begin();  // insert invalidates rs, so can't be passed a mere reference into it
-	locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
+	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 }
 
 Future<Void> DatabaseContext::onMasterProxiesChanged() {
@@ -1226,14 +1430,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			ASSERT(value.present());
 
 			Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-			std::string versionString = value.get().toString();
-
-			size_t index = 0;
-			size_t nextIndex = 0;
-			while(nextIndex != versionString.npos) {
-				nextIndex = versionString.find(';', index);
-				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString.substr(index, nextIndex-index)));
-				index = nextIndex + 1;
+			std::vector<StringRef> supportedVersionsStrings = value.get().splitAny(LiteralStringRef(";"));
+			for (StringRef versionString: supportedVersionsStrings) {
+				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString));
 			}
 
 			ASSERT(supportedVersions.size() > 0);
@@ -1323,23 +1522,21 @@ Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool usePro
 }
 
 void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
-	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED ) {
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
 		ASSERT(data.size() <= rows);
 		rows -= data.size();
 	}
 
 	minRows = std::max(0, minRows - data.size());
 
-	if( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED )
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		bytes = std::max( 0, bytes - (int)data.expectedSize() - (8-(int)sizeof(KeyValueRef))*data.size() );
 }
 
 void GetRangeLimits::decrement( KeyValueRef const& data ) {
 	minRows = std::max(0, minRows - 1);
-	if( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED )
-		rows--;
-	if( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED )
-		bytes = std::max( 0, bytes - (int)8 - (int)data.expectedSize() );
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) rows--;
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED) bytes = std::max(0, bytes - (int)8 - (int)data.expectedSize());
 }
 
 // True if either the row or byte limit has been reached
@@ -1349,16 +1546,17 @@ bool GetRangeLimits::isReached() {
 
 // True if data would cause the row or byte limit to be reached
 bool GetRangeLimits::reachedBy( VectorRef<KeyValueRef> const& data ) {
-	return ( rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED && data.size() >= rows )
-		|| ( bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED && (int)data.expectedSize() + (8-(int)sizeof(KeyValueRef))*data.size() >= bytes && data.size() >= minRows );
+	return (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED && data.size() >= rows) ||
+	       (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
+	        (int)data.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * data.size() >= bytes && data.size() >= minRows);
 }
 
 bool GetRangeLimits::hasByteLimit() {
-	return bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+	return bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 }
 
 bool GetRangeLimits::hasRowLimit() {
-	return rows != CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
+	return rows != GetRangeLimits::ROW_LIMIT_UNLIMITED;
 }
 
 bool GetRangeLimits::hasSatisfiedMinRows() {
@@ -1458,7 +1656,11 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 }
 
 template <class F>
-Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation( Database const& cx, Key const& key, F StorageServerInterface::*member, TransactionInfo const& info, bool isBackward = false ) {
+Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx, Key const& key,
+															   F StorageServerInterface::*member,
+															   TransactionInfo const& info,
+															   bool isBackward = false) {
+	// we first check whether this range is cached
 	auto ssi = cx->getCachedLocation( key, isBackward );
 	if (!ssi.second) {
 		return getKeyLocation_internal( cx, key, info, isBackward );
@@ -1607,7 +1809,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetValueReply _reply =
-							wait(loadBalance(ssi.second, &StorageServerInterface::getValue,
+							wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::getValue,
 											GetValueRequest(key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID), TaskPriority::DefaultPromiseEndpoint, false,
 											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
@@ -1695,7 +1897,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyReply _reply =
-							wait(loadBalance(ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID),
+							wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID),
 											TaskPriority::DefaultPromiseEndpoint, false,
 											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
@@ -1785,7 +1987,7 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 			}
 			state WatchValueReply resp;
 			choose {
-				when(WatchValueReply r = wait(loadBalance(ssi.second, &StorageServerInterface::watchValue,
+				when(WatchValueReply r = wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::watchValue,
 				                                          WatchValueRequest(key, value, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), watchValueID),
 				                                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
@@ -1889,10 +2091,10 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				try {
 					choose {
 						when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-						when(GetKeyValuesReply _rep =
-								wait(loadBalance(locations[shard].second, &StorageServerInterface::getKeyValues, req,
-												TaskPriority::DefaultPromiseEndpoint, false,
-												cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+						when(GetKeyValuesReply _rep = wait(
+								 loadBalance(cx.getPtr(), locations[shard].second, &StorageServerInterface::getKeyValues,
+											 req, TaskPriority::DefaultPromiseEndpoint, false,
+											 cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 							rep = _rep;
 						}
 					}
@@ -2188,7 +2390,10 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 								transaction_too_old(), future_version()
 									});
 					}
-					GetKeyValuesReply _rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskPriority::DefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+					GetKeyValuesReply _rep =
+						wait(loadBalance(cx.getPtr(), beginServer.second, &StorageServerInterface::getKeyValues, req,
+										 TaskPriority::DefaultPromiseEndpoint, false,
+										 cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
 				} catch(Error&) {
@@ -2364,7 +2569,7 @@ Transaction::~Transaction() {
 	cancelWatches();
 }
 
-void Transaction::operator=(Transaction&& r) BOOST_NOEXCEPT {
+void Transaction::operator=(Transaction&& r) noexcept {
 	flushTrLogsIfEnabled();
 	cx = std::move(r.cx);
 	tr = std::move(r.tr);
@@ -3764,7 +3969,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, 
 			req.min.bytes = 0;
 			req.max.bytes = -1;
 			StorageMetrics m = wait(
-			    loadBalance(locationInfo, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
+			    loadBalance(locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
 			return m;
 		} catch (Error& e) {
 			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
@@ -3809,8 +4014,8 @@ ACTOR Future<Void> trackBoundedStorageMetrics(
 	try {
 		loop {
 			WaitMetricsRequest req( keys, x - halfError, x + halfError );
-			StorageMetrics nextX = wait( loadBalance( location, &StorageServerInterface::waitMetrics, req ) );
-			deltaStream.send( nextX - x );
+			StorageMetrics nextX = wait(loadBalance(location->locations(), &StorageServerInterface::waitMetrics, req));
+			deltaStream.send(nextX - x);
 			x = nextX;
 		}
 	} catch (Error& e) {
@@ -3835,8 +4040,8 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
 		WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
-		fx[i] =
-		    loadBalance(locations[i].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution);
+		fx[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::waitMetrics, req,
+		                    TaskPriority::DataDistribution);
 	}
 	wait(waitForAll(fx));
 
@@ -3884,7 +4089,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, K
 			state vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			for (int i = 0; i < nLocs; i++) {
 				ReadHotSubRangeRequest req(locations[i].first);
-				fReplies[i] = loadBalance(locations[i].second, &StorageServerInterface::getReadHotRanges, req,
+				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getReadHotRanges, req,
 				                          TaskPriority::DataDistribution);
 			}
 
@@ -3930,7 +4135,8 @@ ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError);
 				} else {
 					WaitMetricsRequest req( keys, min, max );
-					fx = loadBalance( locations[0].second, &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution );
+					fx = loadBalance(locations[0].second->locations(), &StorageServerInterface::waitMetrics, req,
+					                 TaskPriority::DataDistribution);
 				}
 				StorageMetrics x = wait(fx);
 				return std::make_pair(x,-1);
@@ -4018,8 +4224,12 @@ ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, 
 				state int i = 0;
 				for(; i<locations.size(); i++) {
 					SplitMetricsRequest req( locations[i].first, limit, used, estimated, i == locations.size() - 1 );
-					SplitMetricsReply res = wait( loadBalance( locations[i].second, &StorageServerInterface::splitMetrics, req, TaskPriority::DataDistribution ) );
-					if( res.splits.size() && res.splits[0] <= results.back() ) { // split points are out of order, possibly because of moving data, throw error to retry
+					SplitMetricsReply res =
+					    wait(loadBalance(locations[i].second->locations(), &StorageServerInterface::splitMetrics, req,
+					                     TaskPriority::DataDistribution));
+					if (res.splits.size() &&
+					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of moving
+						                                   // data, throw error to retry
 						ASSERT_WE_THINK(false);   // FIXME: This seems impossible and doesn't seem to be covered by testing
 						throw all_alternatives_failed();
 					}

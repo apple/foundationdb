@@ -22,6 +22,11 @@
 #define FLOW_MULTIINTERFACE_H
 #pragma once
 
+#include "flow/FastRef.h"
+#include "fdbrpc/Locality.h"
+
+#include <vector>
+
 extern uint64_t debug_lastLoadBalanceResultEndpointToken;
 
 template <class K, class V>
@@ -168,7 +173,7 @@ class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 template <class T>
 class MultiInterface<ReferencedInterface<T>> : public ReferenceCounted<MultiInterface<ReferencedInterface<T>>> {
 public:
-	MultiInterface( const vector<Reference<ReferencedInterface<T>>>& v ) : alternatives(v), bestCount(0) {
+	MultiInterface( const std::vector<Reference<ReferencedInterface<T>>>& v ) : alternatives(v), bestCount(0) {
 		deterministicRandom()->randomShuffle(alternatives);
 		if ( LBLocalityData<T>::Present ) {
 			std::stable_sort( alternatives.begin(), alternatives.end(), ReferencedInterface<T>::sort_by_distance );
@@ -204,6 +209,18 @@ public:
 
 	T const& getInterface(int index) { return alternatives[index]->interf; }
 	UID getId( int index ) const { return alternatives[index]->interf.id(); }
+	bool hasInterface(UID id) const {
+		for (const auto& ref : alternatives) {
+			if (ref->interf.id() == id) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	Reference<ReferencedInterface<T>>& operator[](int i) { return alternatives[i]; }
+
+	const Reference<ReferencedInterface<T>>& operator[](int i) const { return alternatives[i]; }
 
 	virtual ~MultiInterface() {}
 
@@ -211,7 +228,7 @@ public:
 		return describe( alternatives );
 	}
 private:
-	vector<Reference<ReferencedInterface<T>>> alternatives;
+	std::vector<Reference<ReferencedInterface<T>>> alternatives;
 	int16_t bestCount;
 };
 

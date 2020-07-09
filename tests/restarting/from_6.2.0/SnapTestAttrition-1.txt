@@ -1,13 +1,16 @@
-testTitle=SnapTestPre
 ;write 1000 Keys ending with even numbers
+testTitle=SnapTestPre
+clearAfterTest=false
+
         testName=SnapTest
         numSnaps=1
         maxSnapDelay=3.0
         testID=0
-        clearAfterTest=false
 
-testTitle=SnapTestTakeSnap
 ;Take snap and do read/write
+testTitle=SnapTestTakeSnap
+clearAfterTest=false
+
         testName=ReadWrite
         testDuration=10.0
         transactionsPerSecond=10000
@@ -24,18 +27,18 @@ testTitle=SnapTestTakeSnap
         numSnaps=1
         maxSnapDelay=10.0
         testID=1
-        clearAfterTest=false
 
         testName=Attrition
         testDuration=10.0
 
-testTitle=SnapTestPost
 ;write 1000 Keys ending with odd numbers
+testTitle=SnapTestPost
+clearAfterTest=false
+
         testName=SnapTest
         numSnaps=1
         maxSnapDelay=25.0
         testID=2
-        clearAfterTest=false
 
 ; save and shutdown
 testTitle=SnapSimpleShutdown

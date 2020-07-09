@@ -1445,26 +1445,23 @@ struct ThreadSafeCounter {
 
 class KeyValueStoreSQLite : public IKeyValueStore {
 public:
-	virtual void dispose() {
-		doClose(this, true);
-	}
-	virtual void close() {
-		doClose(this, false);
-	}
+	virtual void dispose() override { doClose(this, true); }
+	virtual void close() override { doClose(this, false); }
 
-	virtual Future<Void> getError() { return delayed( readThreads->getError() || writeThread->getError() ); }
-	virtual Future<Void> onClosed() { return stopped.getFuture(); }
+	virtual Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
+	virtual Future<Void> onClosed() override { return stopped.getFuture(); }
 
-	virtual KeyValueStoreType getType() { return type; }
-	virtual StorageBytes getStorageBytes();
+	virtual KeyValueStoreType getType() const override { return type; }
+	virtual StorageBytes getStorageBytes() const override;
 
-	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL );
-	virtual void clear( KeyRangeRef range, const Arena* arena = NULL );
-	virtual Future<Void> commit(bool sequential = false);
+	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
+	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
+	virtual Future<Void> commit(bool sequential = false) override;
 
-	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID );
-	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID );
-	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 );
+	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override;
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override;
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                                     int byteLimit = 1 << 30) override;
 
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
 	~KeyValueStoreSQLite();
@@ -1968,7 +1965,7 @@ KeyValueStoreSQLite::~KeyValueStoreSQLite() {
 	//printf("dbf=%lld bytes, wal=%lld bytes\n", getFileSize((filename+".fdb").c_str()), getFileSize((filename+".fdb-wal").c_str()));
 }
 
-StorageBytes KeyValueStoreSQLite::getStorageBytes() {
+StorageBytes KeyValueStoreSQLite::getStorageBytes() const {
 	int64_t free;
 	int64_t total;
 
@@ -2081,4 +2078,3 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 
 	return Void();
 }
-

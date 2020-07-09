@@ -144,7 +144,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 						{
 							MutationRef privatized = m;
 							privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-							TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
+							//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 							cachedRangeInfo[k] = privatized;
 						}
 					if(k != allKeys.end) {
@@ -161,7 +161,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				if(toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
+					//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 					toCommit->addTag( cacheTag );
 					toCommit->addTypedMessage(privatized);
 				}
@@ -276,6 +276,7 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 							allTags.insert(decodeServerTagValue(kv.value));
 						}
 					}
+					allTags.insert(cacheTag);
 
 					if (m.param1 == lastEpochEndKey) {
 						toCommit->addTags(allTags);
@@ -494,14 +495,24 @@ void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRe
 				keyBegin = itr->first;
 				mutationBegin = itr->second;
 				++itr;
-				keyEnd = itr->first;
-				mutationEnd = itr->second;
+				if (itr != cachedRangeInfo.end()) {
+					keyEnd = itr->first;
+					mutationEnd = itr->second;
+				} else {
+					//TraceEvent(SevDebug, "EndKeyNotFound", dbgid).detail("KeyBegin", keyBegin.toString());
+					break;
+				}
 			} else {
 				keyEnd = itr->first;
 				mutationEnd = itr->second;
 				++itr;
-				keyBegin = itr->first;
-				mutationBegin = itr->second;
+				if (itr != cachedRangeInfo.end()) {
+					keyBegin = itr->first;
+					mutationBegin = itr->second;
+				} else {
+					//TraceEvent(SevDebug, "BeginKeyNotFound", dbgid).detail("KeyEnd", keyEnd.toString());
+					break;
+				}
 			}
 
 			// Now get all the storage server tags for the cached key-ranges

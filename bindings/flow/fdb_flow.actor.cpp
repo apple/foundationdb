@@ -36,7 +36,7 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(630);
+	API *fdb = FDB::API::selectAPIVersion(700);
 	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr = db->createTransaction();
 
@@ -79,7 +79,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(630);
+	API *fdb = FDB::API::selectAPIVersion(700);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
@@ -158,15 +158,15 @@ namespace FDB {
 		void reset() override;
 
 		TransactionImpl() : tr(NULL) {}
-		TransactionImpl(TransactionImpl&& r) BOOST_NOEXCEPT {
-			tr = r.tr;
-			r.tr = NULL;
-		}
-		TransactionImpl& operator=(TransactionImpl&& r) BOOST_NOEXCEPT {
-			tr = r.tr;
-			r.tr = NULL;
+	    TransactionImpl(TransactionImpl&& r) noexcept {
+		    tr = r.tr;
+		    r.tr = NULL;
+	    }
+	    TransactionImpl& operator=(TransactionImpl&& r) noexcept {
+		    tr = r.tr;
+		    r.tr = NULL;
 			return *this;
-		}
+	    }
 
 	private:
 		FDBTransaction* tr;

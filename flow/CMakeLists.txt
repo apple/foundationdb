@@ -39,7 +39,8 @@ set(FLOW_SRCS
   Net2.actor.cpp
   Net2Packet.cpp
   Net2Packet.h
-  Platform.cpp
+  Platform.actor.cpp
+  Platform.actor.h
   Platform.h
   Profiler.actor.cpp
   Profiler.h
@@ -67,7 +68,7 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h
-	crc32c.h
+  crc32c.h
   crc32c.cpp
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
@@ -79,11 +80,18 @@ set(FLOW_SRCS
   genericactors.actor.h
   network.cpp
   network.h
+  rte_memcpy.h
   serialize.cpp
   serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
+  test_memcpy.cpp
+  test_memcpy_perf.cpp
   version.cpp)
+
+if(UNIX AND NOT APPLE)
+  list(APPEND FLOW_SRCS folly_memcpy.S)
+endif()
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 

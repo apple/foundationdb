@@ -1,6 +1,7 @@
 testTitle=UnitTests
-testName=UnitTests
 startDelay=0
 useDB=false
-maxTestCases=0
-testsMatching=/status/json/merging
+
+    testName=UnitTests
+    maxTestCases=0
+    testsMatching=/status/json/merging

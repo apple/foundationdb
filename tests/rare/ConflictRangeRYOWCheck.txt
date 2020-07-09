@@ -1,5 +1,7 @@
-testTitle=RandomReadWriteTest
-testName=ConflictRange
-testReadYourWrites=true
-connectionFailuresDisableDuration=100000
 buggify=off
+
+testTitle=RandomReadWriteTest
+connectionFailuresDisableDuration=100000
+
+    testName=ConflictRange
+    testReadYourWrites=true

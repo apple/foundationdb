@@ -1,4 +1,8 @@
+minimumReplication=2
+
 testTitle=Clogged
+connectionFailuresDisableDuration=60
+
     testName=Cycle
     transactionsPerSecond=1000.0
     testDuration=300.0
@@ -16,6 +20,3 @@ testTitle=Clogged
     waitForVersion=true
     allowFaultInjection=false
     killDc=false
-
-connectionFailuresDisableDuration=60
-minimumReplication=2
