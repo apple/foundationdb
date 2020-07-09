@@ -24,14 +24,15 @@ StringRef toStringRef(rocksdb::Slice s) {
 
 rocksdb::Options getOptions(const std::string& path) {
 	rocksdb::Options options;
-	bool exists = directoryExists(path);
-	options.create_if_missing = !exists;
+	options.create_if_missing = true;
 	return options;
 }
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	return {};
 }
+
+auto SPECIAL_KEYSPACE = LiteralStringRef("\xff");
 
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
@@ -305,9 +306,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	void set(KeyValueRef kv, const Arena* a) override {
-		// Writes to the special keyspace also go to SQLite.
+		// Writes to the special keyspace only go to SQLite.
 		if (kv.key[0] == 0xFF) {
 			sqlLite->set(kv, a);
+			return;
 		}
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
@@ -316,9 +318,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	void clear(KeyRangeRef keyRange, const Arena* a) override {
-		// Writes to the special keyspace also go to SQLite.
+		// Writes to the special keyspace only go to SQLite.
 		if (keyRange.begin[0] == 0xFF) {
 			sqlLite->clear(keyRange, a);
+			return;
 		}
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
@@ -363,14 +366,39 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
+	ACTOR static Future<Standalone<RangeResultRef>> stitchRangeRead(RocksDBKeyValueStore* self, KeyRangeRef keys,
+	                                                                int rowLimit, int byteLimit) {
+		state Standalone<RangeResultRef> result = wait(self->readRange(keys, rowLimit, byteLimit));
+		// We should probably not be duplicating this work, but these range reads are rare.
+		int accumulatedBytes = 0;
+		for (const auto& kv : result) {
+			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+		}
+		if (accumulatedBytes < byteLimit && result.size() < rowLimit) {
+			Standalone<RangeResultRef> sResult = wait(self->sqlLite->readRange(
+			    { SPECIAL_KEYSPACE, keys.end }, rowLimit - result.size(), byteLimit - accumulatedBytes));
+			for (const auto& kv : sResult) {
+				result.push_back_deep(result.arena(), kv);
+			}
+			result.more = (result.size() == rowLimit);
+			if (result.more) {
+				result.readThrough = result[result.size() - 1].key;
+			}
+		}
+		return result;
+	}
+
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
 		if (keys.begin[0] == 0xFF) {
 			return sqlLite->readRange(keys, rowLimit, byteLimit);
 		}
-		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
-		auto res = a->result.getFuture();
-		readThreads->post(a);
-		return res;
+		if (keys.end <= SPECIAL_KEYSPACE) {
+			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
+			auto res = a->result.getFuture();
+			readThreads->post(a);
+			return res;
+		}
+		return stitchRangeRead(this, keys, rowLimit, byteLimit);
 	}
 
 	StorageBytes getStorageBytes() override {
