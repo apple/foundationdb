@@ -983,3 +983,124 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	req.reply.send(RestoreCommonReply(self->id(), false));
 	return Void();
 }
+
+namespace {
+
+void oldSplitMutation(std::map<Key, UID>* pRangeToApplier, MutationRef m, Arena& mvector_arena,
+                      VectorRef<MutationRef>& mvector, Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) {
+	// mvector[i] should be mapped to nodeID[i]
+	ASSERT(mvector.empty());
+	ASSERT(nodeIDs.empty());
+	// key range [m->param1, m->param2)
+	std::map<Key, UID>::iterator itlow, itup; // we will return [itlow, itup)
+	itlow = pRangeToApplier->lower_bound(m.param1); // lower_bound returns the iterator that is >= m.param1
+	if (itlow == pRangeToApplier->end()) {
+		--itlow;
+		mvector.push_back_deep(mvector_arena, m);
+		nodeIDs.push_back(nodeIDs_arena, itlow->second);
+		return;
+	}
+	if (itlow->first > m.param1) {
+		if (itlow != pRangeToApplier->begin()) {
+			--itlow;
+		}
+	}
+
+	itup = pRangeToApplier->upper_bound(m.param2); // return rmap::end if no key is after m.param2.
+	ASSERT(itup == pRangeToApplier->end() || itup->first > m.param2);
+
+	std::map<Key, UID>::iterator itApplier;
+	while (itlow != itup) {
+		Standalone<MutationRef> curm; // current mutation
+		curm.type = m.type;
+		// The first split mutation should starts with m.first.
+		// The later ones should start with the rangeToApplier boundary.
+		if (m.param1 > itlow->first) {
+			curm.param1 = m.param1;
+		} else {
+			curm.param1 = itlow->first;
+		}
+		itApplier = itlow;
+		itlow++;
+		if (itlow == itup) {
+			ASSERT(m.param2 <= normalKeys.end);
+			curm.param2 = m.param2;
+		} else if (m.param2 < itlow->first) {
+			UNREACHABLE();
+			curm.param2 = m.param2;
+		} else {
+			curm.param2 = itlow->first;
+		}
+		ASSERT(curm.param1 <= curm.param2);
+		// itup > m.param2: (itup-1) may be out of mutation m's range
+		// Ensure the added mutations have overlap with mutation m
+		if (m.param1 < curm.param2 && m.param2 > curm.param1) {
+			mvector.push_back_deep(mvector_arena, curm);
+			nodeIDs.push_back(nodeIDs_arena, itApplier->second);
+		}
+	}
+}
+
+// Test splitMutation
+TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
+	std::map<Key, UID> rangeToApplier;
+	MutationsVec mvector;
+	Standalone<VectorRef<UID>> nodeIDs;
+
+	// Prepare RangeToApplier
+	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
+	int numAppliers = deterministicRandom()->randomInt(1, 50);
+	for (int i = 0; i < numAppliers; ++i) {
+		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
+		UID node = deterministicRandom()->randomUniqueID();
+		rangeToApplier.emplace(k, node);
+		TraceEvent("RangeToApplier").detail("Key", k).detail("Node", node);
+	}
+	Key k1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 500)));
+	Key k2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));
+	Key beginK = k1 < k2 ? k1 : k2;
+	Key endK = k1 < k2 ? k2 : k1;
+	Standalone<MutationRef> mutation(MutationRef(MutationRef::ClearRange, beginK.contents(), endK.contents()));
+
+	// Method 1: Use old splitMutation
+	oldSplitMutation(&rangeToApplier, mutation, mvector.arena(), mvector.contents(), nodeIDs.arena(),
+	                 nodeIDs.contents());
+	ASSERT(mvector.size() == nodeIDs.size());
+
+	// Method 2: Use new intersection based method
+	KeyRangeMap<UID> krMap;
+	buildApplierRangeMap(&krMap, &rangeToApplier);
+
+	MutationsVec mvector2;
+	Standalone<VectorRef<UID>> nodeIDs2;
+	splitMutation(krMap, mutation, mvector2.arena(), mvector2.contents(), nodeIDs2.arena(), nodeIDs2.contents());
+	ASSERT(mvector2.size() == nodeIDs2.size());
+
+	ASSERT(mvector.size() == mvector2.size());
+	int splitMutationIndex = 0;
+	for (; splitMutationIndex < mvector.size(); splitMutationIndex++) {
+		MutationRef result = mvector[splitMutationIndex];
+		MutationRef result2 = mvector2[splitMutationIndex];
+		UID applierID = nodeIDs[splitMutationIndex];
+		UID applierID2 = nodeIDs2[splitMutationIndex];
+		KeyRange krange(KeyRangeRef(result.param1, result.param2));
+		KeyRange krange2(KeyRangeRef(result2.param1, result2.param2));
+		TraceEvent("Result")
+		    .detail("KeyRange1", krange.toString())
+		    .detail("KeyRange2", krange2.toString())
+		    .detail("ApplierID1", applierID)
+		    .detail("ApplierID2", applierID2);
+		if (krange != krange2 || applierID != applierID2) {
+			TraceEvent(SevError, "IncorrectResult")
+			    .detail("Mutation", mutation.toString())
+			    .detail("KeyRange1", krange.toString())
+			    .detail("KeyRange2", krange2.toString())
+			    .detail("ApplierID1", applierID)
+			    .detail("ApplierID2", applierID2);
+		}
+	}
+
+	return Void();
+}
+
+} // namespace
