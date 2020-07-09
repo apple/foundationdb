@@ -1,24 +1,26 @@
+extraDB=1
+
 testTitle=BackupAndRestore
+clearAfterTest=false
+simBackupAgents=BackupToDB
+
     testName=Cycle
     transactionsPerSecond=500.0
     testDuration=20.0
     expectedRate=0
-    clearAfterTest=false
-	keyPrefix=a
+    keyPrefix=a
 
     testName=Cycle
     transactionsPerSecond=500.0
     testDuration=30.0
     expectedRate=0
-    clearAfterTest=false
-	keyPrefix=A
+    keyPrefix=A
 
     testName=Cycle
     transactionsPerSecond=500.0
     testDuration=40.0
     expectedRate=0
-    clearAfterTest=false
-	keyPrefix=m
+    keyPrefix=m
 
     testName=BackupToDBCorrectness
     backupTag=backup1
@@ -26,9 +28,6 @@ testTitle=BackupAndRestore
     backupAfter=10.0
     restoreAfter=60.0
     performRestore=false
-    clearAfterTest=false
-    simBackupAgents=BackupToDB
-    extraDB=1
 
     testName=BackupToDBCorrectness
     backupTag=backup2
@@ -36,9 +35,6 @@ testTitle=BackupAndRestore
     backupAfter=15.0
     restoreAfter=60.0
     performRestore=true
-    clearAfterTest=false
-    simBackupAgents=BackupToDB
-    extraDB=1
 
     testName=BackupToDBCorrectness
     backupTag=backup3
@@ -46,6 +42,3 @@ testTitle=BackupAndRestore
     backupAfter=20.0
     restoreAfter=60.0
     performRestore=false
-    clearAfterTest=false
-    simBackupAgents=BackupToDB
-    extraDB=1
