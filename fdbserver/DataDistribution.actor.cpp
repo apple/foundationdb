@@ -767,6 +767,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 
+			bool foundSrc = false;
+			for( int i = 0; i < req.src.size(); i++ ) {
+				if( self->server_info.count( req.src[i] ) ) {
+					foundSrc = true;
+					break;
+				}
+			}
+
 			// Select the best team
 			// Currently the metric is minimum used disk space (adjusted for data in flight)
 			// Only healthy teams may be selected. The team has to be healthy at the moment we update
@@ -777,7 +785,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
 			if( !self->teams.size() ) {
-				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
+				req.reply.send( std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc) );
 				return Void();
 			}
 
@@ -803,7 +811,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found && teamList[j]->isHealthy()) {
-							req.reply.send( teamList[j] );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
@@ -888,14 +897,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found) {
-							req.reply.send( teamList[j] );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
 				}
 			}
 
-			req.reply.send( bestOption );
+			req.reply.send( std::make_pair(bestOption, foundSrc) );
 
 			return Void();
 		} catch( Error &e ) {

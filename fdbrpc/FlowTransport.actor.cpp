@@ -471,7 +471,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 			try {
 				self->transport->countConnEstablished++;
-				wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+				wait( connectionWriter(self, conn) || reader || connectionMonitor(self) || self->resetConnection.onTrigger() );
+				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+				throw connection_failed();
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
 						e.code() == error_code_connection_unreferenced ||
@@ -481,8 +483,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					self->transport->countConnClosedWithError++;
 				throw e;
 			}
-
-			ASSERT( false );
 		} catch (Error& e) {
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
 				self->reconnectionDelay = FLOW_KNOBS->INITIAL_RECONNECTION_TIME;
@@ -1312,6 +1312,13 @@ int FlowTransport::getEndpointCount() {
 
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
+}
+
+void FlowTransport::resetConnection( NetworkAddress address ) {
+	auto peer = self->getPeer(address);
+	if(peer) {
+		peer->resetConnection.trigger();
+	}
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {

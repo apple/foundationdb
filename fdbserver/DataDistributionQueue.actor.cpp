@@ -356,6 +356,7 @@ struct DDQueueData {
 
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
+	Reference<FlowLock> fetchSourceLock;
 
 	int activeRelocations;
 	int queuedRelocations;
@@ -422,7 +423,7 @@ struct DDQueueData {
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), distributorId( mid ), lock( lock ),
 			cx( cx ), teamSize( teamSize ), singleRegionTeamSize( singleRegionTeamSize ), output( output ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
-			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited),
+			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), fetchSourceLock( new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM) ), lastLimited(lastLimited),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
 	void validate() {
@@ -528,7 +529,7 @@ struct DDQueueData {
 		}
 	}
 
-	ACTOR Future<Void> getSourceServersForRange( Database cx, RelocateData input, PromiseStream<RelocateData> output ) {
+	ACTOR Future<Void> getSourceServersForRange( Database cx, RelocateData input, PromiseStream<RelocateData> output, Reference<FlowLock> fetchLock ) {
 		state std::set<UID> servers;
 		state Transaction tr(cx);
 
@@ -538,6 +539,9 @@ struct DDQueueData {
 		} else {
 			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
+
+		wait( fetchLock->take( TaskPriority::DataDistributionLaunch ) );
+		state FlowLock::Releaser releaser( *fetchLock );
 
 		loop {
 			servers.clear();
@@ -678,7 +682,7 @@ struct DDQueueData {
 				startRelocation(rrs.priority, rrs.healthPriority);
 
 				fetchingSourcesQueue.insert( rrs );
-				getSourceActors.insert( rrs.keys, getSourceServersForRange( cx, rrs, fetchSourceServersComplete ) );
+				getSourceActors.insert( rrs.keys, getSourceServersForRange( cx, rrs, fetchSourceServersComplete, fetchSourceLock ) );
 			} else {
 				RelocateData newData( rrs );
 				newData.keys = affectedQueuedItems[r];
@@ -933,30 +937,26 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_POPULATE_REGION || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, inflightPenalty);
+					req.src = rd.src;
 					req.completeSources = rd.completeSources;
-					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
+					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
 					// the unhealthy DC is healthy again or is excluded.
-					if(!bestTeam.present()) {
+					if(!bestTeam.first.present()) {
 						foundTeams = false;
 						break;
 					}
-					if(!bestTeam.get()->isHealthy()) {
+					if(!bestTeam.first.get()->isHealthy()) {
 						allHealthy = false;
 					} else {
 						anyHealthy = true;
 					}
-					bool foundSource = false;
-					if(!rd.wantsNewServers && self->teamCollections.size() > 1) {
-						for(auto& it : bestTeam.get()->getServerIDs()) {
-							if(std::find(rd.src.begin(), rd.src.end(), it) != rd.src.end()) {
-								foundSource = true;
-								anyWithSource = true;
-								break;
-							}
-						}
+
+					if(bestTeam.second) {
+						anyWithSource = true;
 					}
-					bestTeams.push_back(std::make_pair(bestTeam.get(), foundSource));
+					
+					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
 					tciIndex++;
 				}
 				if (foundTeams && anyHealthy) {
@@ -1247,26 +1247,26 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
+				state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false))));
 				
-				traceEvent.detail("DestTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
+				traceEvent.detail("DestTeam", printable(randomTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
-				if (randomTeam.present()) {
-					state Optional<Reference<IDataDistributionTeam>> loadedTeam =
+				if (randomTeam.first.present()) {
+					state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> loadedTeam =
 						wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 							GetTeamRequest(true, true, false, true))));
 
-					traceEvent.detail("SourceTeam", printable(loadedTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
+					traceEvent.detail("SourceTeam", printable(loadedTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 						return team->getDesc();
 					})));
 
-					if (loadedTeam.present()) {
+					if (loadedTeam.first.present()) {
 						bool _moved =
-							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(),
-												randomTeam.get(), teamCollectionIndex == 0, &traceEvent));
+							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.first.get(),
+												randomTeam.first.get(), teamCollectionIndex == 0, &traceEvent));
 						moved = _moved;	
 						if (moved) {
 							resetCount = 0;
@@ -1345,25 +1345,25 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				state Optional<Reference<IDataDistributionTeam>> randomTeam = wait(brokenPromiseToNever(
+				state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false, true))));
 
-				traceEvent.detail("SourceTeam", printable(randomTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
+				traceEvent.detail("SourceTeam", printable(randomTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
-				if (randomTeam.present()) {
-					state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait(brokenPromiseToNever(
+				if (randomTeam.first.present()) {
+					state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> unloadedTeam = wait(brokenPromiseToNever(
 					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false))));
 
-					traceEvent.detail("DestTeam", printable(unloadedTeam.map<std::string>([](const Reference<IDataDistributionTeam>& team){
+					traceEvent.detail("DestTeam", printable(unloadedTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 						return team->getDesc();
 					})));
 
-					if (unloadedTeam.present()) {
+					if (unloadedTeam.first.present()) {
 						bool _moved =
-							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(),
-												unloadedTeam.get(), teamCollectionIndex == 0, &traceEvent));
+							wait(rebalanceTeams(self, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.first.get(),
+												unloadedTeam.first.get(), teamCollectionIndex == 0, &traceEvent));
 						moved = _moved;
 						if (moved) {
 							resetCount = 0;
