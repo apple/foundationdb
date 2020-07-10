@@ -232,7 +232,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.txt)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupApiCorrectnessAtomicRestore.txt)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreTestSplitMutation.txt)
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)
