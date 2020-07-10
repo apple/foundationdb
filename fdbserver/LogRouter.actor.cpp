@@ -20,6 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
@@ -30,7 +31,6 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/Stats.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LogRouterData {

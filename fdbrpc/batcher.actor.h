@@ -27,8 +27,8 @@
 #elif !defined(FLOW_BATCHER_ACTOR_H)
 	#define FLOW_BATCHER_ACTOR_H
 
+#include "fdbrpc/Stats.h"
 #include "flow/flow.h"
-#include "flow/Stats.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <class X>

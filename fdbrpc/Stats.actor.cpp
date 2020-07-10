@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)

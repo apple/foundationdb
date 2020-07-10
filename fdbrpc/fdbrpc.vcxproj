@@ -28,6 +28,7 @@
     <ClCompile Include="libcoroutine\Coro.c" />
     <ClCompile Include="Locality.cpp" />
     <ActorCompiler Include="sim2.actor.cpp" />
+    <ActorCompiler Include="Stats.actor.cpp" />
     <ClCompile Include="Net2FileSystem.cpp" />
     <ClCompile Include="QueueModel.cpp" />
     <ClCompile Include="Replication.cpp" />
@@ -107,6 +108,7 @@
     <ClInclude Include="simulator.h" />
     <ClInclude Include="sim_validation.h" />
     <ClInclude Include="Smoother.h" />
+    <ClInclude Include="Stats.h" />
     <ClInclude Include="TimedRequest.h" />
     <ClInclude Include="TraceFileIO.h" />
     <ClInclude Include="zlib\zlib.h" />

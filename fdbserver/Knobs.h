@@ -473,6 +473,9 @@ public:
 	int64_t TIME_KEEPER_DELAY;
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
+	// Server request latency measurement
+	int LATENCY_SAMPLE_SIZE;
+	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
 };
