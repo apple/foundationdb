@@ -29,7 +29,6 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Xml;
-using System.Runtime.Serialization.Json;
 
 namespace SummarizeTest
 {
@@ -360,22 +359,20 @@ namespace SummarizeTest
                 {
                     ErrorOutputListener errorListener = new ErrorOutputListener();
                     process.StartInfo.UseShellExecute = false;
-                    string tlsPluginArg = "";
                     if (tlsPluginFile.Length > 0) {
                         process.StartInfo.EnvironmentVariables["FDB_TLS_PLUGIN"] = tlsPluginFile;
-                        tlsPluginArg = "--tls_plugin=" + tlsPluginFile;
                     }
                     process.StartInfo.RedirectStandardOutput = true;
                     var args = "";
                     if (willRestart && oldBinaryName.EndsWith("alpha6"))
                     {
-                        args = string.Format("-Rs 1000000000 -r simulation {0} -s {1} -f \"{2}\" -b {3} {4} --crash",
-                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1000000000 -r simulation {0} -s {1} -f \"{2}\" -b {3} --tls_plugin={4} --crash",
+                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginFile);
                     }
                     else
                     {
-                        args = string.Format("-Rs 1GB -r simulation {0} -s {1} -f \"{2}\" -b {3} {4} --crash",
-                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginArg);
+                        args = string.Format("-Rs 1GB -r simulation {0} -s {1} -f \"{2}\" -b {3} --tls_plugin={4} --crash",
+                            IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", tlsPluginFile);
                     }
                     if (restarting) args = args + " --restarting";
                     if (useValgrind && !willRestart)
@@ -480,7 +477,7 @@ namespace SummarizeTest
                     memCheckThread.Join();
                     consoleThread.Join();
 
-                    var traceFiles = Directory.GetFiles(tempPath, "trace*.*", SearchOption.TopDirectoryOnly).Where(s => s.EndsWith(".xml") || s.EndsWith(".json")).ToArray();
+                    var traceFiles = Directory.GetFiles(tempPath, "trace*.xml");
                     if (traceFiles.Length == 0)
                     {
                         if (!traceToStdout)
@@ -661,10 +658,6 @@ namespace SummarizeTest
             return whats.ToArray();
         }
 
-        delegate IEnumerable<Magnesium.Event> parseDelegate(System.IO.Stream stream, string file,
-            bool keepOriginalElement = false, double startTime = -1, double endTime = Double.MaxValue,
-            double samplingFactor = 1.0);
-
         static int Summarize(string[] traceFiles, string summaryFileName,
             string errorFileName, bool? killed, List<string> outputErrors, int? exitCode, long? peakMemory,
             string uid, string valgrindOutputFileName, int expectedUnseed, out int unseed, out bool retryableError, bool logOnRetryableError,
@@ -696,12 +689,7 @@ namespace SummarizeTest
                 {
                     try
                     {
-                        parseDelegate parse;
-                        if (traceFileName.EndsWith(".json"))
-                            parse = Magnesium.JsonParser.Parse;
-                        else
-                            parse = Magnesium.XmlParser.Parse;
-                        foreach (var ev in parse(traceFile, traceFileName))
+                        foreach (var ev in Magnesium.XmlParser.Parse(traceFile, traceFileName))
                         {
                             Magnesium.Severity newSeverity;
                             if (severityMap.TryGetValue(new KeyValuePair<string, Magnesium.Severity>(ev.Type, ev.Severity), out newSeverity))
@@ -1101,19 +1089,10 @@ namespace SummarizeTest
 
         private static void AppendToSummary(string summaryFileName, XElement xout, bool traceToStdout = false, bool shouldLock = true)
         {
-            bool useXml = true;
-            if (summaryFileName.EndsWith(".json"))
-                useXml = false;
-
             if (traceToStdout)
             {
-                if (useXml) {
-                    using (var wr = System.Xml.XmlWriter.Create(Console.OpenStandardOutput(), new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true, Encoding = new System.Text.UTF8Encoding(false) }))
-                        xout.WriteTo(wr);
-                } else {
-                    using (var wr = System.Runtime.Serialization.Json.JsonReaderWriterFactory.CreateJsonWriter(Console.OpenStandardOutput()))
-                        xout.WriteTo(wr);
-                }
+                using (var wr = System.Xml.XmlWriter.Create(Console.OpenStandardOutput(), new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true, Encoding = new System.Text.UTF8Encoding(false) }))
+                    xout.WriteTo(wr);
                 Console.WriteLine();
                 return;
             }
@@ -1124,6 +1103,7 @@ namespace SummarizeTest
                 takeLock(summaryFileName);
             try
             {
+
                 using (var f = System.IO.File.Open(summaryFileName, System.IO.FileMode.Append, System.IO.FileAccess.Write))
                 {
                     if (f.Length == 0)
@@ -1131,13 +1111,8 @@ namespace SummarizeTest
                         byte[] bytes = Encoding.UTF8.GetBytes("<Trace>");
                         f.Write(bytes, 0, bytes.Length);
                     }
-                    if (useXml) {
-                        using (var wr = System.Xml.XmlWriter.Create(f, new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true }))
-                            xout.Save(wr);
-                    } else {
-                        using (var wr = System.Runtime.Serialization.Json.JsonReaderWriterFactory.CreateJsonWriter(f))
-                            xout.WriteTo(wr);
-                    }
+                    using (var wr = System.Xml.XmlWriter.Create(f, new System.Xml.XmlWriterSettings() { OmitXmlDeclaration = true }))
+                        xout.Save(wr);
                     var endl = Encoding.UTF8.GetBytes(Environment.NewLine);
                     f.Write(endl, 0, endl.Length);
                 }
@@ -1148,7 +1123,6 @@ namespace SummarizeTest
                     releaseLock(summaryFileName);
             }
         }
-
         private static void AppendXmlMessageToSummary(string summaryFileName, XElement xout, bool traceToStdout = false, string testFile = null,
             int? seed = null, bool? buggify = null, bool? determinismCheck = null, string oldBinaryName = null)
         {
