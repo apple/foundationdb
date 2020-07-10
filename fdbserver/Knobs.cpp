@@ -538,7 +538,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( TIME_KEEPER_MAX_ENTRIES,                3600 * 24 * 30 * 6 ); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
 
 	// Server request latency measurement
-	init( LATENCY_SAMPLE_SIZE,                                 10000 );
+	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// clang-format on
