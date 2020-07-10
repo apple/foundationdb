@@ -124,4 +124,16 @@ struct HaltRatekeeperRequest {
 	}
 };
 
+struct TransactionCommitCostEstimation {
+	int64_t numWrite = 0;
+	int64_t numAtomicWrite = 0;
+	unsigned long bytesWrite = 0;
+	unsigned long bytesClearEst = 0;
+	unsigned long bytesAtomicWrite = 0;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite);
+	}
+};
 #endif //FDBSERVER_RATEKEEPERINTERFACE_H
