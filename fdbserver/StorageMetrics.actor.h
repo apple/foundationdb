@@ -259,7 +259,7 @@ struct StorageServerMetrics {
 
 	// Called by StorageServerDisk when the size of a key in byteSample changes, to notify WaitMetricsRequest
 	// Should not be called for keys past allKeys.end
-	void notifyBytes( RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::Iterator shard, int64_t bytes ) {
+	void notifyBytes( RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard, int64_t bytes ) {
 		ASSERT(shard.end() <= allKeys.end);
 
 		StorageMetrics notifyMetrics;
