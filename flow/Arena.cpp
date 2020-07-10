@@ -25,6 +25,11 @@
 #ifdef VALGRIND_ARENA
 #include <memcheck.h>
 #else
+// Since VALGRIND_ARENA is not set, we don't want to pay the performance penalty for precise tracking of arenas. We'll
+// make these macros noops just for this translation unit.
+#undef VALGRIND_MAKE_MEM_NOACCESS
+#undef VALGRIND_MAKE_MEM_DEFINED
+#undef VALGRIND_MAKE_MEM_UNDEFINED
 #define VALGRIND_MAKE_MEM_NOACCESS(addr, size) ((void)(addr), (void)(size))
 #define VALGRIND_MAKE_MEM_DEFINED(addr, size) ((void)(addr), (void)(size))
 #define VALGRIND_MAKE_MEM_UNDEFINED(addr, size) ((void)(addr), (void)(size))
