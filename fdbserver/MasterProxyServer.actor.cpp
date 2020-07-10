@@ -333,7 +333,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				} else if (req.priority >= TransactionPriority::DEFAULT) {
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					defaultQueue->push_back(req);
-					systemQueue->span.addParent(req.spanContext);
+					defaultQueue->span.addParent(req.spanContext);
 				} else {
 					// Return error for batch_priority GRV requests
 					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
