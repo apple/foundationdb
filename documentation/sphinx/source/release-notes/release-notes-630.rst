@@ -18,6 +18,7 @@ Features
 * Added a new API in all bindings that can be used to query the estimated byte size of a given range. `(PR #2537) <https://github.com/apple/foundationdb/pull/2537>`_
 * Added the ``lock`` and ``unlock`` commands to ``fdbcli`` which lock or unlock a cluster. `(PR #2890) <https://github.com/apple/foundationdb/pull/2890>`_
 * Add a framework which helps to add client functions using special keys (keys within ``[\xff\xff, \xff\xff\xff)``). `(PR #2662) <https://github.com/apple/foundationdb/pull/2662>`_
+* Added capability of aborting replication to a clone of DR site without affecting replication to the original dr site with ``--dstonly`` option of ``fdbdr abort``. `(PR 3457) <https://github.com/apple/foundationdb/pull/3457>`_
 
 Performance
 -----------
