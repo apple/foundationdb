@@ -32,7 +32,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	return {};
 }
 
-auto SPECIAL_KEYSPACE = LiteralStringRef("\xff");
+const StringRef SPECIAL_KEYSPACE = LiteralStringRef("\xff");
 
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
@@ -368,21 +368,36 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	ACTOR static Future<Standalone<RangeResultRef>> stitchRangeRead(RocksDBKeyValueStore* self, KeyRangeRef keys,
 	                                                                int rowLimit, int byteLimit) {
-		state Standalone<RangeResultRef> result = wait(self->readRange(keys, rowLimit, byteLimit));
-		// We should probably not be duplicating this work, but these range reads are rare.
-		int accumulatedBytes = 0;
-		for (const auto& kv : result) {
-			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-		}
-		if (accumulatedBytes < byteLimit && result.size() < rowLimit) {
-			Standalone<RangeResultRef> sResult = wait(self->sqlLite->readRange(
-			    { SPECIAL_KEYSPACE, keys.end }, rowLimit - result.size(), byteLimit - accumulatedBytes));
-			for (const auto& kv : sResult) {
-				result.push_back_deep(result.arena(), kv);
+		state Standalone<RangeResultRef> result;
+		if (rowLimit >= 0) {
+			// Limit the first range to end at the special keyspace to prevent infinite recursion.
+			Standalone<RangeResultRef> result =
+			    wait(self->readRange({ keys.begin, SPECIAL_KEYSPACE }, rowLimit, byteLimit));
+			// We should probably not be duplicating this work, but these range reads are rare.
+			int accumulatedBytes = 0;
+			for (const auto& kv : result) {
+				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			}
-			result.more = (result.size() == rowLimit);
-			if (result.more) {
-				result.readThrough = result[result.size() - 1].key;
+			if (accumulatedBytes < byteLimit && result.size() < rowLimit) {
+				Standalone<RangeResultRef> sResult = wait(self->sqlLite->readRange(
+				    { SPECIAL_KEYSPACE, keys.end }, rowLimit - result.size(), byteLimit - accumulatedBytes));
+				for (const auto& kv : sResult) {
+					result.push_back_deep(result.arena(), kv);
+				}
+			}
+		} else {
+			Standalone<RangeResultRef> result =
+			    wait(self->sqlLite->readRange({ SPECIAL_KEYSPACE, keys.end }, rowLimit, byteLimit));
+			int accumulatedBytes = 0;
+			for (const auto& kv : result) {
+				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+			}
+			if (accumulatedBytes < byteLimit && result.size() < rowLimit) {
+				Standalone<RangeResultRef> rResult = wait(self->readRange(
+				    { keys.begin, SPECIAL_KEYSPACE }, rowLimit - result.size(), byteLimit - accumulatedBytes));
+				for (const auto& kv : rResult) {
+					result.push_back_deep(result.arena(), kv);
+				}
 			}
 		}
 		return result;
