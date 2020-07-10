@@ -157,12 +157,14 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
+	TransactionCommitCostEstimation commitCostEstimation;
+	TagSet tagSet;
 
 	CommitTransactionRequest() : flags(0) {}
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID);
+		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet);
 	}
 };
 

@@ -320,6 +320,8 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
+	TransactionCommitCostEstimation estimateCommitCosts(bool traceEvent = false) const;
+
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 	Database cx;
