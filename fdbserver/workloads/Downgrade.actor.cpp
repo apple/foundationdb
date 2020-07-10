@@ -28,10 +28,12 @@ struct DowngradeWorkload : TestWorkload {
 
 	static constexpr const char* NAME = "Downgrade";
 	Key oldKey, newKey;
+	int numObjects;
 
 	DowngradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		oldKey = getOption(options, LiteralStringRef("oldKey"), LiteralStringRef("oldKey"));
 		newKey = getOption(options, LiteralStringRef("newKey"), LiteralStringRef("newKey"));
+		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0,100));
 	}
 
 	template <class Impl>
@@ -43,6 +45,8 @@ struct DowngradeWorkload : TestWorkload {
 	struct OldStruct : public _Struct<OldStruct> {
 		void setFields() { oldField = 1; }
 
+		bool isSet() const { return oldField == 1; }
+
 		template <class Archive>
 		void serialize(Archive& ar) {
 			serializer(ar, oldField);
@@ -51,6 +55,10 @@ struct DowngradeWorkload : TestWorkload {
 
 	struct NewStruct : public _Struct<NewStruct> {
 		int newField = 0;
+
+		bool isSet() const {
+			return oldField == 1 && newField == 2;
+		}
 
 		void setFields() {
 			oldField = 1;
@@ -63,9 +71,9 @@ struct DowngradeWorkload : TestWorkload {
 		}
 	};
 
-	ACTOR static Future<Void> writeOld(Database cx, Key key) {
+	ACTOR static Future<Void> writeOld(Database cx, int numObjects, Key key) {
 		BinaryWriter writer(IncludeVersion(currentProtocolVersion));
-		std::vector<OldStruct> data(10);
+		std::vector<OldStruct> data(numObjects);
 		for (auto& oldStruct : data) {
 			oldStruct.setFields();
 		}
@@ -84,11 +92,11 @@ struct DowngradeWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> writeNew(Database cx, Key key) {
+	ACTOR static Future<Void> writeNew(Database cx, int numObjects, Key key) {
 		ProtocolVersion protocolVersion = currentProtocolVersion;
 		protocolVersion.addObjectSerializerFlag();
 		ObjectWriter writer(IncludeVersion(protocolVersion));
-		std::vector<NewStruct> data(10);
+		std::vector<NewStruct> data(numObjects);
 		for (auto& newObject : data) {
 			newObject.setFields();
 		}
@@ -107,7 +115,7 @@ struct DowngradeWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> readData(Database cx, Key key) {
+	ACTOR static Future<Void> readData(Database cx, int numObjects, Key key) {
 		state Transaction tr(cx);
 		state Value value;
 
@@ -127,9 +135,9 @@ struct DowngradeWorkload : TestWorkload {
 			BinaryReader reader(value, IncludeVersion());
 			std::vector<OldStruct> data;
 			reader >> data;
-			ASSERT(data.size() == 10);
+			ASSERT(data.size() == numObjects);
 			for (const auto& oldObject : data) {
-				ASSERT(oldObject.oldField == 1);
+				ASSERT(oldObject.isSet());
 			}
 		}
 		{
@@ -137,9 +145,9 @@ struct DowngradeWorkload : TestWorkload {
 			ArenaReader reader(Arena(), value, IncludeVersion());
 			std::vector<OldStruct> data;
 			reader >> data;
-			ASSERT(data.size() == 10);
+			ASSERT(data.size() == numObjects);
 			for (const auto& oldObject : data) {
-				ASSERT(oldObject.oldField == 1);
+				ASSERT(oldObject.isSet());
 			}
 		}
 		return Void();
@@ -148,11 +156,11 @@ struct DowngradeWorkload : TestWorkload {
 	std::string description() override { return NAME; }
 
 	Future<Void> setup(Database const& cx) override {
-		return clientId ? Void() : (writeOld(cx, oldKey) && writeNew(cx, newKey));
+		return clientId ? Void() : (writeOld(cx, numObjects, oldKey) && writeNew(cx, numObjects, newKey));
 	}
 
 	Future<Void> start(Database const& cx) override {
-		return clientId ? Void() : (readData(cx, oldKey) && readData(cx, newKey));
+		return clientId ? Void() : (readData(cx, numObjects, oldKey) && readData(cx, numObjects, newKey));
 	}
 
 	Future<bool> check(Database const& cx) override {
