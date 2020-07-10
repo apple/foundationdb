@@ -49,6 +49,9 @@ struct KeyValueMapPair {
 	}
 
 	bool operator<(KeyValueMapPair const& r) const { return key < r.key; }
+	bool operator>(KeyValueMapPair const& r) const { return r < *this; }
+	bool operator<=(KeyValueMapPair const& r) const { return !(*this > r); }
+	bool operator>=(KeyValueMapPair const& r) const { return !(*this < r); }
 	bool operator==(KeyValueMapPair const& r) const { return key == r.key; }
 	bool operator!=(KeyValueMapPair const& r) const { return key != r.key; }
 };

@@ -48,8 +48,6 @@
 
 #include <boost/version.hpp>
 
-using namespace std::rel_ops;
-
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \

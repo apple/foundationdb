@@ -50,6 +50,7 @@ public:
 	RYWIterator& operator--();
 
 	bool operator == ( const RYWIterator& r ) const;
+	bool operator!=(const RYWIterator& r) const;
 
 	void skip( KeyRef key );
 	

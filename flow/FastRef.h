@@ -165,5 +165,9 @@ template <class P>
 bool operator==( const Reference<P>& lhs, const Reference<P>& rhs ) {
 	return lhs.getPtr() == rhs.getPtr();
 }
+template <class P>
+bool operator!=(const Reference<P>& lhs, const Reference<P>& rhs) {
+	return !(lhs == rhs);
+}
 
 #endif
