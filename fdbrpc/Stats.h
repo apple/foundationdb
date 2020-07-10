@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_STATS_H
-#define FLOW_STATS_H
+#ifndef FDBRPC_STATS_H
+#define FDBRPC_STATS_H
 #pragma once
 
 // Yet another performance statistics interface
@@ -37,6 +37,7 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include <cstddef>
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbrpc/ContinuousSample.h"
 
 struct ICounter {
 	// All counters have a name and value
@@ -197,4 +198,43 @@ private:
 		bands.insert(std::make_pair(value, new Counter(format("Band%f", value), *cc)));
 	}
 };
+
+class LatencySample {
+public:
+	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize) : name(name), id(id), sample(sampleSize), sampleStart(now()) {
+		logger = recurring([this](){ logSample(); }, loggingInterval);
+	}
+
+	void addMeasurement(double measurement) {
+		sample.addSample(measurement);
+	}
+
+private:
+	std::string name;
+	UID id;
+	double sampleStart;
+
+	ContinuousSample<double> sample;
+	Future<Void> logger;
+
+	void logSample() {
+		TraceEvent(name.c_str(), id)
+			.detail("Count", sample.getPopulationSize())
+			.detail("Elapsed", now() - sampleStart)
+			.detail("Min", sample.min())
+			.detail("Max", sample.max())
+			.detail("Mean", sample.mean())
+			.detail("Median", sample.median())
+			.detail("P25", sample.percentile(0.25))
+			.detail("P90", sample.percentile(0.9))
+			.detail("P95", sample.percentile(0.95))
+			.detail("P99", sample.percentile(0.99))
+			.detail("P99.9", sample.percentile(0.999))
+			.trackLatest(id.toString() + "/" + name);
+
+		sample.clear();
+		sampleStart = now();
+	}
+};
+
 #endif

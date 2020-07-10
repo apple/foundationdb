@@ -408,8 +408,24 @@ struct MachineMemoryInfo {
 struct RolesInfo {
 	std::multimap<NetworkAddress, JsonBuilderObject> roles;
 
+	JsonBuilderObject addLatencyStatistics(TraceEventFields const& metrics) {
+		JsonBuilderObject latencyStats;
+		latencyStats.setKeyRawNumber("count", metrics.getValue("Count"));
+		latencyStats.setKeyRawNumber("min", metrics.getValue("Min"));
+		latencyStats.setKeyRawNumber("max", metrics.getValue("Max"));
+		latencyStats.setKeyRawNumber("median", metrics.getValue("Median"));
+		latencyStats.setKeyRawNumber("mean", metrics.getValue("Mean"));
+		latencyStats.setKeyRawNumber("p25", metrics.getValue("P25"));
+		latencyStats.setKeyRawNumber("p90", metrics.getValue("P90"));
+		latencyStats.setKeyRawNumber("p95", metrics.getValue("P95"));
+		latencyStats.setKeyRawNumber("p99", metrics.getValue("P99"));
+		latencyStats.setKeyRawNumber("p99.9", metrics.getValue("P99.9"));
+		
+		return latencyStats;
+	}
+
 	JsonBuilderObject addLatencyBandInfo(TraceEventFields const& metrics) {
-		JsonBuilderObject latency;
+		JsonBuilderObject latencyBands;
 		std::map<std::string, JsonBuilderObject> bands;
 
 		for(auto itr = metrics.begin(); itr != metrics.end(); ++itr) {
@@ -424,10 +440,10 @@ struct RolesInfo {
 				continue;
 			}
 
-			latency[band] = StatusCounter(itr->second).getCounter();
+			latencyBands[band] = StatusCounter(itr->second).getCounter();
 		}
 
-		return latency;
+		return latencyBands;
 	}
 
 	JsonBuilderObject& addRole( NetworkAddress address, std::string const& role, UID id) {
@@ -478,7 +494,12 @@ struct RolesInfo {
 
 			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
 			if(readLatencyMetrics.size()) {
-				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyMetrics);
+				obj["read_latency_statistics"] = addLatencyStatistics(readLatencyMetrics);
+			}
+
+			TraceEventFields const& readLatencyBands = metrics.at("ReadLatencyBands");
+			if(readLatencyBands.size()) {
+				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyBands);
 			}
 
 			obj["data_lag"] = getLagObject(versionLag);
@@ -530,12 +551,25 @@ struct RolesInfo {
 		try {
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
 			if(grvLatencyMetrics.size()) {
-				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyMetrics);
+				JsonBuilderObject priorityStats;
+				// We only report default priority now, but this allows us to add other priorities if we want them
+				priorityStats["default"] = addLatencyStatistics(grvLatencyMetrics);
+				obj["grv_latency_statistics"] = priorityStats;
+			}
+
+			TraceEventFields const& grvLatencyBands = metrics.at("GRVLatencyBands");
+			if(grvLatencyBands.size()) {
+				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyBands);
 			}
 
 			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
 			if(commitLatencyMetrics.size()) {
-				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyMetrics);
+				obj["commit_latency_statistics"] = addLatencyStatistics(commitLatencyMetrics);
+			}
+
+			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
+			if(commitLatencyBands.size()) {
+				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
 			}
 		} catch (Error &e) {
 			if(e.code() != error_code_attribute_not_found) {
@@ -1543,7 +1577,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
 	vector<std::pair<StorageServerInterface, EventMap>> results = wait(
-	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics" }));
+	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands" }));
 
 	return results;
 }
@@ -1558,7 +1592,7 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 
 ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Reference<AsyncVar<CachedSerialization<ServerDBInfo>>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().read().client.proxies, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics" }));
+	    db->get().read().client.proxies, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics", "GRVLatencyBands", "CommitLatencyBands" }));
 
 	return results;
 }

@@ -27,7 +27,7 @@
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
 // Dead code, removed in the next protocol version

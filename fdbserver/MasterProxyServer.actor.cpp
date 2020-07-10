@@ -28,6 +28,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
@@ -44,7 +45,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Knobs.h"
-#include "flow/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -64,6 +64,9 @@ struct ProxyStats {
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
 	Version lastCommitVersionAssigned;
 
+	LatencySample commitLatencySample;
+	LatencySample grvLatencySample;
+
 	LatencyBands commitLatencyBands;
 	LatencyBands grvLatencyBands;
 
@@ -74,7 +77,8 @@ struct ProxyStats {
 		txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
 		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),	txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc), 
-		lastCommitVersionAssigned(0), commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY), grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
+		lastCommitVersionAssigned(0), commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE), grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY), grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 	{
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
@@ -1091,9 +1095,11 @@ ACTOR Future<Void> commitBatch(
 		}
 
 		// TODO: filter if pipelined with large commit
+		double duration = endTime - trs[t].requestTime();
+		self->stats.commitLatencySample.addMeasurement(duration);
 		if(self->latencyBandConfig.present()) {
 			bool filter = maxTransactionBytes > self->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
-			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime(), filter);
+			self->stats.commitLatencyBands.addMeasurement(duration, filter);
 		}
 	}
 
@@ -1212,8 +1218,12 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	GetReadVersionReply reply = wait(replyFuture);
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
+		double duration = end - request.requestTime();
+		if(request.priority() == GetReadVersionRequest::PRIORITY_DEFAULT) {
+			stats->grvLatencySample.addMeasurement(duration);
+		}
 		if(request.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
-			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+			stats->grvLatencyBands.addMeasurement(duration);
 		}
 		++stats->txnRequestOut;
 		request.reply.send(reply);

@@ -4,6 +4,14 @@
 Release Notes
 #############
 
+6.2.24
+======
+
+Status
+------
+
+* Added per-process server request latency statistics reported in the role section of relevant processes. These are named ``grv_latency_statistics`` and ``commit_latency_statistics`` on proxy roles and ``read_latency_statistics`` on storage roles. `(PR #3480) <https://github.com/apple/foundationdb/pull/3480>`_
+
 6.2.23
 ======
 

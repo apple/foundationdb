@@ -30,7 +30,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {
