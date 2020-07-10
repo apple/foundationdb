@@ -50,7 +50,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include <type_traits>
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -534,6 +534,7 @@ public:
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
 		Counter readsRejected;
 
+		LatencySample readLatencySample;
 		LatencyBands readLatencyBands;
 
 		Counters(StorageServer* self)
@@ -564,7 +565,8 @@ public:
 			fetchExecutingMS("FetchExecutingMS", cc),
 			fetchExecutingCount("FetchExecutingCount", cc),
 			readsRejected("ReadsRejected", cc),
-			readLatencyBands("ReadLatencyMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
+			readLatencySample("ReadLatencyMetrics", self->thisServerID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+			readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
 		{
 			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self](){ return self->version.get(); });
@@ -994,9 +996,12 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+
+	double duration = timer() - req.requestTime();
+	data->counters.readLatencySample.addMeasurement(duration);
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
-		data->counters.readLatencyBands.addMeasurement(timer() - req.requestTime(), resultSize > maxReadBytes);
+		data->counters.readLatencyBands.addMeasurement(duration, resultSize > maxReadBytes);
 	}
 
 	return Void();
@@ -1585,11 +1590,13 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
+	double duration = timer() - req.requestTime();
+	data->counters.readLatencySample.addMeasurement(duration);
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(
-		    timer() - req.requestTime(), resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
+		    duration, resultSize > maxReadBytes || abs(req.begin.offset) > maxSelectorOffset ||
 		                                     abs(req.end.offset) > maxSelectorOffset);
 	}
 
@@ -1648,11 +1655,14 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
+
+	double duration = timer() - req.requestTime();
+	data->counters.readLatencySample.addMeasurement(duration);
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
 		int maxSelectorOffset = data->latencyBandConfig.get().readConfig.maxKeySelectorOffset.orDefault(std::numeric_limits<int>::max());
 		data->counters.readLatencyBands.addMeasurement(
-		    timer() - req.requestTime(), resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
+		    duration, resultSize > maxReadBytes || abs(req.sel.offset) > maxSelectorOffset);
 	}
 
 	return Void();

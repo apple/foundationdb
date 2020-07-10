@@ -46,8 +46,6 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
-  Stats.actor.cpp
-  Stats.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h

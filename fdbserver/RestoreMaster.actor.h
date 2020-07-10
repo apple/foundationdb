@@ -28,12 +28,12 @@
 #define FDBSERVER_RESTORE_MASTER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "flow/Platform.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
