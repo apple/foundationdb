@@ -2199,7 +2199,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, JsonBuilderArray* 
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				messages->push_back(
-				    JsonString::makeMessage("fetch_primary_dc_timedout", "Fetching primary DC timed out."));
+				    JsonString::makeMessage("fetch_primary_dc_timeout", "Fetching primary DC timed out."));
 				return Optional<Value>();
 			} else {
 				wait(tr.onError(e));
