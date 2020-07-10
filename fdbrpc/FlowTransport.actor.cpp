@@ -483,8 +483,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 					self->transport->countConnClosedWithError++;
 				throw e;
 			}
-
-			ASSERT( false );
 		} catch (Error& e) {
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
 				self->reconnectionDelay = FLOW_KNOBS->INITIAL_RECONNECTION_TIME;

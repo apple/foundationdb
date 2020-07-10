@@ -150,7 +150,7 @@ ACTOR Future<TLogPeekReply> recordRequestMetrics( ILogSystem::ServerPeekCursor* 
 	try {
 		state double startTime = now();
 		TLogPeekReply t = wait(in);
-		if(now()-lastReset > SERVER_KNOBS->PEEK_RESET_INTERVAL) {
+		if(now()-self->lastReset > SERVER_KNOBS->PEEK_RESET_INTERVAL) {
 			if(now()-startTime > SERVER_KNOBS->PEEK_MAX_LATENCY) {
 				if(t.messages.size() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES || SERVER_KNOBS->PEEK_COUNT_SMALL_MESSAGES) {
 					if(self->resetCheck.isReady()) {
