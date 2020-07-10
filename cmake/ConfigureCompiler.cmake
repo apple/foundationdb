@@ -223,6 +223,7 @@ else()
       -Wno-mismatched-tags
       -Wno-missing-field-initializers
       -Wno-overloaded-virtual
+      -Wno-reorder
       -Wno-reorder-ctor
       -Wno-sign-compare
       -Wno-tautological-pointer-compare

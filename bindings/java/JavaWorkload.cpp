@@ -77,6 +77,7 @@ void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring messag
 		sev = FDBSeverity::WarnAlways;
 	} else {
 		assert(false);
+		std::abort();
 	}
 	log->trace(sev, msg, detailsMap);
 	if (isCopy) {
