@@ -37,7 +37,7 @@
 typedef std::map<Standalone<StringRef>, std::pair<Standalone<StringRef>, uint32_t>> SerializedMutationListMap;
 
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier);
-void splitMutation(KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector,
+void splitMutation(const KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs);
 void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
                               std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
@@ -641,7 +641,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 
 // Splits a clear range mutation for Appliers and puts results of splitted mutations and
 // Applier IDs into "mvector" and "nodeIDs" on return.
-void splitMutation(KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector,
+void splitMutation(const KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena, VectorRef<MutationRef>& mvector,
                    Arena& nodeIDs_arena, VectorRef<UID>& nodeIDs) {
 	TraceEvent(SevDebug, "FastRestoreSplitMutation").detail("Mutation", m.toString());
 	ASSERT(mvector.empty());
@@ -653,7 +653,7 @@ void splitMutation(KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_arena,
 		KeyRef rangeEnd = m.param2 < i->range().end ? m.param2 : i->range().end;
 		KeyRange krange1(KeyRangeRef(rangeBegin, rangeEnd));
 		mvector.push_back_deep(mvector_arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
-		nodeIDs.push_back(nodeIDs_arena, i->value());
+		nodeIDs.push_back(nodeIDs_arena, i->cvalue());
 	}
 }
 
