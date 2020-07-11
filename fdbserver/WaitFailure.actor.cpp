@@ -46,7 +46,7 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 			if (!x.present()) {
 				if (trace) {
 					TraceEvent("WaitFailureClient")
-					    .detail("PeerAddr", waitFailure.getEndpoint().getPrimaryAddress().toString());
+					    .detail("FailedEndpoint", waitFailure.getEndpoint().getPrimaryAddress().toString());
 				}
 				return Void();
 			}
