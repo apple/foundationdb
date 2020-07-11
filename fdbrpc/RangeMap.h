@@ -66,7 +66,6 @@ template <class Key, class Val, class Range = RangeMapRange<Key>, class Metric =
 class RangeMap {
 private:
 	typedef MapPair<Key,Val> pair_type;
-public:
 	//Applications may decrement an iterator before ranges begin, or increment after ranges end, but once in this state cannot do further incrementing or decrementing
 	template <bool isConst>
 	class IteratorImpl {
@@ -88,11 +87,11 @@ public:
 
 		Range range() { return Range(begin(),end()); }
 
-		Val& value() {
+		std::conditional_t<isConst, const Val&, Val&> value() {
 			//ASSERT( it->key != allKeys.end );
 			return it->value;
 		}
-		const Val cvalue() const { return it->value; }
+		const Val& cvalue() const { return it->value; }
 
 		void operator ++() { ++it; }
 		void operator --() { it.decrementNonEnd(); }
@@ -106,6 +105,8 @@ public:
 	private:
 		value_type it;
 	};
+
+public:
 	using iterator = IteratorImpl<false>;
 	using const_iterator = IteratorImpl<true>;
 	using Ranges = iterator_range<iterator>;
