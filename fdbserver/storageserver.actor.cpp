@@ -2003,7 +2003,7 @@ void coalesceShards(StorageServer *data, KeyRangeRef keys) {
 
 	bool lastReadable = false;
 	bool lastNotAssigned = false;
-	KeyRangeMap<Reference<ShardInfo>>::Iterator lastRange;
+	KeyRangeMap<Reference<ShardInfo>>::iterator lastRange;
 
 	for( ; iter != iterEnd; ++iter) {
 		if( lastReadable && iter->value()->isReadable() ) {

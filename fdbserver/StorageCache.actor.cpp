@@ -1077,7 +1077,7 @@ void coalesceCacheRanges(StorageCacheData *data, KeyRangeRef keys) {
 
 	bool lastReadable = false;
 	bool lastNotAssigned = false;
-	KeyRangeMap<Reference<CacheRangeInfo>>::Iterator lastRange;
+	KeyRangeMap<Reference<CacheRangeInfo>>::iterator lastRange;
 
 	for( ; iter != iterEnd; ++iter) {
 		if( lastReadable && iter->value()->isReadable() ) {

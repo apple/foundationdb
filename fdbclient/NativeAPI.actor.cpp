@@ -3172,7 +3172,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		tr.setVersion( version );
 		state int checkedRanges = 0;
 		state KeyRangeMap<MutationBlock>::Ranges ranges = expectedValues.ranges();
-		state KeyRangeMap<MutationBlock>::Iterator it = ranges.begin();
+		state KeyRangeMap<MutationBlock>::iterator it = ranges.begin();
 		for(; it != ranges.end(); ++it) {
 			state MutationBlock m = it->value();
 			if( m.mutated ) {
