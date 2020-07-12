@@ -301,7 +301,7 @@ namespace SummarizeTest
                     int expectedUnseed = -1;
                     int unseed;
                     string uid = Guid.NewGuid().ToString();
-                    bool useNewPlugin = isDowngrade || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
+                    bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
                     result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile + "-1.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
                     if (result == 0)
                     {
