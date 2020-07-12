@@ -1,0 +1,41 @@
+[[test]]
+testTitle = 'Clogged'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 20.0
+    expectedRate = 0.01
+    nodeCount = 50000
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 10.0
+    testDuration = 10.0
+
+[[test]]
+testTitle = 'KillAllButOne'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 100
+    machinesToLeave = 1
+    reboot = true
+    testDuration = 1.0
+
+[[test]]
+testTitle = 'Unclogged'
+runSetup = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 50000
+    transactionsPerSecond = 250.0
+    testDuration = 10.0
+    expectedRate = 0.70
