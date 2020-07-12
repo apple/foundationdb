@@ -2039,6 +2039,7 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 		case FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED:
 			validateOptionValue(value, false);
 			options.specialKeySpaceRelaxed = true;
+			break;
 		case FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION:
 			validateOptionValue(value, false);
 			options.specialKeySpaceChangeConfiguration = true;
