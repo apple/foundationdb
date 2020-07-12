@@ -22,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <boost/algorithm/string/predicate.hpp>
 #include <toml.hpp>
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
@@ -875,29 +876,29 @@ std::vector<TestSpec> readTOMLTests( ifstream& ifs ) {
 	return {};
 }
 
-std::map<std::string, std::function<void(const std::string&, TestSpec*)>> testSpecGlobalKeys = {
+std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
 	// be recognized and accepted, but there's no point in placing them into a testSpec.
-	{"extraDB", [](const std::string& value, TestSpec* spec) {
+	{"extraDB", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
 		}},
-	{"configureLocked", [](const std::string& value, TestSpec* spec) {
+	{"configureLocked", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
 		}},
-	{"minimumReplication", [](const std::string& value, TestSpec* spec) {
+	{"minimumReplication", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
 		}},
-	{"minimumRegions", [](const std::string& value, TestSpec* spec) {
+	{"minimumRegions", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
 		}},
-	{"buggify", [](const std::string& value, TestSpec* spec) {
+	{"buggify", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		}},
 	// The test harness handles NewSeverity events specially.
-	{"StderrSeverity", [](const std::string& value, TestSpec* spec) {
+	{"StderrSeverity", [](const std::string& value) {
 			TraceEvent("StderrSeverity").detail("NewSeverity", value);
 		}},
-	{"ClientInfoLogging", [](const std::string& value, TestSpec* spec) {
+	{"ClientInfoLogging", [](const std::string& value) {
 			if (value == "false") {
 				setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 			}
@@ -907,6 +908,10 @@ std::map<std::string, std::function<void(const std::string&, TestSpec*)>> testSp
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
+	{ "testTitle", [](const std::string& value, TestSpec* spec) {
+			spec->title = value;
+			TraceEvent("TestParserTest").detail("ParsedTest",  spec->title );
+		}},
 	{ "timeout", [](const std::string& value, TestSpec* spec) {
 			sscanf( value.c_str(), "%d", &(spec->timeout) );
 			ASSERT( spec->timeout > 0 );
@@ -1034,14 +1039,13 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 				spec = TestSpec();
 			}
 
-			spec.title = StringRef( value );
-			TraceEvent("TestParserTest").detail("ParsedTest",  spec.title );
+			testSpecTestKeys[attrib](value, &spec);
 		} else if ( testSpecTestKeys.find(attrib) != testSpecTestKeys.end() ) {
 			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
 			testSpecTestKeys[attrib](value, &spec);
 		} else if ( testSpecGlobalKeys.find(attrib) != testSpecGlobalKeys.end() ) {
 			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
-			testSpecGlobalKeys[attrib](value, &spec);
+			testSpecGlobalKeys[attrib](value);
 		}
 		else {
 			if( attrib == "testName" ) {
@@ -1065,6 +1069,85 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	}
 
 	return result;
+}
+
+template <typename T>
+std::string toml_to_string(const T& value) {
+	// TOML formatting converts numbers to strings exactly how they're in the file
+	// and thus, is equivalent to testspec.  However, strings are quoted, so we
+	// must remove the quotes.
+	if (value.type() == toml::value_t::string) {
+		const std::string& formatted = toml::format(value);
+		return formatted.substr(1, formatted.size()-2);
+	} else {
+		return toml::format(value);
+	}
+}
+
+
+std::vector<TestSpec> readTOMLTests_( std::string fileName ) {
+	TestSpec spec;
+	Standalone< VectorRef< KeyValueRef > > workloadOptions;
+	std::vector<TestSpec> result;
+
+	const toml::value& conf = toml::parse(fileName);
+
+	// Handle all global settings
+	for (const auto& [k, v] : conf.as_table()) {
+		if (k == "test") {
+			continue;
+		}
+		if (testSpecGlobalKeys.find(k) != testSpecGlobalKeys.end()) {
+			testSpecGlobalKeys[k](toml_to_string(v));
+		}
+	}
+
+	// Then parse each test
+	const toml::array& tests = toml::find(conf, "test").as_array();
+	for (const toml::value& test : tests) {
+		spec = TestSpec();
+
+		// First handle all test-level settings
+		for (const auto& [k, v] : test.as_table()) {
+			if (k == "workload") {
+				continue;
+			}
+			if (testSpecTestKeys.find(k) != testSpecTestKeys.end()) {
+				testSpecTestKeys[k](toml_to_string(v), &spec);
+			}
+		}
+
+		// And then copy the workload attributes to spec.options
+		const toml::array& workloads = toml::find(test, "workload").as_array();
+		for (const toml::value& workload : workloads) {
+			workloadOptions = Standalone< VectorRef< KeyValueRef > >();
+			TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
+			for (const auto& [attrib, v] : workload.as_table()) {
+				const std::string& value = toml_to_string(v);
+				workloadOptions.push_back_deep( workloadOptions.arena(), 
+					KeyValueRef( StringRef( attrib ), StringRef( value ) ) );
+				TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
+			}
+			spec.options.push_back_deep( spec.options.arena(), workloadOptions );
+		}
+
+		result.push_back(spec);
+	}
+
+	return result;
+}
+
+// A hack to catch and log std::exception, because TOML11 has very useful
+// error messages, but the actor framework can't handle std::exception.
+std::vector<TestSpec> readTOMLTests( std::string fileName ) {
+	try {
+		return readTOMLTests_( fileName );
+	} catch (std::exception &e) {
+		std::cerr << e.what() << std::endl;
+		TraceEvent("TOMLParseError").detail("Error", printable(e.what()));
+		// TODO: replace with toml_parse_error();
+		throw unknown_error();
+	}
 }
 
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
@@ -1259,11 +1342,15 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 		ifs.open( fileName.c_str(), ifstream::in );
 		if( !ifs.good() ) {
 			TraceEvent(SevError, "TestHarnessFail").detail("Reason", "file open failed").detail("File", fileName.c_str());
-			fprintf(stderr, "ERROR: Could not open test spec file `%s'\n", fileName.c_str());
+			fprintf(stderr, "ERROR: Could not open file `%s'\n", fileName.c_str());
 			return Void();
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester
-		testSpecs = readTests( ifs );
+		if ( boost::algorithm::ends_with(fileName, ".txt") ) {
+			testSpecs = readTests( ifs );
+		} else if ( boost::algorithm::ends_with(fileName, ".toml") ) {
+			testSpecs = readTOMLTests( fileName );
+		}
 		ifs.close();
 	}
 
