@@ -36,15 +36,13 @@ struct DowngradeWorkload : TestWorkload {
 		numObjects = getOption(options, LiteralStringRef("numOptions"), deterministicRandom()->randomInt(0,100));
 	}
 
-	template <class Impl>
 	struct _Struct {
 		static constexpr FileIdentifier file_identifier = 2340487;
 		int oldField = 0;
 	};
 
-	struct OldStruct : public _Struct<OldStruct> {
+	struct OldStruct : public _Struct {
 		void setFields() { oldField = 1; }
-
 		bool isSet() const { return oldField == 1; }
 
 		template <class Archive>
@@ -53,13 +51,12 @@ struct DowngradeWorkload : TestWorkload {
 		}
 	};
 
-	struct NewStruct : public _Struct<NewStruct> {
+	struct NewStruct : public _Struct {
 		int newField = 0;
 
 		bool isSet() const {
 			return oldField == 1 && newField == 2;
 		}
-
 		void setFields() {
 			oldField = 1;
 			newField = 2;
@@ -74,8 +71,8 @@ struct DowngradeWorkload : TestWorkload {
 	ACTOR static Future<Void> writeOld(Database cx, int numObjects, Key key) {
 		BinaryWriter writer(IncludeVersion(currentProtocolVersion));
 		std::vector<OldStruct> data(numObjects);
-		for (auto& oldStruct : data) {
-			oldStruct.setFields();
+		for (auto& oldObject : data) {
+			oldObject.setFields();
 		}
 		writer << data;
 		state Value value = writer.toValue();
