@@ -307,7 +307,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void set(KeyValueRef kv, const Arena* a) override {
 		// Writes to the special keyspace only go to SQLite.
-		if (kv.key[0] == 0xFF) {
+		if (kv.key.size() && kv.key[0] == 0xFF) {
 			sqlLite->set(kv, a);
 			return;
 		}
@@ -318,11 +318,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	void clear(KeyRangeRef keyRange, const Arena* a) override {
-		// Writes to the special keyspace only go to SQLite.
-		if (keyRange.begin[0] == 0xFF) {
-			sqlLite->clear(keyRange, a);
+		// If the clear touches the special keyspace send the clear to SQLite.
+		if (keyRange.end > SPECIAL_KEYSPACE) {
+			sqlLite->clear({ SPECIAL_KEYSPACE, keyRange.end }, a);
+		}
+		// If the clear doesn't touch user ranges at all, don't create extra tombstones in Rocks.
+		if (keyRange.begin >= SPECIAL_KEYSPACE) {
 			return;
 		}
+
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 		}
