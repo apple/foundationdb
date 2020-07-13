@@ -20,6 +20,8 @@
 
 #include "Arena.h"
 
+#include "flow/UnitTest.h"
+
 // See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
 // of valgrind client requests
 #ifdef VALGRIND_ARENA
@@ -387,4 +389,69 @@ void ArenaBlock::destroyLeaf() {
 			delete[](uint8_t*) this;
 		}
 	}
+}
+
+namespace {
+template <template <class> class VectorRefLike>
+void testRangeBasedForLoop() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+	int i = 0;
+	for (const auto& x : xs) {
+		ASSERT(x == StringRef(std::to_string(i++)));
+	}
+	ASSERT(i == size);
+}
+
+template <template <class> class VectorRefLike>
+void testIteratorIncrement() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter != xs.end();) {
+			ASSERT(*iter++ == StringRef(std::to_string(i++)));
+		}
+		ASSERT(i == size);
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter != xs.end();) {
+			ASSERT(*++iter == StringRef(std::to_string(++i)));
+		}
+		ASSERT(i == size);
+	}
+}
+
+template <template <class> class VectorRefLike>
+void testVectorLike() {
+	testRangeBasedForLoop<VectorRefLike>();
+	testIteratorIncrement<VectorRefLike>();
+}
+} // namespace
+
+// Fix number of template parameters
+template <class T>
+using VectorRefProxy = VectorRef<T>;
+TEST_CASE("/flow/Arena/VectorRef") {
+	testVectorLike<VectorRefProxy>();
+	return Void();
+}
+
+// Fix number of template parameters
+template <class T>
+using SmallVectorRefProxy = SmallVectorRef<T>;
+TEST_CASE("/flow/Arena/SmallVectorRef") {
+	testVectorLike<SmallVectorRefProxy>();
+	return Void();
 }

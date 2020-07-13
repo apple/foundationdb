@@ -1068,7 +1068,7 @@ public:
 			if (i < InlineMembers) {
 				return vec->arr[i];
 			} else {
-				return vec->data[i];
+				return vec->data[i - InlineMembers];
 			}
 		}
 		reference get() const { return get(idx); }
