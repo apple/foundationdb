@@ -1262,7 +1262,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 				ips.push_back(makeIPAddressForSim(useIPv6, { 2, dc, 1, machine }));
 			}
 
-			// check the sslEnablementMap using only one ip(
+			// check the sslEnablementMap using only one ip
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled,

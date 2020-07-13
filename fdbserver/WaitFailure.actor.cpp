@@ -42,7 +42,9 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 		try {
 			state double start = now();
 			ErrorOr<Void> x = wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
-			if (!x.present()) return Void();
+			if (!x.present()) {
+				return Void();
+			}
 			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
 			if (w > 0)
 				wait( delay( w, taskID ) );

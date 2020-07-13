@@ -3156,7 +3156,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
-									TEST(true); // A removed server is still associated with a team in SABTF
+									TEST(true); // A removed server is still associated with a team in
+									            // ShardsAffectedByTeamFailure
 								}
 							}
 						}
@@ -4579,8 +4580,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (initData->shards[shard].hasDest) {
-					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
-					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
+					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
+					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
+					// easier to just (with low priority) schedule it for movement.
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
