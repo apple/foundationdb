@@ -19,7 +19,6 @@
  */
 
 #include "flow/Hash3.h"
-#include "flow/Stats.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -36,6 +35,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
