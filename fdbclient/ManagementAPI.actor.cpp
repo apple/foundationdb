@@ -38,6 +38,7 @@
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 bool isInteger(const std::string& s) {
 	if( s.empty() ) return false;
@@ -1384,9 +1385,11 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 	}
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
+ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
 	state Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
 	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
+	state Standalone<RangeResultRef> r2 = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	ASSERT( !r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY );
 
 	vector<AddressExclusion> exclusions;
 	for(auto i = r.begin(); i != r.end(); ++i) {
@@ -1394,33 +1397,23 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServers( Transaction* tr 
 		if (a.isValid())
 			exclusions.push_back( a );
 	}
+	for(auto i = r2.begin(); i != r2.end(); ++i) {
+		auto a = decodeFailedServersKey( i->key );
+		if (a.isValid())
+			exclusions.push_back( a );
+	}
+	uniquify(exclusions);
 	return exclusions;
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getFailedServers( Transaction* tr ) {
-	state Standalone<RangeResultRef> r = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
-	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
-
-	vector<AddressExclusion> failedServers;
-	for(auto i = r.begin(); i != r.end(); ++i) {
-		auto a = decodeExcludedServersKey( i->key );
-		if (a.isValid())
-			failedServers.push_back( a );
-	}
-	return failedServers;
-}
-
-ACTOR Future<std::vector<AddressExclusion>> getCombinedExcludedServers( Database cx ) {
+ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-			state std::vector<AddressExclusion> exclusions = wait( getExcludedServers(&tr) );
-			state std::vector<AddressExclusion> failures = wait( getFailedServers(&tr) );
-			exclusions.insert(exclusions.end(), failures.begin(), failures.end());
-			uniquify(exclusions); // sort and uniquify
+			vector<AddressExclusion> exclusions = wait( getExcludedServers(&tr) );
 			return exclusions;
 		} catch (Error& e) {
 			wait( tr.onError(e) );
@@ -1563,6 +1556,7 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 }
 
 ACTOR Future<bool> checkForExcludingServersTxActor(Transaction* tr, std::set<AddressExclusion>* exclusions, std::set<NetworkAddress>* inProgressExclusion) {
+	
 	ASSERT(inProgressExclusion->size() == 0); //  Make sure every time it is cleared beforehand
 	if (!exclusions->size()) return true;
 
@@ -1606,6 +1600,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(Transaction* tr, std::set<Add
 			}
 		}
 	}
+
 	return ok;
 }
 
@@ -1621,12 +1616,12 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 			bool ok = wait(checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion));
 			if (ok) return inProgressExclusion;
 			if (!waitForAllExcluded) break;
+
 			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			wait( tr.onError(e) );
 		}
 	}
-
 	return inProgressExclusion;
 }
 
