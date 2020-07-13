@@ -307,7 +307,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void set(KeyValueRef kv, const Arena* a) override {
 		// Writes to the special keyspace only go to SQLite.
-		if (kv.key.size() && kv.key[0] == 0xFF) {
+		if (kv.key >= SPECIAL_KEYSPACE) {
 			sqlLite->set(kv, a);
 			return;
 		}
@@ -320,7 +320,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void clear(KeyRangeRef keyRange, const Arena* a) override {
 		// If the clear touches the special keyspace send the clear to SQLite.
 		if (keyRange.end > SPECIAL_KEYSPACE) {
-			sqlLite->clear({ SPECIAL_KEYSPACE, keyRange.end }, a);
+			sqlLite->clear(keyRange, a);
 		}
 		// If the clear doesn't touch user ranges at all, don't create extra tombstones in Rocks.
 		if (keyRange.begin >= SPECIAL_KEYSPACE) {
@@ -350,7 +350,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
-		if (key[0] == 0xFF) {
+		if (key >= SPECIAL_KEYSPACE) {
 			return sqlLite->readValue(key, debugID);
 		}
 		auto a = new Reader::ReadValueAction(key, debugID);
@@ -361,7 +361,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override {
-		if (key[0] == 0xFF) {
+		if (key >= SPECIAL_KEYSPACE) {
 			return sqlLite->readValuePrefix(key, maxLength, debugID);
 		}
 		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
@@ -372,6 +372,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	ACTOR static Future<Standalone<RangeResultRef>> stitchRangeRead(RocksDBKeyValueStore* self, KeyRangeRef keys,
 	                                                                int rowLimit, int byteLimit) {
+		ASSERT(keys.begin < SPECIAL_KEYSPACE);
+		ASSERT(keys.end > SPECIAL_KEYSPACE);
 		state Standalone<RangeResultRef> result;
 		if (rowLimit >= 0) {
 			// Limit the first range to end at the special keyspace to prevent infinite recursion.
@@ -408,7 +410,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit, int byteLimit) override {
-		if (keys.begin[0] == 0xFF) {
+		if (keys.begin >= SPECIAL_KEYSPACE) {
 			return sqlLite->readRange(keys, rowLimit, byteLimit);
 		}
 		if (keys.end <= SPECIAL_KEYSPACE) {
