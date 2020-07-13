@@ -1099,6 +1099,8 @@ std::vector<TestSpec> readTOMLTests_( std::string fileName ) {
 		}
 		if (testSpecGlobalKeys.find(k) != testSpecGlobalKeys.end()) {
 			testSpecGlobalKeys[k](toml_to_string(v));
+		} else {
+			TraceEvent(SevError, "TestSpecUnrecognizedGlobalParam").detail("Attrib", k).detail("Value", toml_to_string(v));
 		}
 	}
 
@@ -1114,6 +1116,8 @@ std::vector<TestSpec> readTOMLTests_( std::string fileName ) {
 			}
 			if (testSpecTestKeys.find(k) != testSpecTestKeys.end()) {
 				testSpecTestKeys[k](toml_to_string(v), &spec);
+			} else {
+				TraceEvent(SevError, "TestSpecUnrecognizedTestParam").detail("Attrib", k).detail("Value", toml_to_string(v));
 			}
 		}
 
