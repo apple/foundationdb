@@ -1,7 +1,0 @@
-testTitle=UnitTests
-useDB=false
-startDelay=0
-
-    testName=UnitTests
-    maxTestCases=0
-    testsMatching=/FastRestore/RestoreLoader/splitMutation
