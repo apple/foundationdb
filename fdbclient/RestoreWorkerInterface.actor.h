@@ -30,10 +30,10 @@
 
 #include <sstream>
 #include <string>
-#include "flow/Stats.h"
 #include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/CoordinationInterface.h"

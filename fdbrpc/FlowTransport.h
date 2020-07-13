@@ -132,6 +132,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
 	AsyncTrigger resetPing;
+	AsyncTrigger resetConnection;
 	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
@@ -212,6 +213,9 @@ public:
 
 	Reference<AsyncVar<bool>> getDegraded();
 	// This async var will be set to true when the process cannot connect to a public network address that the failure monitor thinks is healthy.
+
+	void resetConnection( NetworkAddress address );
+	// Forces the connection with this address to be reset
 
 	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 

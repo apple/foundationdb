@@ -37,12 +37,17 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 	}
 }
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime, double reactionSlope, TaskPriority taskID){
+ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure, double reactionTime,
+                                     double reactionSlope, bool trace, TaskPriority taskID) {
 	loop {
 		try {
 			state double start = now();
 			ErrorOr<Void> x = wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
 			if (!x.present()) {
+				if (trace) {
+					TraceEvent("WaitFailureClient")
+					    .detail("FailedEndpoint", waitFailure.getEndpoint().getPrimaryAddress().toString());
+				}
 				return Void();
 			}
 			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
@@ -59,7 +64,7 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 
 ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure, double failureReactionTime, TaskPriority taskID){
 	loop {
-		wait(waitFailureClient(waitFailure, 0, 0, taskID));
+		wait(waitFailureClient(waitFailure, 0, 0, false, taskID));
 		wait(delay(failureReactionTime, taskID) || IFailureMonitor::failureMonitor().onStateEqual( waitFailure.getEndpoint(), FailureStatus(false)));
 		if(IFailureMonitor::failureMonitor().getState( waitFailure.getEndpoint() ).isFailed()) {
 			return Void();
