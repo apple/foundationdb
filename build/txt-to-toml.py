@@ -4,60 +4,60 @@ import sys
 
 def main():
     if len(sys.argv) != 2:
-        print('Usage: txt-to-toml.py [src.txt]')
+        print("Usage: txt-to-toml.py [src.txt]")
         return 1
 
     filename = sys.argv[1]
 
-    indent = '    '
+    indent = "    "
     in_workload = False
     first_test = False
     keys_before_test = False
 
     for line in open(filename):
-	k = ''
-	v = ''
+        k = ""
+        v = ""
 
-	if line.strip().startswith(';'):
-            print( (indent if in_workload else '') + line.strip().replace(';', '#') )
-	    continue
+        if line.strip().startswith(";"):
+            print((indent if in_workload else "") + line.strip().replace(";", "#"))
+            continue
 
-        if '=' in line:
-            (k, v) = line.strip().split('=')
+        if "=" in line:
+            (k, v) = line.strip().split("=")
             (k, v) = (k.strip(), v.strip())
 
-        if k == 'testTitle':
+        if k == "testTitle":
             first_test = True
-	    if in_workload:
-                print('')
+            if in_workload:
+                print("")
             in_workload = False
             if keys_before_test:
-                print('')
+                print("")
                 keys_before_test = False
-            print('[[test]]')
+            print("[[test]]")
 
-        if k == 'testName':
+        if k == "testName":
             in_workload = True
-            print('')
-            print(indent + '[[test.workload]]')
+            print("")
+            print(indent + "[[test.workload]]")
 
         if not first_test:
             keys_before_test = True
 
-        if v.startswith('.'):
-            v = '0' + v
+        if v.startswith("."):
+            v = "0" + v
 
-        if any(c.isalpha() or c in ['/', '!'] for c in v):
-	    if v != 'true' and v != 'false':
+        if any(c.isalpha() or c in ["/", "!"] for c in v):
+            if v != "true" and v != "false":
                 v = "'" + v + "'"
 
-        if k == 'buggify':
-            print('buggify = ' + ('true' if v == "'on'" else 'false'))
-	elif k:
-            print( (indent if in_workload else '') + k + ' = ' + v)
+        if k == "buggify":
+            print("buggify = " + ("true" if v == "'on'" else "false"))
+        elif k:
+            print((indent if in_workload else "") + k + " = " + v)
 
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())
