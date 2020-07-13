@@ -232,7 +232,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
 			}
-			result.more = (result.size() == a.rowLimit);
+			result.more =
+			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
 			if (result.more) {
 			  result.readThrough = result[result.size()-1].key;
 			}
@@ -390,6 +391,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (const auto& kv : sResult) {
 					result.push_back_deep(result.arena(), kv);
 				}
+			} else {
+				ASSERT(result.more);
 			}
 		} else {
 			Standalone<RangeResultRef> result =
@@ -404,6 +407,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (const auto& kv : rResult) {
 					result.push_back_deep(result.arena(), kv);
 				}
+			} else {
+				ASSERT(result.more);
 			}
 		}
 		return result;
