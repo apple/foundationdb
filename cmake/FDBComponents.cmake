@@ -117,12 +117,9 @@ endif()
 # TOML11
 ################################################################################
 
+# TOML can download and install itself into the binary directory, so it should
+# always be available.
 find_package(TOML11)
-if (TOML11_FOUND)
-  set(WITH_TOML ON)
-else()
-  set(WITH_TOML OFF)
-endif()
 
 ################################################################################
 
@@ -142,7 +139,6 @@ function(print_components)
   message(STATUS "Build Bindings (depends on Python):   ${WITH_PYTHON}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
-  message(STATUS "Build with TOML testspecs:            ${WITH_TOML}")
   message(STATUS "=========================================")
 endfunction()
 
