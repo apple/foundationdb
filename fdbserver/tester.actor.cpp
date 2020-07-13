@@ -18,12 +18,13 @@
  * limitations under the License.
  */
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <cinttypes>
 #include <fstream>
 #include <functional>
 #include <map>
-#include <boost/algorithm/string/predicate.hpp>
 #include <toml.hpp>
+
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
@@ -871,11 +872,6 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	return ok;
 }
 
-std::vector<TestSpec> readTOMLTests( ifstream& ifs ) {
-	const toml::value file = toml::parse(ifs);
-	return {};
-}
-
 std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
 	// be recognized and accepted, but there's no point in placing them into a testSpec.
@@ -1353,7 +1349,12 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 		if ( boost::algorithm::ends_with(fileName, ".txt") ) {
 			testSpecs = readTests( ifs );
 		} else if ( boost::algorithm::ends_with(fileName, ".toml") ) {
+			// TOML is weird about opening the file as binary on windows, so we
+			// just let TOML re-open the file instead of using ifs.
 			testSpecs = readTOMLTests( fileName );
+		} else {
+			TraceEvent(SevError, "TestHarnessFail").detail("Reason", "unknown tests specification extension").detail("File", fileName.c_str());
+			return Void();
 		}
 		ifs.close();
 	}
