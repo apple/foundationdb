@@ -27,6 +27,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/MutationTracking.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
@@ -883,16 +884,27 @@ struct LogPushData : NonCopyable {
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
+		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
 		uint32_t subseq = this->subsequence++;
+		bool first = true;
+		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
-			// FIXME: memcpy after the first time
-			BinaryWriter& wr = messagesWriter[loc];
-			int offset = wr.getLength();
-			wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
-			for(auto& tag : prev_tags)
-				wr << tag;
-			wr << item;
-			*(uint32_t*)((uint8_t*)wr.getData() + offset) = wr.getLength() - offset - sizeof(uint32_t);
+			if (first) {
+				BinaryWriter& wr = messagesWriter[loc];
+				firstOffset = wr.getLength();
+				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+				for(auto& tag : prev_tags)
+					wr << tag;
+				wr << item;
+				firstLength = wr.getLength() - firstOffset;
+				*(uint32_t*)((uint8_t*)wr.getData() + firstOffset) = firstLength - sizeof(uint32_t);
+				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
+				first = false;
+			} else {
+				BinaryWriter& wr = messagesWriter[loc];
+				BinaryWriter& from = messagesWriter[msg_locations[0]];
+				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
+			}
 		}
 		next_message_tags.clear();
 	}

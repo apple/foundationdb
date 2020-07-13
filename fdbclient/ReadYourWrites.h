@@ -110,8 +110,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}
-	void operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
-	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
+	void operator=(ReadYourWritesTransaction&& r) noexcept;
+	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept;
 
 	virtual void addref() { ReferenceCounted<ReadYourWritesTransaction>::addref(); }
 	virtual void delref() { ReferenceCounted<ReadYourWritesTransaction>::delref(); }

@@ -1,8 +1,10 @@
+extraDB=2
+
 testTitle=DifferentClustersSameRV
+clearAfterTest=false
+
    testName=DifferentClustersSameRV
    testDuration=150
    switchAfter=50
    keyToRead=someKey
    keyToWatch=anotherKey
-   extraDB=2
-   clearAfterTest=false

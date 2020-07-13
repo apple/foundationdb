@@ -72,7 +72,7 @@ struct scalar_traits<ProtocolVersion> : std::true_type {
 
 template <class Archive, class Item>
 inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
-	save(ar, const_cast<Item&>(item));
+	save(ar, item);
 	return ar;
 }
 
@@ -535,7 +535,7 @@ public:
 		return b;
 	}
 
-	const void* peekBytes( int bytes ) {
+	const void* peekBytes(int bytes) const {
 		ASSERT( begin + bytes <= end );
 		return begin;
 	}
@@ -595,7 +595,7 @@ public:
 
 	const void* readBytes( int bytes );
 
-	const void* peekBytes( int bytes ) {
+	const void* peekBytes(int bytes) const {
 		ASSERT( begin + bytes <= end );
 		return begin;
 	}
@@ -644,7 +644,7 @@ public:
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
 
-	void assertEnd() { ASSERT( begin == end ); }
+	void assertEnd() const { ASSERT(begin == end); }
 
 	bool empty() const { return begin == end; }
 
@@ -665,8 +665,13 @@ private:
 	ProtocolVersion m_protocolVersion;
 };
 
-struct SendBuffer {
-	uint8_t const* data;
+class SendBuffer {
+protected:
+	uint8_t* _data;
+
+public:
+	inline uint8_t const* data() const { return _data; }
+	inline uint8_t* data() { return _data; }
 	SendBuffer* next;
 	int bytes_written, bytes_sent;
 };
@@ -678,14 +683,13 @@ private:
 	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
 
 public:
-	uint8_t* data() { return const_cast<uint8_t*>(static_cast<SendBuffer*>(this)->data); }
-	size_t size() { return size_; }
+	size_t size() const { return size_; }
 
 private:
 	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
-		next = 0;
+		next = nullptr;
 		bytes_written = bytes_sent = 0;
-		((SendBuffer*)this)->data = reinterpret_cast<uint8_t*>(this + 1);
+		_data = reinterpret_cast<uint8_t*>(this + 1);
 		static_assert(sizeof(PacketBuffer) == PACKET_BUFFER_OVERHEAD);
 	}
 
@@ -698,7 +702,7 @@ public:
 		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
 		return new (mem) PacketBuffer{ size };
 	}
-	PacketBuffer* nextPacketBuffer() { return (PacketBuffer*)next; }
+	PacketBuffer* nextPacketBuffer() { return static_cast<PacketBuffer*>(next); }
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
@@ -739,7 +743,7 @@ struct PacketWriter {
 	void writeAhead( int bytes, struct SplitBuffer* );
 	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	PacketBuffer* finish();
-	int size() { return length; }
+	int size() const { return length; }
 
 	void serializeBytes( StringRef bytes ) {
 		serializeBytes(bytes.begin(), bytes.size());

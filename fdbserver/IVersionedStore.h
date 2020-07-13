@@ -45,9 +45,9 @@ public:
 
 class IVersionedStore : public IClosable {
 public:
-	virtual KeyValueStoreType getType() = 0;
-	virtual bool supportsMutation(int op) = 0; // If this returns true, then mutate(op, ...) may be called
-	virtual StorageBytes getStorageBytes() = 0;
+	virtual KeyValueStoreType getType() const = 0;
+	virtual bool supportsMutation(int op) const = 0; // If this returns true, then mutate(op, ...) may be called
+	virtual StorageBytes getStorageBytes() const = 0;
 
 	// Writes are provided in an ordered stream.
 	// A write is considered part of (a change leading to) the version determined by the previous call to
@@ -58,11 +58,11 @@ public:
 	virtual void mutate(int op, StringRef param1, StringRef param2) = 0;
 	virtual void setWriteVersion(Version) = 0; // The write version must be nondecreasing
 	virtual void setOldestVersion(Version v) = 0; // Set oldest readable version to be used in next commit
-	virtual Version getOldestVersion() = 0; // Get oldest readable version
+	virtual Version getOldestVersion() const = 0; // Get oldest readable version
 	virtual Future<Void> commit() = 0;
 
 	virtual Future<Void> init() = 0;
-	virtual Version getLatestVersion() = 0;
+	virtual Version getLatestVersion() const = 0;
 
 	// readAtVersion() may only be called on a version which has previously been passed to setWriteVersion() and never
 	// previously passed

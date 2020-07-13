@@ -1,4 +1,12 @@
+ ; Disable buggify for parallel restore
+ ;buggify=off
+
 testTitle=BackupAndRestore
+clearAfterTest=false
+simBackupAgents=BackupToFile
+ ;timeout is in seconds
+ timeout=360000
+
      testName=Cycle
  ;    nodeCount=30000
      nodeCount=1000
@@ -6,7 +14,6 @@ testTitle=BackupAndRestore
      transactionsPerSecond=2500.0
      testDuration=30.0
      expectedRate=0
-     clearAfterTest=false
  ;	keyPrefix=!
 
  ; Each testName=RunRestoreWorkerWorkload creates a restore worker
@@ -17,8 +24,6 @@ testTitle=BackupAndRestore
      testName=BackupAndParallelRestoreCorrectness
      backupAfter=10.0
      restoreAfter=60.0
-     clearAfterTest=false
-     simBackupAgents=BackupToFile
  ; backupRangesCount<0 means backup the entire normal keyspace
      backupRangesCount=-1
      usePartitionedLogs=false
@@ -43,10 +48,4 @@ testTitle=BackupAndRestore
      machinesToLeave=3
      reboot=true
      testDuration=90.0
-
- ; Disable buggify for parallel restore
- ;buggify=off
- ;testDuration=360000 ;not work
- ;timeout is in seconds
- timeout=360000
 

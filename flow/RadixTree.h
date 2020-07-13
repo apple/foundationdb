@@ -257,7 +257,9 @@ public:
 	radix_tree(const radix_tree& other) = delete; // delete
 	radix_tree& operator=(const radix_tree other) = delete; // delete
 
-	inline std::tuple<size_type, size_type, size_type> size() { return std::make_tuple(m_size, m_node, inline_keys); }
+	inline std::tuple<size_type, size_type, size_type> size() const {
+		return std::make_tuple(m_size, m_node, inline_keys);
+	}
 
 	// Return the amount of memory used by an entry in the RadixTree
 	static int getElementBytes(node* node) {
@@ -294,7 +296,7 @@ public:
 	// iterators
 	iterator find(const StringRef& key);
 	iterator begin();
-    iterator end();
+	iterator end() const;
 	iterator previous(iterator i);
 	// modifications
 	std::pair<iterator, bool> insert(const StringRef& key, const StringRef& val, bool replaceExisting = true);
@@ -309,7 +311,7 @@ public:
 	iterator lower_bound(const StringRef& key);
 	iterator upper_bound(const StringRef& key);
 	// access
-	uint64_t sumTo(iterator to);
+	uint64_t sumTo(iterator to) const;
 
 private:
     size_type m_size;
@@ -582,7 +584,7 @@ StringRef radix_tree::iterator::getKey(uint8_t* content) const {
 	return StringRef(content, (m_pointee->m_depth + m_pointee->getKeySize()));
 }
 
-radix_tree::iterator radix_tree::end() {
+radix_tree::iterator radix_tree::end() const {
 	return iterator(NULL);
 }
 
@@ -715,7 +717,7 @@ radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
 }
 
 // Return the sum of getT(x) for begin()<=x<to
-uint64_t radix_tree::sumTo(iterator to) {
+uint64_t radix_tree::sumTo(iterator to) const {
 	if(to == end()) {
         return m_root ? total_bytes : 0;
     }
