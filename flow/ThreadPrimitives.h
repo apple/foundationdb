@@ -49,7 +49,7 @@
 // can set this variable properly?
 constexpr size_t CACHE_LINE_SIZE = 64;
 
-class ThreadSpinLock {
+class alignas(CACHE_LINE_SIZE) ThreadSpinLock {
 public:
 // #ifdef _WIN32
 	ThreadSpinLock() {
