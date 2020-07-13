@@ -786,3 +786,57 @@ ACTOR Future<Optional<std::string>> failedServerCommitActor(ReadYourWritesTransa
 Future<Optional<std::string>> FailedServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	return failedServerCommitActor(ryw);
 }
+
+ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWritesTransaction *ryw, KeyRef prefix, KeyRangeRef kr) {
+	state Standalone<RangeResultRef> result;
+	// TODO : get all inprogress excluded servers
+	state Transaction& tr = ryw->getTransaction();
+	tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
+	tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
+	tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+
+	state std::vector<AddressExclusion> excl = wait((getExcludedServers(&tr)));
+	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
+	state std::set<NetworkAddress> inProgressExclusion;
+	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed recovery
+	// Check that there aren't any storage servers with addresses violating the exclusions
+	state Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
+	ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+
+	for(auto& s : serverList) {
+		auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
+		if ( addressExcluded(exclusions, addresses.address) ) {
+			inProgressExclusion.insert(addresses.address);
+		}
+		if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
+			inProgressExclusion.insert(addresses.secondaryAddress.get());
+		}
+	}
+
+	Optional<Standalone<StringRef>> value = wait( tr.get(logsKey) );
+	ASSERT(value.present());
+	auto logs = decodeLogsValue(value.get());
+	for( auto const& log : logs.first ) {
+		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
+			inProgressExclusion.insert(log.second);
+		}
+	}
+	for( auto const& log : logs.second ) {
+		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
+			inProgressExclusion.insert(log.second);
+		}
+	}
+
+	for( auto const& address : inProgressExclusion ) {
+		Key addrKey = prefix.withSuffix(address.toString());
+		if (kr.contains(addrKey))
+			result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
+	}
+	return result;
+}
+
+ExclusionInProgressRangeImpl::ExclusionInProgressRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransaction *ryw, KeyRangeRef kr) const {
+	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
+}

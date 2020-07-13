@@ -822,6 +822,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		std::make_unique<FailedServersRangeImpl>(KeyRangeRef(
 			LiteralStringRef("\xff\xff/conf/failed/"), LiteralStringRef("\xff\xff/conf/failed0")
 		)), true);
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
+		std::make_unique<ExclusionInProgressRangeImpl>(KeyRangeRef(
+			LiteralStringRef("\xff\xff/conf/inProgressExclusion/"), LiteralStringRef("\xff\xff/conf/inProgressExclusion0")
+		)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));

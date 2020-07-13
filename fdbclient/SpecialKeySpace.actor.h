@@ -227,5 +227,11 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class ExclusionInProgressRangeImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit ExclusionInProgressRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif
