@@ -275,13 +275,10 @@ else()
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
       -Wno-format
-<<<<<<< HEAD
       -Wredundant-move
       -Wpessimizing-move
+      -Woverloaded-virtual
       )
-=======
-      -Woverloaded-virtual)
->>>>>>> master
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register

@@ -21,9 +21,6 @@ connectionFailuresDisableDuration=60
     waitForVersion=true
     allowFaultInjection=false
     killDc=false
-<<<<<<< HEAD
 
 connectionFailuresDisableDuration=60
 minimumReplication=2
-=======
->>>>>>> master
