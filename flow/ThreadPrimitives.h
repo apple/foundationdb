@@ -23,6 +23,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -43,6 +44,10 @@
 #if VALGRIND
 #include <drd.h>
 #endif
+
+// TODO: We should make this dependent on the CPU. Maybe cmake
+// can set this variable properly?
+constexpr size_t CACHE_LINE_SIZE = 64;
 
 class ThreadSpinLock {
 public:
@@ -83,6 +88,9 @@ private:
 	ThreadSpinLock(const ThreadSpinLock&);
 	void operator=(const ThreadSpinLock&);
 	std::atomic_flag isLocked = ATOMIC_FLAG_INIT;
+	// We want a spin lock to occupy a cache line in order to
+	// prevent false sharing.
+	std::array<uint8_t, CACHE_LINE_SIZE - sizeof(isLocked)> padding;
 };
 
 class ThreadSpinLockHolder {
