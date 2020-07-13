@@ -38,7 +38,6 @@
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 bool isInteger(const std::string& s) {
 	if( s.empty() ) return false;
@@ -1385,7 +1384,7 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 	}
 }
 
-ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
+ACTOR Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
 	state Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
 	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
 	state Standalone<RangeResultRef> r2 = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
