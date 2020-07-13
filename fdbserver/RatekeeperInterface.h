@@ -75,6 +75,28 @@ struct ClientTagThrottleLimits {
 	}
 };
 
+struct TransactionCommitCostEstimation {
+	int64_t numWrite = 0;
+	int64_t numAtomicWrite = 0;
+	unsigned long bytesWrite = 0;
+	unsigned long bytesClearEst = 0;
+	unsigned long bytesAtomicWrite = 0;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite);
+	}
+
+	TransactionCommitCostEstimation& operator += (const TransactionCommitCostEstimation& other) {
+		numWrite += other.numWrite;
+		numAtomicWrite += other.numAtomicWrite;
+		bytesWrite += other.bytesWrite;
+		bytesClearEst += other.bytesClearEst;
+		bytesAtomicWrite += other.numAtomicWrite;
+		return *this;
+	}
+};
+
 struct GetRateInfoReply {
 	constexpr static FileIdentifier file_identifier = 7845006;
 	double transactionRate;
@@ -97,12 +119,17 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 
 	TransactionTagMap<uint64_t> throttledTagCounts;
+	TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
-	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions, TransactionTagMap<uint64_t> throttledTagCounts, bool detailed)
-		: requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions), batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts), detailed(detailed) {}
+	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
+	                   TransactionTagMap<uint64_t> throttledTagCounts,
+	                   TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst, bool detailed)
+	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
+	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
+	    throttledTagCommitCostEst(throttledTagCommitCostEst), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -124,16 +151,5 @@ struct HaltRatekeeperRequest {
 	}
 };
 
-struct TransactionCommitCostEstimation {
-	int64_t numWrite = 0;
-	int64_t numAtomicWrite = 0;
-	unsigned long bytesWrite = 0;
-	unsigned long bytesClearEst = 0;
-	unsigned long bytesAtomicWrite = 0;
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite);
-	}
-};
 #endif //FDBSERVER_RATEKEEPERINTERFACE_H
