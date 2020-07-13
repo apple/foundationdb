@@ -392,9 +392,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			for (const auto& kv : result) {
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			}
-			if (accumulatedBytes < byteLimit && result.size() < rowLimit) {
+			if (accumulatedBytes < byteLimit && result.size() < -rowLimit) {
 				Standalone<RangeResultRef> rResult = wait(self->readRange(
-				    { keys.begin, SPECIAL_KEYSPACE }, rowLimit - result.size(), byteLimit - accumulatedBytes));
+				    { keys.begin, SPECIAL_KEYSPACE }, rowLimit + result.size(), byteLimit - accumulatedBytes));
 				for (const auto& kv : rResult) {
 					result.push_back_deep(result.arena(), kv);
 				}
