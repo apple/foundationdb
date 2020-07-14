@@ -138,6 +138,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
+			ASSERT(a.key < SPECIAL_KEYSPACE);
+
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
@@ -168,6 +170,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
+			ASSERT(a.key < SPECIAL_KEYSPACE);
+
 			rocksdb::PinnableSlice value;
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
@@ -198,6 +202,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			ASSERT(a.keys.begin < SPECIAL_KEYSPACE);
+			ASSERT(a.keys.end <= SPECIAL_KEYSPACE);
+
 			if (cursor == nullptr) {
 				cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
 			} else {
