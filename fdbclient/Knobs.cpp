@@ -232,7 +232,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 
-	init( COMMIT_CLEAR_COST_ESTIMATE_METHOD,         0.0);
+	init( EXPENSIVE_COMMIT_COST_ESTIMATION_FRAC,     0.0);
 	// clang-format on
 }
 

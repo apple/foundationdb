@@ -1282,15 +1282,16 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					for(auto tag : req.throttledTagCounts) {
 						self.throttledTags.addRequests(tag.first, tag.second);
 					}
-					for(auto& tag : req.throttledTagCommitCostEst) {
+					for (auto& tag : req.throttledTagCommitCostEst) {
 						TraceEvent(SevInfo, "ThrottledTagCommitCostEst")
 						    .suppressFor(1.0)
-							.detail("Tag", tag.first)
-							.detail("NumWrite", tag.second.numWrite)
-							.detail("ByteWrites", tag.second.bytesWrite)
-							.detail("NumAtomicWrite", tag.second.numAtomicWrite)
-							.detail("BytesAtomicWrite", tag.second.bytesAtomicWrite)
-							.detail("BytesClearEst", tag.second.bytesClearEst);
+						    .detail("Tag", tag.first)
+						    .detail("NumWrite", tag.second.numWrite)
+						    .detail("ByteWrites", tag.second.bytesWrite)
+						    .detail("NumAtomicWrite", tag.second.numAtomicWrite)
+						    .detail("BytesAtomicWrite", tag.second.bytesAtomicWrite)
+						    .detail("NumClear", tag.second.numClear)
+						    .detail("BytesClearEst", tag.second.bytesClearEst);
 					}
 				}
 				if(p.batchTransactions > 0) {

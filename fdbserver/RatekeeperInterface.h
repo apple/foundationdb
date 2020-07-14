@@ -78,18 +78,20 @@ struct ClientTagThrottleLimits {
 struct TransactionCommitCostEstimation {
 	int64_t numWrite = 0;
 	int64_t numAtomicWrite = 0;
+	int64_t numClear = 0;
 	unsigned long bytesWrite = 0;
 	unsigned long bytesClearEst = 0;
 	unsigned long bytesAtomicWrite = 0;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite);
+		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear);
 	}
 
 	TransactionCommitCostEstimation& operator += (const TransactionCommitCostEstimation& other) {
 		numWrite += other.numWrite;
 		numAtomicWrite += other.numAtomicWrite;
+		numClear += other.numClear;
 		bytesWrite += other.bytesWrite;
 		bytesClearEst += other.bytesClearEst;
 		bytesAtomicWrite += other.numAtomicWrite;

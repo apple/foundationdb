@@ -3269,7 +3269,8 @@ ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* s
 			trCommitCosts.bytesAtomicWrite += it->expectedSize();
 			trCommitCosts.numAtomicWrite++;
 		} else if (it->type == MutationRef::Type::ClearRange) {
-			if (deterministicRandom()->random01() < CLIENT_KNOBS->COMMIT_CLEAR_COST_ESTIMATE_METHOD) {
+			trCommitCosts.numClear ++;
+			if (deterministicRandom()->random01() < CLIENT_KNOBS->EXPENSIVE_COMMIT_COST_ESTIMATION_FRAC) {
 				try {
 					StorageMetrics m = wait(self->getStorageMetrics(KeyRangeRef(it->param1, it->param2), -1));
 					trCommitCosts.bytesClearEst += m.bytes;

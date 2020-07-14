@@ -447,6 +447,7 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
+	TransactionTagMap<TransactionCommitCostEstimation> transactionTagCommitCostEst;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -805,9 +806,11 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 }
 
 // Commit one batch of transactions trs
-ACTOR Future<Void> commitBatch(ProxyCommitData* self, vector<CommitTransactionRequest> trs,
-                               int currentBatchMemBytesCount,
-                               TransactionTagMap<TransactionCommitCostEstimation>* transactionTagCommitCostEst) {
+ACTOR Future<Void> commitBatch(
+	ProxyCommitData* self,
+	vector<CommitTransactionRequest> trs,
+	int currentBatchMemBytesCount)
+{
 	//WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as possible
 	state int64_t localBatchNumber = ++self->localCommitBatchesStarted;
 	state LogPushData toCommit(self->logSystem);
@@ -1338,7 +1341,7 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self, vector<CommitTransactionRe
 			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
 			// aggregate commit cost estimation iff committed
 			for (auto& tag : trs[t].tagSet) {
-				(*transactionTagCommitCostEst)[tag] += trs[t].commitCostEstimation;
+				(self->transactionTagCommitCostEst)[tag] += trs[t].commitCostEstimation;
 			}
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
@@ -1545,10 +1548,12 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 }
 
 ACTOR static Future<Void> transactionStarter(
-    MasterProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db, PromiseStream<Future<Void>> addActor,
-    ProxyCommitData* commitData, GetHealthMetricsReply* healthMetricsReply,
-    GetHealthMetricsReply* detailedHealthMetricsReply,
-    TransactionTagMap<TransactionCommitCostEstimation>* transactionTagCommitCostEst) {
+	MasterProxyInterface proxy,
+	Reference<AsyncVar<ServerDBInfo>> db,
+	PromiseStream<Future<Void>> addActor,
+	ProxyCommitData* commitData, GetHealthMetricsReply* healthMetricsReply,
+	GetHealthMetricsReply* detailedHealthMetricsReply)
+{
 	state double lastGRVTime = 0;
 	state PromiseStream<Void> GRVTimer;
 	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -1571,7 +1576,7 @@ ACTOR static Future<Void> transactionStarter(
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
-	                      transactionTagCommitCostEst));
+	                      &(commitData->transactionTagCommitCostEst)));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
 	                                            &transactionTagCounter));
@@ -2070,8 +2075,6 @@ ACTOR Future<Void> masterProxyServerCore(
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
 
-	state TransactionTagMap<TransactionCommitCostEstimation> transactionTagCommitCostEst;
-
 	addActor.send( waitFailureServer(proxy.waitFailure.getFuture()) );
 	addActor.send( traceRole(Role::MASTER_PROXY, proxy.id()) );
 
@@ -2105,7 +2108,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData));
-	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply, &transactionTagCommitCostEst));
+	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
@@ -2149,7 +2152,7 @@ ACTOR Future<Void> masterProxyServerCore(
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {
-					lastCommitComplete = commitBatch(&commitData, trs, batchBytes, &transactionTagCommitCostEst);
+					lastCommitComplete = commitBatch(&commitData, trs, batchBytes);
 					addActor.send(lastCommitComplete);
 				}
 			}
