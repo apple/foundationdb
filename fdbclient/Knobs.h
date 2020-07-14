@@ -219,9 +219,6 @@ public:
 	double TAG_THROTTLE_RECHECK_INTERVAL;
 	double TAG_THROTTLE_EXPIRATION_INTERVAL;
 
-	double EXPENSIVE_COMMIT_COST_ESTIMATION_FRAC; // 0 --> estimate through shard-map; 1 --> estimate by asking StorageServer
-	                                       // (more accurate but more expensive)
-
 	ClientKnobs();
 	void initialize(bool randomize = false);
 };

@@ -3270,7 +3270,7 @@ ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* s
 			trCommitCosts.numAtomicWrite++;
 		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.numClear ++;
-			if (deterministicRandom()->random01() < CLIENT_KNOBS->EXPENSIVE_COMMIT_COST_ESTIMATION_FRAC) {
+			if(self->options.expensiveClearCostEstimation) {
 				try {
 					StorageMetrics m = wait(self->getStorageMetrics(KeyRangeRef(it->param1, it->param2), -1));
 					trCommitCosts.bytesClearEst += m.bytes;
@@ -3300,10 +3300,17 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		Version v = wait( readVersion );
-		req.transaction.read_snapshot = v;
-		TransactionCommitCostEstimation costEst = wait( estimateCommitCosts(tr, &req.transaction) );
-		req.commitCostEstimation = costEst; // estimateCommitCosts(tr, &req.transaction, false);
+		if(!req.tagSet.present()) {
+			Version v = wait(readVersion);
+			req.transaction.read_snapshot = v;
+		}
+		else {
+			Version v;
+			TransactionCommitCostEstimation costEst;
+			wait(store(v, readVersion) && store(costEst, estimateCommitCosts(tr, &req.transaction)));
+			req.transaction.read_snapshot = v;
+			req.commitCostEstimation = costEst; // estimateCommitCosts(tr, &req.transaction, false);
+		}
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -3449,7 +3456,8 @@ Future<Void> Transaction::commitMutations() {
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
-		tr.tagSet = options.tags;
+		if(options.tags.size())
+			tr.tagSet = options.tags;
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
@@ -3728,7 +3736,10 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		    validateOptionValue(value, false);
 		    options.reportConflictingKeys = true;
 		    break;
-
+		case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
+			validateOptionValue(value, false);
+			options.expensiveClearCostEstimation = true;
+			break;
 	    default:
 			break;
 	}

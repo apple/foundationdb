@@ -158,8 +158,8 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
-	TransactionCommitCostEstimation commitCostEstimation;
-	TagSet tagSet;
+	Optional<TransactionCommitCostEstimation> commitCostEstimation;
+	Optional<TagSet> tagSet;
 
 	CommitTransactionRequest() : flags(0) {}
 
