@@ -34,6 +34,19 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 const StringRef SPECIAL_KEYSPACE = LiteralStringRef("\xff");
 
+class AssertingWriteBatch : public rocksdb::WriteBatch {
+public:
+	rocksdb::Status Put(KeyValueRef kv) {
+		ASSERT(kv.key < SPECIAL_KEYSPACE);
+		return WriteBatch::Put(toSlice(kv.key), toSlice(kv.value));
+	}
+
+	rocksdb::Status DeleteRange(KeyRangeRef keyRange) {
+		ASSERT(keyRange.begin < SPECIAL_KEYSPACE);
+		return WriteBatch::DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+	}
+};
+
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -82,7 +95,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
-			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
+			std::unique_ptr<AssertingWriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -257,7 +270,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
-	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	std::unique_ptr<AssertingWriteBatch> writeBatch;
 	IKeyValueStore* sqlLite;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id, IKeyValueStore* sqlLite)
@@ -270,7 +283,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() override { return join(errorPromise.getFuture(), sqlLite->getError()); }
+	Future<Void> getError() override { return errorPromise.getFuture() && sqlLite->getError(); }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		wait(self->readThreads->stop());
@@ -284,12 +297,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		delete self;
 	}
 
-	ACTOR static Future<Void> join(Future<Void> a, Future<Void> b) {
-		wait(success(a) && success(b));
-		return Void();
-	}
-
-	Future<Void> onClosed() override { return join(closePromise.getFuture(), sqlLite->onClosed()); }
+	Future<Void> onClosed() override { return closePromise.getFuture() && sqlLite->onClosed(); }
 
 	void dispose() override {
 		sqlLite->dispose();
@@ -310,7 +318,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		a->path = path;
 		auto res = a->done.getFuture();
 		writeThread->post(a.release());
-		return join(res, sqlLite->init());
+		return res && sqlLite->init();
 	}
 
 	void set(KeyValueRef kv, const Arena* a) override {
@@ -320,9 +328,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return;
 		}
 		if (writeBatch == nullptr) {
-			writeBatch.reset(new rocksdb::WriteBatch());
+			writeBatch.reset(new AssertingWriteBatch());
 		}
-		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
+		writeBatch->Put(kv);
 	}
 
 	void clear(KeyRangeRef keyRange, const Arena* a) override {
@@ -336,10 +344,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (writeBatch == nullptr) {
-			writeBatch.reset(new rocksdb::WriteBatch());
+			writeBatch.reset(new AssertingWriteBatch());
 		}
 
-		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
+		writeBatch->DeleteRange(keyRange);
 	}
 
 	Future<Void> commit(bool b) override {
@@ -354,7 +362,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
-		return join(res, sf);
+		return sf && res;
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override {
