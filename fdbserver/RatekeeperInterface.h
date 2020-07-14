@@ -133,7 +133,7 @@ struct GetRateInfoRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, throttledTagCommitCostEst, detailed, reply);
 	}
 };
 

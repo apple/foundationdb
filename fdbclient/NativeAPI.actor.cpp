@@ -3257,6 +3257,32 @@ void Transaction::setupWatches() {
 	}
 }
 
+ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self, CommitTransactionRef* transaction) {
+	state MutationRef* it = transaction->mutations.begin();
+	state MutationRef* end = transaction->mutations.end();
+	state TransactionCommitCostEstimation trCommitCosts;
+	for (; it != end; ++it) {
+		if (it->type == MutationRef::Type::SetValue) {
+			trCommitCosts.bytesWrite += it->expectedSize();
+			trCommitCosts.numWrite++;
+		} else if (it->isAtomicOp()) {
+			trCommitCosts.bytesAtomicWrite += it->expectedSize();
+			trCommitCosts.numAtomicWrite++;
+		} else if (it->type == MutationRef::Type::ClearRange) {
+			if (deterministicRandom()->random01() < CLIENT_KNOBS->COMMIT_CLEAR_COST_ESTIMATE_METHOD) {
+				try {
+					StorageMetrics m = wait(self->getStorageMetrics(KeyRangeRef(it->param1, it->param2), -1));
+					trCommitCosts.bytesClearEst += m.bytes;
+					continue;
+				} catch (...) {} // do a local estimation
+			}
+			// TODO how much data a clear would delete: 1. shard-map
+
+		}
+	}
+	return trCommitCosts;
+}
+
 ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime = now();
@@ -3275,6 +3301,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
+		TransactionCommitCostEstimation costEst = wait( estimateCommitCosts(tr, &req.transaction) );
+		req.commitCostEstimation = costEst; // estimateCommitCosts(tr, &req.transaction, false);
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -3401,33 +3429,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	}
 }
 
-TransactionCommitCostEstimation Transaction::estimateCommitCosts(bool traceEvent) const {
-	auto it = tr.transaction.mutations.cbegin();
-	auto end = tr.transaction.mutations.cend();
-	TransactionCommitCostEstimation trCommitCosts;
-	for (; it != end; ++it) {
-		if (it->type == MutationRef::Type::SetValue) {
-			trCommitCosts.bytesWrite += it->expectedSize();
-		    trCommitCosts.numWrite ++;
-		}
-		else if (it->isAtomicOp()) {
-			trCommitCosts.bytesAtomicWrite += it->expectedSize();
-			trCommitCosts.numAtomicWrite ++;
-		}
-		else if (it->type == MutationRef::Type::ClearRange) {
-			// TODO how much data a clear would delete: 1. shard-map 2. storage server
-		}
-	}
-	if (traceEvent) {
-		TraceEvent(SevDebug, "TransactionCostEstimation")
-		    .detail("numWrite", trCommitCosts.numWrite)
-		    .detail("byteWrites", trCommitCosts.bytesWrite)
-		    .detail("numAtomicWrite", trCommitCosts.numAtomicWrite)
-		    .detail("bytesAtomicWrite", trCommitCosts.bytesAtomicWrite)
-		    .detail("bytesClearEst", trCommitCosts.bytesClearEst);
-	}
-	return trCommitCosts;
-}
 
 Future<Void> Transaction::commitMutations() {
 	try {
@@ -3447,7 +3448,6 @@ Future<Void> Transaction::commitMutations() {
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
-		tr.commitCostEstimation = estimateCommitCosts(true);
 		tr.tagSet = options.tags;
 
 		size_t transactionSize = getSize();
