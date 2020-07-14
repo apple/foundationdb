@@ -28,6 +28,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
@@ -46,7 +47,6 @@
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
-#include "flow/Stats.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/Tracing.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -91,6 +91,9 @@ struct ProxyStats {
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
 	Version lastCommitVersionAssigned;
+
+	LatencySample commitLatencySample;
+	LatencySample grvLatencySample;
 
 	LatencyBands commitLatencyBands;
 	LatencyBands grvLatencyBands;
@@ -140,6 +143,8 @@ struct ProxyStats {
 		conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
 		keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
 		lastCommitVersionAssigned(0),
+		commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
@@ -256,6 +261,13 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
+
+			TransactionTagMap<uint64_t> tagCounts;
+			for(auto itr : *throttledTags) {
+				for(auto priorityThrottles : itr.second) {
+					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
+				}
+			}
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
 			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
 			                       *transactionTagCommitCostEst, detailed)));
@@ -1361,9 +1373,11 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self, vector<CommitTransactionRe
 		for (int resolverInd : transactionResolverMap[t]) nextTr[resolverInd]++;
 
 		// TODO: filter if pipelined with large commit
+		double duration = endTime - trs[t].requestTime();
+		self->stats.commitLatencySample.addMeasurement(duration);
 		if(self->latencyBandConfig.present()) {
 			bool filter = maxTransactionBytes > self->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
-			self->stats.commitLatencyBands.addMeasurement(endTime - trs[t].requestTime(), filter);
+			self->stats.commitLatencyBands.addMeasurement(duration, filter);
 		}
 	}
 
@@ -1482,8 +1496,12 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
+		double duration = end - request.requestTime();
+		if(request.priority == TransactionPriority::DEFAULT) {
+			stats->grvLatencySample.addMeasurement(duration);
+		}
 		if(request.priority >= TransactionPriority::DEFAULT) {
-			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+			stats->grvLatencyBands.addMeasurement(duration);
 		}
 
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
@@ -1502,8 +1520,13 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if(tagItr != priorityThrottledTags.end()) {
 					if(tagItr->second.expiration > now()) {
-						TEST(true); // Proxy returning tag throttle
-						reply.tagThrottleInfo[tag.first] = tagItr->second;
+						if(tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
+							TEST(true); // Auto TPS rate is unlimited
+						}
+						else {
+							TEST(true); // Proxy returning tag throttle
+							reply.tagThrottleInfo[tag.first] = tagItr->second;
+						}
 					}
 					else {
 						// This isn't required, but we might as well
@@ -2034,7 +2057,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	state ProxyCommitData commitData(proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
-	state PromiseStream< std::pair<vector<CommitTransactionRequest>, int> > batchedCommits; // pair.second => batchBytes
+	state PromiseStream< std::pair<vector<CommitTransactionRequest>, int> > batchedCommits;
 	state Future<Void> commitBatcherActor;
 	state Future<Void> lastCommitComplete = Void();
 

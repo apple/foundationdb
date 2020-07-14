@@ -112,7 +112,7 @@ Reference<IThreadPool>	createGenericThreadPool();
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
-	DummyThreadPool() : thread(NULL) {}
+	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() {
 		return errors.getFuture();
 	}

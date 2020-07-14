@@ -149,7 +149,7 @@ private:
 		RkTagThrottleData() : clientRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
 		double getTargetRate(Optional<double> requestRate) {
-			if(limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0) {
+			if(limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 				return limits.tpsRate;
 			}
 			else {
@@ -162,7 +162,7 @@ private:
 				double targetRate = getTargetRate(requestRate);
 				if(targetRate == std::numeric_limits<double>::max()) {
 					rateSet = false;
-					return Optional<double>();
+					return targetRate;
 				}
 				if(!rateSet) {
 					rateSet = true;
@@ -183,6 +183,10 @@ private:
 			}
 		}
 	};
+
+	void initializeTag(TransactionTag const& tag) {
+		tagData.try_emplace(tag);
+	}
 
 public:
 	RkTagThrottleCollection() {}
@@ -217,17 +221,30 @@ public:
 		ASSERT(!expiration.present() || expiration.get() > now());
 
 		auto itr = autoThrottledTags.find(tag);
-		if(itr == autoThrottledTags.end() && autoThrottledTags.size() >= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS) {
-			TEST(true); // Reached auto-throttle limit
-			return Optional<double>();
+		bool present = (itr != autoThrottledTags.end());
+		if(!present) {
+			if(autoThrottledTags.size() >= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS) {
+				TEST(true); // Reached auto-throttle limit
+				return Optional<double>();
+			}
+
+			itr = autoThrottledTags.try_emplace(tag).first;
+			initializeTag(tag);
+		}
+		else if(itr->second.limits.expiration <= now()) {
+			TEST(true); // Re-throttling expired tag that hasn't been cleaned up
+			present = false;
+			itr->second = RkTagThrottleData();
 		}
 
-		itr = autoThrottledTags.try_emplace(itr, tag);
 		auto &throttle = itr->second;
 
 		if(!tpsRate.present()) {
 			if(now() <= throttle.created + SERVER_KNOBS->AUTO_TAG_THROTTLE_START_AGGREGATION_TIME) {
 				tpsRate = std::numeric_limits<double>::max();
+				if(present) {
+					return Optional<double>();
+				}
 			}
 			else if(now() <= throttle.lastUpdated + SERVER_KNOBS->AUTO_TAG_THROTTLE_UPDATE_FREQUENCY) {
 				TEST(true); // Tag auto-throttled too quickly
@@ -253,15 +270,19 @@ public:
 
 		ASSERT(tpsRate.present() && tpsRate.get() >= 0);
 
-		TraceEvent("RkSetAutoThrottle", id)
-			.detail("Tag", tag)
-			.detail("TargetRate", tpsRate.get())
-			.detail("Expiration", expiration.get() - now());
-
 		throttle.limits.tpsRate = tpsRate.get();
 		throttle.limits.expiration = expiration.get();
 
-		throttle.updateAndGetClientRate(getRequestRate(tag));
+		Optional<double> clientRate = throttle.updateAndGetClientRate(getRequestRate(tag));
+
+		TraceEvent("RkSetAutoThrottle", id)
+			.detail("Tag", tag)
+			.detail("TargetRate", tpsRate.get())
+			.detail("Expiration", expiration.get() - now())
+			.detail("ClientRate", clientRate)
+			.detail("Created", now()-throttle.created)
+			.detail("LastUpdate", now()-throttle.lastUpdated)
+			.detail("LastReduced", now()-throttle.lastReduced);
 
 		if(tpsRate.get() != std::numeric_limits<double>::max()) {
 			return tpsRate.get();
@@ -278,6 +299,7 @@ public:
 
 		auto &priorityThrottleMap = manualThrottledTags[tag];
 		auto result = priorityThrottleMap.try_emplace(priority);
+		initializeTag(tag);
 		ASSERT(result.second); // Updating to the map is done by copying the whole map
 		
 		result.first->second.limits.tpsRate = tpsRate;
@@ -365,7 +387,8 @@ public:
 				Optional<double> autoClientRate = autoItr->second.updateAndGetClientRate(requestRate);
 				if(autoClientRate.present()) {
 					double adjustedRate = autoClientRate.get();
-					if(now() >= autoItr->second.lastReduced + SERVER_KNOBS->AUTO_TAG_THROTTLE_RAMP_UP_TIME) {
+					double rampStartTime = autoItr->second.lastReduced + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION - SERVER_KNOBS->AUTO_TAG_THROTTLE_RAMP_UP_TIME;
+					if(now() >= rampStartTime && adjustedRate != std::numeric_limits<double>::max()) {
 						TEST(true); // Tag auto-throttle ramping up
 
 						double targetBusyness = SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS;
@@ -373,7 +396,7 @@ public:
 							targetBusyness = 0.01;
 						}
 
-						double rampLocation = (now() - autoItr->second.lastReduced - SERVER_KNOBS->AUTO_TAG_THROTTLE_RAMP_UP_TIME) / targetBusyness;
+						double rampLocation = (now() - rampStartTime) / SERVER_KNOBS->AUTO_TAG_THROTTLE_RAMP_UP_TIME;
 						adjustedRate = computeTargetTpsRate(targetBusyness, pow(targetBusyness, 1 - rampLocation), adjustedRate);
 					}
 
@@ -388,8 +411,14 @@ public:
 					clientRates[TransactionPriority::BATCH][tagItr->first] = ClientTagThrottleLimits(0, autoItr->second.limits.expiration);
 				}
 				else {
+					ASSERT(autoItr->second.limits.expiration <= now());
 					TEST(true); // Auto throttle expired
-					autoThrottledTags.erase(autoItr);
+					if(BUGGIFY) { // Temporarily extend the window between expiration and cleanup
+						tagPresent = true;
+					}
+					else {
+						autoThrottledTags.erase(autoItr);
+					}
 				}
 			}
 
@@ -406,23 +435,24 @@ public:
 	}
 
 	void addRequests(TransactionTag const& tag, int requests) {
-		TEST(true); // Requests reported for throttled tag
-		ASSERT(requests > 0);
+		if(requests > 0) {
+			TEST(true); // Requests reported for throttled tag
 
-		auto tagItr = tagData.try_emplace(tag);
-		tagItr.first->second.requestRate.addDelta(requests);
+			auto tagItr = tagData.try_emplace(tag);
+			tagItr.first->second.requestRate.addDelta(requests);
 
-		double requestRate = tagItr.first->second.requestRate.smoothRate();
-		
-		auto autoItr = autoThrottledTags.find(tag);
-		if(autoItr != autoThrottledTags.end()) {
-			autoItr->second.updateAndGetClientRate(requestRate);
-		}
+			double requestRate = tagItr.first->second.requestRate.smoothRate();
+			
+			auto autoItr = autoThrottledTags.find(tag);
+			if(autoItr != autoThrottledTags.end()) {
+				autoItr->second.updateAndGetClientRate(requestRate);
+			}
 
-		auto manualItr = manualThrottledTags.find(tag);
-		if(manualItr != manualThrottledTags.end()) {
-			for(auto priorityItr = manualItr->second.begin(); priorityItr != manualItr->second.end(); ++priorityItr) {
-				priorityItr->second.updateAndGetClientRate(requestRate);
+			auto manualItr = manualThrottledTags.find(tag);
+			if(manualItr != manualThrottledTags.end()) {
+				for(auto priorityItr = manualItr->second.begin(); priorityItr != manualItr->second.end(); ++priorityItr) {
+					priorityItr->second.updateAndGetClientRate(requestRate);
+				}
 			}
 		}
 	}
@@ -810,7 +840,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
-void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss, RkTagThrottleCollection& throttledTags) {
+void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
 	if(ss.busiestTag.present() && ss.busiestTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && ss.busiestTagRate > SERVER_KNOBS->MIN_TAG_COST) {
 		TEST(true); // Transaction tag auto-throttled
 
@@ -824,7 +854,7 @@ void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss, RkTagT
 	}
 }
 
-void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RkTagThrottleCollection& throttledTags) {
+void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	//double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = self->smoothReleasedTransactions.smoothRate();
@@ -892,7 +922,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RkTagThrottleCol
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
 		if(limits->priority == TransactionPriority::DEFAULT && (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
-			tryAutoThrottleTag(self, ss, throttledTags);
+			tryAutoThrottleTag(self, ss);
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
@@ -1162,8 +1192,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits, RkTagThrottleCol
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
 			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-			.detail("TagsAutoThrottled", throttledTags.autoThrottleCount())
-			.detail("TagsManuallyThrottled", throttledTags.manualThrottleCount())
+			.detail("TagsAutoThrottled", self->throttledTags.autoThrottleCount())
+			.detail("TagsManuallyThrottled", self->throttledTags.manualThrottleCount())
 			.trackLatest(name);
 	}
 }
@@ -1227,8 +1257,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		state bool lastLimited = false;
 		loop choose {
 			when (wait( timeout )) {
-				updateRate(&self, &self.normalLimits, self.throttledTags);
-				updateRate(&self, &self.batchLimits, self.throttledTags);
+				updateRate(&self, &self.normalLimits);
+				updateRate(&self, &self.batchLimits);
 
 				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
