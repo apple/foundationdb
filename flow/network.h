@@ -232,12 +232,13 @@ struct NetworkAddress {
 	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
+	bool fromHostname; // deliberately not included in compare operators
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
-	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE) {}
+	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE), fromHostname(false) {}
 	NetworkAddress(const IPAddress& address, uint16_t port, bool isPublic, bool isTLS)
-	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)) {}
+	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)), fromHostname(false) {}
 	NetworkAddress(uint32_t ip, uint16_t port, bool isPublic, bool isTLS)
 	  : NetworkAddress(IPAddress(ip), port, isPublic, isTLS) {}
 
@@ -278,7 +279,7 @@ struct NetworkAddress {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, ip, port, flags);
+			serializer(ar, ip, port, flags, fromHostname);
 		} else {
 			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
@@ -286,6 +287,9 @@ struct NetworkAddress {
 				ip = IPAddress(ipV4);
 			} else {
 				serializer(ar, ip, port, flags);
+			}
+			if (ar.protocolVersion().hasNetworkAddressHostnameFlag()) {
+				serializer(ar, fromHostname);
 			}
 		}
 	}

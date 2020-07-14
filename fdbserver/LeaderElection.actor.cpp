@@ -26,29 +26,32 @@
 
 Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees );
 
+// Keep trying to become a leader by submitting itself to all coordinators. Monitor the health of all coordinators
+// at the same time
+// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
+// to throw `coordinators_changed()` error
 ACTOR Future<Void> submitCandidacy(Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID,
                                    AsyncTrigger* nomineeChanged, Optional<LeaderInfo>* leaderInfo,
                                    Optional<Hostname> hostname = Optional<Hostname>(),
                                    Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>()) {
 	state Optional<LeaderInfo> li;
 	loop {
-		if (hostname.present()) {
+		if (coord.candidacy.getEndpoint().getPrimaryAddress().fromHostname) {
 			ErrorOr<Optional<LeaderInfo>> rep = wait(coord.candidacy.tryGetReply(
 			    CandidacyRequest(key, myInfo, leaderInfo->present() ? leaderInfo->get().changeID : UID(), prevChangeID),
 			    TaskPriority::CoordinationReply));
-			if (rep.isError() && (rep.getError().code() == error_code_connection_failed ||
-			                      rep.getError().code() == error_code_request_maybe_delivered)) {
+			if (rep.isError() && rep.getError().code() == error_code_request_maybe_delivered) {
 				// connecting to nominee failed, most likely due to timeout.
 				// re-resolve this single hostname
 				if (connFile.isValid()) {
 					TraceEvent("CoordnitorChangedSubmitCandadicy")
-					    .detail("Hostname", hostname.get().toString())
+					    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 					    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
-					connFile->getMutableConnectionString().resetToUnresolved();
 					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
 					wait(delay(0.05));
-					throw coordinators_changed();
+					connFile->getMutableConnectionString().resetToUnresolved();
 				}
+				throw coordinators_changed();
 			} else if (rep.present()) {
 				li = rep.get();
 			}

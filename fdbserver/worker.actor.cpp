@@ -1672,6 +1672,10 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 			}
 			successIndex = index;
 		} else {
+			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
+				info.intermediateConnFile->getMutableConnectionString().resetToUnresolved();
+				return info;
+			}
 			index = (index+1) % addrs.size();
 			if (index == successIndex) {
 				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
@@ -1683,6 +1687,9 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 ACTOR Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
 	state MonitorLeaderInfo info(connFile);
 	loop {
+		if (info.intermediateConnFile->hasUnresolvedHostnames()) {
+			wait(info.intermediateConnFile->resolveHostnames());
+		}
 		MonitorLeaderInfo _info = wait( monitorLeaderRemotelyOneGeneration( connFile, outSerializedLeaderInfo, info ) );
 		info = _info;
 	}

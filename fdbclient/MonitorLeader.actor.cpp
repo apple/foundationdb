@@ -161,6 +161,7 @@ ACTOR Future<Void> _resolveHostnames(ClusterConnectionString* self) {
 		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
 			                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
 			                 addr.flags = 0; // Reset the parsed address to public
+			                 addr.fromHostname = true;
 			                 if (hostName.useTLS) addr.flags |= NetworkAddress::FLAG_TLS;
 			                 self->mutableCoordinators().push_back(addr);
 			                 self->mutableResolveResults().emplace(addr, hostName);
@@ -466,28 +467,28 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 // Nominee is the worker among all workers that are considered as leader by a coordinator
 // This function contacts a coordinator coord to ask if the worker is considered as a leader (i.e., if the worker
 // is a nominee)
+// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
+// to throw `coordinators_changed()` error
 ACTOR Future<Void> monitorNominee(Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange,
                                   Optional<LeaderInfo>* info, Optional<Hostname> hostname = Optional<Hostname>(),
                                   Reference<ClusterConnectionFile> connFile = Reference<ClusterConnectionFile>()) {
 	state Optional<LeaderInfo> li;
 	loop {
-		if (hostname.present()) {
+		if (coord.getLeader.getEndpoint().getPrimaryAddress().fromHostname) {
 			state ErrorOr<Optional<LeaderInfo>> rep =
 			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
 			                                     TaskPriority::CoordinationReply));
-			if (rep.isError() && (rep.getError().code() == error_code_connection_failed ||
-			                      rep.getError().code() == error_code_request_maybe_delivered)) {
-				// connecting to nominee failed, most likely due to timeout.
-				// re-resolve this single hostname
+			if (rep.isError() && rep.getError().code() == error_code_request_maybe_delivered) {
+				// connecting to nominee failed, most likely due to connection failed.
 				if (connFile.isValid()) {
 					TraceEvent("CoordnitorChangedMonitorNominee")
-					    .detail("Hostname", hostname.get().toString())
+					    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 					    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
-					connFile->getMutableConnectionString().resetToUnresolved();
 					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
 					wait(delay(0.05));
-					throw coordinators_changed();
+					connFile->getMutableConnectionString().resetToUnresolved();
 				}
+				throw coordinators_changed();
 			} else if (rep.present()) {
 				li = rep.get();
 			}
@@ -610,17 +611,6 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 		}
 		wait(nomineeChange.onTrigger() || allActors);
 	}
-}
-
-Future<Void> monitorLeaderRemotelyInternal( Reference<ClusterConnectionFile> const& connFile, Reference<AsyncVar<Value>> const& outSerializedLeaderInfo );
-
-template <class LeaderInterface>
-Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
-						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
-	LeaderDeserializer<LeaderInterface> deserializer;
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
-	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
-	return m || deserializer( serializedInfo, outKnownLeader );
 }
 
 ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
@@ -752,11 +742,13 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 }
 
 // First get and monitor the leader in order to get latest ClientData which contains the lastest list of proxies
-// Once the leader if known, `getClientInfoFromLeader` will keep `ClientData` updated. Whomever calls this actor can
+// Once the leader is known, `getClientInfoFromLeader` will keep `ClientData` updated. Whomever calls this actor can
 // then monitor the async var inside `ClientData` and take actions accordingly. For exmaple a cluter controller would
 // use this actor, when recieved an `OpenDatabaseCoordRequest` request, to answer with the latest client info, i.e.
 // the list of proxies.
-ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData, Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo ) {
+ACTOR Future<Void> monitorLeaderForProxies(Key clusterKey, vector<NetworkAddress> coordinators, ClientData* clientData,
+                                           Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo,
+                                           Reference<AsyncVar<Void>> coordinatorsChanged) {
 	state vector< ClientLeaderRegInterface > clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -799,7 +791,17 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 				leaderInfo->set(leader.get().first);
 			}
 		}
-		wait( nomineeChange.onTrigger() || allActors );
+
+		try {
+			wait(nomineeChange.onTrigger() || allActors);
+		} catch (Error& e) {
+			if (e.code() == error_code_coordinators_changed) {
+				coordinatorsChanged->trigger();
+				return Void();
+			} else {
+				throw;
+			}
+		}
 	}
 }
 
@@ -887,6 +889,10 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			clientInfo->set( ni );
 			successIdx = idx;
 		} else {
+			if (rep.isError() && rep.getError().code() == error_code_coordinators_changed) {
+				info.intermediateConnFile->getMutableConnectionString().resetToUnresolved();
+				return info;
+			}
 			idx = (idx+1)%addrs.size();
 			if(idx == successIdx) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));

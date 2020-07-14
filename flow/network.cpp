@@ -172,8 +172,8 @@ Future<Reference<IConnection>> INetworkConnections::connect( std::string host, s
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
 		NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		if(useTLS)
-			addr.flags = NetworkAddress::FLAG_TLS;
+		addr.fromHostname = true;
+		if (useTLS) addr.flags |= NetworkAddress::FLAG_TLS;
 		return addr;
 	});
 

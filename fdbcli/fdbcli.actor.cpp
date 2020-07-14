@@ -3132,6 +3132,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
+					// TODO: since cluster file supports hostname, it might be worthy to make change coordinators
+					// support hostname too
 					auto cs = ClusterConnectionFile(db->getConnectionFile()->getFilename()).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
