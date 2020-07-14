@@ -170,8 +170,15 @@ private:
 		T* newArr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)),
 		                              newSize * sizeof(T)); // SOMEDAY: FastAllocator
 		ASSERT(newArr != nullptr);
+		try {
+			for (int i = begin; i != end; i++) {
+				new (&newArr[i - begin]) T(std::move_if_noexcept(arr[i & mask]));
+			}
+		} catch (...) {
+			aligned_free(newArr);
+			throw;
+		}
 		for (int i = begin; i != end; i++) {
-			new (&newArr[i - begin]) T(std::move_if_noexcept(arr[i & mask]));
 			static_assert(std::is_nothrow_destructible_v<T>);
 			arr[i&mask].~T();
 		}
