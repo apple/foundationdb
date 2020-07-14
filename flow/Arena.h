@@ -114,7 +114,11 @@ public:
 	friend void* operator new ( size_t size, Arena& p );
 	friend void* operator new[] ( size_t size, Arena& p );
 
-//private:
+	bool sameArena(const Arena& other) const {
+		return impl.getPtr() == other.impl.getPtr();
+	}
+
+private:
 	Reference<struct ArenaBlock> impl;
 };
 
