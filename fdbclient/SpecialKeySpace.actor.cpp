@@ -360,11 +360,15 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		throw special_keys_write_disabled();
 	if (range.empty()) return;
 	auto begin = writeImpls[range.begin];
-	auto end = writeImpls[range.end];
-	if (begin != end)
+	auto end = writeImpls.rangeContainingKeyBefore(range.end)->value();
+	if (begin != end) {
+		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range.toString());
 		throw special_keys_cross_module_clear(); // ban cross module clear
-	else if (begin == nullptr)
+	}
+	else if (begin == nullptr) {
+		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range.toString());
 		throw special_keys_no_write_module_found();
+	}
 	return begin->clear(ryw, range);
 }
 
