@@ -3221,7 +3221,7 @@ extern volatile void** net2backtraces;
 extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
-extern volatile int64_t net2backtraces_count;
+extern volatile int net2backtraces_count;
 extern std::atomic<int64_t> net2RunLoopIterations;
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
