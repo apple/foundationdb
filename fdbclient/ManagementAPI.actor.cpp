@@ -1277,16 +1277,32 @@ void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool fai
 }
 
 ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
-	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
-
-	loop {
-		try {
-			excludeServers(tr, servers, failed);
-			wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			wait( tr.onError(e) );
+	if (cx->apiVersionAtLeast(700)) {
+		state ReadYourWritesTransaction ryw(cx);
+		loop {
+			try{
+				ryw.setOption( FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+				for(auto& s : servers) {
+					Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString()) : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
+					ryw.set(addr, ValueRef());
+				}
+				TraceEvent("ExcludeServersSpecialKeySpaceCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
+				wait(ryw.commit());
+				return Void();
+			} catch (Error& e) {
+				wait( ryw.onError(e) );
+			}
+		}
+	} else {
+		state Transaction tr(cx);
+		loop {
+			try {
+				excludeServers(tr, servers, failed);
+				wait( tr.commit() );
+				return Void();
+			} catch (Error& e) {
+				wait( tr.onError(e) );
+			}
 		}
 	}
 }
