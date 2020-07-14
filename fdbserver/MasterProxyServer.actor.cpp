@@ -258,7 +258,14 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter, detailed)));
+			
+			TransactionTagMap<uint64_t> tagCounts;
+			for(auto itr : *throttledTags) {
+				for(auto priorityThrottles : itr.second) {
+					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
+				}
+			}
+			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, tagCounts, detailed)));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		}
@@ -1505,8 +1512,13 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if(tagItr != priorityThrottledTags.end()) {
 					if(tagItr->second.expiration > now()) {
-						TEST(true); // Proxy returning tag throttle
-						reply.tagThrottleInfo[tag.first] = tagItr->second;
+						if(tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
+							TEST(true); // Auto TPS rate is unlimited
+						}
+						else {
+							TEST(true); // Proxy returning tag throttle
+							reply.tagThrottleInfo[tag.first] = tagItr->second;
+						}
 					}
 					else {
 						// This isn't required, but we might as well
