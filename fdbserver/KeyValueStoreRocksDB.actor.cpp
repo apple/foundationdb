@@ -393,6 +393,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			}
 			if (accumulatedBytes < byteLimit && result.size() < rowLimit) {
+				ASSERT(!result.more);
 				Standalone<RangeResultRef> sResult = wait(self->sqlLite->readRange(
 				    { SPECIAL_KEYSPACE, keys.end }, rowLimit - result.size(), byteLimit - accumulatedBytes));
 				for (const auto& kv : sResult) {
@@ -409,6 +410,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			}
 			if (accumulatedBytes < byteLimit && result.size() < -rowLimit) {
+				ASSERT(!result.more);
 				Standalone<RangeResultRef> rResult = wait(self->readRange(
 				    { keys.begin, SPECIAL_KEYSPACE }, rowLimit + result.size(), byteLimit - accumulatedBytes));
 				for (const auto& kv : rResult) {
