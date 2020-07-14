@@ -518,6 +518,7 @@ void testVectorLike() {
 	testIteratorIncrement<VectorRefLike>();
 	testReverseIterator<VectorRefLike>();
 	testAppend<VectorRefLike>();
+	testCopy<VectorRefLike>();
 }
 } // namespace
 
