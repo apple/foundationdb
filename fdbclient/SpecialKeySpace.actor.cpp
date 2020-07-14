@@ -39,6 +39,11 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::FAILURE, singleKeyRange(LiteralStringRef("\xff\xff/failure")) }
 };
 
+std::unordered_map<std::string, Key> SpecialKeySpace::commandToPrefix = {
+	{"exclude", moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("excluded/"))},
+	{"failed", moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("failed/"))}
+};
+
 // This function will move the given KeySelector as far as possible to the standard form:
 // orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in the underlying key range, it will move over the range
@@ -713,15 +718,28 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 	// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 	ryw->setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+	// for exluded servers
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(excludedServersKeys.withPrefix(normalKeys.end));
 	auto iter = ranges.begin();
 	Transaction& tr = ryw->getTransaction();
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
 		if (entry.first && !entry.second.present()) {
-			// ignore failed
 			tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
 			tr.set(excludedServersVersionKey, versionKey);
+			KeyRangeRef includingRange = iter->range().removePrefix(normalKeys.end);
+			tr.clear(includingRange);
+		}
+		++iter;
+	}
+	// for failed servers
+	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(failedServersKeys.withPrefix(normalKeys.end));
+	iter = ranges.begin();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		if (entry.first && !entry.second.present()) {
+			tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+			tr.set(failedServersVersionKey, versionKey);
 			KeyRangeRef includingRange = iter->range().removePrefix(normalKeys.end);
 			tr.clear(includingRange);
 		}
@@ -762,11 +780,11 @@ void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& k
 }
 
 void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	// TODO : clear of failed ranges should be forbidden
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 }
 
 void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	// TODO : clear of failed ranges should be forbidden
+	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
 ACTOR Future<Optional<std::string>> failedServerCommitActor(ReadYourWritesTransaction* ryw) {

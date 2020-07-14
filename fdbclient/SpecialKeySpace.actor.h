@@ -154,6 +154,7 @@ public:
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
+	static Key getCommandPrefix(std::string command) { return commandToPrefix.at(command); }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
@@ -172,6 +173,7 @@ private:
 	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
+	static std::unordered_map<std::string, Key> commandToPrefix; // management command prefix for special keys
 
 	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit();
