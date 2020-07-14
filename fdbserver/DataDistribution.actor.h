@@ -77,7 +77,8 @@ struct GetTeamRequest {
 	bool teamMustHaveShards;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
-	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
+	std::vector<UID> src;
+	Promise< std::pair<Optional<Reference<IDataDistributionTeam>>,bool> > reply;
 
 	GetTeamRequest() {}
 	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 

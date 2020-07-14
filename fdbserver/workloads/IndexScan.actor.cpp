@@ -108,7 +108,7 @@ struct IndexScanWorkload : KVWorkload {
 		state int startNode = deterministicRandom()->randomInt(0, self->nodeCount / 2); //start in the first half of the database
 		state KeySelector begin = firstGreaterOrEqual( self->keyForIndex( startNode ) );
 		state KeySelector end = firstGreaterThan( self->keyForIndex( self->nodeCount ) );
-		state GetRangeLimits limits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, self->bytesPerRead );
+		state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, self->bytesPerRead);
 
 		state int rowsRead;
 		state int chunks;

@@ -31,6 +31,7 @@
 #include <type_traits>
 #include "flow/IRandom.h"
 #include "flow/Error.h"
+#include "flow/ITrace.h"
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
@@ -479,6 +480,10 @@ public:
 		return enabled;
 	}
 
+	explicit operator bool() const {
+		return enabled;
+	}
+
 	void log();
 
 	~TraceEvent();  // Actually logs the event
@@ -512,36 +517,7 @@ private:
 	bool init( struct TraceInterval& );
 };
 
-struct ITraceLogWriter {
-	virtual void open() = 0;
-	virtual void roll() = 0;
-	virtual void close() = 0;
-	virtual void write(const std::string&) = 0;
-	virtual void sync() = 0;
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
-
-struct ITraceLogFormatter {
-	virtual const char* getExtension() = 0;
-	virtual const char* getHeader() = 0; // Called when starting a new file
-	virtual const char* getFooter() = 0; // Called when ending a file
-	virtual std::string formatEvent(const TraceEventFields&) = 0; // Called for each event
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
-
-struct ITraceLogIssuesReporter {
-	virtual void addIssue(std::string issue) = 0;
-	virtual void resolveIssue(std::string issue) = 0;
-
-	virtual void retrieveIssues(std::set<std::string>& out) = 0;
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
+class StringRef;
 
 struct TraceInterval {
 	TraceInterval( const char* type ) : count(-1), type(type), severity(SevInfo) {}

@@ -108,7 +108,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(630)
+    fdb.api_version(700)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -1158,7 +1158,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
 .. method:: has_incomplete_versionstamp(tuple)
 
     Returns ``True`` if there is at least one element contained within the tuple that is a
-    :class`Versionstamp` instance that is incomplete. If there are multiple incomplete
+    :class:`Versionstamp` instance that is incomplete. If there are multiple incomplete
     :class:`Versionstamp` instances, this method will return ``True``, but trying to pack it into a
     byte string will result in an error.
 

@@ -122,6 +122,7 @@ enum {
 	OPT_SOURCE_CLUSTER,
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP,
+	OPT_DSTONLY,
 
 	OPT_TRACE_FORMAT,
 };
@@ -767,6 +768,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_DEST_CLUSTER,    "-d",               SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER,    "--destination",    SO_REQ_SEP },
 	{ OPT_CLEANUP,         "--cleanup",        SO_NONE },
+	{ OPT_DSTONLY,         "--dstonly",        SO_NONE },
 	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -1147,6 +1149,7 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
+	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1554,7 +1557,8 @@ ACTOR Future<json_spirit::mObject> getLayerStatus(Database src, std::string root
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Standalone<RangeResultRef> kvPairs = wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), CLIENT_KNOBS->ROW_LIMIT_UNLIMITED));
+			state Standalone<RangeResultRef> kvPairs =
+			    wait(tr.getRange(KeyRangeRef(rootKey, strinc(rootKey)), GetRangeLimits::ROW_LIMIT_UNLIMITED));
 			json_spirit::mObject statusDoc;
 			JSONDoc modifier(statusDoc);
 			for(auto &kv : kvPairs) {
@@ -1911,12 +1915,12 @@ ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showError
 	return Void();
 }
 
-ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagName, bool partial) {
+ACTOR Future<Void> abortDBBackup(Database src, Database dest, std::string tagName, bool partial, bool dstOnly) {
 	try
 	{
 		state DatabaseBackupAgent backupAgent(src);
 
-		wait(backupAgent.abortBackup(dest, Key(tagName), partial));
+		wait(backupAgent.abortBackup(dest, Key(tagName), partial, false, dstOnly));
 		wait(backupAgent.unlockBackup(dest, Key(tagName)));
 
 		printf("The DR on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
@@ -2949,6 +2953,7 @@ int main(int argc, char* argv[]) {
 		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
 		ESOError	lastError;
 		bool partial = true;
+		bool dstOnly = false;
 		LocalityData localities;
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
@@ -3128,6 +3133,9 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_CLEANUP:
 					partial = false;
+					break;
+				case OPT_DSTONLY:
+					dstOnly = true;
 					break;
 				case OPT_KNOB: {
 					std::string syn = args->OptionSyntax();
@@ -3466,16 +3474,6 @@ int main(int argc, char* argv[]) {
 		std::set_new_handler( &platform::outOfMemory );
 		setMemoryQuota( memLimit );
 
-		int total = 0;
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			total += i->second;
-		if (total)
-			printf("%d errors:\n", total);
-		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
-			if (i->second > 0)
-				printf("  %d: %d %s\n", i->second, i->first, Error::fromCode(i->first).what());
-
-
 		Reference<ClusterConnectionFile> ccf;
 		Database db;
 		Reference<ClusterConnectionFile> sourceCcf;
@@ -3735,7 +3733,7 @@ int main(int argc, char* argv[]) {
 				    f = stopAfter(
 				        map(ba.abortRestore(db, KeyRef(tagName)), [tagName](FileBackupAgent::ERestoreState s) -> Void {
 					        printf("RESTORE_ABORT Tag: %s  State: %s\n", tagName.c_str(),
-					               FileBackupAgent::restoreStateText(s).c_str());
+					               FileBackupAgent::restoreStateText(s).toString().c_str());
 					        return Void();
 				        }));
 				    break;
@@ -3807,7 +3805,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( switchDBBackup(sourceDb, db, backupKeys, tagName, forceAction) );
 				break;
 			case DB_ABORT:
-				f = stopAfter( abortDBBackup(sourceDb, db, tagName, partial) );
+				f = stopAfter( abortDBBackup(sourceDb, db, tagName, partial, dstOnly) );
 				break;
 			case DB_PAUSE:
 				f = stopAfter( changeDBBackupResumed(sourceDb, db, true) );

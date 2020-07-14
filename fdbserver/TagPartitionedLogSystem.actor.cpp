@@ -28,6 +28,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
@@ -426,14 +427,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(auto& it : self->tLogs) {
 				for(auto &t : it->logServers) {
 					if( t->get().present() ) {
-						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+						failed.push_back(waitFailureClient(t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+						                                   -SERVER_KNOBS->TLOG_TIMEOUT /
+						                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						                                   /*trace=*/true));
 					} else {
 						changes.push_back(t->onChange());
 					}
 				}
 				for(auto &t : it->logRouters) {
 					if( t->get().present() ) {
-						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+						failed.push_back(waitFailureClient(t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+						                                   -SERVER_KNOBS->TLOG_TIMEOUT /
+						                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						                                   /*trace=*/true));
 					} else {
 						changes.push_back(t->onChange());
 					}
@@ -442,7 +449,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if (worker->get().present()) {
 						backupFailed.push_back(waitFailureClient(
 						    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
-						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						    /*trace=*/true));
 					} else {
 						changes.push_back(worker->onChange());
 					}
@@ -454,7 +462,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for(auto& it : old.tLogs) {
 						for(auto &t : it->logRouters) {
 							if( t->get().present() ) {
-								failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+								failed.push_back(waitFailureClient(
+								    t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+								    -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+								    /*trace=*/true));
 							} else {
 								changes.push_back(t->onChange());
 							}
@@ -465,7 +476,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						if (worker->get().present()) {
 							backupFailed.push_back(waitFailureClient(
 							    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
-							    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+							    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							    /*trace=*/true));
 						} else {
 							changes.push_back(worker->onChange());
 						}
@@ -690,10 +702,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end, bool useMergePeekCursors, int8_t peekLocality = tagLocalityInvalid ) {
-		if(tag.locality >= 0 || tag.locality == tagLocalityUpgraded) {
+		if(tag.locality >= 0 || tag.locality == tagLocalityUpgraded || tag.locality == tagLocalitySpecial) {
 			peekLocality = tag.locality;
 		}
-		ASSERT(peekLocality >= 0 || peekLocality == tagLocalityUpgraded);
+		ASSERT(peekLocality >= 0 || peekLocality == tagLocalityUpgraded || tag.locality == tagLocalitySpecial);
 
 		int bestSet = -1;
 		bool foundSpecial = false;
@@ -702,7 +714,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(tLogs[t]->logServers.size() && tLogs[t]->locality != tagLocalitySatellite) {
 				logCount++;
 			}
-			if(tLogs[t]->logServers.size() && (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded)) {
+			if(tLogs[t]->logServers.size() && (tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded || peekLocality == tagLocalitySpecial)) {
 				if( tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded ) {
 					foundSpecial = true;
 				}
@@ -757,7 +769,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if(oldLogData[i].tLogs[t]->logServers.size() && oldLogData[i].tLogs[t]->locality != tagLocalitySatellite) {
 						logCount++;
 					}
-					if(oldLogData[i].tLogs[t]->logServers.size() && (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || oldLogData[i].tLogs[t]->locality == peekLocality || peekLocality == tagLocalityUpgraded)) {
+					if(oldLogData[i].tLogs[t]->logServers.size() && (oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || oldLogData[i].tLogs[t]->locality == peekLocality ||
+																	 peekLocality == tagLocalityUpgraded || peekLocality == tagLocalitySpecial)) {
 						if( oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded ) {
 							nextFoundSpecial = true;
 						}
@@ -783,8 +796,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				Version thisBegin = std::max(oldLogData[i].tLogs[bestOldSet]->startVersion, begin);
 				if(thisBegin < lastBegin) {
 					if(thisBegin < end) {
-						TraceEvent("TLogPeekLocalAddingOldBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end)
+						TraceEvent("TLogPeekLocalAddingOldBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestOldSet", bestOldSet)
 							.detail("LogServers", oldLogData[i].tLogs[bestOldSet]->logServerString()).detail("ThisBegin", thisBegin).detail("LastBegin", lastBegin);
+						//detail("LogId", oldLogData[i].tLogs[bestOldSet]->logServers[tLogs[bestOldSet]->bestLocationFor( tag )]->get().id());
 						cursors.emplace_back(new ILogSystem::MergedPeekCursor( oldLogData[i].tLogs[bestOldSet]->logServers, oldLogData[i].tLogs[bestOldSet]->bestLocationFor( tag ), oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 - oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor, tag,
 							thisBegin, std::min(lastBegin, end), useMergePeekCursors, oldLogData[i].tLogs[bestOldSet]->tLogLocalities, oldLogData[i].tLogs[bestOldSet]->tLogPolicy, oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor));
 						epochEnds.emplace_back(std::min(lastBegin, end));
@@ -1959,7 +1973,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
-						failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+						failed.push_back(waitFailureClient(
+						    logRouterInitializationReplies[nextReplies][i].get().waitFailure,
+						    SERVER_KNOBS->TLOG_TIMEOUT,
+						    -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						    /*trace=*/true));
 					}
 					nextReplies++;
 				}
@@ -1977,7 +1995,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
 						if(!forRemote) {
-							failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+							failed.push_back(waitFailureClient(
+							    logRouterInitializationReplies[nextReplies][i].get().waitFailure,
+							    SERVER_KNOBS->TLOG_TIMEOUT,
+							    -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							    /*trace=*/true));
 						}
 					}
 					nextReplies++;

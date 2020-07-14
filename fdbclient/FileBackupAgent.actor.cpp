@@ -87,22 +87,15 @@ const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
-std::string FileBackupAgent::restoreStateText(ERestoreState id) {
+StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	switch(id) {
-	case ERestoreState::UNITIALIZED:
-		return "unitialized";
-	case ERestoreState::QUEUED:
-		return "queued";
-	case ERestoreState::STARTING:
-		return "starting";
-	case ERestoreState::RUNNING:
-		return "running";
-	case ERestoreState::COMPLETED:
-		return "completed";
-	case ERestoreState::ABORTED:
-		return "aborted";
-	default:
-		return "Unknown";
+		case ERestoreState::UNITIALIZED: return LiteralStringRef("unitialized");
+		case ERestoreState::QUEUED: return LiteralStringRef("queued");
+		case ERestoreState::STARTING: return LiteralStringRef("starting");
+		case ERestoreState::RUNNING: return LiteralStringRef("running");
+		case ERestoreState::COMPLETED: return LiteralStringRef("completed");
+		case ERestoreState::ABORTED: return LiteralStringRef("aborted");
+		default: return LiteralStringRef("Unknown");
 	}
 }
 
@@ -1444,8 +1437,8 @@ namespace fileBackup {
 			// thousands of iterations.
 			// Declare some common iterators which must be state vars and will be used multiple times.
 			state int i;
-			state RangeMap<Key, int, KeyRangeRef>::Iterator iShard;
-			state RangeMap<Key, int, KeyRangeRef>::Iterator iShardEnd;
+			state RangeMap<Key, int, KeyRangeRef>::iterator iShard;
+			state RangeMap<Key, int, KeyRangeRef>::iterator iShardEnd;
 
 			// Set anything inside a dispatched range to DONE.
 			// Also ensure that the boundary value are true, false, [true, false]...
@@ -3975,7 +3968,7 @@ public:
 				if(!current.present()) {
 					if(verbose)
 						printf("waitRestore: Tag: %s  State: %s\n", tagName.toString().c_str(),
-						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).c_str());
+						       FileBackupAgent::restoreStateText(ERestoreState::UNITIALIZED).toString().c_str());
 					return ERestoreState::UNITIALIZED;
 				}
 

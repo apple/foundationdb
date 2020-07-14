@@ -458,7 +458,7 @@ struct TPCC : TestWorkload {
 		state int d_id = deterministicRandom()->randomInt(0, 10);
 		state int i;
 		state Order order;
-		state VectorRef<OrderLine> orderLines;
+		state std::vector<OrderLine> orderLines;
 		try {
 			state Customer customer = wait(getRandomCustomer(self, &tr, w_id, d_id));
 			order.o_w_id = customer.c_w_id;
@@ -481,7 +481,7 @@ struct TPCC : TestWorkload {
 				BinaryReader r(olValue.get(), IncludeVersion());
 				OrderLine ol;
 				serializer(r, ol);
-				orderLines.push_back(order.arena, ol);
+				orderLines.push_back(ol);
 			}
 		} catch (Error& e) {
 			return false;

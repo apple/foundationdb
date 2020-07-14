@@ -20,6 +20,10 @@
 
 #include <set>
 #include <sstream>
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -35,9 +39,11 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/serialize.h"
 
 class TCTeamInfo;
 struct TCMachineInfo;
@@ -768,6 +774,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 
+			bool foundSrc = false;
+			for( int i = 0; i < req.src.size(); i++ ) {
+				if( self->server_info.count( req.src[i] ) ) {
+					foundSrc = true;
+					break;
+				}
+			}
+
 			// Select the best team
 			// Currently the metric is minimum used disk space (adjusted for data in flight)
 			// Only healthy teams may be selected. The team has to be healthy at the moment we update
@@ -778,7 +792,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
 			if( !self->teams.size() ) {
-				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
+				req.reply.send( std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc) );
 				return Void();
 			}
 
@@ -804,7 +818,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found && teamList[j]->isHealthy()) {
-							req.reply.send( teamList[j] );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
@@ -895,7 +910,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found) {
-							req.reply.send( teamList[j] );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
@@ -906,7 +922,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// 	self->traceAllInfo(true);
 			// }
 
-			req.reply.send( bestOption );
+			req.reply.send( std::make_pair(bestOption, foundSrc) );
 
 			return Void();
 		} catch( Error &e ) {
@@ -3150,7 +3166,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
-									TEST(true); // A removed server is still associated with a team in SABTF
+									TEST(true); // A removed server is still associated with a team in
+									            // ShardsAffectedByTeamFailure
 								}
 							}
 						}
@@ -4573,8 +4590,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (initData->shards[shard].hasDest) {
-					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
-					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
+					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
+					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
+					// easier to just (with low priority) schedule it for movement.
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
@@ -4853,6 +4871,56 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	return Void();
 }
 
+ACTOR Future<Void> waitFailCacheServer(Database* db, StorageServerInterface ssi) {
+	state Transaction tr(*db);
+	state Key key = storageCacheServerKey(ssi.id());
+	wait(waitFailureClient(ssi.waitFailure));
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			tr.addReadConflictRange(storageCacheServerKeys);
+			tr.clear(key);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> cacheServerWatcher(Database* db) {
+	state Transaction tr(*db);
+	state ActorCollection actors(false);
+	state std::set<UID> knownCaches;
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!range.more);
+			std::set<UID> caches;
+			for (auto& kv : range) {
+				UID id;
+				BinaryReader reader{kv.key.removePrefix(storageCacheServersPrefix), Unversioned()};
+				reader >> id;
+				caches.insert(id);
+				if (knownCaches.find(id) == knownCaches.end()) {
+					StorageServerInterface ssi;
+					BinaryReader reader{kv.value, IncludeVersion()};
+					reader >> ssi;
+					actors.add(waitFailCacheServer(db, ssi));
+				}
+			}
+			knownCaches = std::move(caches);
+			tr.reset();
+			wait(delay(5.0) || actors.getResult());
+			ASSERT(!actors.getResult().isReady());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
@@ -4865,6 +4933,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
 		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
+		self->addActor.send(cacheServerWatcher(&cx));
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
 		loop choose {

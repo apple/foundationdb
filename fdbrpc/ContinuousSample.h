@@ -50,7 +50,7 @@ public:
 		return *this;
 	}
 
-	double mean() {
+	double mean() const {
 		if (!samples.size()) return 0;
 		T sum = 0;
 		for( int c = 0; c < samples.size(); c++ )
@@ -70,14 +70,18 @@ public:
 		return samples[ idx ];
 	}
 
-	T min() { return _min; }
-	T max() { return _max; }
+	T min() const { return _min; }
+	T max() const { return _max; }
 
 	void clear() {
 		samples.clear();
 		populationSize = 0;
 		sorted = true;
 		_min = _max = 0; // Doesn't work for all T
+	}
+
+	uint64_t getPopulationSize() const {
+		return populationSize;
 	}
 
 private:

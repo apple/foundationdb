@@ -19,7 +19,6 @@
  */
 
 #include "flow/Hash3.h"
-#include "flow/Stats.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -35,6 +34,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
@@ -310,8 +310,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 		TagData( Tag tag, Version popped, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), popped(popped), poppedRecently(poppedRecently), unpoppedRecovered(unpoppedRecovered) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
-		void operator= (TagData&& r) BOOST_NOEXCEPT {
+		TagData(TagData&& r) noexcept
+		  : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent),
+		    poppedRecently(r.poppedRecently), popped(r.popped), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
+		void operator=(TagData&& r) noexcept {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
 			poppedRecently = r.poppedRecently;

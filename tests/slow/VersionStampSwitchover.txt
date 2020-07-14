@@ -1,11 +1,13 @@
+extraDB=2
+
 testTitle=VersionStampCorrectnessTest
+clearAfterTest=false
+simBackupAgents=BackupToDB
+
     testName=VersionStamp
     testDuration=60.0
     
     testName=AtomicSwitchover
-    clearAfterTest=false
-    simBackupAgents=BackupToDB
-    extraDB=2
     switch1delay=20.0
     switch2delay=20.0
     stopDelay=20.0

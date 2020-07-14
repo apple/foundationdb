@@ -1,10 +1,8 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
 
-6.3.2
+6.3.3
 =====
 
 Features
@@ -18,6 +16,7 @@ Features
 * Added a new API in all bindings that can be used to query the estimated byte size of a given range. `(PR #2537) <https://github.com/apple/foundationdb/pull/2537>`_
 * Added the ``lock`` and ``unlock`` commands to ``fdbcli`` which lock or unlock a cluster. `(PR #2890) <https://github.com/apple/foundationdb/pull/2890>`_
 * Add a framework which helps to add client functions using special keys (keys within ``[\xff\xff, \xff\xff\xff)``). `(PR #2662) <https://github.com/apple/foundationdb/pull/2662>`_
+* Added capability of aborting replication to a clone of DR site without affecting replication to the original dr site with ``--dstonly`` option of ``fdbdr abort``. `(PR 3457) <https://github.com/apple/foundationdb/pull/3457>`_
 
 Performance
 -----------
@@ -105,10 +104,12 @@ Fixes from previous versions
 ----------------------------
 
 * The 6.3.1 patch release includes all fixes from the patch releases 6.2.21 and 6.2.22. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.3 patch release includes all fixes from the patch release 6.2.23. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 
 Fixes only impacting 6.3.0+
 ---------------------------
 
+* Clients did not probably balance requests to the proxies. [6.3.3] `(PR #3377) <https://github.com/apple/foundationdb/pull/3377>`_
 * Renamed ``MIN_DELAY_STORAGE_CANDIDACY_SECONDS`` knob to ``MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS``. [6.3.2] `(PR #3327) <https://github.com/apple/foundationdb/pull/3327>`_
 * Refreshing TLS certificates could cause crashes. [6.3.2] `(PR #3352) <https://github.com/apple/foundationdb/pull/3352>`_
 * All storage class processes attempted to connect to the same coordinator. [6.3.2] `(PR #3361) <https://github.com/apple/foundationdb/pull/3361>`_

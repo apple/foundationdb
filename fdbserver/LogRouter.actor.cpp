@@ -20,6 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
@@ -30,7 +31,6 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/Stats.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LogRouterData {
@@ -42,8 +42,10 @@ struct LogRouterData {
 
 		TagData( Tag tag, Version popped, Version durableKnownCommittedVersion ) : tag(tag), popped(popped), durableKnownCommittedVersion(durableKnownCommittedVersion) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped), durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
-		void operator= (TagData&& r) BOOST_NOEXCEPT {
+		TagData(TagData&& r) noexcept
+		  : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped),
+		    durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
+		void operator=(TagData&& r) noexcept {
 			version_messages = std::move(r.version_messages);
 			tag = r.tag;
 			popped = r.popped;
