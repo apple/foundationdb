@@ -433,9 +433,42 @@ void testIteratorIncrement() {
 }
 
 template <template <class> class VectorRefLike>
+void testReverseIterator() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+
+	int i = xs.size() - 1;
+	for (auto iter = xs.rbegin(); iter != xs.rend();) {
+		ASSERT(*iter++ == StringRef(std::to_string(i--)));
+	}
+	ASSERT(i == -1);
+}
+
+template <template <class> class VectorRefLike>
+void testAppend() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	VectorRefLike<StringRef> ys;
+	ys.append(a, xs.begin(), xs.size());
+	ASSERT(xs.size() == ys.size());
+	ASSERT(xs == ys);
+}
+
+template <template <class> class VectorRefLike>
 void testVectorLike() {
 	testRangeBasedForLoop<VectorRefLike>();
 	testIteratorIncrement<VectorRefLike>();
+	testReverseIterator<VectorRefLike>();
+	testAppend<VectorRefLike>();
 }
 } // namespace
 
@@ -452,5 +485,13 @@ template <class T>
 using SmallVectorRefProxy = SmallVectorRef<T>;
 TEST_CASE("/flow/Arena/SmallVectorRef") {
 	testVectorLike<SmallVectorRefProxy>();
+	return Void();
+}
+
+// Fix number of template parameters
+template <class T>
+using SmallVectorRef10Proxy = SmallVectorRef<T, 10>;
+TEST_CASE("/flow/Arena/SmallVectorRef10") {
+	testVectorLike<SmallVectorRef10Proxy>();
 	return Void();
 }

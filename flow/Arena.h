@@ -917,7 +917,8 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
-	void append(Arena& p, const T* begin, int count) {
+	template <class It>
+	void append(Arena& p, It begin, int count) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
 		VPS::invalidate();
 		if (count > 0) {
@@ -1002,6 +1003,8 @@ protected:
 // won't need allocations in these cases.
 template <class T, int InlineMembers = 1>
 class SmallVectorRef {
+	static_assert(InlineMembers >= 0);
+
 public:
 	// types
 	template <bool isConst>
@@ -1012,7 +1015,7 @@ public:
 		int idx = 0;
 
 	public:
-		using Category = std::random_access_iterator_tag;
+		using iterator_category = std::random_access_iterator_tag;
 		using value_type = std::conditional_t<isConst, const T, T>;
 		using difference_type = int;
 		using pointer = value_type*;
@@ -1060,6 +1063,16 @@ public:
 		self_t& operator-=(difference_type diff) {
 			idx -= diff;
 			return *this;
+		}
+		self_t operator+(difference_type diff) {
+			auto res = *this;
+			res.idx += diff;
+			return res;
+		}
+		self_t operator-(difference_type diff) {
+			auto res = *this;
+			res.idx -= diff;
+			return res;
 		}
 		bool operator!=(self_t const& o) const { return vec != o.vec || idx != o.idx; }
 		bool operator==(self_t const& o) const { return vec == o.vec && idx == o.idx; }
@@ -1171,37 +1184,25 @@ public: // Modification
 	void pop_back() {--m_size; }
 
 	template <class It>
-	void append(Arena& arena, It first, It last) {
-		if (first == last) {
-			return;
-		}
-		auto d = std::distance(first, last);
-		if (m_size + d > InlineMembers) {
-			data.reserve(arena, m_size + d - InlineMembers);
-		}
-		while (first != last && m_size < InlineMembers) {
+	void append(Arena& arena, It first, int count) {
+		ASSERT(count >= 0);
+		while (count > 0 && m_size < InlineMembers) {
 			new (&(arr[m_size++])) T(*(first++));
+			--count;
 		}
-		while (first != last) {
-			data.push_back(arena, *(first++));
-		}
+		data.append(arena, first, count);
+		m_size += count;
 	}
 
 	template <class It>
-	void append_deep(Arena& arena, It first, It last) {
-		if (first == last) {
-			return;
+	void append_deep(Arena& arena, It first, int count) {
+		ASSERT(count >= 0);
+		while (count > 0 && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(*(first++));
+			--count;
 		}
-		auto d = std::distance(first, last);
-		if (m_size + d > InlineMembers) {
-			data.reserve(arena, m_size + d - InlineMembers);
-		}
-		while (first != last && m_size < InlineMembers) {
-			new (&(arr[m_size++])) T(arena, *(first++));
-		}
-		while (first != last) {
-			data.push_back_deep(arena, *(first++));
-		}
+		data.append_deep(arena, first, count);
+		m_size += count;
 	}
 
 public: // iterator access
@@ -1313,6 +1314,15 @@ typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> opera
 	auto res = iter;
 	res.idx -= diff;
 	return res;
+}
+
+template <class T, int InlineMembers1, int InlineMembers2>
+bool operator==(const SmallVectorRef<T, InlineMembers1>& lhs, const SmallVectorRef<T, InlineMembers2>& rhs) {
+	return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+template <class T, int InlineMembers1, int InlineMembers2>
+bool operator!=(const SmallVectorRef<T, InlineMembers1>& lhs, const SmallVectorRef<T, InlineMembers2>& rhs) {
+	return !(lhs == rhs);
 }
 
 template <class T>
