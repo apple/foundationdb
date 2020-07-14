@@ -132,7 +132,7 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr : public ComposedIdentifier<T, 0x1> {
+class ErrorOr : public ComposedIdentifier<T, 2> {
 public:
 	ErrorOr() : ErrorOr(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }

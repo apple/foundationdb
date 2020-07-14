@@ -156,6 +156,7 @@ struct PairFileIdentifier<F, S, false> {};
 
 template <class F, class S>
 struct PairFileIdentifier<F, S, true> {
+	// FIXME: pair<A,B> and pair<B,A> have the same file identifier
 	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
 };
 
@@ -171,7 +172,15 @@ public:
 };
 
 template <class T, class Allocator>
-struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 0x10> {};
+struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 5> {};
+
+template <class T, class Allocator>
+struct CompositionDepthFor<std::vector<T, Allocator>> : std::integral_constant<int, CompositionDepthFor<T>::value + 1> {
+};
+
+template <class F, class S>
+struct CompositionDepthFor<std::pair<F, S>>
+  : std::integral_constant<int, std::max(CompositionDepthFor<F>::value, CompositionDepthFor<S>::value)> {};
 
 template <class Archive, class T>
 inline void save( Archive& ar, const std::vector<T>& value ) {

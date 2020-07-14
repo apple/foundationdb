@@ -212,7 +212,7 @@ inline void save( Archive& ar, const Arena& p ) {
 //    assertion failures are preferable. This is the main reason we
 //    don't intend to use std::optional directly.
 template <class T>
-class Optional : public ComposedIdentifier<T, 0x10> {
+class Optional : public ComposedIdentifier<T, 4> {
 public:
 	Optional() = default;
 
@@ -783,7 +783,7 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 };
 
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
-class VectorRef : public ComposedIdentifier<T, 0x8>, public VectorRefPreserializer<T, SerStrategy> {
+class VectorRef : public ComposedIdentifier<T, 3>, public VectorRefPreserializer<T, SerStrategy> {
 	using VPS = VectorRefPreserializer<T, SerStrategy>;
 	friend class VectorRef<T, SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
 	                                                                     : VecSerStrategy::FlatBuffers>;
