@@ -2732,8 +2732,6 @@ struct RedwoodRecordRef {
 	}
 };
 
-TRIVIALLY_DESTRUCTIBLE(RedwoodRecordRef); // Allows VectorRef<RedwoodRecordRef>
-
 struct BTreePage {
 	typedef DeltaTree<RedwoodRecordRef> BinaryTree;
 	typedef DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly> ValueTree;

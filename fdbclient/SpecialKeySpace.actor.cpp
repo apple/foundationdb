@@ -127,7 +127,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
-	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Iterator iter =
+	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter =
 	    ks->offset < 1 ? sks->getReadImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getReadImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
@@ -200,7 +200,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
 	state Standalone<RangeResultRef> pairs;
-	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Iterator iter;
+	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state KeyRangeRef moduleBoundary;
@@ -404,7 +404,7 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, const Key
 ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Iterator iter = ranges.begin();
+	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 	// TODO : update this set container
 	state std::set<SpecialKeyRangeRWImpl*> writeModulePtrs;
 	while (iter != ranges.end()) {
@@ -481,7 +481,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTr
 			KeyRef beginKey = ddMetricsRef.beginKey.withPrefix(ddStatsRange.begin, result.arena());
 			// Use json string encoded in utf-8 to encode the values, easy for adding more fields in the future
 			json_spirit::mObject statsObj;
-			statsObj["ShardBytes"] = ddMetricsRef.shardBytes;
+			statsObj["shard_bytes"] = ddMetricsRef.shardBytes;
 			std::string statsString =
 			    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 			ValueRef bytes(result.arena(), statsString);
@@ -516,7 +516,7 @@ ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTra
 	} else {
 		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 		    ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
-		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Iterator iter = ranges.begin();
+		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 		int index = 0;
 		while (iter != ranges.end()) {
 			// add all previous entries into result

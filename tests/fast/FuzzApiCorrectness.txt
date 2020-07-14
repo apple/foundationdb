@@ -1,6 +1,8 @@
+StderrSeverity=30
+
 testTitle=FuzzApiCorrectness
     testName=FuzzApiCorrectness
-	testDuration=30.0
+    testDuration=30.0
 
     testName=RandomClogging
     testDuration=30.0
@@ -20,5 +22,3 @@ testTitle=FuzzApiCorrectness
     machinesToLeave=3
     reboot=true
     testDuration=30.0
-
-    StderrSeverity=30

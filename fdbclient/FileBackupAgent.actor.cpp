@@ -1437,8 +1437,8 @@ namespace fileBackup {
 			// thousands of iterations.
 			// Declare some common iterators which must be state vars and will be used multiple times.
 			state int i;
-			state RangeMap<Key, int, KeyRangeRef>::Iterator iShard;
-			state RangeMap<Key, int, KeyRangeRef>::Iterator iShardEnd;
+			state RangeMap<Key, int, KeyRangeRef>::iterator iShard;
+			state RangeMap<Key, int, KeyRangeRef>::iterator iShardEnd;
 
 			// Set anything inside a dispatched range to DONE.
 			// Also ensure that the boundary value are true, false, [true, false]...

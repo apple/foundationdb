@@ -20,6 +20,9 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
+#include "flow/Tracing.h"
+#include <cctype>
+#include <iterator>
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
 #include <boost/algorithm/string.hpp>
@@ -78,7 +81,7 @@
 
 // clang-format off
 enum {
-	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE,
+	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
 	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
@@ -111,6 +114,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_MAXLOGSSIZE,           "--maxlogssize",               SO_REQ_SEP },
 	{ OPT_LOGGROUP,              "--loggroup",                  SO_REQ_SEP },
 	{ OPT_PARENTPID,             "--parentpid",                 SO_REQ_SEP },
+	{ OPT_TRACER,                "--tracer",                    SO_REQ_SEP },
 #ifdef _WIN32
 	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
 	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
@@ -514,6 +518,9 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported.\n");
+	printf("  --tracer       TRACER\n"
+		   "                 Select a tracer for transaction tracing. Currently disabled\n"
+		   "                 (the default) and log_file are supported.\n");
 	printf("  -i ID, --machine_id ID\n"
 	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
 	       "                 Defaults to a random value shared by all fdbserver processes\n"
@@ -1169,6 +1176,22 @@ private:
 				break;
 			}
 #endif
+			case OPT_TRACER:
+			{
+				std::string arg = args.OptionArg();
+				std::string tracer;
+				std::transform(arg.begin(), arg.end(), std::back_inserter(tracer), [](char c) { return tolower(c); });
+				if (tracer == "none" || tracer == "disabled") {
+					openTracer(TracerType::DISABLED);
+				} else if (tracer == "logfile" || tracer == "file" || tracer == "log_file") {
+					openTracer(TracerType::LOG_FILE);
+				} else {
+					fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
 			case OPT_TESTFILE:
 				testFile = args.OptionArg();
 				break;
@@ -1887,7 +1910,6 @@ int main(int argc, char* argv[]) {
 		if (role==Simulation){
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now()-startNow, timer()-start);
-			//cout << format("  %d endpoints left\n", transport().getEndpointCount());
 		}
 
 		//IFailureMonitor::failureMonitor().address_info.clear();

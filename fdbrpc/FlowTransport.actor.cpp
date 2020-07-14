@@ -554,7 +554,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
 					delayedHealthUpdateF = delayedHealthUpdate(self->destination);
-				wait(connectionWriter(self, conn) || reader || connectionMonitor(self));
+				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) || self->resetConnection.onTrigger());
+				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+				throw connection_failed();
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
 						e.code() == error_code_connection_unreferenced ||
@@ -565,8 +567,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				throw e;
 			}
-
-			ASSERT( false );
 		} catch (Error& e) {
 			delayedHealthUpdateF.cancel();
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
@@ -1382,7 +1382,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	SendBuffer *checkbuf = pb;
 	while (checkbuf) {
 		int size = checkbuf->bytes_written;
-		const uint8_t* data = checkbuf->data;
+		const uint8_t* data = checkbuf->data();
 		VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
 		checkbuf = checkbuf -> next;
 	}
@@ -1426,12 +1426,15 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 	return peer;
 }
 
-int FlowTransport::getEndpointCount() {
-	return -1;
-}
-
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
+}
+
+void FlowTransport::resetConnection( NetworkAddress address ) {
+	auto peer = self->getPeer(address);
+	if(peer) {
+		peer->resetConnection.trigger();
+	}
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {

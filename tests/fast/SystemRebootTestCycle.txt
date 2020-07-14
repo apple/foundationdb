@@ -1,6 +1,7 @@
 testTitle=Clogged
+clearAfterTest=false
+
     testName=Cycle
-    clearAfterTest=false
     transactionsPerSecond=250.0
     testDuration=20.0
     expectedRate=0.01
@@ -15,16 +16,18 @@ testTitle=Clogged
 
 
 testTitle=KillAllButOne
+clearAfterTest=false
+
     testName=Attrition
-    clearAfterTest=false
     machinesToKill=100
     machinesToLeave=1
     reboot=true
     testDuration=1.0
 
 testTitle=Unclogged
+runSetup=false
+
     testName=Cycle
-    runSetup=false
     nodeCount=50000
     transactionsPerSecond=250.0
     testDuration=10.0

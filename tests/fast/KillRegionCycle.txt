@@ -1,12 +1,13 @@
+minimumRegions=2
+
 testTitle=KillRegionCycle
+clearAfterTest=false
+
     testName=Cycle
     nodeCount=30000
     transactionsPerSecond=2500.0
     testDuration=30.0
     expectedRate=0
-    clearAfterTest=false
 
     testName=KillRegion
     testDuration=30.0
-
-minimumRegions=2

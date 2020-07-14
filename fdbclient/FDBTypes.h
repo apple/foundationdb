@@ -36,6 +36,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
+typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1,
@@ -278,6 +279,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef( const KeyRef& begin, const KeyRef& end ) : begin(begin), end(end) {
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		}
 	}

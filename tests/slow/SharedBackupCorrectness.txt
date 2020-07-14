@@ -1,17 +1,19 @@
+extraDB=1
+
 testTitle=BackupAndRestore
+clearAfterTest=false
+simBackupAgents=BackupToFileAndDB
+
     testName=Cycle
     nodeCount=3000
     transactionsPerSecond=500.0
     testDuration=30.0
     expectedRate=0
-    clearAfterTest=false
 
     testName=BackupAndRestoreCorrectness
     backupTag=backup1
     backupAfter=10.0
     restoreAfter=60.0
-    clearAfterTest=false
-    simBackupAgents=BackupToFileAndDB
     shareLogRange=true
     performRestore=true
     allowPauses=false
@@ -22,7 +24,4 @@ testTitle=BackupAndRestore
     backupAfter=15.0
     restoreAfter=60.0
     performRestore=false
-    clearAfterTest=false
-    simBackupAgents=BackupToFileAndDB
     shareLogRange=true
-    extraDB=1
