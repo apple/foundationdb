@@ -1308,40 +1308,98 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 }
 
 ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
-	state ReadYourWritesTransaction ryw(cx);
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-	loop {
-		try {
-			ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
-			for (auto& s : servers) {
-				if (!s.isValid()) {
-					if (failed) {
-						ryw.clear(failedServersKeys.withPrefix(normalKeys.end));
+	if (cx->apiVersionAtLeast(700)) {
+		state ReadYourWritesTransaction ryw(cx);
+		loop {
+			try {
+				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+				for (auto& s : servers) {
+					if (!s.isValid()) {
+						if (failed) {
+							ryw.clear(failedServersKeys.withPrefix(normalKeys.end));
+						} else {
+							ryw.clear(excludedServersKeys.withPrefix(normalKeys.end));
+						}
 					} else {
-						ryw.clear(excludedServersKeys.withPrefix(normalKeys.end));
+						Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString()) : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
+						ryw.clear(addr);
+						// Eliminate both any ip-level exclusion (1.2.3.4) and any
+						// port-level exclusions (1.2.3.4:5)
+						// The range ['IP', 'IP;'] was originally deleted. ';' is
+						// char(':' + 1). This does not work, as other for all
+						// x between 0 and 9, 'IPx' will also be in this range.
+						//
+						// This is why we now make two clears: first only of the ip
+						// address, the second will delete all ports.
+						if (s.isWholeMachine())
+							ryw.clear(KeyRangeRef(addr.withSuffix(LiteralStringRef(":")), addr.withSuffix(LiteralStringRef(";"))));
 					}
-				} else {
-					Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString()) : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
-					ryw.clear(addr);
-					// Eliminate both any ip-level exclusion (1.2.3.4) and any
-					// port-level exclusions (1.2.3.4:5)
-					// The range ['IP', 'IP;'] was originally deleted. ';' is
-					// char(':' + 1). This does not work, as other for all
-					// x between 0 and 9, 'IPx' will also be in this range.
-					//
-					// This is why we now make two clears: first only of the ip
-					// address, the second will delete all ports.
-					if (s.isWholeMachine())
-						ryw.clear(KeyRangeRef(addr.withSuffix(LiteralStringRef(":")), addr.withSuffix(LiteralStringRef(";"))));
 				}
-			}
-			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
-			wait( ryw.commit() );
-			return Void();
-		} catch (Error& e) {
-			TraceEvent("IncludeServersError").error(e, true);
-			wait( ryw.onError(e) );
+				wait( ryw.commit() );
+				return Void();
+			} catch (Error& e) {
+				TraceEvent("IncludeServersError").error(e, true);
+				wait( ryw.onError(e) );
+			}
+		}
+	} else {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+				tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+
+				// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
+				tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
+				if (failed) {
+					tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+					tr.set(failedServersVersionKey, versionKey);
+				} else {
+					tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+					tr.set(excludedServersVersionKey, versionKey);
+				}
+
+				for(auto& s : servers ) {
+					if (!s.isValid()) {
+						if (failed) {
+							tr.clear(failedServersKeys);
+						} else {
+							tr.clear(excludedServersKeys);
+						}
+					} else if (s.isWholeMachine()) {
+						// Eliminate both any ip-level exclusion (1.2.3.4) and any
+						// port-level exclusions (1.2.3.4:5)
+						// The range ['IP', 'IP;'] was originally deleted. ';' is
+						// char(':' + 1). This does not work, as other for all
+						// x between 0 and 9, 'IPx' will also be in this range.
+						//
+						// This is why we now make two clears: first only of the ip
+						// address, the second will delete all ports.
+						auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
+						tr.clear(singleKeyRange(addr));
+						tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
+					} else {
+						if (failed) {
+							tr.clear(encodeFailedServersKey(s));
+						} else {
+							tr.clear(encodeExcludedServersKey(s));
+						}
+					}
+				}
+				
+				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+
+				wait( tr.commit() );
+				return Void();
+			} catch (Error& e) {
+				TraceEvent("IncludeServersError").error(e, true);
+				wait( tr.onError(e) );
+			}
 		}
 	}
 }
