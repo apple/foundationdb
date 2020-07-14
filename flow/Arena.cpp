@@ -430,6 +430,38 @@ void testIteratorIncrement() {
 			ASSERT(*++iter == StringRef(std::to_string(++i)));
 		}
 	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter < xs.end();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter += 2;
+			i += 2;
+		}
+	}
+	{
+		int i = xs.size() - 1;
+		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter -= 2;
+			i -= 2;
+		}
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter < xs.end();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter = iter + 2;
+			i += 2;
+		}
+	}
+	{
+		int i = xs.size() - 1;
+		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter = iter - 2;
+			i -= 2;
+		}
+	}
 }
 
 template <template <class> class VectorRefLike>
@@ -460,7 +492,24 @@ void testAppend() {
 	VectorRefLike<StringRef> ys;
 	ys.append(a, xs.begin(), xs.size());
 	ASSERT(xs.size() == ys.size());
-	ASSERT(xs == ys);
+	ASSERT(std::equal(xs.begin(), xs.end(), ys.begin()));
+}
+
+template <template <class> class VectorRefLike>
+void testCopy() {
+	Standalone<VectorRefLike<StringRef>> xs;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(xs.arena(), StringRef(std::to_string(i)));
+	}
+	Arena a;
+	VectorRefLike<StringRef> ys(a, xs);
+	xs = Standalone<VectorRefLike<StringRef>>();
+	int i = 0;
+	for (const auto& y : ys) {
+		ASSERT(y == StringRef(std::to_string(i++)));
+	}
+	ASSERT(i == size);
 }
 
 template <template <class> class VectorRefLike>
