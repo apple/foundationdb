@@ -29,11 +29,14 @@ DatabaseConfiguration::DatabaseConfiguration()
 void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
-	masterProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
+	masterProxyCount =
+//	    grvProxyCount =
+	        resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
+//	autoGrvProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	usableRegions = 1;
@@ -177,7 +180,8 @@ bool DatabaseConfiguration::isValid() const {
 		tLogSpillType != TLogSpillType::UNSET &&
 		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
 		storageServerStoreType != KeyValueStoreType::END &&
-		autoMasterProxyCount >= 1 &&
+		autoMasterProxyCount >= 2 &&
+//		autoGrvProxyCount >= 1 &&
 		autoResolverCount >= 1 &&
 		autoDesiredTLogCount >= 1 &&
 		storagePolicy &&
@@ -304,6 +308,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( masterProxyCount != -1 ) {
 			result["proxies"] = masterProxyCount;
 		}
+//		if( grvProxyCount != -1 ) {
+//			result["grv_proxies"] = grvProxyCount;
+//		}
 		if( resolverCount != -1 ) {
 			result["resolvers"] = resolverCount;
 		}
@@ -319,6 +326,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
 			result["auto_proxies"] = autoMasterProxyCount;
 		}
+//		if( autoGrvProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES ) {
+//			result["auto_grv_proxies"] = autoGrvProxyCount;
+//		}
 		if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS) {
 			result["auto_resolvers"] = autoResolverCount;
 		}
@@ -397,6 +407,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 
 	if (ck == LiteralStringRef("initialized")) initialized = true;
 	else if (ck == LiteralStringRef("proxies")) parse(&masterProxyCount, value);
+//	else if (ck == LiteralStringRef("grv_proxies")) parse(&grvProxyCount, value);
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) {
@@ -431,6 +442,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
 	else if (ck == LiteralStringRef("auto_proxies")) parse(&autoMasterProxyCount, value);
+//	else if (ck == LiteralStringRef("auto_grv_proxies")) parse(&autoGrvProxyCount, value);
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);

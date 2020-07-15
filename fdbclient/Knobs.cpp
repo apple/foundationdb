@@ -53,6 +53,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_PROXY_CONNECTIONS,                     5 ); if( randomize && BUGGIFY ) MAX_PROXY_CONNECTIONS = 1;
+	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
@@ -168,6 +169,7 @@ void ClientKnobs::initialize(bool randomize) {
 
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );
+//	init( DEFAULT_AUTO_GRV_PROXIES,                  1 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
 

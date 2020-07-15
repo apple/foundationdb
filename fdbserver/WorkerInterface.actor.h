@@ -47,6 +47,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeTLogRequest > tLog;
 	RequestStream< struct RecruitMasterRequest > master;
 	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
+	RequestStream< struct InitializeGrvProxyRequest > grvProxy;
 	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
 	RequestStream< struct InitializeRatekeeperRequest > ratekeeper;
 	RequestStream< struct InitializeResolverRequest > resolver;
@@ -73,6 +74,12 @@ struct WorkerInterface {
 	Optional<NetworkAddress> secondaryAddress() const { return tLog.getEndpoint().addresses.secondaryAddress; }
 	NetworkAddressList addresses() const { return tLog.getEndpoint().addresses; }
 
+	std::string toString() const {
+		return "locality: " + locality.toString() + "\n" +
+		       "id: " + id().toString() + "\n" +
+		       "address: " + address().toString() + "\n";
+	}
+
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
@@ -81,6 +88,7 @@ struct WorkerInterface {
 		tLog.getEndpoint( TaskPriority::Worker );
 		master.getEndpoint( TaskPriority::Worker );
 		masterProxy.getEndpoint( TaskPriority::Worker );
+		grvProxy.getEndpoint( TaskPriority::Worker );
 		resolver.getEndpoint( TaskPriority::Worker );
 		logRouter.getEndpoint( TaskPriority::Worker );
 		debugPing.getEndpoint( TaskPriority::Worker );
@@ -91,7 +99,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, grvProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
 	}
 };
 
@@ -179,6 +187,7 @@ struct RegisterMasterRequest {
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
 	std::vector<MasterProxyInterface> proxies;
+	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
@@ -196,8 +205,8 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
-		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
+		serializer(ar, id, mi, logSystemConfig, proxies, grvProxies, resolvers, recoveryCount, registrationCount,
+		           configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
 
@@ -207,17 +216,39 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> tLogs;
 	std::vector<WorkerInterface> satelliteTLogs;
 	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
 	std::vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
 	bool satelliteFallback;
 
+	std::string toString(std::string name, std::vector<WorkerInterface>& workers) {
+		std::string res = name + " of size " + std::to_string(workers.size()) + "\n";
+//		for (const auto& w : workers) {
+//			res += w.toString();
+//		}
+		return res;
+	}
+
+	std::string toString() {
+		std::string res = "DC id: " + (dcId.present() ? dcId.get().toString() : "")+ "\n";
+		res += toString("grvProxies", grvProxies);
+		res += toString("proxies", proxies);
+		res += toString("resolvers", resolvers);
+		res += toString("storageServers", storageServers);
+		res += toString("tLogs", tLogs);
+		res += toString("backupWorkers", backupWorkers);
+		res += toString("oldLogRouters", oldLogRouters);
+		res += toString("satelliteTLogs", satelliteTLogs);
+		return res;
+	}
+
 	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId,
+		serializer(ar, tLogs, satelliteTLogs, proxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
 		           satelliteFallback, backupWorkers);
 	}
 };
@@ -443,6 +474,19 @@ struct InitializeMasterProxyRequest {
 	}
 };
 
+struct InitializeGrvProxyRequest {
+	constexpr static FileIdentifier file_identifier = 313542387;
+	MasterInterface master;
+	uint64_t recoveryCount;
+	Version recoveryTransactionVersion;
+	ReplyPromise<GrvProxyInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, master, recoveryCount, recoveryTransactionVersion, reply);
+	}
+};
+
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
@@ -662,6 +706,7 @@ struct Role {
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role MASTER_PROXY;
+	static const Role GRV_PROXY;
 	static const Role MASTER;
 	static const Role RESOLVER;
 	static const Role CLUSTER_CONTROLLER;
@@ -725,12 +770,14 @@ ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBI
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
+ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy, InitializeGrvProxyRequest req,
+                                  Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, UID workerID, 
                         bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
                         Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
-ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
+ACTOR Future<Void> resolver(ResolverInterface resolver, InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);

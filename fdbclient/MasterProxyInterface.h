@@ -34,6 +34,7 @@
 
 #include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "GrvProxyInterface.h"
 
 struct MasterProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -102,6 +103,7 @@ struct MasterProxyInterface {
 struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
+	vector< GrvProxyInterface > grvProxies;
 	vector< MasterProxyInterface > proxies;
 	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
@@ -119,7 +121,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
+		serializer(ar, grvProxies, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
 	}
 };
 
@@ -290,10 +292,26 @@ struct GetKeyServerLocationsRequest {
 	}
 };
 
+struct GetRawCommittedVersionReply {
+	constexpr static FileIdentifier file_identifier = 61314632;
+	Optional<UID> debugID;
+	Version version;
+	bool locked;
+	Optional<Value> metadataVersion;
+	Version minKnownCommittedVersion;
+
+	GetRawCommittedVersionReply(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+	}
+};
+
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
 	Optional<UID> debugID;
-	ReplyPromise<GetReadVersionReply> reply;
+	ReplyPromise<GetRawCommittedVersionReply> reply;
 
 	explicit GetRawCommittedVersionRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
 

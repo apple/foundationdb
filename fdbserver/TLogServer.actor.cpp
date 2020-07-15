@@ -2204,12 +2204,15 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			}
 		}
 		when( TLogPeekRequest req = waitNext( tli.peekMessages.getFuture() ) ) {
+//			TraceEvent("YoungPeekMessage");
 			logData->addActor.send( tLogPeekMessages( self, req, logData ) );
 		}
 		when( TLogPopRequest req = waitNext( tli.popMessages.getFuture() ) ) {
+			TraceEvent("YoungPopMessage");
 			logData->addActor.send(tLogPop(self, req, logData));
 		}
 		when( TLogCommitRequest req = waitNext( tli.commit.getFuture() ) ) {
+			TraceEvent("YoungTlogCommit");
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
 			TEST(logData->stopped); // TLogCommitRequest while stopped
@@ -2219,12 +2222,15 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 				req.reply.sendError( tlog_stopped() );
 		}
 		when( ReplyPromise< TLogLockResult > reply = waitNext( tli.lock.getFuture() ) ) {
+//			TraceEvent("YoungTlogLock");
 			logData->addActor.send( tLogLock(self, reply, logData) );
 		}
 		when (TLogQueuingMetricsRequest req = waitNext(tli.getQueuingMetrics.getFuture())) {
+//			TraceEvent("YoungTlogQueueMetrics");
 			getQueuingMetrics(self, logData, req);
 		}
 		when (TLogConfirmRunningRequest req = waitNext(tli.confirmRunning.getFuture())){
+//			TraceEvent("YoungTlogComfirmRunning");
 			if (req.debugID.present() ) {
 				UID tlogDebugID = nondeterministicRandom()->randomUniqueID();
 				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), tlogDebugID.first());
@@ -2236,6 +2242,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 				req.reply.sendError( tlog_stopped() );
 		}
 		when( TLogDisablePopRequest req = waitNext( tli.disablePopRequest.getFuture() ) ) {
+//			TraceEvent("YoungTLogDisablePopRequest");
 			if (self->ignorePopUid != "") {
 				TraceEvent(SevWarn, "TLogPopDisableonDisable")
 					.detail("IgnorePopUid", self->ignorePopUid)
@@ -2254,9 +2261,11 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			}
 		}
 		when( TLogEnablePopRequest enablePopReq = waitNext( tli.enablePopRequest.getFuture() ) ) {
+//			TraceEvent("YoungTLogEnablePopRequest");
 			logData->addActor.send( tLogEnablePopReq( enablePopReq, self, logData) );
 		}
 		when( TLogSnapRequest snapReq = waitNext( tli.snapRequest.getFuture() ) ) {
+//			TraceEvent("YoungTLogSnapRequest");
 			logData->addActor.send( tLogSnapCreate( snapReq, self, logData) );
 		}
 	}

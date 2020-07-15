@@ -21,6 +21,7 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
   JsonBuilder.cpp

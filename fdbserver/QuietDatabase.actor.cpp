@@ -123,7 +123,6 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 
 	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %" SCNd64, &inputRate, &inputRoughness, &inputBytes);
 	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %" SCNd64, &durableRate, &durableRoughness, &durableBytes);
-
 	return inputBytes - durableBytes;
 }
 

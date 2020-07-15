@@ -4420,12 +4420,12 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	loop {
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
-		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies));
+		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
 
 		choose {
 			when (wait(db->onChange())) {}
-			when (GetHealthMetricsReply reply = wait(proxies->size() ?
-					basicLoadBalance(proxies, &MasterProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
+			when (GetHealthMetricsReply reply = wait(grvProxies->size() ?
+					basicLoadBalance(grvProxies, &GrvProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
 					: Never())) {
 				if (reply.healthMetrics.batchLimited) {
 					*lastLimited = now();

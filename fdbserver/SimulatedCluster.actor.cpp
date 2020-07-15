@@ -732,8 +732,18 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	bool generateFearless = simple ? false : (minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6 ) : deterministicRandom()->randomInt( 1, 4 ) );
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
-	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
+	if (deterministicRandom()->random01() < 0.25) {
+		db.masterProxyCount = deterministicRandom()->randomInt(2,7);
+		// grvProxy : masterProxy = 2 : 3
+//		db.grvProxyCount = 1;
+//		db.masterProxyCount = proxyCount - db.grvProxyCount;
+		ASSERT(db.masterProxyCount >= 2);
+	}
+	// Maybe between 1 - 3 ?
+//	if (deterministicRandom()->random01() < 0.25) db.grvProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
+	TraceEvent("GenerateNormalConfig").detail("MPCount", db.masterProxyCount);
+//	db.grvProxyCount = 3;
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	switch (storage_engine_type) {
 	case 0: {
@@ -768,7 +778,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	//  set_config("memory-radixtree-beta");
 	if(simple) {
 		db.desiredTLogCount = 1;
-		db.masterProxyCount = 1;
+		db.masterProxyCount = 2;
+//		db.grvProxyCount = 1;
 		db.resolverCount = 1;
 	}
 	int replication_type = simple ? 1 : ( std::max(minimumReplication, datacenters > 4 ? deterministicRandom()->randomInt(1,3) : std::min(deterministicRandom()->randomInt(0,6), 3)) );
@@ -1111,6 +1122,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
 	TraceEvent("SimulatorConfig").detail("ConfigString", StringRef(startingConfigString));
+	TraceEvent("SimulatorConfig2").detail("MachineCount", simconfig.machine_count).detail("PPerM", simconfig.processes_per_machine)
+	    .detail("Coordinators", simconfig.coordinators).detail("Datacenters", simconfig.datacenters).detail("ExtraDB", simconfig.extraDB);
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;

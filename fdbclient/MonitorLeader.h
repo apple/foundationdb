@@ -67,7 +67,8 @@ Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> c
 
 Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions, Key const& traceLogGroup );
 
-void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies );
+void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies,
+					  std::vector<UID>& lastGrvProxyUIDs, std::vector<GrvProxyInterface>& lastGrvProxies);
 
 #ifndef __INTEL_COMPILER
 #pragma region Implementation

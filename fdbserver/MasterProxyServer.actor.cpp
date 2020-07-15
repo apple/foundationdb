@@ -74,14 +74,17 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 
 struct ProxyStats {
 	CounterCollection cc;
+	// Related to GRV proxy
 	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
 	Counter txnStartIn, txnStartOut, txnStartBatch;
 	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
-	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
 	Counter txnDefaultPriorityStartIn, txnDefaultPriorityStartOut;
+	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
+	Counter txnThrottled;
+
+	// Related to master proxy
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut, txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
-	Counter txnThrottled;
 	Counter commitBatchIn, commitBatchOut;
 	Counter mutationBytes;
 	Counter mutations;
@@ -298,6 +301,11 @@ ACTOR Future<Void> queueTransactionStartRequests(
 {
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
+//			ASSERT(false); // This endpoint should not be triggered at any time.
+			// This endpoint only serves an internal request now to catch up other proxies.
+			ASSERT(req.priority == TransactionPriority::IMMEDIATE);
+			ASSERT(req.transactionCount == 0);
+			ASSERT(req.flags == GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			stats->addRequest();
 			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
@@ -842,6 +850,8 @@ ACTOR Future<Void> commitBatch(
 	state Version commitVersion = versionReply.version;
 	state Version prevVersion = versionReply.prevVersion;
 
+	TraceEvent("CommitBatch").detail("CV", commitVersion);
+
 	for(auto it : versionReply.resolverChanges) {
 		auto rs = self->keyResolvers.modify(it.range);
 		for(auto r = rs.begin(); r != rs.end(); ++r)
@@ -1175,6 +1185,7 @@ ACTOR Future<Void> commitBatch(
 					wait(yield());
 					break; 
 				}
+				// Should ask master instead of GRV proxies? But don't get the benefit of batching.
 				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 					if(v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
@@ -1281,9 +1292,10 @@ ACTOR Future<Void> commitBatch(
 	// up-to-date live committed version. We also maintain the invariant that master's committed version >= self->committedVersion
 	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
 	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
+	TraceEvent("ProxyAfterCommit").detail("CV", commitVersion);
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion > self->committedVersion.get()) {
-		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter, self->minKnownCommittedVersion), TaskPriority::ProxyMasterVersionReply));
 	}
 	if( commitVersion > self->committedVersion.get() ) {
 		self->locked = lockedAfter;
@@ -1398,13 +1410,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	//     and no other proxy could have already committed anything without first ending the epoch
 	++commitData->stats.txnStartBatch;
 	state vector<Future<GetReadVersionReply>> proxyVersions;
-	state Future<GetReadVersionReply> replyFromMasterFuture;
-	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::GetLiveCommittedVersionReply);
-	} else {
-		for (auto const& p : *otherProxies)
-			proxyVersions.push_back(brokenPromiseToNever(p.getRawCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::TLogConfirmRunningReply)));
-	}
+	state Future<GetRawCommittedVersionReply> replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(updateLastCommit(commitData, debugID));
@@ -1421,18 +1427,11 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 	rep.metadataVersion = commitData->metadataVersion;
 	rep.version = commitData->committedVersion.get();
 
-	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
-		GetReadVersionReply replyFromMaster = wait(replyFromMasterFuture);
-		if (replyFromMaster.version > rep.version) {
-			rep = replyFromMaster;
-		}
-	} else {
-		vector<GetReadVersionReply> versions = wait(getAll(proxyVersions));
-		for (auto v : versions) {
-			if (v.version > rep.version) {
-				rep = v;
-			}
-		}
+	GetRawCommittedVersionReply replyFromMaster = wait(replyFromMasterFuture);
+	if (replyFromMaster.version > rep.version) {
+		rep.locked = replyFromMaster.locked;
+		rep.metadataVersion = replyFromMaster.metadataVersion;
+		rep.version = replyFromMaster.version;
 	}
 	rep.recentRequests = commitData->stats.getRecentRequests();
 
@@ -1506,6 +1505,7 @@ ACTOR static Future<Void> transactionStarter(
 	state PromiseStream<Void> GRVTimer;
 	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
 
+	// for what
 	state int64_t transactionCount = 0;
 	state int64_t batchTransactionCount = 0;
 	state TransactionRateInfo normalRateInfo(10);
@@ -1521,7 +1521,8 @@ ACTOR static Future<Void> transactionStarter(
 
 	state PromiseStream<double> replyTimes;
 
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
+	// Disabled for now since we don't need proxy to talk to ratekeeper
+//	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
 	                                            &transactionTagCounter));
@@ -2102,7 +2103,7 @@ ACTOR Future<Void> masterProxyServerCore(
 			//TraceEvent("ProxyGetRCV", proxy.id());
 			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion");
-			GetReadVersionReply rep;
+			GetRawCommittedVersionReply rep;
 			rep.locked = commitData.locked;
 			rep.metadataVersion = commitData.metadataVersion;
 			rep.version = commitData.committedVersion.get();

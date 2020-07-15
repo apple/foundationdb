@@ -23,6 +23,7 @@ set(FDBSERVER_SRCS
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
+  GrvProxyServer.actor.cpp
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h

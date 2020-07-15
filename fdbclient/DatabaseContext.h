@@ -69,6 +69,7 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 };
 
 typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+typedef ModelInterface<GrvProxyInterface> GrvProxyInfo;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -164,7 +165,12 @@ public:
 
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
+	// TODO: Consider use provisional proxy.
+	// TODO: Consider make grv proxies code more concise.
+	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Future<Reference<GrvProxyInfo>> getGrvProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
+	Future<Void> onGrvProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
@@ -214,10 +220,15 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
+	AsyncTrigger grvProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
+	Future<Void> monitorGrvProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
-	bool provisional;
+	Reference<GrvProxyInfo> grvProxies;
+	bool masterProxyProvisional;
+	bool grvProxyProvisional;
 	UID masterProxiesLastChange;
+	UID grvProxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
@@ -320,8 +331,8 @@ public:
 	EventMetricHandle<GetValueComplete> getValueCompleted;
 
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
-	Future<Void> clientInfoMonitor;
-	Future<Void> connected;
+	Future<Void> clientInfoMonitor; // is not really used
+	Future<Void> connected; // should be wired to both sizeof grv_proxy != 0 && sizeof proxy != 0
 
 	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
 	Future<Void> statusLeaderMon;

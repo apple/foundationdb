@@ -495,6 +495,19 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	}
 }
 
+ACTOR static Future<Void> monitorGrvProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
+	state vector< GrvProxyInterface > curProxies;
+	curProxies = clientDBInfo->get().grvProxies;
+
+	loop{
+		wait(clientDBInfo->onChange());
+		if (clientDBInfo->get().grvProxies != curProxies) {
+			curProxies = clientDBInfo->get().grvProxies;
+			triggerVar->trigger();
+		}
+	}
+}
+
 void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, StorageServerInterface>& removed,
 								   const std::map<UID, StorageServerInterface>& added) {
 	// TODO: this needs to be more clever in the future
@@ -670,9 +683,9 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 		CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
 	loop {
 		choose {
-			when(wait(cx->onMasterProxiesChanged())) {}
+			when(wait(cx->onGrvProxiesChanged())) {}
 			when(GetHealthMetricsReply rep =
-				 wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getHealthMetrics,
+				 wait(basicLoadBalance(cx->getGrvProxies(false), &GrvProxyInterface::getHealthMetrics,
 							 GetHealthMetricsRequest(sendDetailedRequest)))) {
 				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
 				if (detailed) {
@@ -753,7 +766,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  bool switchable)
   : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
-    apiVersion(apiVersion), switchable(switchable), provisional(false), cc("TransactionMetrics"),
+    apiVersion(apiVersion), switchable(switchable), masterProxyProvisional(false), grvProxyProvisional(false),
+    cc("TransactionMetrics"),
     transactionReadVersions("ReadVersions", cc), 
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
@@ -784,7 +798,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
-	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
+	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange(); // ?
 
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
@@ -800,6 +814,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
+	monitorGrvProxiesInfoChange = monitorGrvProxiesChange(clientInfo, &grvProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 	if (apiVersionAtLeast(630)) {
@@ -885,6 +900,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
 	monitorMasterProxiesInfoChange.cancel();
+	monitorGrvProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -967,6 +983,10 @@ Future<Void> DatabaseContext::onMasterProxiesChanged() {
 	return this->masterProxiesChangeTrigger.onTrigger();
 }
 
+Future<Void> DatabaseContext::onGrvProxiesChanged() {
+	return this->grvProxiesChangeTrigger.onTrigger();
+}
+
 bool DatabaseContext::sampleReadTags() {
 	return clientInfo->get().transactionTagSampleRate > 0 && deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
 }
@@ -1009,6 +1029,8 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
 				if( clientInfo->get().proxies.size() )
 					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ) );
+				if( clientInfo->get().grvProxies.size() )
+					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ) );
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1019,6 +1041,8 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
 				if( clientInfo->get().proxies.size() )
 					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
+				if( clientInfo->get().grvProxies.size() )
+					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1060,11 +1084,13 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
+	self->grvProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
 	auto clearedClientInfo = self->clientInfo->get();
 	clearedClientInfo.proxies.clear();
+	clearedClientInfo.grvProxies.clear();
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
 	self->connectionFile->set(connFile);
@@ -1401,13 +1427,42 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 		masterProxies.clear();
 		if( clientInfo->get().proxies.size() ) {
 			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
-			provisional = clientInfo->get().proxies[0].provisional;
+			masterProxyProvisional = clientInfo->get().proxies[0].provisional;
 		}
 	}
-	if(provisional && !useProvisionalProxies) {
+	if(masterProxyProvisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
 	}
 	return masterProxies;
+}
+
+Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxies) {
+	if (grvProxiesLastChange != clientInfo->get().id) {
+		grvProxiesLastChange = clientInfo->get().id;
+		grvProxies.clear();
+		if( clientInfo->get().grvProxies.size() ) {
+			grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
+			grvProxyProvisional = clientInfo->get().proxies[0].provisional;
+		}
+	}
+	if(grvProxyProvisional && !useProvisionalProxies) {
+		return Reference<GrvProxyInfo>();
+	}
+	return grvProxies;
+}
+
+ACTOR Future<Reference<GrvProxyInfo>> getGrvProxiesFuture(DatabaseContext *cx, bool useProvisionalProxies) {
+	loop{
+		Reference<GrvProxyInfo> proxies = cx->getGrvProxies(useProvisionalProxies);
+		if (proxies)
+			return proxies;
+		wait( cx->onGrvProxiesChanged() );
+	}
+}
+
+//Returns a future which will not be set until the ProxyInfo of this DatabaseContext is not NULL
+Future<Reference<GrvProxyInfo>> DatabaseContext::getGrvProxiesFuture(bool useProvisionalProxies) {
+	return ::getGrvProxiesFuture(this, useProvisionalProxies);
 }
 
 //Actor which will wait until the MultiInterface<MasterProxyInterface> returned by the DatabaseContext cx is not NULL
@@ -1841,7 +1896,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 		loop {
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
+				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 
 					if (v.version >= version)
@@ -1861,7 +1916,7 @@ ACTOR Future<Version> getRawVersion( Database cx ) {
 	loop {
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
+			when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
 				return v.version;
 			}
 		}
@@ -3570,7 +3625,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			state GetReadVersionRequest req( transactionCount, priority, flags, tags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if(tags.size() != 0) {
 						auto &priorityThrottledTags = cx->throttledTags[priority];
 						for(auto& tag : tags) {
