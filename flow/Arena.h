@@ -90,24 +90,33 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
+// An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
+// on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
+// ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
+// memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
-	inline Arena();
-	inline explicit Arena( size_t reservedSize );
+	Arena();
+	explicit Arena(size_t reservedSize);
 	//~Arena();
 	Arena(const Arena&);
 	Arena(Arena && r) BOOST_NOEXCEPT;
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
 
-	inline void dependsOn( const Arena& p );
-	inline size_t getSize() const;
+	void dependsOn(const Arena& p);
+	size_t getSize() const;
 
-	inline bool hasFree( size_t size, const void *address );
+	bool hasFree(size_t size, const void* address);
 
 	friend void* operator new ( size_t size, Arena& p );
 	friend void* operator new[] ( size_t size, Arena& p );
-//private:
+
+	bool sameArena(const Arena& other) const {
+		return impl.getPtr() == other.impl.getPtr();
+	}
+
+private:
 	Reference<struct ArenaBlock> impl;
 };
 
@@ -144,6 +153,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	uint32_t bigSize, bigUsed;	  // include block header
 	uint32_t nextBlockOffset;
 
+	void addref();
 	void delref();
 	bool isTiny() const;
 	int size() const;
@@ -167,28 +177,6 @@ private:
 	static void* operator new(size_t s); // not implemented
 };
 
-inline Arena::Arena() : impl( NULL ) {}
-inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
-	UNSTOPPABLE_ASSERT( reservedSize < std::numeric_limits<int>::max() );
-	if (reservedSize)
-		ArenaBlock::create((int)reservedSize,impl);
-}
-inline Arena::Arena( const Arena& r ) : impl( r.impl ) {}
-inline Arena::Arena(Arena && r) BOOST_NOEXCEPT : impl(std::move(r.impl)) {}
-inline Arena& Arena::operator=(const Arena& r) {
-	impl = r.impl;
-	return *this;
-}
-inline Arena& Arena::operator=(Arena&& r) BOOST_NOEXCEPT {
-	impl = std::move(r.impl);
-	return *this;
-}
-inline void Arena::dependsOn( const Arena& p ) {
-	if (p.impl)
-		ArenaBlock::dependOn( impl, p.impl.getPtr() );
-}
-inline size_t Arena::getSize() const { return impl ? impl->totalSize() : 0; }
-inline bool Arena::hasFree( size_t size, const void *address ) { return impl && impl->unused() >= size && impl->getNextData() == address; }
 inline void* operator new ( size_t size, Arena& p ) {
 	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );
 	return ArenaBlock::allocate( p.impl, (int)size );

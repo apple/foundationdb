@@ -4,6 +4,7 @@ env_set(USE_GPERFTOOLS OFF BOOL "Use gperfools for profiling")
 env_set(USE_DTRACE ON BOOL "Enable dtrace probes on supported platforms")
 env_set(USE_VALGRIND OFF BOOL "Compile for valgrind usage")
 env_set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} BOOL "Use valgrind for ctest")
+env_set(VALGRIND_ARENA OFF BOOL "Inform valgrind about arena-allocated memory. Makes valgrind slower but more precise.")
 env_set(ALLOC_INSTRUMENTATION OFF BOOL "Instrument alloc")
 env_set(WITH_UNDODB OFF BOOL "Use rr or undodb")
 env_set(USE_ASAN OFF BOOL "Compile with address sanitizer")
@@ -210,7 +211,10 @@ else()
   #   -msse4.2)
 
   if (USE_VALGRIND)
-    add_compile_options(-DVALGRIND -DUSE_VALGRIND)
+    add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
+  endif()
+  if (VALGRIND_ARENA)
+    add_compile_options(-DVALGRIND_ARENA=1)
   endif()
   if (CLANG)
     add_compile_options()
@@ -241,7 +245,10 @@ else()
       -Wno-delete-non-virtual-dtor
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
-      -Wno-format)
+      -Wno-format
+      -Wredundant-move
+      -Wpessimizing-move
+      )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
@@ -305,3 +312,4 @@ else()
     endif()
   endif()
 endif()
+
