@@ -76,13 +76,13 @@ struct ClientTagThrottleLimits {
 };
 
 struct TransactionCommitCostEstimation {
-	int64_t numWrite = 0;
-	int64_t numAtomicWrite = 0;
-	int64_t numClear = 0;
-	unsigned long bytesWrite = 0;
-	unsigned long bytesAtomicWrite = 0;
-	Optional<unsigned long> numClearShards;
-	Optional<unsigned long> bytesClearEst;
+	int numWrite = 0;
+	int numAtomicWrite = 0;
+	int numClear = 0;
+	int numClearShards = 0;
+	uint64_t bytesWrite = 0;
+	uint64_t bytesAtomicWrite = 0;
+	uint64_t bytesClearEst = 0;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -95,10 +95,8 @@ struct TransactionCommitCostEstimation {
 		numClear += other.numClear;
 		bytesWrite += other.bytesWrite;
 		bytesAtomicWrite += other.numAtomicWrite;
-		if (other.bytesClearEst.present() || bytesClearEst.present())
-			bytesClearEst = bytesClearEst.orDefault(0) + other.bytesClearEst.orDefault(0);
-		if (other.numClearShards.present() || numClearShards.present())
-			numClearShards = numClearShards.orDefault(0) + other.numClearShards.orDefault(0);
+		numClearShards += other.numClearShards;
+		bytesClearEst += other.bytesClearEst;
 		return *this;
 	}
 };
@@ -139,7 +137,7 @@ struct GetRateInfoRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, throttledTagCommitCostEst, detailed, reply);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, throttledTagCommitCostEst);
 	}
 };
 

@@ -3059,6 +3059,7 @@ void TransactionOptions::clear() {
 	tags = TagSet{};
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
+	expensiveClearCostEstimation = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -3274,18 +3275,14 @@ ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* s
 			trCommitCosts.numClear++;
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
-				try {
-					StorageMetrics m = wait(self->getStorageMetrics(keyRange, INT_MAX));
-					trCommitCosts.bytesClearEst.present() ? (trCommitCosts.bytesClearEst.get() += m.bytes)
-					                                      : (trCommitCosts.bytesClearEst = m.bytes);
-					continue;
-				} catch (...) {
-				} // do a local estimation
+				StorageMetrics m = wait(self->getStorageMetrics(keyRange, INT_MAX));
+				trCommitCosts.bytesClearEst += m.bytes;
 			}
-			std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-			    self->getDatabase(), keyRange, INT_MAX, false, &StorageServerInterface::getShardState, self->info));
-			trCommitCosts.numClearShards.present() ? (trCommitCosts.numClearShards.get() += locations.size())
-			                                       : (trCommitCosts.numClearShards = locations.size());
+			else {
+				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+					self->getDatabase(), keyRange, INT_MAX, false, &StorageServerInterface::getShardState, self->info));
+				trCommitCosts.numClearShards += locations.size();
+			}
 		}
 	}
 	return trCommitCosts;

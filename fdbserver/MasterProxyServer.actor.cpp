@@ -1340,8 +1340,7 @@ ACTOR Future<Void> commitBatch(
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
 			// aggregate commit cost estimation iff committed
-			ASSERT((trs[t].commitCostEstimation.present() && trs[t].tagSet.present()) ||
-			       (!trs[t].commitCostEstimation.present() && !trs[t].tagSet.present()));
+			ASSERT(trs[t].commitCostEstimation.present() == trs[t].tagSet.present());
 			if (trs[t].tagSet.present()) {
 				TransactionCommitCostEstimation& costEstimation = trs[t].commitCostEstimation.get();
 				for (auto& tag : trs[t].tagSet.get()) {
