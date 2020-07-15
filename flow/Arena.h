@@ -1066,6 +1066,10 @@ public:
 			res.idx -= diff;
 			return res;
 		}
+		friend difference_type operator-(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx - rhs.idx;
+		}
 
 		self_t& operator++() {
 			++idx;
