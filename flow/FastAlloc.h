@@ -133,7 +133,7 @@ private:
 	};
 	static thread_local ThreadData threadData;
 	static thread_local bool threadInitialized;
-	static GlobalData* globalData() {
+	static GlobalData* globalData() noexcept {
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
 #endif
