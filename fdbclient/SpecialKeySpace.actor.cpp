@@ -40,8 +40,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 };
 
 std::unordered_map<std::string, Key> SpecialKeySpace::commandToPrefix = {
-	{"exclude", moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("excluded/"))},
-	{"failed", moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("failed/"))}
+	{ "exclude",
+	  moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("excluded/")) },
+	{ "failed", moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("failed/")) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:
@@ -346,8 +347,7 @@ Future<Optional<Value>> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, con
 }
 
 void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	if (!ryw->specialKeySpaceChangeConfiguration())
-		throw special_keys_write_disabled();
+	if (!ryw->specialKeySpaceChangeConfiguration()) throw special_keys_write_disabled();
 	// TODO : check value valid
 	auto impl = writeImpls[key];
 	// TODO : do we need the separate error here to differentiate from read?
@@ -356,16 +356,14 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 }
 
 void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	if (!ryw->specialKeySpaceChangeConfiguration())
-		throw special_keys_write_disabled();
+	if (!ryw->specialKeySpaceChangeConfiguration()) throw special_keys_write_disabled();
 	if (range.empty()) return;
 	auto begin = writeImpls[range.begin];
 	auto end = writeImpls.rangeContainingKeyBefore(range.end)->value();
 	if (begin != end) {
 		TraceEvent(SevDebug, "SpecialKeySpaceCrossModuleClear").detail("Range", range.toString());
 		throw special_keys_cross_module_clear(); // ban cross module clear
-	}
-	else if (begin == nullptr) {
+	} else if (begin == nullptr) {
 		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range.toString());
 		throw special_keys_no_write_module_found();
 	}
@@ -373,8 +371,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 }
 
 void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	if (!ryw->specialKeySpaceChangeConfiguration())
-		throw special_keys_write_disabled();
+	if (!ryw->specialKeySpaceChangeConfiguration()) throw special_keys_write_disabled();
 	auto impl = writeImpls[key];
 	if (impl == nullptr) throw special_keys_no_write_module_found();
 	return impl->clear(ryw, key);
@@ -505,7 +502,7 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 
 // read from rwModule
 ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
-                                                                     KeyRangeRef kr) {
+                                                               KeyRangeRef kr) {
 	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end);
 	Standalone<RangeResultRef> resultWithoutPrefix = wait(ryw->getRange(krWithoutPrefix, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
@@ -611,7 +608,7 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, KeyRangeRef range,
 }
 
 ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* addresses,
-                                  std::set<AddressExclusion>* exclusions, bool markFailed, Optional<std::string> msg) {
+                                  std::set<AddressExclusion>* exclusions, bool markFailed, Optional<std::string>* msg) {
 
 	if (markFailed) {
 		state bool safe;
@@ -623,10 +620,11 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			safe = false;
 		}
 		if (!safe) {
-			msg = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
-			      "Please check that this exclusion does not bring down an entire storage team.\n"
-			      "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
-			      "You may add more storage processes or coordinators to make the operation safe.\n";
+			std::string temp = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
+			       "Please check that this exclusion does not bring down an entire storage team.\n"
+			       "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
+			       "You may add more storage processes or coordinators to make the operation safe.\n";
+			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 			return false;
 		}
 	}
@@ -639,13 +637,13 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 
 	StatusObjectReader statusObjCluster;
 	if (!statusObj.get("cluster", statusObjCluster)) {
-		msg = errorString;
+		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 		return false;
 	}
 
 	StatusObjectReader processesMap;
 	if (!statusObjCluster.get("processes", processesMap)) {
-		msg = errorString;
+		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 		return false;
 	}
 
@@ -668,7 +666,7 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			StatusObjectReader process(proc.second);
 			std::string addrStr;
 			if (!process.get("address", addrStr)) {
-				msg = errorString;
+				*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 				return false;
 			}
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
@@ -680,19 +678,19 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			if (!excluded) {
 				StatusObjectReader disk;
 				if (!process.get("disk", disk)) {
-					msg = errorString;
+					*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 					return false;
 				}
 
 				int64_t total_bytes;
 				if (!disk.get("total_bytes", total_bytes)) {
-					msg = errorString;
+					*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 					return false;
 				}
 
 				int64_t free_bytes;
 				if (!disk.get("free_bytes", free_bytes)) {
-					msg = errorString;
+					*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 					return false;
 				}
 
@@ -701,26 +699,28 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 		}
 	} catch (...) // std::exception
 	{
-		msg = errorString;
+		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 		return false;
 	}
 
 	if (ssExcludedCount == ssTotalCount ||
 	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
-		msg = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%%.\nType `exclude "
-		      "FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update message here
+		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.";
+			//	"\nType `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update message here
+		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
 	return true;
 }
 
 void includeServers(ReadYourWritesTransaction* ryw) {
-	ryw->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-	ryw->setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-	ryw->setOption( FDBTransactionOptions::LOCK_AWARE );
-	ryw->setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
-	// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
-	ryw->setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
+	ryw->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and
+	// CAUSAL_WRITE_RISKY
+	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	// for exluded servers
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(excludedServersKeys.withPrefix(normalKeys.end));
@@ -758,7 +758,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	state std::set<AddressExclusion> exclusions;
 	if (!parseNetWorkAddrFromKeys(ryw, excludedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result))
 		return result;
-	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, false, result));
+	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, false, &result));
 	if (!safe) return result;
 	excludeServers(ryw->getTransaction(), addresses, false);
 	includeServers(ryw);
@@ -773,7 +773,7 @@ Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTran
 FailedServersRangeImpl::FailedServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                                     KeyRangeRef kr) const {
+                                                                    KeyRangeRef kr) const {
 	return rwModuleGetRangeActor(ryw, getKeyRange(), kr);
 }
 
@@ -798,7 +798,7 @@ ACTOR Future<Optional<std::string>> failedServerCommitActor(ReadYourWritesTransa
 	state std::set<AddressExclusion> exclusions;
 	if (!parseNetWorkAddrFromKeys(ryw, failedServersKeys.withPrefix(normalKeys.end), addresses, exclusions, result))
 		return result;
-	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, true, result));
+	bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, true, &result));
 	if (!safe) return result;
 	excludeServers(ryw->getTransaction(), addresses, true);
 
@@ -809,56 +809,57 @@ Future<Optional<std::string>> FailedServersRangeImpl::commit(ReadYourWritesTrans
 	return failedServerCommitActor(ryw);
 }
 
-ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWritesTransaction *ryw, KeyRef prefix, KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
+                                                                  KeyRangeRef kr) {
 	state Standalone<RangeResultRef> result;
 	// TODO : get all inprogress excluded servers
 	state Transaction& tr = ryw->getTransaction();
-	tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
-	tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
-	tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state std::vector<AddressExclusion> excl = wait((getExcludedServers(&tr)));
-	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
+	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
-	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed recovery
-	// Check that there aren't any storage servers with addresses violating the exclusions
-	state Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
-	ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
+	// recovery Check that there aren't any storage servers with addresses violating the exclusions
+	state Standalone<RangeResultRef> serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
-	for(auto& s : serverList) {
-		auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
-		if ( addressExcluded(exclusions, addresses.address) ) {
+	for (auto& s : serverList) {
+		auto addresses = decodeServerListValue(s.value).getKeyValues.getEndpoint().addresses;
+		if (addressExcluded(exclusions, addresses.address)) {
 			inProgressExclusion.insert(addresses.address);
 		}
-		if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
+		if (addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get())) {
 			inProgressExclusion.insert(addresses.secondaryAddress.get());
 		}
 	}
 
-	Optional<Standalone<StringRef>> value = wait( tr.get(logsKey) );
+	Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
 	ASSERT(value.present());
 	auto logs = decodeLogsValue(value.get());
-	for( auto const& log : logs.first ) {
+	for (auto const& log : logs.first) {
 		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 			inProgressExclusion.insert(log.second);
 		}
 	}
-	for( auto const& log : logs.second ) {
+	for (auto const& log : logs.second) {
 		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 			inProgressExclusion.insert(log.second);
 		}
 	}
 
-	for( auto const& address : inProgressExclusion ) {
+	for (auto const& address : inProgressExclusion) {
 		Key addrKey = prefix.withSuffix(address.toString());
-		if (kr.contains(addrKey))
-			result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
+		if (kr.contains(addrKey)) result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
 	}
 	return result;
 }
 
 ExclusionInProgressRangeImpl::ExclusionInProgressRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
-Future<Standalone<RangeResultRef>> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransaction *ryw, KeyRangeRef kr) const {
+Future<Standalone<RangeResultRef>> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                          KeyRangeRef kr) const {
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
 }
