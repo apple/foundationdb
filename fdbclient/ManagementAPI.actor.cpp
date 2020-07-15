@@ -1811,6 +1811,94 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	return Void();
 }
 
+ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(tr->get(databaseLockedKey));
+
+	if (val.present()) {
+		throw database_locked();
+	}
+
+	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
+	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::LockRange);
+	tr->addWriteConflictRange(range);
+	return Void();
+}
+
+ACTOR Future<Void> lockRange(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(tr->get(databaseLockedKey));
+
+	if (val.present()) {
+		throw database_locked();
+	}
+
+	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
+	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::LockRange);
+	tr->addWriteConflictRange(range);
+	return Void();
+}
+
+ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(lockRange(&tr, range));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_database_locked) throw e;
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(tr->get(databaseLockedKey));
+
+	if (val.present()) {
+		throw database_locked();
+	}
+
+	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
+	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::UnlockRange);
+	tr->addWriteConflictRange(range);
+	return Void();
+}
+
+ACTOR Future<Void> unlockRange(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(tr->get(databaseLockedKey));
+
+	if (val.present()) {
+		throw database_locked();
+	}
+
+	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
+	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::UnlockRange);
+	tr->addWriteConflictRange(range);
+	return Void();
+}
+
+ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			wait(unlockRange(&tr, range));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_database_locked) throw e;
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 	state Transaction tr(cx);
 	loop {
