@@ -169,7 +169,7 @@ struct GetCommitVersionRequest {
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
 
-	GetCommitVersionRequest() { }
+	GetCommitVersionRequest() = default;
 	GetCommitVersionRequest(SpanID spanContext, uint64_t requestNum, uint64_t mostRecentProcessedRequestNum,
 	                        UID requestingProxy)
 	  : spanContext(spanContext), requestNum(requestNum), mostRecentProcessedRequestNum(mostRecentProcessedRequestNum),
@@ -183,20 +183,23 @@ struct GetCommitVersionRequest {
 
 struct ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
-	Version version;
-	bool locked;
+	Version version = invalidVersion;
+	bool locked = false;
 	Optional<Value> metadataVersion;
-	Version minKnownCommittedVersion;
+	Optional<Value> rangeLockVersion;
+	Version minKnownCommittedVersion = 0;
 
 	ReplyPromise<Void> reply;
 
-	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
-	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion, Version minKnownCommittedVersion)
-	  : version(version), locked(locked), metadataVersion(metadataVersion), minKnownCommittedVersion(minKnownCommittedVersion) {}
+	ReportRawCommittedVersionRequest() = default;
+	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion,
+	                                 Version minKnownCommittedVersion, Optional<Value> rangeLockVersion)
+	  : version(version), locked(locked), metadataVersion(metadataVersion),
+	    minKnownCommittedVersion(minKnownCommittedVersion), rangeLockVersion(rangeLockVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, reply);
+		serializer(ar, version, locked, metadataVersion, rangeLockVersion, minKnownCommittedVersion, reply);
 	}
 };
 

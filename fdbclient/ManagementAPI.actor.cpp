@@ -1974,6 +1974,7 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range) {
 
 	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
 	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::LockRange);
+	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
 }
@@ -1989,6 +1990,7 @@ ACTOR Future<Void> lockRange(Reference<ReadYourWritesTransaction> tr, KeyRangeRe
 
 	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
 	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::LockRange);
+	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
 }
@@ -2018,6 +2020,7 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range) {
 
 	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
 	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::UnlockRange);
+	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
 }
@@ -2033,6 +2036,7 @@ ACTOR Future<Void> unlockRange(Reference<ReadYourWritesTransaction> tr, KeyRange
 
 	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
 	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::UnlockRange);
+	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
 }

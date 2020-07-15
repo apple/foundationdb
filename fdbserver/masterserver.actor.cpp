@@ -180,6 +180,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
+	Optional<Value> proxyRangeLockVersion;
 	Version minKnownCommittedVersion;
 
 	DatabaseConfiguration originalConfiguration;
@@ -570,16 +571,14 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 	state bool locked = lockedKey.present() && lockedKey.get().size();
 
 	state Optional<Value> metadataVersion = parent->txnStateStore->readValue(metadataVersionKey).get();
+	state Optional<Value> rangeLockVersion = parent->txnStateStore->readValue(rangeLockVersionKey).get();
 
 	// We respond to a minimal subset of the commit proxy protocol.  Our sole purpose is to receive a single write-only
 	// transaction which might repair our configuration, and return it.
 	loop choose {
 		when ( GetReadVersionRequest req = waitNext( parent->provisionalGrvProxies[0].getConsistentReadVersion.getFuture() ) ) {
 			if ( req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY && parent->lastEpochEnd ) {
-				GetReadVersionReply rep;
-				rep.version = parent->lastEpochEnd;
-				rep.locked = locked;
-				rep.metadataVersion = metadataVersion;
+				GetReadVersionReply rep(parent->lastEpochEnd, locked, metadataVersion, rangeLockVersion);
 				req.reply.send( rep );
 			} else
 				req.reply.send(Never());  // We can't perform causally consistent reads without recovering
@@ -1069,11 +1068,9 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				if(self->liveCommittedVersion == invalidVersion) {
 					self->liveCommittedVersion = self->recoveryTransactionVersion;
 				}
-				GetRawCommittedVersionReply reply;
-				reply.version = self->liveCommittedVersion;
-				reply.locked = self->databaseLocked;
-				reply.metadataVersion = self->proxyMetadataVersion;
-				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
+				GetRawCommittedVersionReply reply(self->liveCommittedVersion, self->databaseLocked,
+				                                  self->proxyMetadataVersion, self->proxyRangeLockVersion,
+				                                  self->minKnownCommittedVersion);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
@@ -1082,6 +1079,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;
+					self->proxyRangeLockVersion = req.rangeLockVersion;
 				}
 				req.reply.send(Void());
 			}

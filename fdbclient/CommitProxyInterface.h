@@ -134,17 +134,19 @@ struct CommitID {
 	uint16_t txnBatchId;
 	Optional<Value> metadataVersion;
 	Optional<Standalone<VectorRef<int>>> conflictingKRIndices;
+	Optional<Value> rangeLockVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, txnBatchId, metadataVersion, conflictingKRIndices);
+		serializer(ar, version, txnBatchId, metadataVersion, conflictingKRIndices, rangeLockVersion);
 	}
 
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
 	CommitID(Version version, uint16_t txnBatchId, const Optional<Value>& metadataVersion,
+	         const Optional<Value>& lockVersion,
 	         const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>())
 	  : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion),
-	    conflictingKRIndices(conflictingKRIndices) {}
+	    conflictingKRIndices(conflictingKRIndices), rangeLockVersion(lockVersion) {}
 };
 
 struct CommitTransactionRequest : TimedRequest {
@@ -189,18 +191,21 @@ static inline int getBytes( CommitTransactionRequest const& r ) {
 
 struct GetReadVersionReply : public BasicLoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 15709388;
-	Version version;
-	bool locked;
+	Version version = invalidVersion;
+	bool locked = false;
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
+	Optional<Value> rangeLockVersion;
 
-	GetReadVersionReply() : version(invalidVersion), locked(false) {}
+	GetReadVersionReply() = default;
+	GetReadVersionReply(Version version, bool locked, Optional<Value> metadataVersion, Optional<Value> rangeLockVersion)
+	  : version(version), locked(locked), metadataVersion(metadataVersion), rangeLockVersion(rangeLockVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::processBusyTime, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
+		serializer(ar, BasicLoadBalancedReply::processBusyTime, version, locked, metadataVersion, tagThrottleInfo, midShardSize, rangeLockVersion);
 	}
 };
 
@@ -308,16 +313,21 @@ struct GetKeyServerLocationsRequest {
 struct GetRawCommittedVersionReply {
 	constexpr static FileIdentifier file_identifier = 1314732;
 	Optional<UID> debugID;
-	Version version;
-	bool locked;
+	Version version = invalidVersion;
+	bool locked = false;
 	Optional<Value> metadataVersion;
-	Version minKnownCommittedVersion;
+	Optional<Value> rangeLockVersion;
+	Version minKnownCommittedVersion = invalidVersion;
 
-	GetRawCommittedVersionReply(): debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()), minKnownCommittedVersion(invalidVersion) {}
+	GetRawCommittedVersionReply() = default;
+	GetRawCommittedVersionReply(Version version, bool locked, Optional<Value> metadataVersion,
+	                            Optional<Value> rangeLockVersion, Version minKnownCommittedVersion)
+	  : version(version), locked(locked), metadataVersion(metadataVersion), rangeLockVersion(rangeLockVersion),
+	    minKnownCommittedVersion(minKnownCommittedVersion) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+		serializer(ar, debugID, version, locked, metadataVersion, rangeLockVersion, minKnownCommittedVersion);
 	}
 };
 

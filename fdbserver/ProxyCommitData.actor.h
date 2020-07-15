@@ -115,6 +115,7 @@ struct ProxyCommitData {
 	double lastCoalesceTime;
 	bool locked;
 	Optional<Value> metadataVersion;
+	Optional<Value> rangeLockVersion;
 	double commitBatchInterval;
 
 	int64_t localCommitBatchesStarted;

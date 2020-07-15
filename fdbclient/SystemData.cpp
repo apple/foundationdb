@@ -917,6 +917,10 @@ const KeyRangeRef lockedKeyRanges(
 	LiteralStringRef("\xff/rangeLocked0")
 );
 const KeyRef rangeLockKey = LiteralStringRef("\xff/rangeLocked");
+const KeyRef rangeLockVersionKey = LiteralStringRef("\xff/rangeLockVersion");
+const KeyRef rangeLockVersionKeyEnd = LiteralStringRef("\xff/rangeLockVersion\x00");
+const KeyRef rangeLockVersionRequiredValue =
+    LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 
 const KeyRangeRef monitorConfKeys(
 	LiteralStringRef("\xff\x02/monitorConf/"),

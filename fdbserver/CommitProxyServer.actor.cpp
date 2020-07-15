@@ -439,6 +439,7 @@ struct CommitBatchContext {
 	bool lockedAfter;
 
 	Optional<Value> metadataVersionAfter;
+	Optional<Value> rangeLockVersionAfter;
 
 	int mutationCount = 0;
 	int mutationBytes = 0;
@@ -762,6 +763,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	self->lockedAfter = self->lockedKey.present() && self->lockedKey.get().size();
 
 	self->metadataVersionAfter = pProxyCommitData->txnStateStore->readValue(metadataVersionKey).get();
+	self->rangeLockVersionAfter = pProxyCommitData->txnStateStore->readValue(rangeLockVersionKey).get();
 
 	auto fcm = pProxyCommitData->logAdapter->getCommitMessage();
 	self->storeCommits.emplace_back(fcm, pProxyCommitData->txnStateStore->commit());
@@ -902,7 +904,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			}
 
 			// Check on backing up key, if backup ranges are defined and a normal key
-			if (!(pProxyCommitData->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
+			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
+			      (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey ||
+			       m.param1 == rangeLockVersionKey))) {
 				continue;
 			}
 
@@ -1012,6 +1016,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					if(v.version > pProxyCommitData->committedVersion.get()) {
 						pProxyCommitData->locked = v.locked;
 						pProxyCommitData->metadataVersion = v.metadataVersion;
+						pProxyCommitData->rangeLockVersion = v.rangeLockVersion;
 						pProxyCommitData->committedVersion.set(v.version);
 					}
 
@@ -1138,6 +1143,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	if( self->commitVersion > pProxyCommitData->committedVersion.get() ) {
 		pProxyCommitData->locked = self->lockedAfter;
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
+		pProxyCommitData->rangeLockVersion = self->rangeLockVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
 	}
 
@@ -1155,7 +1161,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		auto& tr = self->trs[t];
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
 			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
-			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
+			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter, self->rangeLockVersionAfter));
 		}
 		else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
@@ -1178,8 +1184,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 				}
 				// At least one keyRange index should be returned
 				ASSERT(conflictingKRIndices.size());
-				tr.reply.send(CommitID(invalidVersion, t, Optional<Value>(),
-				                           Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+				tr.reply.send(CommitID(invalidVersion, t, Optional<Value>(), Optional<Value>(),
+				                       Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
 			} else {
 				tr.reply.sendError(not_committed());
 			}
@@ -1796,6 +1802,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy, MasterInter
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();
 					commitData.locked = lockedKey.present() && lockedKey.get().size();
 					commitData.metadataVersion = commitData.txnStateStore->readValue(metadataVersionKey).get();
+					commitData.rangeLockVersion = commitData.txnStateStore->readValue(rangeLockVersionKey).get();
 
 					commitData.txnStateStore->enableSnapshot();
 				}

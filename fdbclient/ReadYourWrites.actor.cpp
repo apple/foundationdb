@@ -1419,9 +1419,11 @@ void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) 
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
 	}
-	
+
 	if (tr.apiVersionAtLeast(300)) {
-		if ((keys.begin > getMaxReadKey() || keys.end > getMaxReadKey()) && (keys.begin != metadataVersionKey || keys.end != metadataVersionKeyEnd)) {
+		if ((keys.begin > getMaxReadKey() || keys.end > getMaxReadKey()) &&
+		    (keys.begin != metadataVersionKey || keys.end != metadataVersionKeyEnd) &&
+		    (keys.begin != rangeLockVersionKey || keys.end != rangeLockVersionKeyEnd)) {
 			throw key_outside_legal_range();
 		}
 	}

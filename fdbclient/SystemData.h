@@ -361,6 +361,9 @@ extern const KeyRef mustContainSystemMutationsKey;
 extern const KeyRangeRef lockedKeyRanges;
 // Key reserved for setting or unsetting locked ranges
 extern const KeyRef rangeLockKey;
+extern const KeyRef rangeLockVersionKey;
+extern const KeyRef rangeLockVersionKeyEnd;
+extern const KeyRef rangeLockVersionRequiredValue;
 
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;

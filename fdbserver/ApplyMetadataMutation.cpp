@@ -42,6 +42,72 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 	return storageInfo;
 }
 
+// Removes the backup keys in the "commonLogRange" and updates "vecBackupKeys"
+// accordingly.
+void removeBackupKeys(KeyRangeMap<std::set<Key>>* vecBackupKeys, KeyRangeRef commonLogRange,
+                      IKeyValueStore* txnStateStore) {
+	if (vecBackupKeys == nullptr) return;
+
+	KeyRef logKeyBegin;
+	Key logKeyEnd, logDestination;
+
+	// Identify the backup keys being removed
+	// read is expected to be immediately available
+	auto logRangesAffected = txnStateStore->readRange(commonLogRange).get();
+
+	TraceEvent("LogRangeClearBegin").detail("AffectedLogRanges", logRangesAffected.size());
+
+	// Add the backup name to the backup locations that do not have it
+	for (auto logRangeAffected : logRangesAffected) {
+		// Parse the backup key and name
+		logKeyBegin = logRangesDecodeKey(logRangeAffected.key, nullptr);
+
+		// Decode the log destination and key value
+		logKeyEnd = logRangesDecodeValue(logRangeAffected.value, &logDestination);
+
+		TraceEvent("LogRangeErase")
+		    .detail("AffectedKey", logRangeAffected.key)
+		    .detail("AffectedValue", logRangeAffected.value)
+		    .detail("LogKeyBegin", logKeyBegin)
+		    .detail("LogKeyEnd", logKeyEnd)
+		    .detail("LogDestination", logDestination);
+
+		// Identify the locations to place the backup key
+		auto logRanges = vecBackupKeys->modify(KeyRangeRef(logKeyBegin, logKeyEnd));
+
+		// Remove the log prefix from the ranges which include it
+		for (auto logRange : logRanges) {
+			auto& logRangeMap = logRange->value();
+
+			// Remove the backup name from the range
+			logRangeMap.erase(logDestination);
+		}
+
+		bool foundKey = false;
+		for (auto& it : vecBackupKeys->intersectingRanges(normalKeys)) {
+			if (it.value().count(logDestination) > 0) {
+				foundKey = true;
+				break;
+			}
+		}
+		if (!foundKey) {
+			auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
+			for (auto logRange : logRanges) {
+				auto& logRangeMap = logRange->value();
+				logRangeMap.erase(logDestination);
+			}
+			logRanges = vecBackupKeys->modify(singleKeyRange(rangeLockVersionKey));
+			for (auto logRange : logRanges) {
+				auto& logRangeMap = logRange->value();
+				logRangeMap.erase(logDestination);
+			}
+		}
+	}
+
+	// Coallesce the entire range
+	vecBackupKeys->coalesce(allKeys);
+}
+
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all commit proxies at the same time. Otherwise, the data 
 // stored in txnStateStore will become corrupted.
@@ -206,7 +272,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						}
 					}
 				}
-			} else if( m.param1 == databaseLockedKey || m.param1 == metadataVersionKey || m.param1 == mustContainSystemMutationsKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
+			} else if( m.param1 == databaseLockedKey || m.param1 == metadataVersionKey || m.param1 == mustContainSystemMutationsKey || m.param1 == rangeLockVersionKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
 				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) || m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -254,6 +320,9 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						logRange->value().insert(logDestination);
 					}
 					for (auto& logRange : vecBackupKeys->modify(singleKeyRange(metadataVersionKey))) {
+						logRange->value().insert(logDestination);
+					}
+					for (auto& logRange : vecBackupKeys->modify(singleKeyRange(rangeLockVersionKey))) {
 						logRange->value().insert(logDestination);
 					}
 
@@ -384,6 +453,9 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 			if (range.contains(metadataVersionKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(metadataVersionKey));
 			}
+			if (range.contains(rangeLockVersionKey)) {
+				if (!initialCommit) txnStateStore->clear(singleKeyRange(rangeLockVersionKey));
+			}
 			if (range.contains(mustContainSystemMutationsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
@@ -422,64 +494,12 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 				KeyRangeRef commonLogRange(range & logRangesRange);
 
 				TraceEvent("LogRangeClear")
-					.detail("RangeBegin", range.begin).detail("RangeEnd", range.end)
-					.detail("IntersectBegin", commonLogRange.begin).detail("IntersectEnd", commonLogRange.end);
+				    .detail("RangeBegin", range.begin)
+				    .detail("RangeEnd", range.end)
+				    .detail("IntersectBegin", commonLogRange.begin)
+				    .detail("IntersectEnd", commonLogRange.end);
 
-				// Remove the key range from the vector, if defined
-				if (vecBackupKeys) {
-					KeyRef	logKeyBegin;
-					Key		logKeyEnd, logDestination;
-
-					// Identify the backup keys being removed
-					// read is expected to be immediately available
-					auto logRangesAffected = txnStateStore->readRange(commonLogRange).get();
-
-					TraceEvent("LogRangeClearBegin").detail("AffectedLogRanges", logRangesAffected.size());
-
-					// Add the backup name to the backup locations that do not have it
-					for (auto logRangeAffected : logRangesAffected)
-					{
-						// Parse the backup key and name
-						logKeyBegin = logRangesDecodeKey(logRangeAffected.key, nullptr);
-
-						// Decode the log destination and key value
-						logKeyEnd = logRangesDecodeValue(logRangeAffected.value, &logDestination);
-
-						TraceEvent("LogRangeErase").detail("AffectedKey", logRangeAffected.key).detail("AffectedValue", logRangeAffected.value)
-							.detail("LogKeyBegin", logKeyBegin).detail("LogKeyEnd", logKeyEnd)
-							.detail("LogDestination", logDestination);
-
-						// Identify the locations to place the backup key
-						auto logRanges = vecBackupKeys->modify(KeyRangeRef(logKeyBegin, logKeyEnd));
-
-						// Remove the log prefix from the ranges which include it
-						for (auto logRange : logRanges)
-						{
-							auto	&logRangeMap = logRange->value();
-
-							// Remove the backup name from the range
-							logRangeMap.erase(logDestination);
-						}
-
-						bool foundKey = false;
-						for(auto &it : vecBackupKeys->intersectingRanges(normalKeys)) {
-							if(it.value().count(logDestination) > 0) {
-								foundKey = true;
-								break;
-							}
-						}
-						if(!foundKey) {
-							auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
-							for (auto logRange : logRanges) {
-								auto &logRangeMap = logRange->value();
-								logRangeMap.erase(logDestination);
-							}
-						}
-					}
-
-					// Coallesce the entire range
-					vecBackupKeys->coalesce(allKeys);
-				}
+				removeBackupKeys(vecBackupKeys, commonLogRange, txnStateStore);
 
 				if(!initialCommit) txnStateStore->clear(commonLogRange);
 			}
