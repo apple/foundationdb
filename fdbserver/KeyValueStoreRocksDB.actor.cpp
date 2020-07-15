@@ -402,8 +402,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		state Standalone<RangeResultRef> result;
 		if (rowLimit >= 0) {
 			// Limit the first range to end at the special keyspace to prevent infinite recursion.
-			Standalone<RangeResultRef> result =
+			Standalone<RangeResultRef> _result =
 			    wait(self->sqlLite2->readRange({ keys.begin, SPECIAL_KEYSPACE }, rowLimit, byteLimit));
+			result = _result;
 			// We should probably not be duplicating this work, but these range reads are rare.
 			int accumulatedBytes = 0;
 			for (const auto& kv : result) {
@@ -420,8 +421,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				ASSERT(result.more);
 			}
 		} else {
-			Standalone<RangeResultRef> result =
+			Standalone<RangeResultRef> _result =
 			    wait(self->sqlLite->readRange({ SPECIAL_KEYSPACE, keys.end }, rowLimit, byteLimit));
+			result = _result;
 			int accumulatedBytes = 0;
 			for (const auto& kv : result) {
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
