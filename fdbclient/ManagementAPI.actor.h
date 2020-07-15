@@ -189,6 +189,20 @@ ACTOR Future<Void> unlockDatabase( Transaction*  tr, UID  id );
 ACTOR Future<Void> unlockDatabase( Reference<ReadYourWritesTransaction>  tr, UID  id );
 ACTOR Future<Void> unlockDatabase( Database  cx, UID  id );
 
+// Locks a range in the normal key space. If the database is already locked,
+// then a database_locked error is thrown. If (part of) the range is already
+// locked, then a range_locked error is thrown during commit.
+ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range);
+ACTOR Future<Void> lockRange(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range);
+ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range);
+
+// Unlocks a range in the normal key space. If the database is already locked,
+// then a database_locked error is thrown. If the range is not locked, then
+// a range_unlocked error is thrown during commit.
+ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range);
+ACTOR Future<Void> unlockRange(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range);
+ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range);
+
 ACTOR Future<Void> checkDatabaseLock( Transaction*  tr, UID  id );
 ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction>  tr, UID  id );
 

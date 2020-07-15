@@ -357,6 +357,11 @@ extern const KeyRef metadataVersionKeyEnd;
 extern const KeyRef metadataVersionRequiredValue;
 extern const KeyRef mustContainSystemMutationsKey;
 
+// Key range reserved for storing locked ranges
+extern const KeyRangeRef lockedKeyRanges;
+// Key reserved for setting or unsetting locked ranges
+extern const KeyRef rangeLockKey;
+
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
 

@@ -912,6 +912,12 @@ const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00"
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
 
+const KeyRangeRef lockedKeyRanges(
+	LiteralStringRef("\xff/rangeLocked/"),
+	LiteralStringRef("\xff/rangeLocked0")
+);
+const KeyRef rangeLockKey = LiteralStringRef("\xff/rangeLocked");
+
 const KeyRangeRef monitorConfKeys(
 	LiteralStringRef("\xff\x02/monitorConf/"),
 	LiteralStringRef("\xff\x02/monitorConf0")
