@@ -48,6 +48,8 @@ struct FileIdentifierForBase<T, false> {};
 template <class T>
 struct FileIdentifierForBase<T, true> {
 	static constexpr FileIdentifier value = T::file_identifier;
+	static_assert(CompositionDepthFor<T>::value > 0 || T::file_identifier < (1 << 24),
+	              "non-composed file identifiers must be less than 2^24");
 };
 
 template <class T>
