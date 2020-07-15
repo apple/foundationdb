@@ -1291,7 +1291,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 						    .detail("NumAtomicWrite", tag.second.numAtomicWrite)
 						    .detail("BytesAtomicWrite", tag.second.bytesAtomicWrite)
 						    .detail("NumClear", tag.second.numClear)
-						    .detail("BytesClearEst", tag.second.bytesClearEst);
+						    .detail("NumClearShards", tag.second.numClearShards.orDefault(0))
+						    .detail("BytesClearEst", tag.second.bytesClearEst.orDefault(0));
 					}
 				}
 				if(p.batchTransactions > 0) {

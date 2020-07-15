@@ -3257,10 +3257,12 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self, CommitTransactionRef* transaction) {
+ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self,
+                                                                  CommitTransactionRef* transaction) {
 	state MutationRef* it = transaction->mutations.begin();
 	state MutationRef* end = transaction->mutations.end();
 	state TransactionCommitCostEstimation trCommitCosts;
+	state KeyRange keyRange;
 	for (; it != end; ++it) {
 		if (it->type == MutationRef::Type::SetValue) {
 			trCommitCosts.bytesWrite += it->expectedSize();
@@ -3269,16 +3271,21 @@ ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* s
 			trCommitCosts.bytesAtomicWrite += it->expectedSize();
 			trCommitCosts.numAtomicWrite++;
 		} else if (it->type == MutationRef::Type::ClearRange) {
-			trCommitCosts.numClear ++;
-			if(self->options.expensiveClearCostEstimation) {
+			trCommitCosts.numClear++;
+			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
+			if (self->options.expensiveClearCostEstimation) {
 				try {
-					StorageMetrics m = wait(self->getStorageMetrics(KeyRangeRef(it->param1, it->param2), -1));
-					trCommitCosts.bytesClearEst += m.bytes;
+					StorageMetrics m = wait(self->getStorageMetrics(keyRange, INT_MAX));
+					trCommitCosts.bytesClearEst.present() ? (trCommitCosts.bytesClearEst.get() += m.bytes)
+					                                      : (trCommitCosts.bytesClearEst = m.bytes);
 					continue;
-				} catch (...) {} // do a local estimation
+				} catch (...) {
+				} // do a local estimation
 			}
-			// TODO how much data a clear would delete: 1. shard-map
-
+			std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+			    self->getDatabase(), keyRange, INT_MAX, false, &StorageServerInterface::getShardState, self->info));
+			trCommitCosts.numClearShards.present() ? (trCommitCosts.numClearShards.get() += locations.size())
+			                                       : (trCommitCosts.numClearShards = locations.size());
 		}
 	}
 	return trCommitCosts;
@@ -3305,11 +3312,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			req.transaction.read_snapshot = v;
 		}
 		else {
-			Version v;
-			TransactionCommitCostEstimation costEst;
-			wait(store(v, readVersion) && store(costEst, estimateCommitCosts(tr, &req.transaction)));
-			req.transaction.read_snapshot = v;
-			req.commitCostEstimation = costEst; // estimateCommitCosts(tr, &req.transaction, false);
+			req.commitCostEstimation = TransactionCommitCostEstimation();
+			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
 		}
 
 		startTime = now();
@@ -3732,15 +3736,17 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			span.addParent(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()));
 			break;
 
-	    case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
-		    validateOptionValue(value, false);
-		    options.reportConflictingKeys = true;
-		    break;
+		case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
+			validateOptionValue(value, false);
+			options.reportConflictingKeys = true;
+			break;
+		
 		case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
 			validateOptionValue(value, false);
 			options.expensiveClearCostEstimation = true;
 			break;
-	    default:
+
+		default:
 			break;
 	}
 }

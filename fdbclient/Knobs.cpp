@@ -231,6 +231,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
 	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
+
 	// clang-format on
 }
 

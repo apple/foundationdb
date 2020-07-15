@@ -80,21 +80,25 @@ struct TransactionCommitCostEstimation {
 	int64_t numAtomicWrite = 0;
 	int64_t numClear = 0;
 	unsigned long bytesWrite = 0;
-	unsigned long bytesClearEst = 0;
 	unsigned long bytesAtomicWrite = 0;
+	Optional<unsigned long> numClearShards;
+	Optional<unsigned long> bytesClearEst;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear);
+		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear, numClearShards);
 	}
 
-	TransactionCommitCostEstimation& operator += (const TransactionCommitCostEstimation& other) {
+	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
 		numWrite += other.numWrite;
 		numAtomicWrite += other.numAtomicWrite;
 		numClear += other.numClear;
 		bytesWrite += other.bytesWrite;
-		bytesClearEst += other.bytesClearEst;
 		bytesAtomicWrite += other.numAtomicWrite;
+		if (other.bytesClearEst.present() || bytesClearEst.present())
+			bytesClearEst = bytesClearEst.orDefault(0) + other.bytesClearEst.orDefault(0);
+		if (other.numClearShards.present() || numClearShards.present())
+			numClearShards = numClearShards.orDefault(0) + other.numClearShards.orDefault(0);
 		return *this;
 	}
 };
