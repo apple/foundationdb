@@ -386,7 +386,7 @@ struct P2PNetworkTest {
 		writer.serializeBinaryItem((int)msg.size());
 		writer.serializeBytes(msg);
 
-		state int bytesBeforeDelay = FLOW_KNOBS->MAX_PACKET_SEND_BYTES;
+		state int bytesSinceYield = 0;
 
 		loop {
 			int stutter = self->waitWriteMilliseconds.get();
@@ -394,11 +394,11 @@ struct P2PNetworkTest {
 				wait(delay(stutter / 1e3));
 			}
 
-			int sent = conn->write(packets.getUnsent(), bytesBeforeDelay);
+			int sent = conn->write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 
 			if(sent != 0) {
 				self->bytesSent += sent;
-				bytesBeforeDelay -= sent;
+				bytesSinceYield += sent;
 				packets.sent(sent);
 			}
 
@@ -407,9 +407,9 @@ struct P2PNetworkTest {
 			}
 
 			wait(conn->onWritable());
-			if(bytesBeforeDelay <= 0) {
-				wait(delay(0, TaskPriority::WriteSocket));
-				bytesBeforeDelay = FLOW_KNOBS->MAX_PACKET_SEND_BYTES;
+			if (bytesSinceYield >= FLOW_KNOBS->MAX_PACKET_SEND_BYTES_BEFORE_YIELD) {
+				wait( yield(TaskPriority::WriteSocket) );
+				bytesSinceYield = 0;
 			}
 		}
 

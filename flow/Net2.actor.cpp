@@ -650,8 +650,8 @@ public:
 				}
 			}
 
-			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
-			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
+			wait(g_network->networkInfo.handshakeLock->take());
+			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 			Future<Void> onHandshook;
 
@@ -704,8 +704,8 @@ public:
 		state Hold<int> holder;
 
 		try {
-			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
-			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
+			wait(g_network->networkInfo.handshakeLock->take());
+			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
 			Future<Void> onHandshook;
 			// If the background handshakers are not all busy, use one

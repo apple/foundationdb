@@ -88,11 +88,10 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
 	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
-	init( TLS_SERVER_HANDSHAKE_THREADS,                        100 );
+	init( TLS_SERVER_HANDSHAKE_THREADS,                       1000 );
 	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
 	init( TLS_MALLOC_ARENA_MAX,                                  6 );
-	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
-	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
+	init( TLS_HANDSHAKE_LIMIT,                                1000 );
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
@@ -146,7 +145,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
-	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( MAX_PACKET_SEND_BYTES,                        128 * 1024 );
+	init( MAX_PACKET_SEND_BYTES_BEFORE_YIELD,            64 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );

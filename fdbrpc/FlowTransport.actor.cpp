@@ -414,17 +414,17 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		//wait( delay(500e-6, TaskPriority::WriteSocket) );
 		//wait( yield(TaskPriority::WriteSocket) );
 
-		state int bytesBeforeDelay = FLOW_KNOBS->MAX_PACKET_SEND_BYTES;
+		state int bytesSinceYield = 0;
 
 		// Send until there is nothing left to send
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), bytesBeforeDelay);
+			int sent = conn->write(self->unsent.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 
-			if (sent) {
+			if (sent != 0) {
 				self->transport->bytesSent += sent;
-				bytesBeforeDelay -= sent;
+				bytesSinceYield += sent;
 				self->unsent.sent(sent);
 			}
 
@@ -435,17 +435,18 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull.
 			wait( conn->onWritable() );
 
-			// After the first write on a connection, onWritable() must be called before every write, because
-			// otherwise for some reason with TLS connections calling write() too much can result in a socket
-			// closure rather than returning 0 or some kind of WouldBlock error.  This, combined with the fact
-			// that TLS connections will only read from the first PacketBuffer in the chain, leads to this
-			// loop being executed far more often than for non-TLS connections.  To mitigate this, and since
-			// MAX_PACKET_SEND_BYTES is intended to be the most bytes from the PacketBuffer chain that can be
-			// sent without interruption, we will only yield one we have sent MAX_PACKET_SEND_BYTES since the
-			// last yield.
-			if (bytesBeforeDelay <= 0) {
-				wait(delay(0, TaskPriority::WriteSocket));
-				bytesBeforeDelay = FLOW_KNOBS->MAX_PACKET_SEND_BYTES;
+			// After the first write on a connection, onWritable() must be waited on before every write, because
+			// otherwise for some reason calling write_some() too much on a boost ssl socket can result in a socket
+			// closure rather than returning 0 or some kind of WouldBlock error.  This, combined with the fact ssl
+			// socket write_some() will currently only consume the first PacketBuffer in the chain, leads to this
+			// loop being executed far more often than for non-TLS connections for high throughput connections and
+			// this does reduce throughput.
+			//
+			// To mitigate this, there is another knob, MAX_PACKET_SEND_BYTES_BEFORE_YIELD, which indicates how many
+			// bytes can be sent, using multiple calls to write() if needed, before yielding to other tasks.
+			if (bytesSinceYield >= FLOW_KNOBS->MAX_PACKET_SEND_BYTES_BEFORE_YIELD) {
+				wait( yield(TaskPriority::WriteSocket) );
+				bytesSinceYield = 0;
 			}
 		}
 
