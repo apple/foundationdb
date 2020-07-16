@@ -671,6 +671,7 @@ public:
 	}
 
 	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfiguration( RecruitFromConfigurationRequest const& req, Optional<Key> dcId ) {
+		TraceEvent("FindWorkersInternal").detail("Req", req.recruitSeedServers);
 		RecruitFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		updateKnownIds(&id_used);
@@ -693,6 +694,7 @@ public:
 		}
 
 		if(req.recruitSeedServers) {
+			TraceEvent("RecruitSeedServers");
 			auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, dcId );
 			for(int i = 0; i < primaryStorageServers.size(); i++) {
 				result.storageServers.push_back(primaryStorageServers[i].interf);
@@ -719,8 +721,8 @@ public:
 		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
 		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_proxy );
 		ASSERT(proxies.size() >= 2);
-		int grvProxiesCount = 1;
-		int masterProxiesCount = proxies.size() - 1;
+		int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
+		int masterProxiesCount = proxies.size() - grvProxiesCount;
 
 		for(int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
@@ -877,7 +879,9 @@ public:
 						for(int i = 0; i < resolvers.size(); i++)
 							result.resolvers.push_back(resolvers[i].interf);
 
-						int grvProxiesCount = 1;
+						ASSERT(proxies.size() >= 2);
+						// Consider shuffle the proxies array before assigning grv proxies and normal proxies.
+						int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
 						int masterProxiesCount = proxies.size() - grvProxiesCount;
 						for(int i = 0; i < masterProxiesCount; i++)
 							result.proxies.push_back(proxies[i].interf);
@@ -1066,15 +1070,15 @@ public:
 			proxyClasses.push_back(proxyWorker->second.details);
 		}
 
-		// Get grvProxy classes
-		std::vector<WorkerDetails> grvProxyClasses;
+//		// Get grvProxy classes
+//		std::vector<WorkerDetails> grvProxyClasses;
 		for(auto& it : dbi.client.grvProxies ) {
 			auto grvProxyWorker = id_worker.find(it.processId);
 			if ( grvProxyWorker == id_worker.end() )
 				return false;
 			if ( grvProxyWorker->second.priorityInfo.isExcluded )
 				return true;
-			grvProxyClasses.push_back(grvProxyWorker->second.details);
+			proxyClasses.push_back(grvProxyWorker->second.details);
 		}
 
 		// Get resolver classes
@@ -1225,6 +1229,7 @@ public:
 		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(), db.config, id_used, first_proxy, true );
 		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
 
+		TraceEvent("InsideBetterMasterExists").detail("Size", proxies.size());
 		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
 		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
 			return false;

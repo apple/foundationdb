@@ -1063,11 +1063,11 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				TraceEvent("ServerServeGet").detail("Own", self->liveCommittedVersion);
+				TraceEvent("ServerServeGet").detail("Own", self->minKnownCommittedVersion);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				TraceEvent("ServerReceiveReport").detail("CV", req.version).detail("Own", self->liveCommittedVersion);
+				TraceEvent("ServerReceiveReport").detail("MV", req.minKnownCommittedVersion).detail("Own", self->minKnownCommittedVersion);
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
@@ -1539,9 +1539,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	recoverAndEndEpoch.cancel();
 
-	ASSERT( self->proxies.size() <= self->configuration.getDesiredProxies() );
+	ASSERT( self->proxies.size() + self->grvProxies.size() <= self->configuration.getDesiredProxies() );
 	TraceEvent("AssertFailure").detail("GrvProxies", self->grvProxies.size());
-	ASSERT( self->grvProxies.size() == 1 );
+	ASSERT( self->grvProxies.size() >= 1 );
 	ASSERT( self->resolvers.size() <= self->configuration.getDesiredResolvers() );
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;

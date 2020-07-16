@@ -428,6 +428,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
 			// Only backup worker may infrequently use this flag.
 			reply.version = minKnownCommittedVersion;
+			TraceEvent("GrvServeMinKnownCommittedVersion").detail("V", minKnownCommittedVersion);
 		}
 		else {
 			reply.version = replyVersion;
@@ -633,6 +634,7 @@ ACTOR Future<Void> grvProxyServerCore(
 
 
 	grvProxyData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
+	TraceEvent("LogSystemCreate").detail("Role", "GRV").detail("UID", proxy.id());
 //	grvProxyData.logAdapter = new LogSystemDiskQueueAdapter(grvProxyData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 //	grvProxyData.txnStateStore = keyValueStoreLogSystem(grvProxyData.logAdapter, proxy.id(), 2e9, true, true, true);
 
@@ -654,6 +656,7 @@ ACTOR Future<Void> grvProxyServerCore(
 
 				if(grvProxyData.db->get().master.id() == master.id() && grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 					grvProxyData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
+					TraceEvent("LogSystemCreate").detail("Role", "GRV").detail("UID", proxy.id()).detail("DBInfoChange", "");
 				}
 				grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 			}

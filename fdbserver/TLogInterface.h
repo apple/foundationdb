@@ -209,13 +209,14 @@ struct TLogPopRequest {
 	Version durableKnownCommittedVersion;
 	Tag tag;
 	ReplyPromise<Void> reply;
+	UID debugId;
 
-	TLogPopRequest( Version to, Version durableKnownCommittedVersion, Tag tag ) : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest( Version to, Version durableKnownCommittedVersion, Tag tag) : to(to), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
 	TLogPopRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply);
+		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply, debugId);
 	}
 };
 

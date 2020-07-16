@@ -303,9 +303,9 @@ ACTOR Future<Void> queueTransactionStartRequests(
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 //			ASSERT(false); // This endpoint should not be triggered at any time.
 			// This endpoint only serves an internal request now to catch up other proxies.
-			ASSERT(req.priority == TransactionPriority::IMMEDIATE);
-			ASSERT(req.transactionCount == 0);
-			ASSERT(req.flags == GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
+//			ASSERT(req.priority == TransactionPriority::IMMEDIATE);
+//			ASSERT(req.transactionCount == 0);
+//			ASSERT(req.flags == GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			stats->addRequest();
 			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
@@ -384,6 +384,7 @@ struct ProxyCommitData {
 	int64_t commitBatchesMemBytesCount;
 	ProxyStats stats;
 	MasterInterface master;
+	std::vector<GrvProxyInterface> grvProxies;
 	vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
@@ -850,8 +851,6 @@ ACTOR Future<Void> commitBatch(
 	state Version commitVersion = versionReply.version;
 	state Version prevVersion = versionReply.prevVersion;
 
-	TraceEvent("CommitBatch").detail("CV", commitVersion);
-
 	for(auto it : versionReply.resolverChanges) {
 		auto rs = self->keyResolvers.modify(it.range);
 		for(auto r = rs.begin(); r != rs.end(); ++r)
@@ -1186,6 +1185,8 @@ ACTOR Future<Void> commitBatch(
 					break; 
 				}
 				// Should ask master instead of GRV proxies? But don't get the benefit of batching.
+//				when(GetReadVersionReply v = wait(basicLoadBalance(
+//				         self->cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY), TaskPriority::GetLiveCommittedVersion))) {
 				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
 					if(v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
@@ -1246,12 +1247,19 @@ ACTOR Future<Void> commitBatch(
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
 
+	state long c1 = 0;
+	state long c2 = 0;
 	try {
 		choose {
 			when(Version ver = wait(loggingComplete)) {
+				TraceEvent("LoggingComplete").detail("C1", c1).detail("V", ver).detail("MinKnown", self->minKnownCommittedVersion);
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, ver);
+				c1++;
 			}
-			when(wait(self->committedVersion.whenAtLeast( commitVersion+1 ))) {}
+			when(wait(self->committedVersion.whenAtLeast( commitVersion+1 ))) {
+				c2++;
+				TraceEvent("CommittedVersionLargeEnough").detail("C2", c2);
+			}
 		}
 	} catch(Error &e) {
 		if(e.code() == error_code_broken_promise) {
@@ -1292,9 +1300,9 @@ ACTOR Future<Void> commitBatch(
 	// up-to-date live committed version. We also maintain the invariant that master's committed version >= self->committedVersion
 	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
 	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
-	TraceEvent("ProxyAfterCommit").detail("CV", commitVersion);
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion > self->committedVersion.get()) {
+//		TraceEvent("ProxyReportMinKnownCommittedVersion").detail("V", self->minKnownCommittedVersion);
 		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter, self->minKnownCommittedVersion), TaskPriority::ProxyMasterVersionReply));
 	}
 	if( commitVersion > self->committedVersion.get() ) {
@@ -1522,7 +1530,7 @@ ACTOR static Future<Void> transactionStarter(
 	state PromiseStream<double> replyTimes;
 
 	// Disabled for now since we don't need proxy to talk to ratekeeper
-//	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
 	                                            &transactionTagCounter));
@@ -1534,6 +1542,7 @@ ACTOR static Future<Void> transactionStarter(
 		if (mp != proxy)
 			otherProxies.push_back(mp);
 	}
+	TraceEvent("OtherProxies").detail("Size", otherProxies.size());
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
 
@@ -2032,12 +2041,14 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	commitData.resolvers = commitData.db->get().resolvers;
 	ASSERT(commitData.resolvers.size() != 0);
-
+	commitData.grvProxies = commitData.db->get().client.grvProxies;
+	ASSERT(commitData.grvProxies.size() != 0);
 	auto rs = commitData.keyResolvers.modify(allKeys);
 	for(auto r = rs.begin(); r != rs.end(); ++r)
 		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
+	TraceEvent("LogSystemCreate").detail("Role", "MasterProxy").detail("UID", proxy.id());
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
@@ -2076,6 +2087,7 @@ ACTOR Future<Void> masterProxyServerCore(
 			dbInfoChange = commitData.db->onChange();
 			if(commitData.db->get().master.id() == master.id() && commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
+				TraceEvent("LogSystemCreate").detail("Role", "MasterProxy").detail("UID", proxy.id()).detail("DBInfoChange", "");
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}

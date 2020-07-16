@@ -740,6 +740,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		result.auto_proxies = result.old_proxies;
 		proxyCount = result.old_proxies;
 	}
+	TraceEvent("ProxyCountManagementApi").detail("Count", proxyCount);
 
 //	result.desired_grv_proxies = std::min( 4, processCount / 15 );
 //	int grvProxyCount;
