@@ -1276,9 +1276,10 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 
 	if( resetPromise.isSet() )
 		return resetPromise.getFuture().getError();
-	
-	if(key >= getMaxReadKey() && key != metadataVersionKey)
+
+	if (key >= getMaxReadKey() && key != metadataVersionKey && key != rangeLockVersionKey) {
 		return key_outside_legal_range();
+	}
 
 	//There are no keys in the database with size greater than KEY_SIZE_LIMIT
 	if(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -1541,6 +1542,8 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 					case MutationRef::MinV2:
 					case MutationRef::AndV2:
 					case MutationRef::CompareAndClear:
+					case MutationRef::LockRange:
+					case MutationRef::UnlockRange:
 						tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
 						break;
 					default:
@@ -1705,9 +1708,17 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		if(operationType != MutationRef::SetVersionstampedValue || operand != metadataVersionRequiredValue) {
 			throw client_invalid_operation();
 		}
+	} else if (key == rangeLockVersionKey) {
+		if (operationType != MutationRef::SetVersionstampedValue || operand != rangeLockVersionRequiredValue) {
+			throw client_invalid_operation();
+		}
 	}
 	else if(key >= getMaxWriteKey()) {
 		throw key_outside_legal_range();
+	}
+
+	if ((operationType == MutationRef::LockRange || operationType == MutationRef::UnlockRange) && key != rangeLockKey) {
+		throw client_invalid_operation();
 	}
 
 	if(!isValidMutationType(operationType) || !isAtomicOp((MutationRef::Type) operationType))
@@ -1775,7 +1786,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {
-	if (key == metadataVersionKey) {
+	if (key == metadataVersionKey || key == rangeLockVersionKey) {
 		throw client_invalid_operation();
 	}
 
@@ -1920,8 +1931,10 @@ Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
 	if( options.readYourWritesDisabled )
 		return watches_disabled();
 
-	if(key >= allKeys.end || (key >= getMaxReadKey() && key != metadataVersionKey && tr.apiVersionAtLeast(300)))
+	if (key >= allKeys.end || (key >= getMaxReadKey() && key != metadataVersionKey && key != rangeLockVersionKey &&
+	                           tr.apiVersionAtLeast(300))) {
 		return key_outside_legal_range();
+	}
 
 	if (key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
 		return key_too_large();

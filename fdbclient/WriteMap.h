@@ -416,9 +416,10 @@ public:
 	static RYWMutation coalesce(RYWMutation existingEntry, RYWMutation newEntry, Arena& arena) {
 		ASSERT(newEntry.value.present());
 
-		if (newEntry.type == MutationRef::SetValue)
+		if (newEntry.type == MutationRef::SetValue || newEntry.type == MutationRef::LockRange ||
+		    newEntry.type == MutationRef::UnlockRange) {
 			return newEntry;
-		else if (newEntry.type == MutationRef::AddValue) {
+		} else if (newEntry.type == MutationRef::AddValue) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
 					return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
@@ -528,8 +529,9 @@ public:
 			default:
 				throw operation_failed();
 			}
-		} else
+		} else {
 			throw operation_failed();
+		}
 	}
 		
 	static void coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {

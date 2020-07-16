@@ -333,6 +333,7 @@ public:
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);
+
 	Database cx;
 
 	double backoff;
@@ -340,6 +341,7 @@ private:
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
+	Promise<Optional<Value>> rangeLockVersion;
 	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;

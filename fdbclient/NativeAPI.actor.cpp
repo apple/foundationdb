@@ -2716,6 +2716,7 @@ void Transaction::operator=(Transaction&& r) noexcept {
 	tr = std::move(r.tr);
 	readVersion = std::move(r.readVersion);
 	metadataVersion = std::move(r.metadataVersion);
+	rangeLockVersion = std::move(r.rangeLockVersion);
 	extraConflictRanges = std::move(r.extraConflictRanges);
 	commitResult = std::move(r.commitResult);
 	committing = std::move(r.committing);
@@ -2762,6 +2763,18 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 
 	if( !snapshot )
 		tr.transaction.read_conflict_ranges.push_back(tr.arena, singleKeyRange(key, tr.arena));
+
+	if (key == rangeLockVersionKey) {
+		// Don't allow snapshot read of rangeLockVersion, because the Proxies
+		// can't keep a history of locked ranges.
+		if (snapshot) throw client_invalid_operation();
+
+		if (!ver.isReady() || rangeLockVersion.isSet()) {
+			return rangeLockVersion.getFuture();
+		} else {
+			ASSERT(false);
+		}
+	}
 
 	if(key == metadataVersionKey) {
 		++cx->transactionMetadataVersionReads;
@@ -3034,6 +3047,10 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 			operationType = MutationRef::AndV2;
 	}
 
+	if ((operationType == MutationRef::LockRange || operationType == MutationRef::UnlockRange) && key != rangeLockKey) {
+		throw client_invalid_operation();
+	}
+
 	auto &req = tr;
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );
@@ -3186,7 +3203,8 @@ void TransactionOptions::reset(Database const& cx) {
 void Transaction::reset() {
 	tr = CommitTransactionRequest();
 	readVersion = Future<Version>();
-	metadataVersion = Promise<Optional<Key>>();
+	metadataVersion = Promise<Optional<Value>>();
+	rangeLockVersion = Promise<Optional<Value>>();
 	extraConflictRanges.clear();
 	versionstampPromise = Promise<Standalone<StringRef>>();
 	commitResult = Promise<Void>();
@@ -4021,7 +4039,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, SpanID parent, DatabaseContext* cx, TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
                                          bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
-                                         TagSet tags) {
+                                         Promise<Optional<Value>> rangeLockVersion, TagSet tags) {
 	state Span span(spanContext, location, { parent });
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
@@ -4079,6 +4097,7 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 	}
 
 	metadataVersion.send(rep.metadataVersion);
+	rangeLockVersion.send(rep.rangeLockVersion);
 	return rep.version;
 }
 
@@ -4150,7 +4169,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		batcher.stream.send(req);
 		startTime = now();
 		readVersion = extractReadVersion(location, spanContext, info.spanID, cx.getPtr(), options.priority, trLogInfo,
-		                                 req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
+		                                 req.reply.getFuture(), options.lockAware, startTime, metadataVersion, rangeLockVersion, options.tags);
 	}
 	return readVersion;
 }

@@ -201,7 +201,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	GetReadVersionReply() = default;
 	GetReadVersionReply(Version version, bool locked, Optional<Value> metadataVersion, Optional<Value> rangeLockVersion)
-	  : version(version), locked(locked), metadataVersion(metadataVersion), rangeLockVersion(rangeLockVersion) {}
+	  : BasicLoadBalancedReply(), version(version), locked(locked), metadataVersion(metadataVersion), rangeLockVersion(rangeLockVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

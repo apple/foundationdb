@@ -937,7 +937,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(
 							(op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 4)) ||
-							(op == MutationRef::SetVersionstampedValue && (pos < 0 || pos + 10 > value.size() - 4))) )
+							(op == MutationRef::SetVersionstampedValue && (pos < 0 || pos + 10 > value.size() - 4)) ||
+							(op == MutationRef::LockRange && key != rangeLockKey) ||
+							(op == MutationRef::UnlockRange && key != rangeLockKey)) )
 			};
 		}
 
