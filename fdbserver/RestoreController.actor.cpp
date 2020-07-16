@@ -186,7 +186,7 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreControllerData> con
 
 // The server of the restore controller. It drives the restore progress with the following steps:
 // 1) Lock database and clear the normal keyspace
-// 2) Wait on each RestoreRequest, which is sent by RestoreAgent operated by DBA
+// 2) Wait on each RestoreRequest, which is sent by RestoreTool operated by DBA
 // 3) Process each restore request in actor processRestoreRequest;
 // 3.1) Sample workload to decide the key range for each applier, which is implemented as a dummy sampling;
 // 3.2) Send each loader the map of key-range to applier interface;
