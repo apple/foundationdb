@@ -24,7 +24,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::vector<std::string> RestoreRoleStr = { "Invalid", "Master", "Loader", "Applier" };
+const std::vector<std::string> RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
 
 // Similar to debugMutation(), we use debugFRMutation to track mutations for fast restore systems only.

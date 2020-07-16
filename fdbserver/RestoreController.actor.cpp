@@ -1,5 +1,5 @@
 /*
- * RestoreMaster.actor.cpp
+ * RestoreController.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-// This file implements the functions for RestoreMaster role
+// This file implements the functions for RestoreController role
 
 #include "fdbrpc/RangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -30,7 +30,7 @@
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreMaster.actor.h"
+#include "fdbserver/RestoreController.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 
@@ -43,78 +43,79 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles, Key url);
 
-ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx, RestoreRequest request);
-ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx);
-ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, int batchIndex,
+ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerData> self, Database cx,
+                                                   RestoreRequest request);
+ACTOR static Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, Database cx);
+ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreControllerData> self, int batchIndex,
                                                             Database cx, RestoreRequest request,
                                                             VersionBatch versionBatch);
 
-ACTOR static Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker,
-                                              Reference<RestoreMasterData> masterData);
-ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterData,
+ACTOR static Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWorker,
+                                              Reference<RestoreControllerData> controllerData);
+ACTOR static Future<Void> distributeRestoreSysInfo(Reference<RestoreControllerData> controllerData,
                                                    KeyRangeMap<Version>* pRangeVersions);
 
 ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx);
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex);
-ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchData> batchData,
-                                                        Reference<MasterBatchStatus> batchStatus,
+ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<ControllerBatchData> batchData,
+                                                        Reference<ControllerBatchStatus> batchStatus,
                                                         std::map<UID, RestoreApplierInterface> appliersInterf,
                                                         int batchIndex, NotifiedVersion* finishedBatch);
 ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoaderInterface> loadersInterf,
                                                             int batchIndex);
-ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate);
-ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx);
-ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self);
-ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreMasterData> self);
+ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData> self, bool terminate);
+ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self, Database cx);
+ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self);
+ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> self);
 
-void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
+void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex);
 
-ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx) {
-	state Reference<RestoreMasterData> self = Reference<RestoreMasterData>(new RestoreMasterData());
+ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
+	state Reference<RestoreControllerData> self = Reference<RestoreControllerData>(new RestoreControllerData());
 	state ActorCollectionNoErrors actors;
 
 	try {
-		// recruitRestoreRoles must come after masterWorker has finished collectWorkerInterface
-		wait(recruitRestoreRoles(masterWorker, self));
+		// recruitRestoreRoles must come after controllerWorker has finished collectWorkerInterface
+		wait(recruitRestoreRoles(controllerWorker, self));
 
 		actors.add(updateHeartbeatTime(self));
 		actors.add(checkRolesLiveness(self));
 		actors.add(updateProcessMetrics(self));
-		actors.add(traceProcessMetrics(self, "RestoreMaster"));
+		actors.add(traceProcessMetrics(self, "RestoreController"));
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
-			TraceEvent(SevError, "FastRestoreMasterStart").detail("Reason", "Unexpected unhandled error").error(e);
+			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
 		}
 	}
 
 	return Void();
 }
 
-// RestoreWorker that has restore master role: Recruite a role for each worker
-ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker,
-                                       Reference<RestoreMasterData> masterData) {
+// RestoreWorker that has restore controller role: Recruite a role for each worker
+ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWorker,
+                                       Reference<RestoreControllerData> controllerData) {
 	state int nodeIndex = 0;
 	state RestoreRole role = RestoreRole::Invalid;
 
-	TraceEvent("FastRestoreMaster", masterData->id())
-	    .detail("RecruitRestoreRoles", masterWorker->workerInterfaces.size())
+	TraceEvent("FastRestoreController", controllerData->id())
+	    .detail("RecruitRestoreRoles", controllerWorker->workerInterfaces.size())
 	    .detail("NumLoaders", SERVER_KNOBS->FASTRESTORE_NUM_LOADERS)
 	    .detail("NumAppliers", SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
-	ASSERT(masterData->loadersInterf.empty() && masterData->appliersInterf.empty());
+	ASSERT(controllerData->loadersInterf.empty() && controllerData->appliersInterf.empty());
 
-	ASSERT(masterData.isValid());
+	ASSERT(controllerData.isValid());
 	ASSERT(SERVER_KNOBS->FASTRESTORE_NUM_LOADERS > 0 && SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS > 0);
 	// We assign 1 role per worker for now
 	ASSERT(SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS <=
-	       masterWorker->workerInterfaces.size());
+	       controllerWorker->workerInterfaces.size());
 
 	// Assign a role to each worker
 	std::vector<std::pair<UID, RestoreRecruitRoleRequest>> requests;
-	for (auto& workerInterf : masterWorker->workerInterfaces) {
+	for (auto& workerInterf : controllerWorker->workerInterfaces) {
 		if (nodeIndex >= 0 && nodeIndex < SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS) {
 			// [0, numApplier) are appliers
 			role = RestoreRole::Applier;
@@ -126,36 +127,36 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> masterWorker
 			break;
 		}
 
-		TraceEvent("FastRestoreMaster", masterData->id()).detail("WorkerNode", workerInterf.first);
+		TraceEvent("FastRestoreController", controllerData->id()).detail("WorkerNode", workerInterf.first);
 		requests.emplace_back(workerInterf.first, RestoreRecruitRoleRequest(role, nodeIndex));
 		nodeIndex++;
 	}
 
 	state std::vector<RestoreRecruitRoleReply> replies;
-	wait(getBatchReplies(&RestoreWorkerInterface::recruitRole, masterWorker->workerInterfaces, requests, &replies));
+	wait(getBatchReplies(&RestoreWorkerInterface::recruitRole, controllerWorker->workerInterfaces, requests, &replies));
 	for (auto& reply : replies) {
 		if (reply.role == RestoreRole::Applier) {
 			ASSERT_WE_THINK(reply.applier.present());
-			masterData->appliersInterf[reply.applier.get().id()] = reply.applier.get();
+			controllerData->appliersInterf[reply.applier.get().id()] = reply.applier.get();
 		} else if (reply.role == RestoreRole::Loader) {
 			ASSERT_WE_THINK(reply.loader.present());
-			masterData->loadersInterf[reply.loader.get().id()] = reply.loader.get();
+			controllerData->loadersInterf[reply.loader.get().id()] = reply.loader.get();
 		} else {
-			TraceEvent(SevError, "FastRestoreMaster").detail("RecruitRestoreRolesInvalidRole", reply.role);
+			TraceEvent(SevError, "FastRestoreController").detail("RecruitRestoreRolesInvalidRole", reply.role);
 		}
 	}
-	TraceEvent("FastRestoreRecruitRestoreRolesDone", masterData->id())
-	    .detail("Workers", masterWorker->workerInterfaces.size())
+	TraceEvent("FastRestoreRecruitRestoreRolesDone", controllerData->id())
+	    .detail("Workers", controllerWorker->workerInterfaces.size())
 	    .detail("RecruitedRoles", replies.size());
 
 	return Void();
 }
 
-ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterData,
+ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreControllerData> controllerData,
                                             KeyRangeMap<Version>* pRangeVersions) {
-	ASSERT(masterData.isValid());
-	ASSERT(!masterData->loadersInterf.empty());
-	RestoreSysInfo sysInfo(masterData->appliersInterf);
+	ASSERT(controllerData.isValid());
+	ASSERT(!controllerData->loadersInterf.empty());
+	RestoreSysInfo sysInfo(controllerData->appliersInterf);
 	// Construct serializable KeyRange versions
 	Standalone<VectorRef<std::pair<KeyRangeRef, Version>>> rangeVersionsVec;
 	auto ranges = pRangeVersions->ranges();
@@ -170,20 +171,20 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterD
 		    .detail("RangeVersion", r->value());
 	}
 	std::vector<std::pair<UID, RestoreSysInfoRequest>> requests;
-	for (auto& loader : masterData->loadersInterf) {
+	for (auto& loader : controllerData->loadersInterf) {
 		requests.emplace_back(loader.first, RestoreSysInfoRequest(sysInfo, rangeVersionsVec));
 	}
 
-	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoaders", masterData->id())
-	    .detail("Loaders", masterData->loadersInterf.size());
-	wait(sendBatchRequests(&RestoreLoaderInterface::updateRestoreSysInfo, masterData->loadersInterf, requests));
-	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoadersDone", masterData->id())
-	    .detail("Loaders", masterData->loadersInterf.size());
+	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoaders", controllerData->id())
+	    .detail("Loaders", controllerData->loadersInterf.size());
+	wait(sendBatchRequests(&RestoreLoaderInterface::updateRestoreSysInfo, controllerData->loadersInterf, requests));
+	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoadersDone", controllerData->id())
+	    .detail("Loaders", controllerData->loadersInterf.size());
 
 	return Void();
 }
 
-// The server of the restore master. It drives the restore progress with the following steps:
+// The server of the restore controller. It drives the restore progress with the following steps:
 // 1) Lock database and clear the normal keyspace
 // 2) Wait on each RestoreRequest, which is sent by RestoreAgent operated by DBA
 // 3) Process each restore request in actor processRestoreRequest;
@@ -192,12 +193,13 @@ ACTOR Future<Void> distributeRestoreSysInfo(Reference<RestoreMasterData> masterD
 // 3.3) Construct requests of which file should be loaded by which loader, and send requests to loaders;
 // 4) After process all restore requests, finish restore by cleaning up the restore related system key
 //    and ask all restore roles to quit.
-ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self, Database cx) {
+ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, Database cx) {
 	state UID randomUID = deterministicRandom()->randomUniqueID();
 	state std::vector<RestoreRequest> restoreRequests = wait(collectRestoreRequests(cx));
 	state int restoreIndex = 0;
 
-	TraceEvent("FastRestoreMasterWaitOnRestoreRequests", self->id()).detail("RestoreRequests", restoreRequests.size());
+	TraceEvent("FastRestoreControllerWaitOnRestoreRequests", self->id())
+	    .detail("RestoreRequests", restoreRequests.size());
 
 	// TODO: Sanity check restoreRequests' key ranges do not overlap
 
@@ -206,10 +208,10 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		for (restoreIndex = 0; restoreIndex < restoreRequests.size(); restoreIndex++) {
 			state RestoreRequest request = restoreRequests[restoreIndex];
 			state KeyRange range = request.range.removePrefix(request.removePrefix).withPrefix(request.addPrefix);
-			TraceEvent("FastRestoreMasterProcessRestoreRequests", self->id())
+			TraceEvent("FastRestoreControllerProcessRestoreRequests", self->id())
 			    .detail("RestoreRequestInfo", request.toString())
 			    .detail("TransformedKeyRange", range);
-			// TODO: Initialize MasterData and all loaders and appliers' data for each restore request!
+			// TODO: Initialize controllerData and all loaders and appliers' data for each restore request!
 			self->resetPerRestoreRequest();
 
 			// clear the key range that will be restored
@@ -225,11 +227,11 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 		}
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
-			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
+			TraceEvent(SevError, "FastRestoreControllerProcessRestoreRequestsFailed", self->id())
 			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString())
 			    .error(e);
 		} else {
-			TraceEvent(SevError, "FastRestoreMasterProcessRestoreRequestsFailed", self->id())
+			TraceEvent(SevError, "FastRestoreControllerProcessRestoreRequestsFailed", self->id())
 			    .detail("RestoreRequests", restoreRequests.size())
 			    .detail("RestoreIndex", restoreIndex)
 			    .error(e);
@@ -239,12 +241,12 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreMasterData> self
 	// Step: Notify all restore requests have been handled by cleaning up the restore keys
 	wait(signalRestoreCompleted(self, cx));
 
-	TraceEvent("FastRestoreMasterRestoreCompleted", self->id());
+	TraceEvent("FastRestoreControllerRestoreCompleted", self->id());
 
 	return Void();
 }
 
-ACTOR static Future<Void> monitorFinishedVersion(Reference<RestoreMasterData> self, RestoreRequest request) {
+ACTOR static Future<Void> monitorFinishedVersion(Reference<RestoreControllerData> self, RestoreRequest request) {
 	loop {
 		TraceEvent("FastRestoreMonitorFinishedVersion", self->id())
 		    .detail("RestoreRequest", request.toString())
@@ -253,7 +255,7 @@ ACTOR static Future<Void> monitorFinishedVersion(Reference<RestoreMasterData> se
 	}
 }
 
-ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> self, Database cx,
+ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerData> self, Database cx,
                                                    RestoreRequest request) {
 	state std::vector<RestoreFileFR> rangeFiles;
 	state std::vector<RestoreFileFR> logFiles;
@@ -319,18 +321,18 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 	for (; versionBatch != versionBatches.end(); versionBatch++) {
 		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM && !releaseVBOutOfOrder) {
 			// Control how many batches can be processed in parallel. Avoid dead lock due to OOM on loaders
-			TraceEvent("FastRestoreMasterDispatchVersionBatches")
+			TraceEvent("FastRestoreControllerDispatchVersionBatches")
 			    .detail("WaitOnRunningVersionBatches", self->runningVersionBatches.get());
 			wait(self->runningVersionBatches.onChange());
 		}
 		int batchIndex = versionBatch->batchIndex;
-		TraceEvent("FastRestoreMasterDispatchVersionBatches")
+		TraceEvent("FastRestoreControllerDispatchVersionBatches")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("BatchSize", versionBatch->size)
 		    .detail("RunningVersionBatches", self->runningVersionBatches.get())
 		    .detail("VersionBatches", versionBatches.size());
-		self->batch[batchIndex] = Reference<MasterBatchData>(new MasterBatchData());
-		self->batchStatus[batchIndex] = Reference<MasterBatchStatus>(new MasterBatchStatus());
+		self->batch[batchIndex] = Reference<ControllerBatchData>(new ControllerBatchData());
+		self->batchStatus[batchIndex] = Reference<ControllerBatchStatus>(new ControllerBatchStatus());
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));
 		// Wait a bit to give the current version batch a head start from the next version batch
 		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_LAUNCH_DELAY));
@@ -338,19 +340,19 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreMasterData> 
 
 	wait(waitForAll(fBatches));
 
-	TraceEvent("FastRestoreMaster").detail("RestoreToVersion", request.targetVersion);
+	TraceEvent("FastRestoreController").detail("RestoreToVersion", request.targetVersion);
 	return request.targetVersion;
 }
 
-ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchData,
-                                             Reference<MasterBatchStatus> batchStatus,
+ACTOR static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batchData,
+                                             Reference<ControllerBatchStatus> batchStatus,
                                              std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex,
                                              Database cx, RestoreRequest request, VersionBatch versionBatch,
                                              bool isRangeFile) {
 	// set is internally sorted
 	std::set<RestoreFileFR>* files = isRangeFile ? &versionBatch.rangeFiles : &versionBatch.logFiles;
 
-	TraceEvent("FastRestoreMasterPhaseLoadFilesStart")
+	TraceEvent("FastRestoreControllerPhaseLoadFilesStart")
 	    .detail("RestoreRequestID", request.randomUid)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FileTypeLoadedInVersionBatch", isRangeFile)
@@ -395,7 +397,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		param.asset.addPrefix = request.addPrefix;
 		param.asset.removePrefix = request.removePrefix;
 
-		TraceEvent("FastRestoreMasterPhaseLoadFiles")
+		TraceEvent("FastRestoreControllerPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("LoadParamIndex", paramIdx)
 		    .detail("LoaderID", loader->first.toString())
@@ -408,7 +410,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		requests.emplace_back(loader->first, RestoreLoadFileRequest(batchIndex, param));
 		// Restore asset should only be loaded exactly once.
 		if (batchStatus->raStatus.find(param.asset) != batchStatus->raStatus.end()) {
-			TraceEvent(SevError, "FastRestoreMasterPhaseLoadFiles")
+			TraceEvent(SevError, "FastRestoreControllerPhaseLoadFiles")
 			    .detail("LoadingParam", param.toString())
 			    .detail("RestoreAssetAlreadyProcessed", batchStatus->raStatus[param.asset]);
 		}
@@ -417,7 +419,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		++loader;
 		++paramIdx;
 	}
-	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreMasterPhaseLoadFiles")
+	TraceEvent(files->size() != paramIdx ? SevError : SevInfo, "FastRestoreControllerPhaseLoadFiles")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Files", files->size())
 	    .detail("LoadParams", paramIdx);
@@ -427,7 +429,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	wait(getBatchReplies(&RestoreLoaderInterface::loadFile, loadersInterf, requests, &replies,
 	                     TaskPriority::RestoreLoaderLoadFiles));
 
-	TraceEvent("FastRestoreMasterPhaseLoadFilesReply")
+	TraceEvent("FastRestoreControllerPhaseLoadFilesReply")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingReplies", replies.size());
 	for (auto& reply : replies) {
@@ -438,15 +440,15 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 		} else if (status == RestoreAssetStatus::Loading && reply.isDuplicated) {
 			// Duplicate request wait on the restore asset to be processed before it replies
 			batchStatus->raStatus[reply.param.asset] = RestoreAssetStatus::Loaded;
-			TraceEvent(SevWarn, "FastRestoreMasterPhaseLoadFilesReply")
+			TraceEvent(SevWarn, "FastRestoreControllerPhaseLoadFilesReply")
 			    .detail("RestoreAsset", reply.param.asset.toString())
 			    .detail("DuplicateRequestArriveEarly", "RestoreAsset should have been processed");
 		} else if (status == RestoreAssetStatus::Loaded && reply.isDuplicated) {
-			TraceEvent(SevDebug, "FastRestoreMasterPhaseLoadFilesReply")
+			TraceEvent(SevDebug, "FastRestoreControllerPhaseLoadFilesReply")
 			    .detail("RestoreAsset", reply.param.asset.toString())
 			    .detail("RequestIgnored", "Loading request was sent more than once");
 		} else {
-			TraceEvent(SevError, "FastRestoreMasterPhaseLoadFilesReply")
+			TraceEvent(SevError, "FastRestoreControllerPhaseLoadFilesReply")
 			    .detail("RestoreAsset", reply.param.asset.toString())
 			    .detail("UnexpectedReply", reply.toString());
 		}
@@ -461,13 +463,13 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 	// Sanity check: all restore assets status should be Loaded
 	for (auto& asset : assets) {
 		if (batchStatus->raStatus[asset] != RestoreAssetStatus::Loaded) {
-			TraceEvent(SevError, "FastRestoreMasterPhaseLoadFilesReply")
+			TraceEvent(SevError, "FastRestoreControllerPhaseLoadFilesReply")
 			    .detail("RestoreAsset", asset.toString())
 			    .detail("UnexpectedStatus", batchStatus->raStatus[asset]);
 		}
 	}
 
-	TraceEvent("FastRestoreMasterPhaseLoadFilesDone")
+	TraceEvent("FastRestoreControllerPhaseLoadFilesDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FileTypeLoadedInVersionBatch", isRangeFile)
 	    .detail("BeginVersion", versionBatch.beginVersion)
@@ -476,11 +478,11 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<MasterBatchData> batchDat
 }
 
 // Ask loaders to send its buffered mutations to appliers
-ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> batchData,
-                                                   Reference<MasterBatchStatus> batchStatus,
+ACTOR static Future<Void> sendMutationsFromLoaders(Reference<ControllerBatchData> batchData,
+                                                   Reference<ControllerBatchStatus> batchStatus,
                                                    std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex,
                                                    bool useRangeFile) {
-	TraceEvent("FastRestoreMasterPhaseSendMutationsFromLoadersStart")
+	TraceEvent("FastRestoreControllerPhaseSendMutationsFromLoadersStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("UseRangeFiles", useRangeFile)
 	    .detail("Loaders", loadersInterf.size());
@@ -496,7 +498,7 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 	wait(getBatchReplies(&RestoreLoaderInterface::sendMutations, loadersInterf, requests, &replies,
 	                     TaskPriority::RestoreLoaderSendMutations));
 
-	TraceEvent("FastRestoreMasterPhaseSendMutationsFromLoadersDone")
+	TraceEvent("FastRestoreControllerPhaseSendMutationsFromLoadersDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("UseRangeFiles", useRangeFile)
 	    .detail("Loaders", loadersInterf.size());
@@ -505,21 +507,21 @@ ACTOR static Future<Void> sendMutationsFromLoaders(Reference<MasterBatchData> ba
 }
 
 // Process a version batch. Phases (loading files, send mutations) should execute in order
-ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMasterData> self, int batchIndex,
+ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreControllerData> self, int batchIndex,
                                                             Database cx, RestoreRequest request,
                                                             VersionBatch versionBatch) {
-	state Reference<MasterBatchData> batchData = self->batch[batchIndex];
-	state Reference<MasterBatchStatus> batchStatus = self->batchStatus[batchIndex];
+	state Reference<ControllerBatchData> batchData = self->batch[batchIndex];
+	state Reference<ControllerBatchStatus> batchStatus = self->batchStatus[batchIndex];
 	state double startTime = now();
 
-	TraceEvent("FastRestoreMasterDispatchVersionBatchesStart", self->id())
+	TraceEvent("FastRestoreControllerDispatchVersionBatchesStart", self->id())
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get());
 
 	self->runningVersionBatches.set(self->runningVersionBatches.get() + 1);
 
-	// In case sampling data takes too much memory on master
+	// In case sampling data takes too much memory on controller
 	wait(isSchedulable(self, batchIndex, __FUNCTION__));
 
 	wait(initializeVersionBatch(self->appliersInterf, self->loadersInterf, batchIndex));
@@ -563,7 +565,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 		self->checkMemory.trigger();
 	}
 
-	TraceEvent("FastRestoreMasterDispatchVersionBatchesDone", self->id())
+	TraceEvent("FastRestoreControllerDispatchVersionBatchesDone", self->id())
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get())
@@ -575,7 +577,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreMas
 // Decide which key range should be taken by which applier
 // Input: samples in batchData
 // Output: rangeToApplier in batchData
-void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
+void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex) {
 	ASSERT(batchData->samplesSize >= 0);
 	// Sanity check: samples should not be used after freed
@@ -584,14 +586,14 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
 	double cumulativeSize = slotSize;
-	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRangesStart")
+	TraceEvent("FastRestoreControllerPhaseCalculateApplierKeyRangesStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingSize", batchData->samplesSize)
 	    .detail("SlotSize", slotSize);
 
 	std::set<Key> keyrangeSplitter; // unique key to split key range for appliers
 	keyrangeSplitter.insert(normalKeys.begin); // First slot
-	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
+	TraceEvent("FastRestoreControllerPhaseCalculateApplierKeyRanges")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("CumulativeSize", cumulativeSize)
 	    .detail("Slot", 0)
@@ -603,7 +605,7 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 			break;
 		}
 		keyrangeSplitter.insert(*lowerBound);
-		TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRanges")
+		TraceEvent("FastRestoreControllerPhaseCalculateApplierKeyRanges")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("CumulativeSize", cumulativeSize)
 		    .detail("Slot", slotIdx++)
@@ -611,12 +613,12 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 		cumulativeSize += slotSize;
 	}
 	if (keyrangeSplitter.size() < numAppliers) {
-		TraceEvent(SevWarnAlways, "FastRestoreMasterPhaseCalculateApplierKeyRanges")
+		TraceEvent(SevWarnAlways, "FastRestoreControllerPhaseCalculateApplierKeyRanges")
 		    .detail("NotAllAppliersAreUsed", keyrangeSplitter.size())
 		    .detail("NumAppliers", numAppliers);
 	} else if (keyrangeSplitter.size() > numAppliers) {
 		bool expected = (keyrangeSplitter.size() == numAppliers + 1);
-		TraceEvent(expected ? SevWarn : SevError, "FastRestoreMasterPhaseCalculateApplierKeyRanges")
+		TraceEvent(expected ? SevWarn : SevError, "FastRestoreControllerPhaseCalculateApplierKeyRanges")
 		    .detail("TooManySlotsThanAppliers", keyrangeSplitter.size())
 		    .detail("NumAppliers", numAppliers)
 		    .detail("SamplingSize", batchData->samplesSize)
@@ -635,7 +637,7 @@ void splitKeyRangeForAppliers(Reference<MasterBatchData> batchData,
 	ASSERT(batchData->rangeToApplier.size() > 0);
 	ASSERT(batchData->sanityCheckApplierKeyRange());
 	batchData->logApplierKeyRange(batchIndex);
-	TraceEvent("FastRestoreMasterPhaseCalculateApplierKeyRangesDone")
+	TraceEvent("FastRestoreControllerPhaseCalculateApplierKeyRangesDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("SamplingSize", batchData->samplesSize)
 	    .detail("SlotSize", slotSize);
@@ -650,7 +652,7 @@ ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database
 	// restoreRequestTriggerKey should already been set
 	loop {
 		try {
-			TraceEvent("FastRestoreMasterPhaseCollectRestoreRequestsWait");
+			TraceEvent("FastRestoreControllerPhaseCollectRestoreRequestsWait");
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -664,12 +666,12 @@ ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database
 			if (restoreRequestValues.size()) {
 				for (auto& it : restoreRequestValues) {
 					restoreRequests.push_back(decodeRestoreRequestValue(it.value));
-					TraceEvent("FastRestoreMasterPhaseCollectRestoreRequests")
+					TraceEvent("FastRestoreControllerPhaseCollectRestoreRequests")
 					    .detail("RestoreRequest", restoreRequests.back().toString());
 				}
 				break;
 			} else {
-				TraceEvent(SevError, "FastRestoreMasterPhaseCollectRestoreRequestsEmptyRequests");
+				TraceEvent(SevError, "FastRestoreControllerPhaseCollectRestoreRequestsEmptyRequests");
 				wait(delay(5.0));
 			}
 		} catch (Error& e) {
@@ -694,7 +696,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		request.targetVersion = desc.maxRestorableVersion.get();
 	}
 
-	TraceEvent("FastRestoreMasterPhaseCollectBackupFilesStart")
+	TraceEvent("FastRestoreControllerPhaseCollectBackupFilesStart")
 	    .detail("TargetVersion", request.targetVersion)
 	    .detail("BackupDesc", desc.toString());
 	if (g_network->isSimulated()) {
@@ -704,7 +706,8 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
 
 	if (!restorable.present()) {
-		TraceEvent(SevWarn, "FastRestoreMasterPhaseCollectBackupFiles").detail("NotRestorable", request.targetVersion);
+		TraceEvent(SevWarn, "FastRestoreControllerPhaseCollectBackupFiles")
+		    .detail("NotRestorable", request.targetVersion);
 		throw restore_missing_data();
 	}
 
@@ -715,22 +718,23 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	std::set<RestoreFileFR> uniqueLogFiles;
 	*minRangeVersion = MAX_VERSION;
 	for (const RangeFile& f : restorable.get().ranges) {
-		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFile", f.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("RangeFile", f.toString());
 		if (f.fileSize <= 0) {
 			continue;
 		}
 		RestoreFileFR file(f);
-		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("RangeFileFR", file.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
+		    .detail("RangeFileFR", file.toString());
 		uniqueRangeFiles.insert(file);
 		*minRangeVersion = std::min(*minRangeVersion, file.version);
 	}
 	for (const LogFile& f : restorable.get().logs) {
-		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("LogFile", f.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFile", f.toString());
 		if (f.fileSize <= 0) {
 			continue;
 		}
 		RestoreFileFR file(f);
-		TraceEvent(SevFRDebugInfo, "FastRestoreMasterPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
+		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
 		logFiles->push_back(file);
 		uniqueLogFiles.insert(file);
 	}
@@ -738,7 +742,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	rangeFiles->assign(uniqueRangeFiles.begin(), uniqueRangeFiles.end());
 	logFiles->assign(uniqueLogFiles.begin(), uniqueLogFiles.end());
 
-	TraceEvent("FastRestoreMasterPhaseCollectBackupFilesDone")
+	TraceEvent("FastRestoreControllerPhaseCollectBackupFilesDone")
 	    .detail("BackupDesc", desc.toString())
 	    .detail("RangeFiles", rangeFiles->size())
 	    .detail("LogFiles", logFiles->size());
@@ -749,12 +753,12 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 // set (beginKey, endKey) and file->version to pRangeVersions
 ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions, RestoreFileFR* file,
                                              Reference<IBackupContainer> bc) {
-	TraceEvent("FastRestoreMasterDecodeRangeVersion").detail("File", file->toString());
+	TraceEvent("FastRestoreControllerDecodeRangeVersion").detail("File", file->toString());
 	RangeFile rangeFile = { file->version, (uint32_t)file->blockSize, file->fileName, file->fileSize };
 
 	// First and last key are the range for this file: endKey is exclusive
 	KeyRange fileRange = wait(bc->getSnapshotFileKeyRange(rangeFile));
-	TraceEvent("FastRestoreMasterInsertRangeVersion")
+	TraceEvent("FastRestoreControllerInsertRangeVersion")
 	    .detail("DecodedRangeFile", file->fileName)
 	    .detail("KeyRange", fileRange)
 	    .detail("Version", file->version);
@@ -818,7 +822,7 @@ ACTOR static Future<Void> clearDB(Database cx) {
 
 ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface> appliersInterf,
                                                  std::map<UID, RestoreLoaderInterface> loadersInterf, int batchIndex) {
-	TraceEvent("FastRestoreMasterPhaseInitVersionBatchForAppliersStart")
+	TraceEvent("FastRestoreControllerPhaseInitVersionBatchForAppliersStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Appliers", appliersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToAppliers;
@@ -827,7 +831,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	}
 	wait(sendBatchRequests(&RestoreApplierInterface::initVersionBatch, appliersInterf, requestsToAppliers));
 
-	TraceEvent("FastRestoreMasterPhaseInitVersionBatchForLoaders")
+	TraceEvent("FastRestoreControllerPhaseInitVersionBatchForLoaders")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Loaders", loadersInterf.size());
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
@@ -836,18 +840,18 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, loadersInterf, requestsToLoaders));
 
-	TraceEvent("FastRestoreMasterPhaseInitVersionBatchForLoadersDone").detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreControllerPhaseInitVersionBatchForLoadersDone").detail("BatchIndex", batchIndex);
 	return Void();
 }
 
 // Ask each applier to apply its received mutations to DB
-// NOTE: Master cannot start applying mutations at batchIndex until all appliers have applied for (batchIndex - 1)
+// NOTE: Controller cannot start applying mutations at batchIndex until all appliers have applied for (batchIndex - 1)
 //       because appliers at different batchIndex may have overlapped key ranges.
-ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchData> batchData,
-                                                        Reference<MasterBatchStatus> batchStatus,
+ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<ControllerBatchData> batchData,
+                                                        Reference<ControllerBatchStatus> batchStatus,
                                                         std::map<UID, RestoreApplierInterface> appliersInterf,
                                                         int batchIndex, NotifiedVersion* finishedBatch) {
-	TraceEvent("FastRestoreMasterPhaseApplyToDBStart")
+	TraceEvent("FastRestoreControllerPhaseApplyToDBStart")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FinishedBatch", finishedBatch->get());
 
@@ -857,7 +861,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		// Prepare the applyToDB requests
 		std::vector<std::pair<UID, RestoreVersionBatchRequest>> requests;
 
-		TraceEvent("FastRestoreMasterPhaseApplyToDBRunning")
+		TraceEvent("FastRestoreControllerPhaseApplyToDBRunning")
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Appliers", appliersInterf.size());
 		for (auto& applier : appliersInterf) {
@@ -873,7 +877,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 			batchData->applyToDB = getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests,
 			                                       &replies, TaskPriority::RestoreApplierWriteDB);
 		} else {
-			TraceEvent(SevError, "FastRestoreMasterPhaseApplyToDB")
+			TraceEvent(SevError, "FastRestoreControllerPhaseApplyToDB")
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Attention", "Actor should not be invoked twice for the same batch index");
 		}
@@ -887,7 +891,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 			if (batchStatus->applyStatus[reply.id] == RestoreApplyStatus::Applying) {
 				batchStatus->applyStatus[reply.id] = RestoreApplyStatus::Applied;
 				if (reply.isDuplicated) {
-					TraceEvent(SevWarn, "FastRestoreMasterPhaseApplyToDB")
+					TraceEvent(SevWarn, "FastRestoreControllerPhaseApplyToDB")
 					    .detail("Applier", reply.id)
 					    .detail("DuplicateRequestReturnEarlier", "Apply db request should have been processed");
 				}
@@ -895,7 +899,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		}
 		for (auto& applier : appliersInterf) {
 			if (batchStatus->applyStatus[applier.first] != RestoreApplyStatus::Applied) {
-				TraceEvent(SevError, "FastRestoreMasterPhaseApplyToDB")
+				TraceEvent(SevError, "FastRestoreControllerPhaseApplyToDB")
 				    .detail("Applier", applier.first)
 				    .detail("ApplyStatus", batchStatus->applyStatus[applier.first]);
 			}
@@ -903,7 +907,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 		finishedBatch->set(batchIndex);
 	}
 
-	TraceEvent("FastRestoreMasterPhaseApplyToDBDone")
+	TraceEvent("FastRestoreControllerPhaseApplyToDBDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FinishedBatch", finishedBatch->get());
 
@@ -913,22 +917,22 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<MasterBatchDat
 // Notify loaders that all data in the version batch has been applied to DB.
 ACTOR static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoaderInterface> loadersInterf,
                                                             int batchIndex) {
-	TraceEvent("FastRestoreMasterPhaseNotifyLoadersVersionBatchFinishedStart").detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreControllerPhaseNotifyLoadersVersionBatchFinishedStart").detail("BatchIndex", batchIndex);
 	std::vector<std::pair<UID, RestoreVersionBatchRequest>> requestsToLoaders;
 	for (auto& loader : loadersInterf) {
 		requestsToLoaders.emplace_back(loader.first, RestoreVersionBatchRequest(batchIndex));
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::finishVersionBatch, loadersInterf, requestsToLoaders));
-	TraceEvent("FastRestoreMasterPhaseNotifyLoadersVersionBatchFinishedDone").detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreControllerPhaseNotifyLoadersVersionBatchFinishedDone").detail("BatchIndex", batchIndex);
 
 	return Void();
 }
 
 // Ask all loaders and appliers to perform housecleaning at the end of a restore request
 // Terminate those roles if terminate = true
-ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> self, bool terminate = false) {
+ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData> self, bool terminate = false) {
 	std::vector<std::pair<UID, RestoreFinishRequest>> requests;
-	TraceEvent("FastRestoreMasterPhaseNotifyRestoreCompletedStart");
+	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedStart");
 	for (auto& loader : self->loadersInterf) {
 		requests.emplace_back(loader.first, RestoreFinishRequest(terminate));
 	}
@@ -942,19 +946,19 @@ ACTOR static Future<Void> notifyRestoreCompleted(Reference<RestoreMasterData> se
 	Future<Void> endAppliers =
 	    sendBatchRequests(&RestoreApplierInterface::finishRestore, self->appliersInterf, requests);
 
-	// If terminate = true, loaders and appliers exits immediately after it receives the request. Master may not receive
-	// acks.
+	// If terminate = true, loaders and appliers exits immediately after it receives the request. Controller may not
+	// receive acks.
 	if (!terminate) {
 		wait(endLoaders && endAppliers);
 	}
 
-	TraceEvent("FastRestoreMasterPhaseNotifyRestoreCompletedDone");
+	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedDone");
 
 	return Void();
 }
 
 // Register the restoreRequestDoneKey to signal the end of restore
-ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> self, Database cx) {
+ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self, Database cx) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
 	wait(notifyRestoreCompleted(self, true)); // notify workers the restore has completed
@@ -977,13 +981,13 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreMasterData> se
 		}
 	}
 
-	TraceEvent("FastRestoreMasterAllRestoreCompleted");
+	TraceEvent("FastRestoreControllerAllRestoreCompleted");
 
 	return Void();
 }
 
-// Update the most recent time when master receives hearbeat from each loader and applier
-ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self) {
+// Update the most recent time when controller receives hearbeat from each loader and applier
+ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
 	int numRoles = self->loadersInterf.size() + self->appliersInterf.size();
 	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
@@ -1030,7 +1034,7 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreMasterData> self)
 }
 
 // Check if a restore role dies or disconnected
-ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreMasterData> self) {
+ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> self) {
 	loop {
 		wait(delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_MAX_DELAY));
 		for (auto& role : self->rolesHeartBeatTime) {
