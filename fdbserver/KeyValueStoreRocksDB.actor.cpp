@@ -34,19 +34,6 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 const StringRef SPECIAL_KEYSPACE = LiteralStringRef("\xff");
 
-class AssertingWriteBatch : public rocksdb::WriteBatch {
-public:
-	rocksdb::Status Put(KeyValueRef kv) {
-		ASSERT(kv.key < SPECIAL_KEYSPACE);
-		return WriteBatch::Put(toSlice(kv.key), toSlice(kv.value));
-	}
-
-	rocksdb::Status DeleteRange(KeyRangeRef keyRange) {
-		ASSERT(keyRange.begin < SPECIAL_KEYSPACE);
-		return WriteBatch::DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
-	}
-};
-
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
@@ -95,7 +82,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
-			std::unique_ptr<AssertingWriteBatch> batchToCommit;
+			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -270,7 +257,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
-	std::unique_ptr<AssertingWriteBatch> writeBatch;
+	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	IKeyValueStore* sqlLite;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id, IKeyValueStore* sqlLite)
@@ -328,9 +315,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return;
 		}
 		if (writeBatch == nullptr) {
-			writeBatch.reset(new AssertingWriteBatch());
+			writeBatch.reset(new rocksdb::WriteBatch());
 		}
-		writeBatch->Put(kv);
+		writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
 	}
 
 	void clear(KeyRangeRef keyRange, const Arena* a) override {
@@ -344,10 +331,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (writeBatch == nullptr) {
-			writeBatch.reset(new AssertingWriteBatch());
+			writeBatch.reset(new rocksdb::WriteBatch());
 		}
 
-		writeBatch->DeleteRange(keyRange);
+		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
 	}
 
 	Future<Void> commit(bool b) override {
@@ -462,7 +449,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-	std::cout << "We created the Rock!\n";
 	return new RocksDBKeyValueStore(path, logID,
 	                                keyValueStoreSQLite(std::string(path) + "/sqlite", logID,
 	                                                    KeyValueStoreType::SSD_BTREE_V2, checkChecksums,
