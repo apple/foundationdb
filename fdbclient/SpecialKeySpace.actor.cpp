@@ -415,12 +415,12 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		}
 		++iter;
 	}
-	TraceEvent(SevInfo, "SKSCommitActor").detail("WriteModulesSize", writeModulePtrs.size());
 	state std::set<SpecialKeyRangeRWImpl*>::const_iterator it;
 	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 		Optional<std::string> msg = wait((*it)->commit(ryw));
 		if (msg.present()) {
 			ryw->setSpecialKeySpaceErrorMsg(msg.get());
+			TraceEvent(SevDebug, "SpecialKeySpaceManagemetnAPIError").detail("Reason", msg.get());
 			throw special_keys_management_api_failure();
 		}
 	}
