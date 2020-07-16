@@ -21,6 +21,3 @@ connectionFailuresDisableDuration=60
     waitForVersion=true
     allowFaultInjection=false
     killDc=false
-
-connectionFailuresDisableDuration=60
-minimumReplication=2
