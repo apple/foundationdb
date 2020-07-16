@@ -795,13 +795,9 @@ public:
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) {
-		//TraceEvent("MXTestPromiseCopy").detail("RHS", (long long) rhs.sav).detail("MySAV",(long long) sav);
 		sav->addPromiseRef();
 	}
-	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
-		//TraceEvent("MXTestPromiseMove");
-		rhs.sav = 0; // Should be nullptr
-	}
+	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
