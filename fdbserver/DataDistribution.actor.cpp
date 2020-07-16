@@ -667,21 +667,47 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	~DDTeamCollection() {
-		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is held by the actor
-		// It also ensures that the trackers are done fiddling with healthyTeamCount before we free this
+		TraceEvent("DDTeamCollectionDestroyed", distributorId).detail("Primary", primary);
+		// Other teamCollections also hold pointer to this teamCollection;
+		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
+		for (int i = 0; i < teamCollections.size(); i++) {
+			if (teamCollections[i] != nullptr && teamCollections[i] != this) {
+				for (int j = 0; j < teamCollections[i]->teamCollections.size(); ++j) {
+					if (teamCollections[i]->teamCollections[j] == this) {
+						teamCollections[i]->teamCollections[j] = nullptr;
+					}
+				}
+			}
+		}
+		// Team tracker has pointer to DDTeamCollections both in primary and remote.
+		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is
+		// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
+		// this
 		for(int i=0; i < teams.size(); i++) {
 			teams[i]->tracker.cancel();
 		}
+		TraceEvent("DDTeamCollectionDestroyed", distributorId)
+		    .detail("Primary", primary)
+		    .detail("TeamTrackerDestroyed", teams.size());
 		for(int i=0; i < badTeams.size(); i++) {
 			badTeams[i]->tracker.cancel();
 		}
+		TraceEvent("DDTeamCollectionDestroyed", distributorId)
+		    .detail("Primary", primary)
+		    .detail("BadTeamTrackerDestroyed", badTeams.size());
 		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be stopped
 		//  before the server_status map to which it has a pointer, is destroyed.
 		for(auto it = server_info.begin(); it != server_info.end(); ++it) {
 			it->second->tracker.cancel();
 			it->second->collection = nullptr;
 		}
+		TraceEvent("DDTeamCollectionDestroyed", distributorId)
+		    .detail("Primary", primary)
+		    .detail("ServerTrackerDestroyed", server_info.size());
 		teamBuilder.cancel();
+		TraceEvent("DDTeamCollectionDestroyed", distributorId)
+		    .detail("Primary", primary)
+		    .detail("TeamBuilderDestroyed", server_info.size());
 	}
 
 	void addLaggingStorageServer(Key zoneId) {
@@ -1331,12 +1357,21 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		TraceEvent("ServerInfo", distributorId).detail("Size", server_info.size());
 		for (auto& server : server_info) {
 			TraceEvent("ServerInfo", distributorId)
-			    .detail("ServerInfoIndex", i++)
-			    .detail("ServerID", server.first.toString())
-			    .detail("ServerTeamOwned", server.second->teams.size())
-			    .detail("MachineID", server.second->machine->machineID.contents().toString())
-			    .detail("StoreType", server.second->storeType.toString())
-			    .detail("InDesiredDC", server.second->inDesiredDC);
+			    .detail("ServerInfoIndex", i)
+			    .detail("ServerID", server.first.toString());
+			if (!server.second.isValid()) {
+				TraceEvent("ServerInfoInvalid", distributorId)
+				    .detail("ServerInfoIndex", i++)
+				    .detail("ServerID", server.first.toString());
+			} else {
+				TraceEvent("ServerInfo", distributorId)
+				    .detail("ServerInfoIndex", i++)
+				    .detail("ServerID", server.first.toString())
+				    .detail("ServerTeamOwned", server.second->teams.size())
+				    .detail("MachineID", server.second->machine->machineID.contents().toString())
+				    .detail("StoreType", server.second->storeType.toString())
+				    .detail("InDesiredDC", server.second->inDesiredDC);
+			}
 		}
 		for (auto& server : server_info) {
 			const UID& uid = server.first;
@@ -1424,8 +1459,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceAllInfo(bool shouldPrint = false) {
 
 		if (!shouldPrint) return;
+		// Record all team collections IDs
+		for (int i = 0; i < teamCollections.size(); ++i) {
+			TraceEvent("DDTCTraceAllInfo", distributorId)
+			    .detail("TeamCollectionIndex", i)
+			    .detail("TeamCollectionID", teamCollections[i]->distributorId)
+			    .detail("Primary", teamCollections[i]->primary);
+		}
 
-		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
+		TraceEvent("DDTCTraceAllInfo", distributorId).detail("Primary", primary);
 		traceConfigInfo();
 		traceServerInfo();
 		traceServerTeamInfo();
@@ -2957,6 +2999,18 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 	try {
 		loop {
+			TraceEvent("MXLoopStart");
+			// Always check if all teamCollections are valid, since the teamTracker can be triggered between
+			// after a DDTeamCollection was destroyed and before the other DDTeamCollection is destroyed
+			for (int i = 0; i < self->teamCollections.size(); ++i) {
+				TraceEvent("TeamTracker", self->distributorId)
+				    .detail("Primary", self->primary)
+				    .detail("TeamCollectionIndex", i)
+				    .detail("TeamCollectionPtr", (long long)self->teamCollections[i]);
+				if (self->teamCollections[i] == nullptr) {
+					throw actor_cancelled();
+				}
+			}
 			if(logTeamEvents) {
 				TraceEvent("TeamHealthChangeDetected", self->distributorId)
 					.detail("Team", team->getDesc())
@@ -2973,6 +3027,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			for (const UID& uid : team->getServerIDs()) {
 				change.push_back( self->server_status.onChange( uid ) );
 				auto& status = self->server_status.get(uid);
+				ASSERT(status.initialized);
 				if (!status.isFailed) {
 					serversLeft++;
 				}
@@ -3003,18 +3058,18 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			bool optimal = team->isOptimal() && healthy;
 			bool containsFailed = teamContainsFailedServer(self, team);
 			bool recheck = !healthy && (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams->get()) || containsFailed);
-			// TraceEvent("TeamHealthChangeDetected", self->distributorId)
-			//     .detail("Team", team->getDesc())
-			//     .detail("ServersLeft", serversLeft)
-			//     .detail("LastServersLeft", lastServersLeft)
-			//     .detail("AnyUndesired", anyUndesired)
-			//     .detail("LastAnyUndesired", lastAnyUndesired)
-			//     .detail("AnyWrongConfiguration", anyWrongConfiguration)
-			//     .detail("LastWrongConfiguration", lastWrongConfiguration)
-			//     .detail("Recheck", recheck)
-			//     .detail("BadTeam", badTeam)
-			//     .detail("LastZeroHealthy", lastZeroHealthy)
-			//     .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
+			TraceEvent("TeamHealthChangeDetected", self->distributorId)
+			    .detail("Team", team->getDesc())
+			    .detail("ServersLeft", serversLeft)
+			    .detail("LastServersLeft", lastServersLeft)
+			    .detail("AnyUndesired", anyUndesired)
+			    .detail("LastAnyUndesired", lastAnyUndesired)
+			    .detail("AnyWrongConfiguration", anyWrongConfiguration)
+			    .detail("LastWrongConfiguration", lastWrongConfiguration)
+			    .detail("Recheck", recheck)
+			    .detail("BadTeam", badTeam)
+			    .detail("LastZeroHealthy", lastZeroHealthy)
+			    .detail("ZeroHealthyTeam", self->zeroHealthyTeams->get());
 
 			lastReady = self->initialFailureReactionDelay.isReady();
 			lastZeroHealthy = self->zeroHealthyTeams->get();
@@ -3119,33 +3174,72 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
 				if ((self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get()) || containsFailed) {
+					TraceEvent("MX1HasChange", self->distributorId).detail("ContainFailed", containsFailed);
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
-
+					TraceEvent("MX1HasChange", self->distributorId).detail("Shards", shards.size());
 					for(int i=0; i<shards.size(); i++) {
+						TraceEvent("MX1HasChange", self->distributorId).detail("Shard", i);
 						// Make it high priority to move keys off failed server or else RelocateShards may never be addressed
 						int maxPriority = containsFailed ? SERVER_KNOBS->PRIORITY_TEAM_FAILED : team->getPriority();
 						// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 						// so we need to recalculate the shard's priority
+						TraceEvent("MX1HasChange", self->distributorId)
+						    .detail("Shard", i)
+						    .detail("Priority", maxPriority);
 						if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
-							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
+							std::pair<vector<ShardsAffectedByTeamFailure::Team>,
+							          vector<ShardsAffectedByTeamFailure::Team>>
+							    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
+							TraceEvent("MX1HasChange", self->distributorId)
+							    .detail("Teams", teams.first.size() + teams.second.size())
+							    .detail("First", teams.first.size())
+							    .detail("Second", teams.second.size());
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
+								TraceEvent("MX1HasChange", self->distributorId).detail("IndexJ", j);
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
 								if( !t.servers.size() ) {
+									TraceEvent("MX1HasChange", self->distributorId).detail("MaxPriority", maxPriority);
 									maxPriority = std::max( maxPriority, SERVER_KNOBS->PRIORITY_POPULATE_REGION );
+									TraceEvent("MX1HasChange", self->distributorId)
+									    .detail("MaxPriorityNew", maxPriority);
 									break;
 								}
 
+								TraceEvent("MX1HasChange", self->distributorId)
+								    .detail("IndexJ", j)
+								    .detail("TPrimary", t.primary)
+								    .detail("TCs", self->teamCollections.size());
 								auto tc = self->teamCollections[t.primary ? 0 : 1];
 								ASSERT(tc->primary == t.primary);
+								TraceEvent("MX1HasChangeTC", self->distributorId)
+								    .detail("IndexJ", j)
+								    .detail("TPrimary", t.primary)
+								    .detail("TCs", self->teamCollections.size());
+								TraceEvent("MX1HasChangeTC", self->distributorId)
+								    .detail("TCId", tc->distributorId)
+								    .detail("Server0", t.servers[0]);
+								self->traceAllInfo(true);
+								tc->traceAllInfo(
+								    true); // Note: TeamCollection with same id is marked differently for primary
 								if( tc->server_info.count( t.servers[0] ) ) {
+									TraceEvent("MX1TeamTracker", self->distributorId);
 									auto& info = tc->server_info[t.servers[0]];
+									TraceEvent("MX1TeamTracker", self->distributorId)
+									    .detail("Server", info->id)
+									    .detail("ServerTeams", info->teams.size());
 
 									bool found = false;
 									for( int k = 0; k < info->teams.size(); k++ ) {
+										TraceEvent("MX1TeamTracker", self->distributorId)
+										    .detail("Server", info->id)
+										    .detail("ServerTeam", k)
+										    .detail("TeamMembers", info->teams[k]->getServerIDsStr());
 										if( info->teams[k]->getServerIDs() == t.servers ) {
 											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
 											found = true;
+											TraceEvent("MX1TeamTrackerFoundTeam", self->distributorId)
+											    .detail("MaxPriority", maxPriority);
 											break;
 										}
 									}
@@ -3158,6 +3252,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										maxPriority =
 										    std::max<int>(maxPriority, redundantTeam ? SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT
 										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
+										TraceEvent("MX1TeamTrackerNotFoundTeam", self->distributorId)
+										    .detail("MaxPriority", maxPriority);
 									}
 								} else {
 									TEST(true); // A removed server is still associated with a team in SABTF
@@ -3165,19 +3261,21 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 							}
 						}
 
+						TraceEvent("MX1Shard", self->distributorId).detail("Shards", shards.size()).detail("Indexi", i);
 						RelocateShard rs;
 						rs.keys = shards[i];
 						rs.priority = maxPriority;
 
 						self->output.send(rs);
-						if(deterministicRandom()->random01() < 0.01) {
+						if (deterministicRandom()->random01() < 1) {
 							TraceEvent("SendRelocateToDDQx100", self->distributorId)
-								.detail("Team", team->getDesc())
-								.detail("KeyBegin", rs.keys.begin)
-								.detail("KeyEnd", rs.keys.end)
-								.detail("Priority", rs.priority)
-								.detail("TeamFailedMachines", team->size() - serversLeft)
-								.detail("TeamOKMachines", serversLeft);
+							    .detail("Primary", self->primary)
+							    .detail("Team", team->getDesc())
+							    .detail("KeyBegin", rs.keys.begin)
+							    .detail("KeyEnd", rs.keys.end)
+							    .detail("Priority", rs.priority)
+							    .detail("TeamFailedMachines", team->size() - serversLeft)
+							    .detail("TeamOKMachines", serversLeft);
 						}
 					}
 				} else {
@@ -3185,15 +3283,21 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent("TeamHealthNotReady", self->distributorId).detail("HealthyTeamCount", self->healthyTeamCount);
 					}
 				}
+				TraceEvent("MXHasChangeOrNot");
 			}
 
 			// Wait for any of the machines to change status
 			wait( quorum( change, 1 ) );
+			TraceEvent("MXQuorumChanged");
 			wait( yield() );
+			TraceEvent("MXYield");
 		}
 	} catch(Error& e) {
 		if(logTeamEvents) {
-			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
+			TraceEvent("TeamTrackerStopping", self->distributorId)
+			    .detail("Primary", self->primary)
+			    .detail("Team", team->getDesc())
+			    .detail("Priority", team->getPriority());
 		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {
@@ -3201,7 +3305,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			ASSERT( self->healthyTeamCount >= 0 );
 
 			if( self->healthyTeamCount == 0 ) {
-				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
+				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+				    .detail("Primary", self->primary)
+				    .detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
 			}
 		}
@@ -3852,6 +3958,9 @@ ACTOR Future<Void> storageServerTracker(
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
 			errorOut.sendError(e);
+		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
+		    .detail("Primary", self->primary)
+		    .detail("Server", server->id);
 		throw;
 	}
 }
@@ -4637,6 +4746,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 		}
 		catch( Error &e ) {
 			state Error err = e;
+			TraceEvent("DataDistributionErrorDestroyTeamCollection").error(e);
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();

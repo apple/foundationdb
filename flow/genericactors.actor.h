@@ -613,7 +613,12 @@ protected:
 		Promise<Void> noDestroy = trigger;  // The send(Void()) or even V::operator= could cause destroyOnCancel,
 			                                // which could undo the change to i.value here.  Keeping the promise reference count >= 2
 			                                // prevents destroyOnCancel from erasing anything from the map.
-
+		if (noDestroy.getPromiseReferenceCount() < 2) {
+			TraceEvent(SevError, "MXPromiseIncorrectMove")
+			    .detail("PromiseCount", noDestroy.getPromiseReferenceCount())
+			    .detail("FutureCount", noDestroy.getFutureReferenceCount());
+		}
+		ASSERT_WE_THINK(trigger.isValid()); // = should not move the variable trigger
 		if (v == defaultValue)
 			items.erase(k);
 		else
