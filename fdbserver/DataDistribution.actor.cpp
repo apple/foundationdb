@@ -2996,10 +2996,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			// because the teamTracker can be triggered after a DDTeamCollection was destroyed and
 			// before the other DDTeamCollection is destroyed.
 			for (int i = 0; i < self->teamCollections.size(); ++i) {
-				TraceEvent("TeamTracker", self->distributorId)
-				    .detail("Primary", self->primary)
-				    .detail("TeamCollectionIndex", i)
-				    .detail("TeamCollectionPtr", (long long)self->teamCollections[i]);
 				if (self->teamCollections[i] == nullptr) {
 					throw actor_cancelled();
 				}
