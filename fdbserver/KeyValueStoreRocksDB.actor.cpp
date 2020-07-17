@@ -338,7 +338,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> commit(bool b) override {
-		// TODO: We probably should check if there is anything to commit to SQLite.
 		auto sf = sqlLite->commit(b);
 
 		// If there is nothing to write, don't write.
