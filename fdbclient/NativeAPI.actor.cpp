@@ -898,7 +898,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(
 			SpecialKeySpace::MODULE::FAILURE,
 			std::make_unique<SingleSpecialKeyImpl>(
-				LiteralStringRef("\xff\xff/failure"),
+				SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::FAILURE).begin,
 				[](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 					if (ryw->getSpecialKeySpaceErrorMsg().present())
 						return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
@@ -909,7 +909,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
 		std::make_unique<ManagementCommandsOptionsImpl>(KeyRangeRef(
 			LiteralStringRef("options/"), LiteralStringRef("options0")
-		).withPrefix(managementApiRange.begin)), true);
+		).withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)), true);
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
 		std::make_unique<ExcludeServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("exclude")), true);
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
@@ -917,7 +917,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
 		std::make_unique<ExclusionInProgressRangeImpl>(KeyRangeRef(
 			LiteralStringRef("inProgressExclusion/"), LiteralStringRef("inProgressExclusion0")
-		).withPrefix(managementApiRange.begin)));
+		).withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
