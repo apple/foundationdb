@@ -146,7 +146,6 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
 	init( MAX_PACKET_SEND_BYTES,                        128 * 1024 );
-	init( MAX_PACKET_SEND_BYTES_BEFORE_YIELD,            64 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
