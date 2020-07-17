@@ -87,9 +87,9 @@ void* FastAllocator<Size>::freelist = nullptr;
 typedef void (*ThreadInitFunction)();
 
 ThreadInitFunction threadInitFunction = 0;  // See ThreadCleanup.cpp in the C binding
-void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) { 
+void setFastAllocatorThreadInitFunction(ThreadInitFunction f) {
 	ASSERT( !threadInitFunction );
-	threadInitFunction = f; 
+	threadInitFunction = f;
 }
 
 std::atomic<int64_t> g_hugeArenaMemory(0);
@@ -224,25 +224,35 @@ struct FastAllocator<Size>::GlobalData {
 	long long totalMemory;
 	long long partialMagazineUnallocatedMemory;
 	long long activeThreads;
-	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) { 
+	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) {
 		InitializeCriticalSection(&mutex);
 	}
 };
 
 template <int Size>
 long long FastAllocator<Size>::getTotalMemory() {
-	return globalData()->totalMemory;
+	EnterCriticalSection(&globalData()->mutex);
+	long long total = globalData()->totalMemory;
+	LeaveCriticalSection(&globalData()->mutex);
+	return total;
 }
 
 // This does not include memory held by various threads that's available for allocation
 template <int Size>
 long long FastAllocator<Size>::getApproximateMemoryUnused() {
-	return globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
+	EnterCriticalSection(&globalData()->mutex);
+	long long unused =
+	    globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
+	LeaveCriticalSection(&globalData()->mutex);
+	return unused;
 }
 
 template <int Size>
 long long FastAllocator<Size>::getActiveThreads() {
-	return globalData()->activeThreads;
+	EnterCriticalSection(&globalData()->mutex);
+	long long count = globalData()->activeThreads;
+	LeaveCriticalSection(&globalData()->mutex);
+	return count;
 }
 
 #if FAST_ALLOCATOR_DEBUG
@@ -454,8 +464,9 @@ void FastAllocator<Size>::getMagazine() {
 #if FAST_ALLOCATOR_DEBUG
 #ifdef WIN32
 	static int alt = 0; alt++;
-	block = (void**)VirtualAllocEx( GetCurrentProcess(), 
-									(void*)( ((getSizeCode(Size)<<11) + alt) * magazine_size*Size), magazine_size*Size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE );
+	block =
+	    (void**)VirtualAllocEx(GetCurrentProcess(), (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size),
+	                           magazine_size * Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #else
 	static int alt = 0; alt++;
 	void* desiredBlock = (void*)( ((getSizeCode(Size)<<11) + alt) * magazine_size*Size);
@@ -479,7 +490,7 @@ void FastAllocator<Size>::getMagazine() {
 		block[i*PSize+1] = block[i*PSize] = &block[(i+1)*PSize];
 		check( &block[i*PSize], false );
 	}
-		
+
 	block[(magazine_size-1)*PSize+1] = block[(magazine_size-1)*PSize] = nullptr;
 	check( &block[(magazine_size-1)*PSize], false );
 	threadData.freelist = block;
