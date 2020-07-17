@@ -907,8 +907,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 				}
 		));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
+		std::make_unique<ManagementCommandsOptionsImpl>(KeyRangeRef(
+			LiteralStringRef("\xff\xff/conf/options/"), LiteralStringRef("\xff\xff/conf/options0")
+		)), true);
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
 		std::make_unique<ExcludeServersRangeImpl>(KeyRangeRef(
-			LiteralStringRef("\xff\xff/conf/excluded"), LiteralStringRef("\xff\xff/conf/excluded0")
+			LiteralStringRef("\xff\xff/conf/excluded/"), LiteralStringRef("\xff\xff/conf/excluded0")
 		)), true);
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
 		std::make_unique<FailedServersRangeImpl>(KeyRangeRef(

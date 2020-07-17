@@ -1282,8 +1282,12 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 		loop {
 			try{
 				ryw.setOption( FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+				Key optionKey = failed ? LiteralStringRef("\xff\xff/conf/options/failed/force")
+									   : LiteralStringRef("\xff\xff/conf/options/exclude/force");
+				ryw.set(optionKey, ValueRef());
 				for(auto& s : servers) {
-					Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString()) : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
+					Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString())
+									  : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
 					ryw.set(addr, ValueRef());
 				}
 				TraceEvent("ExcludeServersSpecialKeySpaceCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);

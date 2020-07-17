@@ -209,6 +209,22 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
+class ManagementCommandsOptionsImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ManagementCommandsOptionsImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	// // Given a command name and its option name, returns the special key we use to set.
+	// // No key will be returned if there is no such a mapping
+	// Optional<Key> getOptionSpecialKey(const std::string& command, const std::string& option);
+
+private:
+	static std::unordered_set<std::string> options; // "<command>/<option>"
+};
+
 class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
