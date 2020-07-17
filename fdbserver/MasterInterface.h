@@ -192,7 +192,7 @@ struct LifetimeToken {
 	LifetimeToken() : count(0) {}
 
 	bool isStillValid( LifetimeToken const& latestToken, bool isLatestID ) const {
-		return (ccID == latestToken.ccID || !latestToken.ccID.isValid()) && (count >= latestToken.count || isLatestID);
+		return ccID == latestToken.ccID && (count >= latestToken.count || isLatestID);
 	}
 	std::string toString() const {
 		return ccID.shortString() + format("#%lld", count);

@@ -1619,7 +1619,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, ServerCoordinators coordinators, LifetimeToken lifetime, bool forceRecovery )
+ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, ServerCoordinators coordinators, LifetimeToken lifetime, bool forceRecovery )
 {
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
@@ -1635,8 +1635,8 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		loop choose {
 			when (wait( core )) { break; }
 			when (wait( onDBChange )) {
-				onDBChange = db->onChange();
-				if (!lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() )) {
+				onDBChange = db->onChange() || ccInterface->onChange();
+				if (ccInterface->get().present() && db->get().clusterInterface == ccInterface->get().get() && !lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() )) {
 					TraceEvent("MasterTerminated", mi.id()).detail("Reason", "LifetimeToken").detail("MyToken", lifetime.toString()).detail("CurrentToken", db->get().masterLifetime.toString());
 					TEST(true);  // Master replaced, dying
 					if (BUGGIFY) wait( delay(5) );

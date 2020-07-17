@@ -717,7 +717,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
                                  Promise<Void> recovered,
                                  Reference<ClusterConnectionFile> connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
