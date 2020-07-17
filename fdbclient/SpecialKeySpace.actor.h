@@ -72,6 +72,9 @@ public:
 	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) = 0;
 	virtual Future<Optional<std::string>> commit(
 	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
+	// Given the special key to write, return the real key that needs to be modified
+	// By default, we assume the special key is the real key prefixed by \xff
+	virtual Key decode(const KeyRef& key) { return key.removePrefix(normalKeys.end); }
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
@@ -141,7 +144,7 @@ public:
 
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
 
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range );
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range);
 
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key);
 
@@ -149,13 +152,21 @@ public:
 
 	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl,
 	                      bool rw = false);
+		
+	Key decode(const KeyRef& key);
+	KeyRange decode(const KeyRangeRef& kr);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
-	static KeyRange getManamentApiCommandRange(std::string command) { return managementApiCommandToRange.at(command); }
-	static Key getManagementApiCommandPrefix(std::string command) { return managementApiCommandToRange.at(command).begin; }
+	static KeyRangeRef getModuleRange(SpecialKeySpace::MODULE module) { return moduleToBoundary.at(module); }
+	static KeyRangeRef getManamentApiCommandRange(std::string command) {
+		return managementApiCommandToRange.at(command);
+	}
+	static KeyRef getManagementApiCommandPrefix(std::string command) {
+		return managementApiCommandToRange.at(command).begin;
+	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
 	static const std::unordered_set<std::string>& getManamentApiOptionsSet() { return options; }
 
@@ -176,7 +187,8 @@ private:
 	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
-	static std::unordered_map<std::string, KeyRange> managementApiCommandToRange; // management command to its special keys' range
+	static std::unordered_map<std::string, KeyRange>
+	    managementApiCommandToRange; // management command to its special keys' range
 	static std::unordered_set<std::string> options; // "<command>/<option>"
 
 	// Initialize module boundaries, used to handle cross_module_read

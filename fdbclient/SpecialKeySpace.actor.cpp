@@ -34,15 +34,16 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
 	{ SpecialKeySpace::MODULE::METRICS,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
-	{ SpecialKeySpace::MODULE::MANAGEMENT, managementApiRange },
+	{ SpecialKeySpace::MODULE::MANAGEMENT,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/conf/"), LiteralStringRef("\xff\xff/conf0")) },
 	{ SpecialKeySpace::MODULE::FAILURE, singleKeyRange(LiteralStringRef("\xff\xff/failure")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
-	{ "exclude",
-	  KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0")).withPrefix(managementApiRange.begin) },
-	{ "failed",
-	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0")).withPrefix(managementApiRange.begin) }
+	{ "exclude", KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0"))
+	                 .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "failed", KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
+	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_set<std::string> SpecialKeySpace::options = { "exclude/force", "failed/force" };
@@ -354,8 +355,8 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 	auto impl = writeImpls[key];
 	if (impl == nullptr) {
 		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound")
-	    .detail("Key", key.toString())
-	    .detail("Value", value.toString());
+		    .detail("Key", key.toString())
+		    .detail("Value", value.toString());
 		throw special_keys_no_write_module_found();
 	}
 	return impl->set(ryw, key, value);
@@ -406,6 +407,21 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, const Key
 		ASSERT(rwImpl);
 		writeImpls.insert(kr, rwImpl);
 	}
+}
+
+Key SpecialKeySpace::decode(const KeyRef& key) {
+	auto impl = writeImpls[key];
+	ASSERT(impl != nullptr);
+	return impl->decode(key);
+}
+
+KeyRange SpecialKeySpace::decode(const KeyRangeRef& kr) {
+	// Only allow to decode key range in the same underlying impl range
+	auto begin = writeImpls.rangeContaining(kr.begin);
+	ASSERT(begin->value() != nullptr);
+	auto end = writeImpls.rangeContainingKeyBefore(kr.end);
+	ASSERT(begin == end);
+	return KeyRangeRef(begin->value()->decode(kr.begin), begin->value()->decode(kr.end));
 }
 
 ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
@@ -509,7 +525,7 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 }
 
 Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option) {
-	Key prefix = LiteralStringRef("options/").withPrefix(managementApiRange.begin);
+	Key prefix = LiteralStringRef("options/").withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin);
 	auto pair = command + "/" + option;
 	ASSERT(options.find(pair) != options.end());
 	return prefix.withSuffix(pair);
@@ -546,7 +562,6 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
 		if (range.contains(key))
-			// ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 			ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }
@@ -555,7 +570,6 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
 	if (SpecialKeySpace::getManamentApiOptionsSet().find(option) != SpecialKeySpace::getManamentApiOptionsSet().end()) {
-		// ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 		ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }
@@ -568,7 +582,7 @@ Future<Optional<std::string>> ManagementCommandsOptionsImpl::commit(ReadYourWrit
 // read from rwModule
 ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
                                                                KeyRangeRef kr) {
-	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end); // TODO : need to replace with a general encode/decode funciton
+	KeyRange krWithoutPrefix = ryw->getDatabase()->specialKeySpace->decode(kr);
 	Standalone<RangeResultRef> resultWithoutPrefix = wait(ryw->getRange(krWithoutPrefix, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
 	Standalone<RangeResultRef> result;
@@ -797,8 +811,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 		if (entry.first && !entry.second.present()) {
 			tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
 			tr.set(excludedServersVersionKey, versionKey);
-			KeyRangeRef includingRange = iter->range().removePrefix(normalKeys.end);
-			tr.clear(includingRange);
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter->range()));
 		}
 		++iter;
 	}
@@ -810,8 +823,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 		if (entry.first && !entry.second.present()) {
 			tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
 			tr.set(failedServersVersionKey, versionKey);
-			KeyRangeRef includingRange = iter->range().removePrefix(normalKeys.end);
-			tr.clear(includingRange);
+			tr.clear(ryw->getDatabase()->specialKeySpace->decode(iter->range()));
 		}
 		++iter;
 	}
