@@ -202,10 +202,6 @@ const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
-const KeyRangeRef managementApiRange =
-	KeyRangeRef(LiteralStringRef("\xff\xff/conf/"),
-				LiteralStringRef("\xff\xff/conf0"));
-
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
 // TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
