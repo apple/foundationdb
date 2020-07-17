@@ -803,12 +803,12 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
   int i;
   pthread_t
       network_thread; /* handle for thread which invoked fdb_run_network() */
-  pthread_t *worker_threads;
+  pthread_t *worker_threads = NULL;
 #if FDB_API_VERSION < 610
   FDBCluster *cluster;
 #endif
   process_info_t process;
-  thread_args_t *thread_args;
+  thread_args_t *thread_args = NULL;
   int rc;
   fdb_error_t err;
 
@@ -825,7 +825,10 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
   //  fprintf(stderr, "fdb_get_max_api_version: %d\n",
   //  fdb_get_max_api_version());
   err = fdb_select_api_version(fdb_get_max_api_version());
-  check_fdb_error(err);
+  if (err) {
+    fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
+    return -1;
+  }
 
   /* enable flatbuffers if specified */
   if (args->flatbuffers) {
@@ -886,7 +889,10 @@ int worker_process_main(mako_args_t *args, int worker_id, mako_shmhdr_t *shm) {
     printf("DEBUG: fdb_setup_network\n");
   }
   err = fdb_setup_network();
-  check_fdb_error(err);
+  if (err) {
+    fprintf(stderr, "ERROR: Failed at %s:%d (%s)\n", __FILE__, __LINE__, fdb_get_error(err));
+    return -1;
+  }
 
   /* Each worker process will have its own network thread */
   if (args->verbose >= VERBOSE_DEBUG) {
@@ -1637,7 +1643,7 @@ int main(int argc, char *argv[]) {
   int rc;
   mako_args_t args;
   int p;
-  pid_t *worker_pids;
+  pid_t *worker_pids = NULL;
   proc_type_t proc_type = proc_master;
   int worker_id;
   pid_t pid;
@@ -1687,6 +1693,7 @@ int main(int argc, char *argv[]) {
   shmsize = sizeof(mako_shmhdr_t) +
             (sizeof(mako_stats_t) * args.num_processes * args.num_threads);
   if (ftruncate(shmfd, shmsize) < 0) {
+    shm = MAP_FAILED;
     fprintf(stderr, "ERROR: ftruncate (fd:%d size:%llu) failed\n", shmfd,
             (unsigned long long)shmsize);
     goto EXIT;
