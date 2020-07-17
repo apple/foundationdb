@@ -9,6 +9,7 @@
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
@@ -50,18 +51,22 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	using CF = rocksdb::ColumnFamilyHandle*;
 
 	struct Writer : IThreadPoolReceiver {
-		DB& db;
-		UID id;
+		RocksDBKeyValueStore * const store;
 
-		explicit Writer(DB& db, UID id) : db(db), id(id) {}
+		explicit Writer(RocksDBKeyValueStore * store) : store(store) {}
+
 
 		~Writer() override {
-			if (db) {
-				delete db;
+			if (store->db) {
+				delete store->db;
 			}
 		}
 
-		void init() override {}
+		void init() override {
+			if (store->proc != nullptr) {
+				ISimulator::currentProcess = store->proc;
+			}
+		}
 
 		Error statusToError(const rocksdb::Status& s) {
 			if (s == rocksdb::Status::IOError()) {
@@ -83,7 +88,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 				"default", getCFOptions() } };
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
-			auto status = rocksdb::DB::Open(getOptions(), a.path, defaultCF, &handle, &db);
+			auto status = rocksdb::DB::Open(getOptions(), a.path, defaultCF, &handle, &store->db);
 			if (!status.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
@@ -120,7 +125,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
-			auto s = db->Write(options, a.batchToCommit.get());
+			auto s = store->db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
 				a.done.sendError(statusToError(s));
@@ -142,14 +147,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
-			if (db == nullptr) {
+			if (!store->db) {
 				a.done.send(Void());
 				return;
 			}
-			auto s = db->Close();
+			auto s = store->db->Close();
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
 			}
+      store->db = nullptr;
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
@@ -166,11 +172,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	};
 
 	struct Reader : IThreadPoolReceiver {
-		DB& db;
+		RocksDBKeyValueStore * const store;
 
-		explicit Reader(DB& db) : db(db) {}
+		explicit Reader(RocksDBKeyValueStore * store) : store(store) {}
 
-		void init() override {}
+		void init() override {
+			if (store->proc != nullptr) {
+				ISimulator::currentProcess = store->proc;
+			}
+		}
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
@@ -188,7 +198,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			rocksdb::PinnableSlice value;
-			auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = store->db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 				traceBatch.get().dump();
@@ -219,7 +229,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+			auto s = store->db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 				                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
@@ -300,6 +310,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	};
 
 	DB db = nullptr;
+	ISimulator::ProcessInfo * proc = nullptr;
+
 	std::string path;
 	UID id;
 	Reference<IThreadPool> writeThread;
@@ -314,9 +326,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	{
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
-		writeThread->addThread(new Writer(db, id));
+		if (g_network->isSimulated()) {
+			proc = g_simulator.getCurrentProcess();
+			mallopt(M_ARENA_MAX, 4);
+			nReaders = 1;
+		}
+		writeThread->addThread(new Writer(this));
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db));
+			readThreads->addThread(new Reader(this));
 		}
 	}
 
