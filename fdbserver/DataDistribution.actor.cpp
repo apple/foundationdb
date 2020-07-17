@@ -2991,15 +2991,6 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 	try {
 		loop {
-			// teamTracker only works when all teamCollections are valid.
-			// Always check if all teamCollections are valid, and throw error if any teamCollection has been destructed,
-			// because the teamTracker can be triggered after a DDTeamCollection was destroyed and
-			// before the other DDTeamCollection is destroyed.
-			for (int i = 0; i < self->teamCollections.size(); ++i) {
-				if (self->teamCollections[i] == nullptr) {
-					throw actor_cancelled();
-				}
-			}
 			if(logTeamEvents) {
 				TraceEvent("TeamHealthChangeDetected", self->distributorId)
 					.detail("Team", team->getDesc())
@@ -3182,6 +3173,14 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 								}
 
 								auto tc = self->teamCollections[t.primary ? 0 : 1];
+								if (tc == nullptr) {
+									// teamTracker only works when all teamCollections are valid.
+									// Always check if all teamCollections are valid, and throw error if any
+									// teamCollection has been destructed, because the teamTracker can be triggered
+									// after a DDTeamCollection was destroyed and before the other DDTeamCollection is
+									// destroyed. Do not throw actor_cancelled() because flow treat it differently.
+									throw dd_cancelled();
+								}
 								ASSERT(tc->primary == t.primary);
 								// tc->traceAllInfo();
 								if( tc->server_info.count( t.servers[0] ) ) {
@@ -3217,16 +3216,15 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.priority = maxPriority;
 
 						self->output.send(rs);
-						if (deterministicRandom()->random01() < 0.01) {
-							TraceEvent("SendRelocateToDDQx100", self->distributorId)
-							    .detail("Primary", self->primary)
-							    .detail("Team", team->getDesc())
-							    .detail("KeyBegin", rs.keys.begin)
-							    .detail("KeyEnd", rs.keys.end)
-							    .detail("Priority", rs.priority)
-							    .detail("TeamFailedMachines", team->size() - serversLeft)
-							    .detail("TeamOKMachines", serversLeft);
-						}
+						TraceEvent("SendRelocateToDDQx100", self->distributorId)
+						    .suppressFor(1.0)
+						    .detail("Primary", self->primary)
+						    .detail("Team", team->getDesc())
+						    .detail("KeyBegin", rs.keys.begin)
+						    .detail("KeyEnd", rs.keys.end)
+						    .detail("Priority", rs.priority)
+						    .detail("TeamFailedMachines", team->size() - serversLeft)
+						    .detail("TeamOKMachines", serversLeft);
 					}
 				} else {
 					if(logTeamEvents) {
@@ -3906,6 +3904,7 @@ ACTOR Future<Void> storageServerTracker(
 		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
 			errorOut.sendError(e);
 		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
+		    .suppressFor(1.0)
 		    .detail("Primary", self->primary)
 		    .detail("Server", server->id);
 		throw;
