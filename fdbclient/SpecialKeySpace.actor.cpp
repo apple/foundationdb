@@ -352,11 +352,12 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 	if (!ryw->specialKeySpaceChangeConfiguration()) throw special_keys_write_disabled();
 	// TODO : check value valid
 	auto impl = writeImpls[key];
-	if (impl == nullptr) throw special_keys_no_write_module_found();
-	TraceEvent(SevDebug, "SpecialKeySpaceSet")
+	if (impl == nullptr) {
+		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound")
 	    .detail("Key", key.toString())
-	    .detail("Value", value.toString())
-	    .detail("Impl", impl->getKeyRange().toString());
+	    .detail("Value", value.toString());
+		throw special_keys_no_write_module_found();
+	}
 	return impl->set(ryw, key, value);
 }
 
@@ -417,9 +418,6 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		if (entry.first) {
 			auto modulePtr = sks->getRWImpls().rangeContaining(iter->begin())->value();
 			writeModulePtrs.insert(modulePtr);
-			TraceEvent(SevDebug, "SpecialKeySpaceWrites")
-			    .detail("Key", iter->begin())
-			    .detail("Range", modulePtr->getKeyRange().toString());
 		}
 		++iter;
 	}
@@ -831,10 +829,6 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed" : "exclude", "force")];
-	TraceEvent(SevDebug, "ExclusionCommit")
-	    .detail("Failed", failed)
-	    .detail("Force", force.first)
-	    .detail("Addresses", describe(addresses));
 	// only do safety check when we have servers to be excluded and the force option key is not set
 	if (addresses.size() && !(force.first && force.second.present())) {
 		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));
