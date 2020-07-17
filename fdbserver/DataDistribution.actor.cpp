@@ -3216,7 +3216,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.priority = maxPriority;
 
 						self->output.send(rs);
-						TraceEvent("SendRelocateToDDQx100", self->distributorId)
+						TraceEvent("SendRelocateToDDQueue", self->distributorId)
 						    .suppressFor(1.0)
 						    .detail("Primary", self->primary)
 						    .detail("Team", team->getDesc())

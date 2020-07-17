@@ -30,6 +30,7 @@
 
 // 1xxx Normal failure (plausibly these should not even be "errors", but they are failures of
 //   the way operations are currently defined)
+// clang-format off
 ERROR( success, 0, "Success" )
 ERROR( end_of_stream, 1, "End of stream" )
 ERROR( operation_failed, 1000, "Operation failed")
@@ -228,6 +229,7 @@ ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot o
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+// clang-format on
 
 #undef ERROR
 #endif
