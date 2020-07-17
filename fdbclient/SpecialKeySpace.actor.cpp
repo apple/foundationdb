@@ -39,9 +39,13 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
-	{ "exclude", KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0")).withPrefix(managementApiRange.begin) },
-	{ "failed", KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0")).withPrefix(managementApiRange.begin) }
+	{ "exclude",
+	  KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0")).withPrefix(managementApiRange.begin) },
+	{ "failed",
+	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0")).withPrefix(managementApiRange.begin) }
 };
+
+std::unordered_set<std::string> SpecialKeySpace::options = { "exclude/force", "failed/force" };
 
 // This function will move the given KeySelector as far as possible to the standard form:
 // orEqual == false && offset == 1 (Standard form)
@@ -348,7 +352,6 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 	if (!ryw->specialKeySpaceChangeConfiguration()) throw special_keys_write_disabled();
 	// TODO : check value valid
 	auto impl = writeImpls[key];
-	// TODO : do we need the separate error here to differentiate from read?
 	if (impl == nullptr) throw special_keys_no_write_module_found();
 	TraceEvent(SevDebug, "SpecialKeySpaceSet")
 	    .detail("Key", key.toString())
@@ -408,7 +411,6 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
 	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
-	// TODO : update this set container
 	state std::set<SpecialKeyRangeRWImpl*> writeModulePtrs;
 	while (iter != ranges.end()) {
 		std::pair<bool, Optional<Value>> entry = iter->value();
@@ -508,12 +510,12 @@ Future<Standalone<RangeResultRef>> DDStatsRangeImpl::getRange(ReadYourWritesTran
 	return ddMetricsGetRangeActor(ryw, kr);
 }
 
-std::unordered_set<std::string> ManagementCommandsOptionsImpl::options = { "exclude/force", "failed/force" };
-
-// Optional<Key> ManagementCommandsOptionsImpl::getOptionSpecialKey(const std::string& command, const std::string&
-// option) { 	auto pair = command + "/" + option; 	if (options.find(pair) != options.end()) { 		return
-// Optional<Key>(getKeyRange().begin.withSuffix(pair)); 	} else 		return Optional<Key>();
-// }
+Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option) {
+	Key prefix = LiteralStringRef("options/").withPrefix(managementApiRange.begin);
+	auto pair = command + "/" + option;
+	ASSERT(options.find(pair) != options.end());
+	return prefix.withSuffix(pair);
+}
 
 ManagementCommandsOptionsImpl::ManagementCommandsOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
@@ -521,7 +523,7 @@ Future<Standalone<RangeResultRef>> ManagementCommandsOptionsImpl::getRange(ReadY
                                                                            KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	// Since we only have limit number of options, a brute force loop here is enough
-	for (const auto& option : options) {
+	for (const auto& option : SpecialKeySpace::getManamentApiOptionsSet()) {
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
 		auto r = ryw->getSpecialKeySpaceWriteMap()[key];
@@ -534,15 +536,15 @@ Future<Standalone<RangeResultRef>> ManagementCommandsOptionsImpl::getRange(ReadY
 void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (options.find(option) != options.end()) {
-		TraceEvent(SevDebug, "ManagementAPIOption").detail("Option", option).detail("Key", key);
+	if (SpecialKeySpace::getManamentApiOptionsSet().find(option) != SpecialKeySpace::getManamentApiOptionsSet().end()) {
+		TraceEvent(SevDebug, "ManagementApiOption").detail("Option", option).detail("Key", key);
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
 }
 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
 	// Since we only have limit number of options, a brute force loop here is enough
-	for (const auto& option : options) {
+	for (const auto& option : SpecialKeySpace::getManamentApiOptionsSet()) {
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
 		if (range.contains(key))
@@ -554,7 +556,7 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (options.find(option) != options.end()) {
+	if (SpecialKeySpace::getManamentApiOptionsSet().find(option) != SpecialKeySpace::getManamentApiOptionsSet().end()) {
 		// ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 		ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
@@ -568,7 +570,7 @@ Future<Optional<std::string>> ManagementCommandsOptionsImpl::commit(ReadYourWrit
 // read from rwModule
 ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
                                                                KeyRangeRef kr) {
-	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end); // TODO : need to update
+	KeyRangeRef krWithoutPrefix = kr.removePrefix(normalKeys.end); // TODO : need to replace with a general encode/decode funciton
 	Standalone<RangeResultRef> resultWithoutPrefix = wait(ryw->getRange(krWithoutPrefix, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
 	Standalone<RangeResultRef> result;
@@ -695,7 +697,7 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
 	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
-	    "Please try the exclude again in 30 seconds.\n"; // TODO : update msg here
+	    "Please try the exclude again in 30 seconds.\n";
 
 	StatusObjectReader statusObj(status);
 
@@ -773,8 +775,6 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 	if (ssExcludedCount == ssTotalCount ||
 	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
 		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.";
-		//	"\nType `exclude FORCE <ADDRESS...>' to exclude without checking free space.\n"; // TODO : update message
-		// here
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
@@ -829,8 +829,8 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	        addresses, exclusions, result))
 		return result;
 	// If force option is not set, we need to do safety check
-	auto force = ryw->getSpecialKeySpaceWriteMap()[failed ? LiteralStringRef("\xff\xff/conf/options/failed/force")
-	                                                      : LiteralStringRef("\xff\xff/conf/options/exclude/force")];
+	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+	    failed ? "failed" : "exclude", "force")];
 	TraceEvent(SevDebug, "ExclusionCommit")
 	    .detail("Failed", failed)
 	    .detail("Force", force.first)
@@ -878,7 +878,6 @@ Future<Optional<std::string>> FailedServersRangeImpl::commit(ReadYourWritesTrans
 ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
                                                                   KeyRangeRef kr) {
 	state Standalone<RangeResultRef> result;
-	// TODO : get all inprogress excluded servers
 	state Transaction& tr = ryw->getTransaction();
 	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?

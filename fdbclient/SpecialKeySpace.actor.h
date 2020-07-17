@@ -156,6 +156,8 @@ public:
 	KeyRangeRef getKeyRange() const { return range; }
 	static KeyRange getManamentApiCommandRange(std::string command) { return managementApiCommandToRange.at(command); }
 	static Key getManagementApiCommandPrefix(std::string command) { return managementApiCommandToRange.at(command).begin; }
+	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
+	static const std::unordered_set<std::string>& getManamentApiOptionsSet() { return options; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
@@ -175,6 +177,7 @@ private:
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 	static std::unordered_map<std::string, KeyRange> managementApiCommandToRange; // management command to its special keys' range
+	static std::unordered_set<std::string> options; // "<command>/<option>"
 
 	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit();
@@ -218,9 +221,6 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-
-private:
-	static std::unordered_set<std::string> options; // "<command>/<option>"
 };
 
 class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
