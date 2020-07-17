@@ -34,15 +34,13 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
 	{ SpecialKeySpace::MODULE::METRICS,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
-	{ SpecialKeySpace::MODULE::MANAGEMENT,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/conf/"), LiteralStringRef("\xff\xff/conf0")) },
+	{ SpecialKeySpace::MODULE::MANAGEMENT, managementApiRange },
 	{ SpecialKeySpace::MODULE::FAILURE, singleKeyRange(LiteralStringRef("\xff\xff/failure")) }
 };
 
-std::unordered_map<std::string, Key> SpecialKeySpace::commandToPrefix = {
-	{ "exclude",
-	  moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("excluded/")) },
-	{ "failed", moduleToBoundary[SpecialKeySpace::MODULE::MANAGEMENT].begin.withSuffix(LiteralStringRef("failed/")) }
+std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
+	{ "exclude", KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0")).withPrefix(managementApiRange.begin) },
+	{ "failed", KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0")).withPrefix(managementApiRange.begin) }
 };
 
 // This function will move the given KeySelector as far as possible to the standard form:

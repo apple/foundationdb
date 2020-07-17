@@ -154,7 +154,8 @@ public:
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
-	static Key getCommandPrefix(std::string command) { return commandToPrefix.at(command); }
+	static KeyRange getManamentApiCommandRange(std::string command) { return managementApiCommandToRange.at(command); }
+	static Key getManagementApiCommandPrefix(std::string command) { return managementApiCommandToRange.at(command).begin; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
@@ -173,7 +174,7 @@ private:
 	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
-	static std::unordered_map<std::string, Key> commandToPrefix; // management command prefix for special keys
+	static std::unordered_map<std::string, KeyRange> managementApiCommandToRange; // management command to its special keys' range
 
 	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit();
@@ -217,9 +218,6 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	// // Given a command name and its option name, returns the special key we use to set.
-	// // No key will be returned if there is no such a mapping
-	// Optional<Key> getOptionSpecialKey(const std::string& command, const std::string& option);
 
 private:
 	static std::unordered_set<std::string> options; // "<command>/<option>"

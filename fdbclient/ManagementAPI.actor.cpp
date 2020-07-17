@@ -1286,8 +1286,8 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 									   : LiteralStringRef("\xff\xff/conf/options/exclude/force");
 				ryw.set(optionKey, ValueRef());
 				for(auto& s : servers) {
-					Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString())
-									  : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
+					Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
+									  : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
 					ryw.set(addr, ValueRef());
 				}
 				TraceEvent("ExcludeServersSpecialKeySpaceCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
@@ -1326,7 +1326,8 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 							ryw.clear(excludedServersKeys.withPrefix(normalKeys.end));
 						}
 					} else {
-						Key addr = failed ? SpecialKeySpace::getCommandPrefix("failed").withSuffix(s.toString()) : SpecialKeySpace::getCommandPrefix("exclude").withSuffix(s.toString());
+						Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
+										  : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
 						ryw.clear(addr);
 						// Eliminate both any ip-level exclusion (1.2.3.4) and any
 						// port-level exclusions (1.2.3.4:5)
