@@ -27,7 +27,7 @@
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
-#include "fdbserver/RestoreMaster.actor.h"
+#include "fdbserver/RestoreController.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

@@ -65,11 +65,11 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<LoadingParam, Future<Void>> processedFileParams;
 	std::map<LoadingParam, VersionedMutationsMap> kvOpsPerLP; // Buffered kvOps for each loading param
 
-	// rangeToApplier is in master and loader. Loader uses this to determine which applier a mutation should be sent
+	// rangeToApplier is in controller and loader. Loader uses this to determine which applier a mutation should be sent
 	//   Key is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
 
-	// Sampled mutations to be sent back to restore master
+	// Sampled mutations to be sent back to restore controller
 	std::map<LoadingParam, MutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
