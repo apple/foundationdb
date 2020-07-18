@@ -480,6 +480,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("Addresses", describe(toKillArray))
 		    .detail("FailedAddresses", describe(toKillMarkFailedArray))
 		    .detail("ClusterAvailable", g_simulator.isAvailable());
+		// blocked
 		if (markExcludeAsFailed) {
 			wait( excludeServers( cx, toKillMarkFailedArray, true ) );
 		}

@@ -1063,11 +1063,11 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				TraceEvent("ServerServeGet").detail("Own", self->minKnownCommittedVersion);
+//				TraceEvent("ServerServeGet").detail("Own", self->minKnownCommittedVersion);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-				TraceEvent("ServerReceiveReport").detail("MV", req.minKnownCommittedVersion).detail("Own", self->minKnownCommittedVersion);
+//				TraceEvent("ServerReceiveReport").detail("MV", req.minKnownCommittedVersion).detail("Own", self->minKnownCommittedVersion);
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;

@@ -499,7 +499,13 @@ ACTOR static Future<Void> getReadVersionServer(
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions from master.
 
-	TraceEvent("ProxyReadyForTxnStarts", proxy.id());
+	std::vector<GrvProxyInterface> otherGrvProxies;
+	for (GrvProxyInterface gp : db->get().client.grvProxies) {
+		if (gp != proxy)
+			otherGrvProxies.push_back(gp);
+	}
+
+	TraceEvent("GrvProxyReadyForTxnStarts", proxy.id());
 
 	loop{
 		waitNext(GRVTimer.getFuture());

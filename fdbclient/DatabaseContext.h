@@ -170,7 +170,7 @@ public:
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
 	Future<Reference<GrvProxyInfo>> getGrvProxiesFuture(bool useProvisionalProxies);
 	Future<Void> onMasterProxiesChanged();
-	Future<Void> onGrvProxiesChanged();
+//	Future<Void> onGrvProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
@@ -220,9 +220,9 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
-	AsyncTrigger grvProxiesChangeTrigger;
+//	AsyncTrigger grvProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
-	Future<Void> monitorGrvProxiesInfoChange;
+//	Future<Void> monitorGrvProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool masterProxyProvisional;

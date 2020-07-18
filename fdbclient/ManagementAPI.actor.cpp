@@ -1306,6 +1306,7 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 
 			wait( tr.commit() );
+			TraceEvent("ExcludeServersCommitDone");
 			return Void();
 		} catch (Error& e) {
 			wait( tr.onError(e) );
