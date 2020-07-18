@@ -353,7 +353,7 @@ namespace HTTP {
 
 			loop {
 				wait(conn->onWritable());
-				wait( delay( 0, TaskPriority::WriteSocket ) );
+				wait(yield(TaskPriority::WriteSocket));
 
 				// If we already got a response, before finishing sending the request, then close the connection,
 				// set the Connection header to "close" as a hint to the caller that this connection can't be used
