@@ -160,7 +160,7 @@ struct VersionStampWorkload : TestWorkload {
 			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
-		// We specifically wish to grab the smalles read version that we can get and maintain it, to
+		// We specifically wish to grab the smallest read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
 		state Version readVersion = wait(tr.getReadVersion());
 

@@ -160,6 +160,7 @@ set(FDBSERVER_SRCS
   workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
   workloads/LockDatabaseFrequently.actor.cpp
+  workloads/LockRange.actor.cpp
   workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp

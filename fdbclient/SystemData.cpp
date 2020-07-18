@@ -922,6 +922,18 @@ const KeyRef rangeLockVersionKeyEnd = LiteralStringRef("\xff/rangeLockVersion\x0
 const KeyRef rangeLockVersionRequiredValue =
     LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 
+Value encodeRangeLock(const KeyRangeRef& range) {
+	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
+	return BinaryWriter::toValue(sysRange, IncludeVersion(ProtocolVersion::withLockRangeValue()));
+}
+
+KeyRange decodeRangeLockValue(const ValueRef& v) {
+	KeyRangeRef range;
+	BinaryReader reader(v, IncludeVersion(ProtocolVersion::withLockRangeValue()));
+	reader >> range;
+	return range.removePrefix(lockedKeyRanges.begin);
+}
+
 const KeyRangeRef monitorConfKeys(
 	LiteralStringRef("\xff\x02/monitorConf/"),
 	LiteralStringRef("\xff\x02/monitorConf0")

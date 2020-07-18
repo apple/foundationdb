@@ -35,10 +35,12 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 
@@ -1972,8 +1974,7 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range) {
 		throw database_locked();
 	}
 
-	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
-	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::LockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::LockRange);
 	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
@@ -1988,8 +1989,7 @@ ACTOR Future<Void> lockRange(Reference<ReadYourWritesTransaction> tr, KeyRangeRe
 		throw database_locked();
 	}
 
-	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
-	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::LockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::LockRange);
 	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
@@ -2018,8 +2018,7 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range) {
 		throw database_locked();
 	}
 
-	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
-	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::UnlockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::UnlockRange);
 	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();
@@ -2034,8 +2033,7 @@ ACTOR Future<Void> unlockRange(Reference<ReadYourWritesTransaction> tr, KeyRange
 		throw database_locked();
 	}
 
-	KeyRange sysRange = range.withPrefix(lockedKeyRanges.begin);
-	tr->atomicOp(rangeLockKey, BinaryWriter::toValue(sysRange, Unversioned()), MutationRef::UnlockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::UnlockRange);
 	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(range);
 	return Void();

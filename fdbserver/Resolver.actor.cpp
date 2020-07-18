@@ -220,9 +220,10 @@ ACTOR Future<Void> resolveBatch(
 		self->resolvedStateMutations += stateMutations;
 		self->resolvedStateBytes += stateBytes;
 
-		if(stateBytes > 0)
-			self->recentStateTransactionSizes.push_back(std::make_pair(req.version, stateBytes));
-		
+		if (stateBytes > 0) {
+			self->recentStateTransactionSizes.emplace_back(req.version, stateBytes);
+		}
+
 		ASSERT(req.version >= firstUnseenVersion);
 		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);
 

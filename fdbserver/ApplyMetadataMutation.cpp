@@ -503,6 +503,12 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 
 				if(!initialCommit) txnStateStore->clear(commonLogRange);
 			}
+		} else if (m.param2.size() && (m.type == MutationRef::LockRange || m.type == MutationRef::UnlockRange)) {
+			KeyRange range = decodeRangeLockValue(m.param2);
+			TraceEvent("LockRange")
+			    .detail("LockType", typeString[(int)m.type])
+			    .detail("Begin", printable(range.begin))
+			    .detail("End", printable(range.end));
 		}
 	}
 
