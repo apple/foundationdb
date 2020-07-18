@@ -1158,7 +1158,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
 .. method:: has_incomplete_versionstamp(tuple)
 
     Returns ``True`` if there is at least one element contained within the tuple that is a
-    :class`Versionstamp` instance that is incomplete. If there are multiple incomplete
+    :class:`Versionstamp` instance that is incomplete. If there are multiple incomplete
     :class:`Versionstamp` instances, this method will return ``True``, but trying to pack it into a
     byte string will result in an error.
 

@@ -137,11 +137,20 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 	return Void();
 }
 
+// Updated process metrics will be used by scheduler for throttling as well
+ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self) {
+	loop {
+		updateProcessStats(self);
+		wait(delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL));
+	}
+}
+
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
 	loop {
-		TraceEvent("FastRestoreTraceProcessMetrics")
+		TraceEvent("FastRestoreTraceProcessMetrics", self->nodeID)
 		    .detail("Role", role)
-		    .detail("Node", self->nodeID)
+		    .detail("PipelinedMaxVersionBatchIndex", self->versionBatchId.get())
+		    .detail("FinishedVersionBatchIndex", self->finishedBatch.get())
 		    .detail("CpuUsage", self->cpuUsage)
 		    .detail("UsedMemory", self->memory)
 		    .detail("ResidentMemory", self->residentMemory);

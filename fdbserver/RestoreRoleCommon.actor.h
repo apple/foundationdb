@@ -29,13 +29,13 @@
 #define FDBSERVER_RestoreRoleCommon_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "flow/SystemMonitor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/Notified.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
@@ -123,7 +123,7 @@ public:
 	virtual std::string describeNode() = 0;
 };
 
-void updateProcessStats(Reference<RestoreRoleData> self);
+ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self);
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
 ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);
 

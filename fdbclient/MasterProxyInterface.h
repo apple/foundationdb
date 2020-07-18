@@ -32,7 +32,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
 
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {

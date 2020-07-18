@@ -845,28 +845,72 @@ Metrics module
 
 Reads in the metrics module are not transactional and may require rpcs to complete.
 
-The key ``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``. The value is a json object with a "ShardBytes" field. More fields may be added in the future.
+``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``
 
-A user can see stats about data distribution like so::
-
-  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/'):
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/', limit=3):
   ...     print(k, v)
   ...
-  ('\xff\xff/metrics/data_distribution_stats/', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako00509', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0099', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako01468', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako023', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0289', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako037', '{"ShardBytes":330000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako042', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0457', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0524', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako058', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako064', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0718', '{"ShardBytes":264000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako083', '{"ShardBytes":297000}')
-  ('\xff\xff/metrics/data_distribution_stats/mako0909', '{"ShardBytes":741000}')
+  ('\xff\xff/metrics/data_distribution_stats/', '{"shard_bytes":3828000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"shard_bytes":2013000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"shard_bytes":3201000}')
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+shard_bytes               number   An estimate of the sum of kv sizes for this shard.
+========================= ======== ===============
+
+Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for application-level throttling.
+Some of this information is also available in ``\xff\xff/status/json``, but these keys are significantly cheaper (in terms of server resources) to read.
+
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/health/'):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/metrics/health/aggregate', '{"batch_limited":false,"tps_limit":483988.66315011407,"worst_storage_durability_lag":5000001,"worst_storage_queue":2036,"worst_log_queue":300}')
+  ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"log_queue":300}')
+  ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpu_usage":2.398696781487125,"disk_usage":0.059995917598039405,"storage_durability_lag":5000001,"storage_queue":2036}')
+
+``\xff\xff/metrics/health/aggregate``
+
+Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.
+
+============================ ======== ===============
+**Field**                    **Type** **Description**
+---------------------------- -------- ---------------
+batch_limited                boolean  Whether or not the cluster is limiting batch priority transactions
+tps_limit                    number   The rate at which normal priority transactions are allowed to start
+worst_storage_durability_lag number   See the description for storage_durability_lag
+worst_storage_queue          number   See the description for storage_queue
+worst_log_queue              number   See the description for log_queue
+============================ ======== ===============
+
+``\xff\xff/metrics/health/log/<id>``
+
+Stats about the health of a particular transaction log process
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+log_queue                 number   The number of bytes of mutations that need to be stored in memory on this transaction log process
+========================= ======== ===============
+
+``\xff\xff/metrics/health/storage/<id>``
+
+Stats about the health of a particular storage process
+
+========================== ======== ===============
+**Field**                  **Type** **Description**
+-------------------------- -------- ---------------
+cpu_usage                  number   The cpu percentage used by this storage process
+disk_usage                 number   The disk IO percentage used by this storage process
+storage_durability_lag     number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000 [#max_read_transaction_life_versions]_.
+storage_queue              number   The number of bytes of mutations that need to be stored in memory on this storage process
+========================== ======== ===============
+
+Caveats
+~~~~~~~
+
+#. ``\xff\xff/metrics/health/`` These keys may return data that's several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.
 
 Performance considerations
 ==========================
@@ -1069,3 +1113,4 @@ If you see one of those errors, the best way of action is to fail the client.
 At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.
 
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
+.. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS

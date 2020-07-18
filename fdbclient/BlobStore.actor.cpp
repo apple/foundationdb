@@ -971,7 +971,6 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 	date = dateBuf;
 
 	std::string msg;
-	StringRef x;
 	msg.append(verb);
 	msg.append("\n");
 	auto contentMD5 = headers.find("Content-MD5");

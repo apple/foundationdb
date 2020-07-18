@@ -1944,7 +1944,6 @@ int main(int argc, char* argv[]) {
 		if (role==Simulation){
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now()-startNow, timer()-start);
-			//cout << format("  %d endpoints left\n", transport().getEndpointCount());
 		}
 
 		//IFailureMonitor::failureMonitor().address_info.clear();

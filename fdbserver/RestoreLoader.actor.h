@@ -28,10 +28,10 @@
 #define FDBSERVER_RESTORE_LOADER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
@@ -76,6 +76,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	Future<Void> pollMetrics;
 
 	LoaderVersionBatchState vbState;
+
+	long loadFileReqs;
 
 	// Status counters
 	struct Counters {
