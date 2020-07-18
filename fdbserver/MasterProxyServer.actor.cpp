@@ -1339,12 +1339,12 @@ ACTOR Future<Void> commitBatch(
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
-			// aggregate commit cost estimation iff committed
+			// aggregate commit cost estimation if committed
 			ASSERT(trs[t].commitCostEstimation.present() == trs[t].tagSet.present());
 			if (trs[t].tagSet.present()) {
 				TransactionCommitCostEstimation& costEstimation = trs[t].commitCostEstimation.get();
 				for (auto& tag : trs[t].tagSet.get()) {
-					(self->transactionTagCommitCostEst)[tag] += costEstimation;
+					self->transactionTagCommitCostEst[tag] += costEstimation;
 				}
 			}
 		}

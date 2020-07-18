@@ -1278,22 +1278,13 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				if (p.totalTransactions > 0) {
 					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.totalTransactions );
 
-					// TODO process commitCostEstimation
 					for(auto tag : req.throttledTagCounts) {
 						self.throttledTags.addRequests(tag.first, tag.second);
 					}
-					for (const auto &[tagName, cost] : req.throttledTagCommitCostEst) {
-						TraceEvent(SevInfo, "ThrottledTagCommitCostEst")
-						    .suppressFor(1.0)
-						    .detail("Tag", tagName)
-						    .detail("NumWrite", cost.numWrite)
-						    .detail("ByteWrites", cost.bytesWrite)
-						    .detail("NumAtomicWrite", cost.numAtomicWrite)
-						    .detail("BytesAtomicWrite", cost.bytesAtomicWrite)
-						    .detail("NumClear", cost.numClear)
-						    .detail("NumClearShards", cost.numClearShards)
-						    .detail("BytesClearEst", cost.bytesClearEst);
-					}
+					// TODO process commitCostEstimation
+					//	for (const auto &[tagName, cost] : req.throttledTagCommitCostEst) {
+					//
+					//	}
 				}
 				if(p.batchTransactions > 0) {
 					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.batchTransactions );

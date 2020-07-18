@@ -155,5 +155,4 @@ struct HaltRatekeeperRequest {
 	}
 };
 
-
 #endif //FDBSERVER_RATEKEEPERINTERFACE_H

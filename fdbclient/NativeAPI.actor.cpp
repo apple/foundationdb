@@ -3275,12 +3275,12 @@ ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* s
 			trCommitCosts.numClear++;
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
-				StorageMetrics m = wait(self->getStorageMetrics(keyRange, INT_MAX));
+				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));
 				trCommitCosts.bytesClearEst += m.bytes;
 			}
 			else {
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-					self->getDatabase(), keyRange, INT_MAX, false, &StorageServerInterface::getShardState, self->info));
+					self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false, &StorageServerInterface::getShardState, self->info));
 				trCommitCosts.numClearShards += locations.size();
 			}
 		}
@@ -3304,11 +3304,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		if(!req.tagSet.present()) {
-			Version v = wait(readVersion);
-			req.transaction.read_snapshot = v;
-		}
-		else {
+		if (!req.tagSet.present()) {
+			wait(store(req.transaction.read_snapshot, readVersion));
+		} else {
 			req.commitCostEstimation = TransactionCommitCostEstimation();
 			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
 		}
