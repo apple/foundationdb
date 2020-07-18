@@ -3059,6 +3059,7 @@ void TransactionOptions::clear() {
 	tags = TagSet{};
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
+	expensiveClearCostEstimation = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -3257,6 +3258,36 @@ void Transaction::setupWatches() {
 	}
 }
 
+ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self,
+                                                                  CommitTransactionRef* transaction) {
+	state MutationRef* it = transaction->mutations.begin();
+	state MutationRef* end = transaction->mutations.end();
+	state TransactionCommitCostEstimation trCommitCosts;
+	state KeyRange keyRange;
+	for (; it != end; ++it) {
+		if (it->type == MutationRef::Type::SetValue) {
+			trCommitCosts.bytesWrite += it->expectedSize();
+			trCommitCosts.numWrite++;
+		} else if (it->isAtomicOp()) {
+			trCommitCosts.bytesAtomicWrite += it->expectedSize();
+			trCommitCosts.numAtomicWrite++;
+		} else if (it->type == MutationRef::Type::ClearRange) {
+			trCommitCosts.numClear++;
+			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
+			if (self->options.expensiveClearCostEstimation) {
+				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));
+				trCommitCosts.bytesClearEst += m.bytes;
+			}
+			else {
+				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+					self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false, &StorageServerInterface::getShardState, self->info));
+				trCommitCosts.numClearShards += locations.size();
+			}
+		}
+	}
+	return trCommitCosts;
+}
+
 ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime = now();
@@ -3273,8 +3304,12 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		Version v = wait( readVersion );
-		req.transaction.read_snapshot = v;
+		if (!req.tagSet.present()) {
+			wait(store(req.transaction.read_snapshot, readVersion));
+		} else {
+			req.commitCostEstimation = TransactionCommitCostEstimation();
+			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
+		}
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -3401,6 +3436,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	}
 }
 
+
 Future<Void> Transaction::commitMutations() {
 	try {
 		//if this is a read-only transaction return immediately
@@ -3419,6 +3455,8 @@ Future<Void> Transaction::commitMutations() {
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
+		if(options.tags.size())
+			tr.tagSet = options.tags;
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
@@ -3693,12 +3731,17 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			span.addParent(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()));
 			break;
 
-	    case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
-		    validateOptionValue(value, false);
-		    options.reportConflictingKeys = true;
-		    break;
+		case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
+			validateOptionValue(value, false);
+			options.reportConflictingKeys = true;
+			break;
+		
+		case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
+			validateOptionValue(value, false);
+			options.expensiveClearCostEstimation = true;
+			break;
 
-	    default:
+		default:
 			break;
 	}
 }

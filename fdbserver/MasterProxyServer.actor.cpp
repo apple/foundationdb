@@ -231,10 +231,13 @@ struct TransactionRateInfo {
 	}
 };
 
-
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, TransactionRateInfo *transactionRateInfo,
-						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
-						   TransactionTagMap<uint64_t>* transactionTagCounter, PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount,
+                           int64_t* inBatchTransactionCount, TransactionRateInfo* transactionRateInfo,
+                           TransactionRateInfo* batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply,
+                           GetHealthMetricsReply* detailedHealthMetricsReply,
+                           TransactionTagMap<uint64_t>* transactionTagCounter,
+                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags,
+                           TransactionTagMap<TransactionCommitCostEstimation>* transactionTagCommitCostEst) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -258,15 +261,18 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-			
+
 			TransactionTagMap<uint64_t> tagCounts;
 			for(auto itr : *throttledTags) {
 				for(auto priorityThrottles : itr.second) {
 					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
 				}
 			}
-			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, tagCounts, detailed)));
+			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
+			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
+			                       *transactionTagCommitCostEst, detailed)));
 			transactionTagCounter->clear();
+			transactionTagCommitCostEst->clear();
 			expectingDetailedReply = detailed;
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
@@ -441,6 +447,7 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
+	TransactionTagMap<TransactionCommitCostEstimation> transactionTagCommitCostEst;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -1332,6 +1339,14 @@ ACTOR Future<Void> commitBatch(
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
+			// aggregate commit cost estimation if committed
+			ASSERT(trs[t].commitCostEstimation.present() == trs[t].tagSet.present());
+			if (trs[t].tagSet.present()) {
+				TransactionCommitCostEstimation& costEstimation = trs[t].commitCostEstimation.get();
+				for (auto& tag : trs[t].tagSet.get()) {
+					self->transactionTagCommitCostEst[tag] += costEstimation;
+				}
+			}
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
 			trs[t].reply.sendError(transaction_too_old());
@@ -1563,7 +1578,9 @@ ACTOR static Future<Void> transactionStarter(
 	state PromiseStream<double> replyTimes;
 	state Span span;
 
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
+	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
+	                      &(commitData->transactionTagCommitCostEst)));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
 	                                            &transactionTagCounter));
