@@ -58,6 +58,7 @@ Fixes
 * Fix multiple data races between threads on the client. `(PR #3026) <https://github.com/apple/foundationdb/pull/3026>`_
 * Transaction logs configured to spill by reference had an unintended delay between each spilled batch. `(PR #3153) <https://github.com/apple/foundationdb/pull/3153>`_
 * Added guards to honor ``DISABLE_POSIX_KERNEL_AIO``. `(PR #2888) <https://github.com/apple/foundationdb/pull/2888>`_
+* Prevent blob upload timeout if request timeout is lower than expected request time. `(PR #3533) <https://github.com/apple/foundationdb/pull/3533>`_
 
 Status
 ------
