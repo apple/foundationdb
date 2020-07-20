@@ -72,7 +72,12 @@ Error internal_error_impl(const char* msg, const char* file, int line) {
 }
 
 Error internal_error_impl(const char* a_nm, long long a, const char * op_nm, const char * b_nm, long long b, const char * file, int line) {
-	fprintf(stderr, "Assertion %s (%lld) %s %s (%lld) failed @ %s %d:\n", a_nm, a, op_nm, b_nm, b, file, line, platform::get_backtrace().c_str());
+	fprintf(stderr, "Assertion failed @ %s %d:\n", file, line);
+	fprintf(stderr, "  expression:\n");
+	fprintf(stderr, "              %s %s %s\n", a_nm, op_nm, b_nm);
+	fprintf(stderr, "  expands to:\n");
+	fprintf(stderr, "              %lld %s %lld\n\n", a, op_nm, b);
+	fprintf(stderr, "  %s\n", platform::get_backtrace().c_str());
 
 	TraceEvent(SevError, "InternalError")
 	    .error(Error::fromCode(error_code_internal_error))
