@@ -108,19 +108,37 @@ Here is a complete list of valid parameters:
 
  *connect_tries* (or *ct*) - Number of times to try to connect for each request.
 
+ *connect_timeout* (or *cto*) - Number of seconds to wait for a connect request to succeed.
+
+ *max_connection_life* (or *mcl*) - Maximum number of seconds to reuse a single TCP connection.
+
+ *request_timeout_min* (or *rtom*) - Minimum number of seconds to wait for a request to succeed after a connection is established.
+
  *request_tries* (or *rt*) - Number of times to try each request until a parseable HTTP response other than 429 is received.
 
  *requests_per_second* (or *rps*) - Max number of requests to start per second.
 
+ *list_requests_per_second* (or *lrps*) - Max number of list requests to start per second.
+
+ *write_requests_per_second* (or *wrps*) - Max number of write requests to start per second.
+
+ *read_requests_per_second* (or *rrps*) - Max number of read requests to start per second.
+
+ *delete_requests_per_second* (or *drps*) - Max number of delete requests to start per second.
+
  *concurrent_requests* (or *cr*) - Max number of requests in progress at once.
+
+ *concurrent_uploads* (or *cu*) - Max concurrent uploads (part or whole) that can be in progress at once.
+
+ *concurrent_lists* (or *cl*) - Max concurrent list operations that can be in progress at once.
+
+ *concurrent_reads_per_file* (or *crps*) - Max concurrent reads in progress for any one file.
+
+ *concurrent_writes_per_file* (or *cwps*)  Max concurrent uploads in progress for any one file.
 
  *multipart_max_part_size* (or *maxps*) - Max part size for multipart uploads.
 
  *multipart_min_part_size* (or *minps*) - Min part size for multipart uploads.
-
- *concurrent_uploads* (or *cu*) - Max concurrent uploads (part or whole) that can be in progress at once.
-
- *concurrent_reads_per_file* (or *crps*) - Max concurrent reads in progress for any one file.
 
  *read_block_size* (or *rbs*) - Block size in bytes to be used for reads.
 

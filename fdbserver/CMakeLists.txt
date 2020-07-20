@@ -70,8 +70,8 @@ set(FDBSERVER_SRCS
   RestoreUtil.actor.cpp
   RestoreRoleCommon.actor.h
   RestoreRoleCommon.actor.cpp
-  RestoreMaster.actor.h
-  RestoreMaster.actor.cpp
+  RestoreController.actor.h
+  RestoreController.actor.cpp
   RestoreApplier.actor.h
   RestoreApplier.actor.cpp
   RestoreLoader.actor.h
