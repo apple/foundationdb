@@ -1,4 +1,4 @@
-FROM foundationdb/foundationdb-build:0.1.13
+FROM foundationdb/foundationdb-build:0.1.15
 
 USER root
 
@@ -48,8 +48,8 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
-LABEL version=0.11.6
-ENV DOCKER_IMAGEVER=0.11.6
+LABEL version=0.11.7
+ENV DOCKER_IMAGEVER=0.11.7
 
 ENV CLANGCC=/usr/local/bin/clang.de8a65ef
 ENV CLANGCXX=/usr/local/bin/clang++.de8a65ef
