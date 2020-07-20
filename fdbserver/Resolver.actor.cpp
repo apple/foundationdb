@@ -44,7 +44,7 @@ struct ProxyRequestsInfo {
 namespace{
 struct Resolver : ReferenceCounted<Resolver> {
 	UID dbgid;
-	int commitProxyCount, resolverCount;
+	const int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 
@@ -96,6 +96,56 @@ struct Resolver : ReferenceCounted<Resolver> {
 		destroyConflictSet( conflictSet );
 	}
 
+	Version getOldestProxyVersion(Version requestVersion) const {
+		// SOMEDAY: This is O(n) in number of proxies. O(log n) solution using appropriate data structure?
+		Version oldestProxyVersion = requestVersion;
+		for (auto itr = proxyInfoMap.begin(); itr != proxyInfoMap.end(); ++itr) {
+			//TraceEvent("ResolveBatchProxyVersion", dbgid).detail("Proxy", itr->first).detail("Version", itr->second.lastVersion);
+			if (itr->first.isValid()) { // Don't consider the first master request
+				oldestProxyVersion = std::min(itr->second.lastVersion, oldestProxyVersion);
+			} else {
+				// The master's request version should never prevent us from clearing recentStateTransactions
+				ASSERT(debugMinRecentStateVersion == 0 || debugMinRecentStateVersion > itr->second.lastVersion);
+			}
+		}
+		return oldestProxyVersion;
+	}
+
+	bool eraseOldStateTransactions(Version upTo, int64_t* stateBytes) {
+		TEST(true); // Deleting old state transactions
+		recentStateTransactions.erase(recentStateTransactions.begin(), recentStateTransactions.upper_bound(upTo));
+		debugMinRecentStateVersion = upTo + 1;
+
+		bool anyPopped = false;
+		while (recentStateTransactionSizes.size() && recentStateTransactionSizes.front().first <= upTo) {
+			anyPopped = true;
+			*stateBytes -= recentStateTransactionSizes.front().second;
+			recentStateTransactionSizes.pop_front();
+		}
+		return anyPopped;
+	}
+
+	// Returns the number state transaction bytes saved, which are stored
+	// in recentStateTransactions.
+	int64_t saveStateTransactions(const ResolveTransactionBatchRequest& req,
+	                              const ResolveTransactionBatchReply& reply) {
+		auto& stateTransactions = recentStateTransactions[req.version];
+		int64_t stateMutations = 0;
+		int64_t stateBytes = 0;
+		for (int t : req.txnStateTransactions) {
+			stateMutations += req.transactions[t].mutations.size();
+			stateBytes += req.transactions[t].mutations.expectedSize();
+			stateTransactions.push_back_deep(
+			    stateTransactions.arena(),
+			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
+			                        req.transactions[t].mutations));
+		}
+
+		resolvedStateTransactions += req.txnStateTransactions.size();
+		resolvedStateMutations += stateMutations;
+		resolvedStateBytes += stateBytes;
+		return stateBytes;
+	}
 };
 } // namespace
 
@@ -169,8 +219,8 @@ ACTOR Future<Void> resolveBatch(
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 
-		vector<int> commitList;
-		vector<int> tooOldList;
+		std::vector<int> commitList;
+		std::vector<int> tooOldList;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
@@ -207,19 +257,9 @@ ACTOR Future<Void> resolveBatch(
 
 		ASSERT(req.prevVersion >= 0 || req.txnStateTransactions.size() == 0); // The master's request should not have any state transactions
 
-		auto& stateTransactions = self->recentStateTransactions[ req.version ];
-		int64_t stateMutations = 0;
-		int64_t stateBytes = 0;
-		for(int t : req.txnStateTransactions) {
-			stateMutations += req.transactions[t].mutations.size();
-			stateBytes += req.transactions[t].mutations.expectedSize();
-			stateTransactions.push_back_deep(stateTransactions.arena(), StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted, req.transactions[t].mutations));
-		}
-
-		self->resolvedStateTransactions += req.txnStateTransactions.size();
-		self->resolvedStateMutations += stateMutations;
-		self->resolvedStateBytes += stateBytes;
-
+		// Save request's state transactions into self->recentStateTransactions
+		// so that other proxies can get them later.
+		int64_t stateBytes = self->saveStateTransactions(req, reply);
 		if (stateBytes > 0) {
 			self->recentStateTransactionSizes.emplace_back(req.version, stateBytes);
 		}
@@ -229,6 +269,7 @@ ACTOR Future<Void> resolveBatch(
 
 		TEST(firstUnseenVersion == req.version); // Resolver first unseen version is current version
 
+		// Copy state transactions older than req.version into the reply
 		auto stateTransactionItr = self->recentStateTransactions.lower_bound(firstUnseenVersion);
 		auto endItr = self->recentStateTransactions.lower_bound(req.version);
 		for(; stateTransactionItr != endItr; ++stateTransactionItr) {
@@ -241,33 +282,14 @@ ACTOR Future<Void> resolveBatch(
 		ASSERT(!proxyInfo.outstandingBatches.empty());
 		ASSERT(self->proxyInfoMap.size() <= self->commitProxyCount+1);
 		
-		// SOMEDAY: This is O(n) in number of proxies. O(log n) solution using appropriate data structure?
-		Version oldestProxyVersion = req.version;
-		for(auto itr = self->proxyInfoMap.begin(); itr != self->proxyInfoMap.end(); ++itr) {
-			//TraceEvent("ResolveBatchProxyVersion", self->dbgid).detail("CommitProxy", itr->first).detail("Version", itr->second.lastVersion);
-			if(itr->first.isValid()) { // Don't consider the first master request
-				oldestProxyVersion = std::min(itr->second.lastVersion, oldestProxyVersion);
-			}
-			else {
-				// The master's request version should never prevent us from clearing recentStateTransactions
-				ASSERT(self->debugMinRecentStateVersion == 0 || self->debugMinRecentStateVersion > itr->second.lastVersion);
-			}
-		}
+		Version oldestProxyVersion = self->getOldestProxyVersion(req.version);
 
 		TEST(oldestProxyVersion == req.version); // The proxy that sent this request has the oldest current version
 		TEST(oldestProxyVersion != req.version); // The proxy that sent this request does not have the oldest current version
 
 		bool anyPopped = false;
 		if(firstUnseenVersion <= oldestProxyVersion && self->proxyInfoMap.size() == self->commitProxyCount+1) {
-			TEST(true); // Deleting old state transactions
-			self->recentStateTransactions.erase( self->recentStateTransactions.begin(), self->recentStateTransactions.upper_bound( oldestProxyVersion ) );
-			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
-
-			while(self->recentStateTransactionSizes.size() && self->recentStateTransactionSizes.front().first <= oldestProxyVersion) {
-				anyPopped = true;
-				stateBytes -= self->recentStateTransactionSizes.front().second;
-				self->recentStateTransactionSizes.pop_front();
-			}
+			anyPopped = self->eraseOldStateTransactions(oldestProxyVersion, &stateBytes);
 		}
 
 		self->version.set( req.version );
