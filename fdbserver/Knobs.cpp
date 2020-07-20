@@ -381,7 +381,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROVISIONAL_START_DELAY,                               1.0 );
 	init( PROVISIONAL_MAX_DELAY,                                60.0 );
 	init( PROVISIONAL_DELAY_GROWTH,                              1.5 );
-	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 );  if( randomize && BUGGIFY ) SECONDS_BEFORE_RECRUIT_BACKUP_WORKER = deterministicRandom()->random01() * 8;
+	init( SECONDS_BEFORE_RECRUIT_BACKUP_WORKER,                  4.0 ); if( randomize && BUGGIFY ) SECONDS_BEFORE_RECRUIT_BACKUP_WORKER = deterministicRandom()->random01() * 8;
+	init( CC_INTERFACE_TIMEOUT,                                 10.0 ); if( randomize && BUGGIFY ) CC_INTERFACE_TIMEOUT = 0.0;
 
 	// Resolver
 	init( SAMPLE_OFFSET_PER_KEY,                                 100 );
