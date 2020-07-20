@@ -212,6 +212,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				state int i;
 				// give tag to client
 				if (self->writeThrottle) {
+					tr.options.tags.clear();
 					if (isBadActor) {
 						tr.options.tags.addTag(self->badWriteTag);
 						tr.options.tags.addTag(self->badReadTag);
@@ -219,6 +220,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 						tr.options.tags.addTag(self->goodTag);
 					}
 				}
+
 				trStart = now();
 				while (true) {
 					try {
