@@ -381,7 +381,7 @@ struct DDQueueData {
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
 	PromiseStream<RelocateData> relocationComplete;
-	PromiseStream<RelocateData> fetchSourceServersComplete;
+	PromiseStream<RelocateData> fetchSourceServersComplete; // find source SSs for a relocate range
 
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> input;
@@ -391,7 +391,8 @@ struct DDQueueData {
 	double lastInterval;
 	int suppressIntervals;
 
-	Reference<AsyncVar<bool>> rawProcessingUnhealthy; //many operations will remove relocations before adding a new one, so delay a small time before settling on a new number.
+	Reference<AsyncVar<bool>> rawProcessingUnhealthy; // many operations will remove relocations before adding a new
+	                                                  // one, so delay a small time before settling on a new number.
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
@@ -787,8 +788,8 @@ struct DDQueueData {
 	}
 
 	// For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
-	// with rd. If there exist, cancel them by cancel their actors and reduce the src servers' busyness of those
-	// canceled inflight relocateData Launch the relocation for the rd.
+	// with rd. If there exist, cancel them by cancelling their actors and reducing the src servers' busyness of those
+	// canceled inflight relocateData. Launch the relocation for the rd.
 	void launchQueuedWork( std::set<RelocateData, std::greater<RelocateData>> combined ) {
 		int startedHere = 0;
 		double startTime = now();
@@ -942,6 +943,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				allHealthy = true;
 				anyWithSource = false;
 				bestTeams.clear();
+				// Get team from teamCollections in diffrent DCs and find the best one
 				while( tciIndex < self->teamCollections.size() ) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
@@ -950,6 +952,9 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
+					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
+					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
+					// when the remote DC is just brought up.
 					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
 					// the unhealthy DC is healthy again or is excluded.
@@ -966,7 +971,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(bestTeam.second) {
 						anyWithSource = true;
 					}
-					
+
 					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
 					tciIndex++;
 				}
@@ -994,8 +999,10 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 
 				if (allHealthy && anyWithSource && !bestTeams[i].second) {
-					// When all teams in bestTeams[i] do not hold the shard
-					// We randomly choose a server in bestTeams[i] as the shard's destination and
+					// When all servers in bestTeams[i] do not hold the shard (!bestTeams[i].second), it indicates
+					// the bestTeams[i] is in a new DC where data has not been replicated to.
+					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data movement
+					// across DC, we randomly choose a server in bestTeams[i] as the shard's destination, and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
 					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
 					int idx = deterministicRandom()->randomInt(0, serverIds.size());
@@ -1202,7 +1209,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 		return false;
 	}
 
-	//verify the shard is still in sabtf
+	// Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
 	for( int i = 0; i < shards.size(); i++ ) {
 		if( moveShard == shards[i] ) {

@@ -1,8 +1,0 @@
-configureLocked=1
-
-testTitle=ConfigureLocked
-runConsistencyCheck=false
-clearAfterTest=false
-
-testName=LockDatabase
-onlyCheckLocked=true

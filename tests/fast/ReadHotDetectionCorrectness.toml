@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'ReadHotDetection'
+
+    [[test.workload]]
+    testName = 'ReadHotDetection'
+    transactionsPerSecond = 1000

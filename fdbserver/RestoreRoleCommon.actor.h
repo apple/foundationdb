@@ -19,7 +19,7 @@
  */
 
 // This file delcares common struct and functions shared by restore roles, i.e.,
-// RestoreMaster, RestoreLoader, RestoreApplier
+// RestoreController, RestoreLoader, RestoreApplier
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreRoleCommon_G_H)
@@ -47,7 +47,7 @@ struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 
 struct RestoreRoleData;
-struct RestoreMasterData;
+struct RestoreControllerData;
 
 struct RestoreSimpleRequest;
 

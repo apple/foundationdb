@@ -19,7 +19,7 @@
  */
 
 // This file defines the commonly used data structure and functions
-// that are used by both RestoreWorker and RestoreRoles(Master, Loader, and Applier)
+// that are used by both RestoreWorker and RestoreRoles(Controller, Loader, and Applier)
 
 #ifndef FDBSERVER_RESTOREUTIL_H
 #define FDBSERVER_RESTOREUTIL_H
@@ -62,7 +62,7 @@ using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
 using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
 
-enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
+enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);
 extern const std::vector<std::string> RestoreRoleStr;

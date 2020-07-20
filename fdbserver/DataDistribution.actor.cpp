@@ -673,21 +673,49 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	~DDTeamCollection() {
-		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is held by the actor
-		// It also ensures that the trackers are done fiddling with healthyTeamCount before we free this
+		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
+		// Other teamCollections also hold pointer to this teamCollection;
+		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
+		for (int i = 0; i < teamCollections.size(); i++) {
+			if (teamCollections[i] != nullptr && teamCollections[i] != this) {
+				for (int j = 0; j < teamCollections[i]->teamCollections.size(); ++j) {
+					if (teamCollections[i]->teamCollections[j] == this) {
+						teamCollections[i]->teamCollections[j] = nullptr;
+					}
+				}
+			}
+		}
+		// Team tracker has pointers to DDTeamCollections both in primary and remote.
+		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is
+		// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
+		// this
 		for(int i=0; i < teams.size(); i++) {
 			teams[i]->tracker.cancel();
 		}
+		// The commented TraceEvent log is useful in detecting what is running during the destruction
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("TeamTrackerDestroyed", teams.size());
 		for(int i=0; i < badTeams.size(); i++) {
 			badTeams[i]->tracker.cancel();
 		}
-		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be stopped
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("BadTeamTrackerDestroyed", badTeams.size());
+		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be
+		// stopped
 		//  before the server_status map to which it has a pointer, is destroyed.
 		for(auto it = server_info.begin(); it != server_info.end(); ++it) {
 			it->second->tracker.cancel();
 			it->second->collection = nullptr;
 		}
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("ServerTrackerDestroyed", server_info.size());
 		teamBuilder.cancel();
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("TeamBuilderDestroyed", server_info.size());
 	}
 
 	void addLaggingStorageServer(Key zoneId) {
@@ -1430,6 +1458,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceAllInfo(bool shouldPrint = false) {
 
 		if (!shouldPrint) return;
+		// Record all team collections IDs
+		for (int i = 0; i < teamCollections.size(); ++i) {
+			TraceEvent("TraceAllInfo", distributorId)
+			    .detail("TeamCollectionIndex", i)
+			    .detail("Primary", teamCollections[i]->primary);
+		}
 
 		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
 		traceConfigInfo();
@@ -3133,7 +3167,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 						// so we need to recalculate the shard's priority
 						if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
-							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
+							std::pair<vector<ShardsAffectedByTeamFailure::Team>,
+							          vector<ShardsAffectedByTeamFailure::Team>>
+							    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
@@ -3143,7 +3179,16 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 								}
 
 								auto tc = self->teamCollections[t.primary ? 0 : 1];
+								if (tc == nullptr) {
+									// teamTracker only works when all teamCollections are valid.
+									// Always check if all teamCollections are valid, and throw error if any
+									// teamCollection has been destructed, because the teamTracker can be triggered
+									// after a DDTeamCollection was destroyed and before the other DDTeamCollection is
+									// destroyed. Do not throw actor_cancelled() because flow treat it differently.
+									throw dd_cancelled();
+								}
 								ASSERT(tc->primary == t.primary);
+								// tc->traceAllInfo();
 								if( tc->server_info.count( t.servers[0] ) ) {
 									auto& info = tc->server_info[t.servers[0]];
 
@@ -3152,6 +3197,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										if( info->teams[k]->getServerIDs() == t.servers ) {
 											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
 											found = true;
+
 											break;
 										}
 									}
@@ -3166,7 +3212,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
-									TEST(true); // A removed server is still associated with a team in SABTF
+									TEST(true); // A removed server is still associated with a team in
+									            // ShardsAffectedByTeamFailure
 								}
 							}
 						}
@@ -3176,15 +3223,15 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.priority = maxPriority;
 
 						self->output.send(rs);
-						if(deterministicRandom()->random01() < 0.01) {
-							TraceEvent("SendRelocateToDDQx100", self->distributorId)
-								.detail("Team", team->getDesc())
-								.detail("KeyBegin", rs.keys.begin)
-								.detail("KeyEnd", rs.keys.end)
-								.detail("Priority", rs.priority)
-								.detail("TeamFailedMachines", team->size() - serversLeft)
-								.detail("TeamOKMachines", serversLeft);
-						}
+						TraceEvent("SendRelocateToDDQueue", self->distributorId)
+						    .suppressFor(1.0)
+						    .detail("Primary", self->primary)
+						    .detail("Team", team->getDesc())
+						    .detail("KeyBegin", rs.keys.begin)
+						    .detail("KeyEnd", rs.keys.end)
+						    .detail("Priority", rs.priority)
+						    .detail("TeamFailedMachines", team->size() - serversLeft)
+						    .detail("TeamOKMachines", serversLeft);
 					}
 				} else {
 					if(logTeamEvents) {
@@ -3199,7 +3246,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 		}
 	} catch(Error& e) {
 		if(logTeamEvents) {
-			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
+			TraceEvent("TeamTrackerStopping", self->distributorId)
+			    .detail("Primary", self->primary)
+			    .detail("Team", team->getDesc())
+			    .detail("Priority", team->getPriority());
 		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {
@@ -3207,7 +3257,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			ASSERT( self->healthyTeamCount >= 0 );
 
 			if( self->healthyTeamCount == 0 ) {
-				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
+				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+				    .detail("Primary", self->primary)
+				    .detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
 			}
 		}
@@ -3858,6 +3910,10 @@ ACTOR Future<Void> storageServerTracker(
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
 			errorOut.sendError(e);
+		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
+		    .suppressFor(1.0)
+		    .detail("Primary", self->primary)
+		    .detail("Server", server->id);
 		throw;
 	}
 }
@@ -4589,8 +4645,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (initData->shards[shard].hasDest) {
-					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
-					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
+					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
+					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
+					// easier to just (with low priority) schedule it for movement.
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
@@ -4643,6 +4700,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 		}
 		catch( Error &e ) {
 			state Error err = e;
+			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();

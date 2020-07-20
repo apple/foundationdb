@@ -697,10 +697,12 @@ Optional<bool> checkBuggifyOverride(const char *testFile) {
 		std::string value = removeWhitespace(line.substr(found + 1));
 
 		if (attrib == "buggify") {
-			if( !strcmp( value.c_str(), "on" ) ) {
+			// Testspec uses `on` or `off` (without quotes).
+			// TOML uses literal `true` and `false`.
+			if( !strcmp( value.c_str(), "on" ) || !strcmp( value.c_str(), "true" ) ) {
 				ifs.close();
 				return true;
-			} else if( !strcmp( value.c_str(), "off" ) ) {
+			} else if( !strcmp( value.c_str(), "off" ) || !strcmp( value.c_str(), "false" )) {
 				ifs.close();
 				return false;
 			} else {
