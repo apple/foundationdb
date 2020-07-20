@@ -67,10 +67,13 @@ struct LockRangeWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> lockAndSave(Database cx, LockRangeWorkload* self) {
+		wait(lockRange(cx, self->range));
+		TraceEvent("LockRangeWorkload").detail("LockedRange", self->range.toString());
+
 		state Transaction tr(cx);
 		loop {
 			try {
-				wait(lockRange(&tr, self->range));
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Standalone<RangeResultRef> data = wait(tr.getRange(self->range, 50000));
 				ASSERT(!data.more);
 				wait(tr.commit());
@@ -83,15 +86,17 @@ struct LockRangeWorkload : TestWorkload {
 
 	ACTOR static Future<Void> unlockAndCheck(Database cx, LockRangeWorkload* self, UID lockID,
 	                                         Standalone<RangeResultRef> data) {
+		wait(unlockRange(cx, self->range));
+		TraceEvent("LockRangeWorkload").detail("UnlockedRange", self->range.toString());
+
+		// TODO: other workload has to be stopped, otherwise the data can be changed while checking.
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Optional<Value> val = wait( tr.get(databaseLockedKey) );
 				// if(!val.present())
 				//	return Void();
 
-				wait(unlockRange(&tr, self->range));
 				state Standalone<RangeResultRef> data2 = wait(tr.getRange(self->range, 50000));
 				if (data.size() != data2.size()) {
 					TraceEvent(SevError, "DataChangedWhileLocked")
