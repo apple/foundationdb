@@ -20,6 +20,11 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "flow/FastAlloc.h"
+#include "flow/FastRef.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "flow/genericactors.actor.h"
+#include <vector>
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -44,7 +49,25 @@ private:
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
+struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
+	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
+	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
+		: Locations(v)
+	{}
+	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
+		: Locations(v)
+		, hasCaches(hasCaches)
+	{}
+	LocationInfo(const LocationInfo&) = delete;
+	LocationInfo(LocationInfo&&) = delete;
+	LocationInfo& operator=(const LocationInfo&) = delete;
+	LocationInfo& operator=(LocationInfo&&) = delete;
+	bool hasCaches = false;
+	Reference<Locations> locations() {
+		return Reference<Locations>::addRef(this);
+	}
+};
+
 typedef ModelInterface<MasterProxyInterface> ProxyInfo;
 
 class ClientTagThrottleData : NonCopyable {
@@ -131,7 +154,7 @@ public:
 
 	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
 
-	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
 	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
 	void invalidateCache( const KeyRef&, bool isBackward = false );
@@ -200,11 +223,13 @@ public:
 	bool enableLocalityLoadBalance;
 
 	struct VersionRequest {
+		SpanID spanContext;
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+		VersionRequest(SpanID spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
 	// Transaction start request batching
@@ -232,7 +257,7 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
+	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
@@ -314,7 +339,8 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
-
+	Future<Void> cacheListMonitor;
+	AsyncTrigger updateCache;
 	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);

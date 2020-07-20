@@ -1,4 +1,4 @@
 testTitle=SimpleExternalTest
-testName=External
-libraryName=c_workloads
-workloadName=SimpleWorkload
+    testName=External
+    libraryName=c_workloads
+    workloadName=SimpleWorkload

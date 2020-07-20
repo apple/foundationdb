@@ -100,9 +100,6 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 	TransientStorageMetricSample( int64_t metricUnitsPerSample ) : StorageMetricSample(metricUnitsPerSample) {}
 
-	bool roll( KeyRef key, int64_t metric ) {
-		return deterministicRandom()->random01() < (double)metric / metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
-	}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire( KeyRef key, int64_t metric, double expiration ) {
@@ -164,6 +161,11 @@ struct TransientStorageMetricSample : StorageMetricSample {
 	}
 
 private:
+	bool roll(KeyRef key, int64_t metric) const {
+		return deterministicRandom()->random01() <
+		       (double)metric / metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
+	}
+
 	int64_t add( KeyRef key, int64_t metric ) {
 		if (!metric) return 0;
 		int64_t mag = metric<0 ? -metric : metric;
@@ -195,7 +197,7 @@ struct StorageServerMetrics {
 	    bytesReadSample(SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE) {}
 
 	// Get the current estimated metrics for the given keys
-	StorageMetrics getMetrics( KeyRangeRef const& keys ) {
+	StorageMetrics getMetrics(KeyRangeRef const& keys) const {
 		StorageMetrics result;
 		result.bytes = byteSample.getEstimate( keys );
 		result.bytesPerKSecond = bandwidthSample.getEstimate( keys ) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -257,7 +259,7 @@ struct StorageServerMetrics {
 
 	// Called by StorageServerDisk when the size of a key in byteSample changes, to notify WaitMetricsRequest
 	// Should not be called for keys past allKeys.end
-	void notifyBytes( RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::Iterator shard, int64_t bytes ) {
+	void notifyBytes( RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard, int64_t bytes ) {
 		ASSERT(shard.end() <= allKeys.end);
 
 		StorageMetrics notifyMetrics;
@@ -305,9 +307,9 @@ struct StorageServerMetrics {
 	//static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
 	// This function can run on untrusted user data.  We must validate all divisions carefully.
-	KeyRef getSplitKey( int64_t remaining, int64_t estimated, int64_t limits, int64_t used, int64_t infinity,
-		bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey, KeyRef const& key, bool hasUsed ) 
-	{	
+	KeyRef getSplitKey(int64_t remaining, int64_t estimated, int64_t limits, int64_t used, int64_t infinity,
+	                   bool isLastShard, const StorageMetricSample& sample, double divisor, KeyRef const& lastKey,
+	                   KeyRef const& key, bool hasUsed) const {
 		ASSERT(remaining >= 0);
 		ASSERT(limits > 0);
 		ASSERT(divisor > 0);
@@ -335,7 +337,7 @@ struct StorageServerMetrics {
 		return key;
 	}
 
-	void splitMetrics( SplitMetricsRequest req ) {
+	void splitMetrics(SplitMetricsRequest req) const {
 		try {
 			SplitMetricsReply reply;
 			KeyRef lastKey = req.keys.begin;
@@ -378,7 +380,8 @@ struct StorageServerMetrics {
 		}
 	}
 
-	void getStorageMetrics( GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate, int64_t versionLag, double lastUpdate ){
+	void getStorageMetrics(GetStorageMetricsRequest req, StorageBytes sb, double bytesInputRate, int64_t versionLag,
+	                       double lastUpdate) const {
 		GetStorageMetricsReply rep;
 
 		// SOMEDAY: make bytes dynamic with hard disk space
@@ -417,7 +420,7 @@ struct StorageServerMetrics {
 	// readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 	// `StorageMetricsSampleTests.txt` after change made.
 	std::vector<KeyRangeRef> getReadHotRanges(KeyRangeRef shard, double readDensityRatio, int64_t baseChunkSize,
-	                                          int64_t minShardReadBandwidthPerKSeconds) {
+	                                          int64_t minShardReadBandwidthPerKSeconds) const {
 		std::vector<KeyRangeRef> toReturn;
 		double shardSize = (double)byteSample.getEstimate(shard);
 		int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
@@ -433,7 +436,7 @@ struct StorageServerMetrics {
 			return toReturn;
 		}
 		KeyRef beginKey = shard.begin;
-		IndexedSet<Key, int64_t>::iterator endKey =
+		auto endKey =
 		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
 		while (endKey != byteSample.sample.end()) {
 			if (*endKey > shard.end) {
@@ -466,7 +469,7 @@ struct StorageServerMetrics {
 		return toReturn;
 	}
 
-	void getReadHotRanges(ReadHotSubRangeRequest req) {
+	void getReadHotRanges(ReadHotSubRangeRequest req) const {
 		ReadHotSubRangeReply reply;
 		std::vector<KeyRangeRef> v = getReadHotRanges(req.keys, SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
 		                                              SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,

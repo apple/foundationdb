@@ -1,5 +1,6 @@
 testTitle=CloggedConfigureDatabaseTest
-    runSetup=false
+runSetup=false
+
     testName=ConfigureDatabase
     testDuration=300.0
 

@@ -20,6 +20,8 @@
 
 #ifndef FLOW_ARENA_H
 #define FLOW_ARENA_H
+#include <array>
+#include <iterator>
 #pragma once
 
 #include "flow/FastAlloc.h"
@@ -100,9 +102,9 @@ public:
 	explicit Arena(size_t reservedSize);
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) BOOST_NOEXCEPT;
+	Arena(Arena&& r) noexcept;
 	Arena& operator=(const Arena&);
-	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
+	Arena& operator=(Arena&&) noexcept;
 
 	void dependsOn(const Arena& p);
 	size_t getSize() const;
@@ -360,12 +362,11 @@ public:
 	}
 #else
 	Standalone( const T& t, const Arena& arena ) : Arena( arena ), T( t ) {}
-	Standalone( const Standalone<T> & t ) : Arena((Arena const&)t), T((T const&)t) {}
-	Standalone<T>& operator=( const Standalone<T> & t ) {
-		*(Arena*)this = (Arena const&)t;
-		*(T*)this = (T const&)t;
-		return *this;
-	}
+	Standalone(const Standalone<T>&) = default;
+	Standalone<T>& operator=(const Standalone<T>&) = default;
+	Standalone(Standalone<T>&&) = default;
+	Standalone<T>& operator=(Standalone<T>&&) = default;
+	~Standalone() = default;
 #endif
 
 	template <class U> Standalone<U> castTo() const {
@@ -563,6 +564,15 @@ public:
 		return dst + length;
 	}
 
+	std::vector<StringRef> splitAny(StringRef sep) const {
+		StringRef r = *this;
+		std::vector<StringRef> tokens;
+		while (r.size()) {
+			tokens.push_back(r.eatAny(sep, nullptr));
+		}
+		return tokens;
+	}
+
 private:
 	// Unimplemented; blocks conversion through std::string
 	StringRef( char* );
@@ -612,6 +622,9 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 };
 
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
+inline StringRef operator "" _sr(const char* str, size_t size) {
+	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
+}
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
@@ -690,15 +703,20 @@ inline bool operator != (const StringRef& lhs, const StringRef& rhs ) { return !
 inline bool operator <= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs>rhs); }
 inline bool operator >= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs<rhs); }
 
-// This trait is used by VectorRef to determine if it should just memcpy the vector contents.
-// FIXME:  VectorRef really should use std::is_trivially_copyable for this BUT that is not implemented
-// in gcc c++0x so instead we will use this custom trait which defaults to std::is_trivial, which
-// handles most situations but others will have to be specialized.
+// This trait is used by VectorRef to determine if deep copy constructor should recursively
+// call deep copies of each element.
+//
+// TODO: There should be an easier way to identify the difference between flow_ref and non-flow_ref types.
+// std::is_trivially_copyable does not work because some flow_ref types are trivially copyable
+// and some non-flow_ref types are not trivially copyable.
 template <typename T>
-struct memcpy_able : std::is_trivial<T> {};
+struct flow_ref : std::integral_constant<bool, !std::is_fundamental_v<T>> {};
 
 template <>
-struct memcpy_able<UID> : std::integral_constant<bool, true> {};
+struct flow_ref<UID> : std::integral_constant<bool, false> {};
+
+template <class A, class B>
+struct flow_ref<std::pair<A, B>> : std::integral_constant<bool, false> {};
 
 template<class T>
 struct string_serialized_traits : std::false_type {
@@ -791,19 +809,19 @@ public:
 		return *this;
 	}
 
-	// Arena constructor for non-Ref types, identified by memcpy_able
+	// Arena constructor for non-Ref types, identified by !flow_ref
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<memcpy_able<T2>::value, int>::type = 0)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
 	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
-			memcpy(data, toCopy.data, m_size * sizeof(T));
+			std::copy(toCopy.data, toCopy.data + m_size, data);
 		}
 	}
 
 	// Arena constructor for Ref types, which must have an Arena constructor
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!memcpy_able<T2>::value, int>::type = 0)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
 	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
@@ -899,7 +917,7 @@ public:
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
 		VPS::invalidate();
 		if (count > 0) {
-			memcpy(data + m_size, begin, sizeof(T) * count);
+			std::copy(begin, begin + count, data + m_size);
 		}
 		m_size += count;
 	}
@@ -939,15 +957,15 @@ public:
 		if (size > m_capacity) reallocate(p, size);
 	}
 
-	// expectedSize() for non-Ref types, identified by memcpy_able
+	// expectedSize() for non-Ref types, identified by !flow_ref
 	template <class T2 = T>
-	typename std::enable_if<memcpy_able<T2>::value, size_t>::type expectedSize() const {
+	typename std::enable_if<!flow_ref<T2>::value, size_t>::type expectedSize() const {
 		return sizeof(T) * m_size;
 	}
 
 	// expectedSize() for Ref types, which must in turn have expectedSize() implemented.
 	template <class T2 = T>
-	typename std::enable_if<!memcpy_able<T2>::value, size_t>::type expectedSize() const {
+	typename std::enable_if<flow_ref<T2>::value, size_t>::type expectedSize() const {
 		size_t t = sizeof(T) * m_size;
 		for (int i = 0; i < m_size; i++) t += data[i].expectedSize();
 		return t;
@@ -957,23 +975,343 @@ public:
 
 	void extendUnsafeNoReallocNoInit(int amount) { m_size += amount; }
 
-private:
+protected:
 	T* data;
 	int m_size, m_capacity;
 
 	void reallocate(Arena& p, int requiredCapacity) {
 		requiredCapacity = std::max(m_capacity * 2, requiredCapacity);
 		// SOMEDAY: Maybe we are right at the end of the arena and can expand cheaply
-		T* newData = (T*)new (p) uint8_t[requiredCapacity * sizeof(T)];
+		T* newData = new (p) T[requiredCapacity];
 		if (m_size > 0) {
-			memcpy(newData, data, m_size * sizeof(T));
+			std::move(data, data + m_size, newData);
 		}
 		data = newData;
 		m_capacity = requiredCapacity;
 	}
 };
 
-template<class T>
+// This is a VectorRef that optimizes for tiny to small sizes.
+// It keeps the first #InlineMembers on the stack - which means
+// that all of them are always copied. This should be faster
+// when you expect the vector to be usually very small as it
+// won't need allocations in these cases.
+template <class T, int InlineMembers = 1>
+class SmallVectorRef {
+public:
+	// types
+	template <bool isConst>
+	class iterator_impl {
+		using self_t = iterator_impl<isConst>;
+		using VecType = SmallVectorRef<T, InlineMembers>;
+		std::conditional_t<isConst, const VecType*, VecType*> vec = nullptr;
+		int idx = 0;
+
+	public:
+		using Category = std::random_access_iterator_tag;
+		using value_type = std::conditional_t<isConst, const T, T>;
+		using difference_type = int;
+		using pointer = value_type*;
+		using reference = value_type&;
+		friend class SmallVectorRef<T, InlineMembers>;
+		template <bool I>
+		friend bool operator<(const iterator_impl<I>&, const iterator_impl<I>&);
+		template <bool I>
+		friend bool operator>(const iterator_impl<I>&, const iterator_impl<I>&);
+		template <bool I>
+		friend bool operator<=(const iterator_impl<I>&, const iterator_impl<I>&);
+		template <bool I>
+		friend bool operator>=(const iterator_impl<I>&, const iterator_impl<I>&);
+		template <bool I>
+		friend self_t operator+(const iterator_impl<I>&, difference_type);
+		template <bool I>
+		friend self_t operator+(difference_type, const self_t&);
+		template <bool I>
+		friend self_t operator-(const iterator_impl<I>&, difference_type);
+		template <bool I>
+		friend difference_type operator-(iterator_impl<I>, self_t);
+
+		self_t& operator++() {
+			++idx;
+			return *this;
+		}
+		self_t operator++(int) {
+			auto res = *this;
+			++(*this);
+			return res;
+		}
+		self_t& operator--() {
+			--idx;
+			return *this;
+		}
+		self_t operator--(int) {
+			auto res = *this;
+			--(*this);
+			return res;
+		}
+		self_t& operator+=(difference_type diff) {
+			idx += diff;
+			return *this;
+		}
+		self_t& operator-=(difference_type diff) {
+			idx -= diff;
+			return *this;
+		}
+		bool operator!=(self_t const& o) const { return vec != o.vec || idx != o.idx; }
+		bool operator==(self_t const& o) const { return vec == o.vec && idx == o.idx; }
+		reference operator[](difference_type i) const { return get(idx + i); }
+		reference& get(int i) const {
+			if (i < InlineMembers) {
+				return vec->arr[i];
+			} else {
+				return vec->data[i];
+			}
+		}
+		reference get() const { return get(idx); }
+		reference operator*() const { return get(); }
+		pointer operator->() const { return &get(); }
+	};
+	using const_iterator = iterator_impl<true>;
+	using iterator = iterator_impl<false>;
+	using reverse_iterator = std::reverse_iterator<iterator>;
+	using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+public: // Construction
+	static_assert(std::is_trivially_destructible_v<T>);
+	SmallVectorRef() {}
+	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
+	  : m_size(other.m_size), arr(other.arr), data(other.data) {}
+	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
+		m_size = other.m_size;
+		arr = other.arr;
+		data = other.data;
+		return *this;
+	}
+
+	template <class T2 = T, int IM = InlineMembers>
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T, IM>& toCopy,
+				   typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
+		: m_size(toCopy.m_size) {
+		if (toCopy.size() > InlineMembers) {
+			data.resize(arena, toCopy.size() - InlineMembers);
+		}
+		std::copy(toCopy.cbegin(), toCopy.cend(), begin());
+	}
+
+	template <class T2 = T, int IM = InlineMembers>
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T2, IM>& toCopy,
+	               typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
+	  : m_size(toCopy.m_size) {
+		for (int i = 0; i < toCopy.size(); ++i) {
+			if (i < arr.size()) {
+				new (&arr[i]) T(arena, toCopy[i]);
+			} else {
+				data.push_back_deep(arena, toCopy[i]);
+			}
+		}
+	}
+
+	template <class It>
+	SmallVectorRef(Arena& arena, It first, It last)
+	  : m_size(0) {
+		while (first != last && m_size < InlineMembers) {
+			new (&arr[m_size++]) T(*(first++));
+		}
+		while (first != last) {
+			data.push_back(arena, *(first++));
+		}
+	}
+
+	SmallVectorRef(SmallVectorRef<T, InlineMembers>&& o)
+		: m_size(o.m_size), arr(std::move(o.arr)), data(std::move(o.data)) {
+		o.m_size = 0;
+	}
+
+public: // information
+	int size() const { return m_size; }
+	int capacity() const { return InlineMembers + data.capacity(); }
+	bool empty() const { return m_size == 0; }
+
+public: // element access
+	T const& front() const { return *cbegin(); }
+	T const& back() const { return *crbegin(); }
+	T& front() { return *begin(); }
+	T& back() { return *rbegin(); }
+	T const& operator[](int i) const {
+		if (i < InlineMembers) {
+			return arr[i];
+		} else {
+			return data[i - InlineMembers];
+		}
+	}
+
+public: // Modification
+	void push_back(Arena& arena, T const& value) {
+		if (m_size < InlineMembers) {
+			new (&arr[m_size++]) T(value);
+			return;
+		}
+		++m_size;
+		data.push_back(arena, value);
+	}
+
+	void push_back_deep(Arena& arena, T const& value) {
+		if (m_size < InlineMembers) {
+			new (&arr[m_size++]) T(arena, value);
+			return;
+		}
+		++m_size;
+		data.push_back_deep(arena, value);
+	}
+
+	void pop_back() {--m_size; }
+
+	template <class It>
+	void append(Arena& arena, It first, It last) {
+		if (first == last) {
+			return;
+		}
+		auto d = std::distance(first, last);
+		if (m_size + d > InlineMembers) {
+			data.reserve(arena, m_size + d - InlineMembers);
+		}
+		while (first != last && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(*(first++));
+		}
+		while (first != last) {
+			data.push_back(arena, *(first++));
+		}
+	}
+
+	template <class It>
+	void append_deep(Arena& arena, It first, It last) {
+		if (first == last) {
+			return;
+		}
+		auto d = std::distance(first, last);
+		if (m_size + d > InlineMembers) {
+			data.reserve(arena, m_size + d - InlineMembers);
+		}
+		while (first != last && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(arena, *(first++));
+		}
+		while (first != last) {
+			data.push_back_deep(arena, *(first++));
+		}
+	}
+
+public: // iterator access
+	iterator begin() {
+		iterator res;
+		res.vec = this;
+		res.idx = 0;
+		return res;
+	}
+
+	const_iterator cbegin() const {
+		const_iterator res;
+		res.vec = this;
+		res.idx = 0;
+		return res;
+	}
+
+	const_iterator begin() const { return cbegin(); }
+
+	iterator end() {
+		iterator res;
+		res.vec = this;
+		res.idx = m_size;
+		return res;
+	}
+
+	const_iterator cend() const {
+		const_iterator res;
+		res.vec = this;
+		res.idx = m_size;
+		return res;
+	}
+
+	const_iterator end() const { return cend(); }
+
+	reverse_iterator rbegin() { return reverse_iterator(end()); }
+
+	const_reverse_iterator crbegin() const { return const_reverse_iterator(cend()); }
+
+	const_reverse_iterator rbegin() const { return crbegin(); }
+
+	reverse_iterator rend() { return reverse_iterator(begin()); }
+
+	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
+
+	const_reverse_iterator rend() const { return crend(); }
+
+private:
+	int m_size = 0;
+	std::array<T, InlineMembers> arr;
+	VectorRef<T> data;
+};
+
+template <class T, int InlineMembers, bool isConst>
+bool operator<(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+               const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx < rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+bool operator>(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+               const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx > rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+bool operator<=(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+                const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx <= rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+bool operator>=(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
+                const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
+	return lhs.idx >= rhs.idx;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator+(
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter,
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff) {
+	auto res = iter;
+	res.idx += diff;
+	return res;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator+(
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff,
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter) {
+	auto res = iter;
+	res.idx += diff;
+	return res;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator-(
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter,
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff) {
+	auto res = iter;
+	res.idx -= diff;
+	return res;
+}
+
+template <class T, int InlineMembers, bool isConst>
+typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator-(
+    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff,
+    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter) {
+	auto res = iter;
+	res.idx -= diff;
+	return res;
+}
+
+template <class T>
 struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 

@@ -560,10 +560,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -644,10 +642,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
 };
 
 
@@ -680,7 +677,7 @@ public:
 		if (sav) sav->addFutureRef();
 		//if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
-	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
+	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
 		rhs.sav = 0;
 		//if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
 	}
@@ -719,7 +716,7 @@ public:
 		if (sav) sav->delFutureRef();
 		sav = rhs.sav;
 	}
-	void operator=(Future<T>&& rhs) BOOST_NOEXCEPT {
+	void operator=(Future<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delFutureRef();
 			sav = rhs.sav;
@@ -798,6 +795,7 @@ public:
 		sav->addPromiseRef();
 	}
 	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
@@ -805,7 +803,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(Promise && rhs) BOOST_NOEXCEPT {
+	void operator=(Promise&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -850,14 +848,14 @@ public:
 	}
 	FutureStream() : queue(NULL) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue) queue->delFutureRef();
 		queue = rhs.queue;
 	}
-	void operator=(FutureStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
 			if (queue) queue->delFutureRef();
 			queue = rhs.queue;
@@ -954,13 +952,13 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	PromiseStream(PromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(PromiseStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(PromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;
@@ -1008,12 +1006,8 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void error(Error e) {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>

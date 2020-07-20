@@ -163,14 +163,13 @@ struct RegisterWorkerReply {
 	constexpr static FileIdentifier file_identifier = 16475696;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
-	Optional<uint16_t> storageCache;
 
 	RegisterWorkerReply() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Optional<uint16_t> storageCache) : processClass(processClass), priorityInfo(priorityInfo), storageCache(storageCache) {}
+	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo) : processClass(processClass), priorityInfo(priorityInfo) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, processClass, priorityInfo, storageCache);
+		serializer(ar, processClass, priorityInfo);
 	}
 };
 
@@ -302,19 +301,18 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
 
 	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf, bool degraded) :
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), storageCacheInterf(storageCacheInterf), degraded(degraded) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, bool degraded) :
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, storageCacheInterf, issues, incompatiblePeers, reply, degraded);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, issues, incompatiblePeers, reply, degraded);
 	}
 };
 
@@ -626,12 +624,13 @@ struct DebugEntryRef {
 	Version version;
 	MutationRef mutation;
 	DebugEntryRef() {}
-	DebugEntryRef( const char* c, Version v, MutationRef const& m ) : context((const uint8_t*)c,strlen(c)), version(v), mutation(m), time(now()), address( g_network->getLocalAddress() ) {}
-	DebugEntryRef( Arena& a, DebugEntryRef const& d ) : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
+	DebugEntryRef(const char* c, Version v, MutationRef const& m)
+	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
+	    address(g_network->getLocalAddress()) {}
+	DebugEntryRef(Arena& a, DebugEntryRef const& d)
+	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
 
-	size_t expectedSize() const {
-		return context.expectedSize() + mutation.expectedSize();
-	}
+	size_t expectedSize() const { return context.expectedSize() + mutation.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -732,7 +731,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest re
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> storageCache(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> storageCacheServer(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();

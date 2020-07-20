@@ -1,0 +1,12 @@
+extraDB = 2
+
+[[test]]
+testTitle = 'DifferentClustersSameRV'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'DifferentClustersSameRV'
+    testDuration = 150
+    switchAfter = 50
+    keyToRead = 'someKey'
+    keyToWatch = 'anotherKey'

@@ -144,6 +144,7 @@ Version getVersionFromString(std::string const& value) {
 // \xff / bklog / keyspace in a funny order for performance reasons.
 // Return the ranges of keys that contain the data for the given range
 // of versions.
+// assert CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE % blocksize = 0. Otherwise calculation of hash will be incorrect
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize) {
 	Standalone<VectorRef<KeyRangeRef>> ret;
 
@@ -200,12 +201,16 @@ Key getApplyKey( Version version, Key backupUid ) {
 	return k2.withPrefix(applyLogKeys.begin);
 }
 
+Version getLogKeyVersion(Key key) {
+	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
+}
+
 //Given a key from one of the ranges returned by get_log_ranges,
 //returns(version, part) where version is the database version number of
 //the transaction log data in the value, and part is 0 for the first such
 //data for a given version, 1 for the second block of data, etc.
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
-	return std::make_pair(bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t))),
+	return std::make_pair(getLogKeyVersion(key),
 		bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
@@ -349,7 +354,10 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 
 	loop{
 		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -413,7 +421,10 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 
 	loop{
 		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

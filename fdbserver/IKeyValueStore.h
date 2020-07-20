@@ -37,9 +37,9 @@ public:
 
 class IKeyValueStore : public IClosable {
 public:
-	virtual KeyValueStoreType getType() = 0;
-	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) = 0;
-	virtual void clear( KeyRangeRef range, const Arena* arena = NULL ) = 0;
+	virtual KeyValueStoreType getType() const = 0;
+	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
+	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> commit(bool sequential = false) = 0;  // returns when prior sets and clears are (atomically) durable
 
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) = 0;
@@ -54,10 +54,10 @@ public:
 	// To debug MEMORY_RADIXTREE type ONLY
 	// Returns (1) how many key & value pairs have been inserted (2) how many nodes have been created (3) how many
 	// key size is less than 12 bytes
-	virtual std::tuple<size_t, size_t, size_t> getSize() { return std::make_tuple(0, 0, 0); }
+	virtual std::tuple<size_t, size_t, size_t> getSize() const { return std::make_tuple(0, 0, 0); }
 
 	// Returns the amount of free and total space for this store, in bytes
-	virtual StorageBytes getStorageBytes() = 0;
+	virtual StorageBytes getStorageBytes() const = 0;
 
 	virtual void resyncLog() {}
 

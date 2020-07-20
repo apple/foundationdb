@@ -1,0 +1,42 @@
+[[test]]
+testTitle = 'SwizzledRollbackTimeLapse'
+
+    [[test.workload]]
+    testName = 'Increment'
+    transactionsPerSecond = 100.0
+    testDuration = 300.0
+    nodeCount = 10000
+    expectedRate = 0.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+    swizzle = 1
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 300.0
+    meanDelay = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 0
+    reboot = true
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 0
+    reboot = true
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    maxDelayBeforeChange = 300.0
+    coordinators = 'auto'

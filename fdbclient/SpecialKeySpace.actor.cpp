@@ -115,7 +115,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
-	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter =
+	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::iterator iter =
 	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
@@ -164,7 +164,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
 	state Standalone<RangeResultRef> pairs;
-	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Iterator iter;
+	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state KeyRangeRef moduleBoundary;
