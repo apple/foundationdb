@@ -1626,7 +1626,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
 		if(ccTimeout.isReady()) {
 			TraceEvent("MasterTerminated", mi.id()).detail("Reason", "Timeout")
-			  .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().id() : UID())
+			  .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
 			  .detail("DBInfoInterface", db->get().clusterInterface.id());
 			return Void();
 		}
