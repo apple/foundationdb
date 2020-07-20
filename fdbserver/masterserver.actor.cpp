@@ -1635,8 +1635,8 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		loop choose {
 			when (wait( core )) { break; }
 			when (wait( onDBChange )) {
-				onDBChange = db->onChange() || ccInterface->onChange();
-				if (ccInterface->get().present() && db->get().clusterInterface == ccInterface->get().get() && !lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() )) {
+				onDBChange = db->onChange();
+				if (!lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() )) {
 					TraceEvent("MasterTerminated", mi.id()).detail("Reason", "LifetimeToken").detail("MyToken", lifetime.toString()).detail("CurrentToken", db->get().masterLifetime.toString());
 					TEST(true);  // Master replaced, dying
 					if (BUGGIFY) wait( delay(5) );
