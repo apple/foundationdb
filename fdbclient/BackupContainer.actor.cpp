@@ -1545,9 +1545,13 @@ public:
 		// Remove trailing slashes on path
 		path.erase(path.find_last_not_of("\\/") + 1);
 
-		if(!g_network->isSimulated() && path != abspath(path)) {
-			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path);
-			throw io_error();
+		std::string absolutePath = abspath(path);
+		
+		if(!g_network->isSimulated() && path != absolutePath) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path).detail("AbsolutePath", absolutePath);
+			// throw io_error();
+			IBackupContainer::lastOpenError = format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
+			throw backup_invalid_url();
 		}
 
 		// Finalized path written to will be will be <path>/backup-<uid>

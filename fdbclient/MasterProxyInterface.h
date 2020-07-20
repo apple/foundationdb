@@ -32,7 +32,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
 
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {
@@ -158,12 +158,14 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
+	Optional<TransactionCommitCostEstimation> commitCostEstimation;
+	Optional<TagSet> tagSet;
 
 	CommitTransactionRequest() : flags(0) {}
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID, spanContext);
+		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext);
 	}
 };
 

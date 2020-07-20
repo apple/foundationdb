@@ -2388,11 +2388,10 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 			}
 			if (!FindNextFile( h, &fd ))
 				break;
-			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
+			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
 				wait( yield() );
 				tsc_begin = __rdtsc();
 			}
-
 		}
 		if (GetLastError() != ERROR_NO_MORE_FILES) {
 			TraceEvent(SevError, "FindNextFile").detail("Directory", directory).detail("Extension", extension).GetLastError();
@@ -2450,7 +2449,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 			    (!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
 				result.push_back( name );
 			}
-			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME) {
+			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
 				wait( yield() );
 				tsc_begin = __rdtsc();
 			}

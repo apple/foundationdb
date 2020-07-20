@@ -13,7 +13,8 @@ connectionFailuresDisableDuration = 60
     [[test.workload]]
     testName = 'LowLatency'
     testDuration = 300.0
-    maxLatency = 50.0
+    maxGRVLatency = 50.0
+    testWrites = false
 
     [[test.workload]]
     testName = 'Attrition'

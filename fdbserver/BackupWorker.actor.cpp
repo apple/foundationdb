@@ -69,10 +69,6 @@ struct VersionedMessage {
 	}
 };
 
-static bool sameArena(const Arena& a, const Arena& b) {
-	return a.impl.getPtr() == b.impl.getPtr();
-}
-
 struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
@@ -340,11 +336,10 @@ struct BackupData {
 		for (int i = 0; i < num; i++) {
 			const Arena& a = messages[i].arena;
 			const Arena& b = messages[i + 1].arena;
-			if (!sameArena(a, b)) {
+			if (!a.sameArena(b)) {
 				bytes += messages[i].bytes;
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
-				    .detail("Release", messages[i].bytes)
-				    .detail("Arena", (void*)a.impl.getPtr());
+				    .detail("Release", messages[i].bytes);
 			}
 		}
 		lock->release(bytes);
@@ -904,10 +899,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			if (!sameArena(prev, r->arena())) {
+			if (!prev.sameArena(r->arena())) {
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 				    .detail("Take", r->arena().getSize())
-				    .detail("Arena", (void*)r->arena().impl.getPtr())
 				    .detail("Current", self->lock->activePermits());
 
 				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));

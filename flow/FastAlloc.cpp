@@ -333,6 +333,9 @@ void FastAllocator<Size>::release(void *ptr) {
 
 	ASSERT(!thr.freelist == (thr.count == 0)); // freelist is empty if and only if count is 0
 
+#if VALGRIND
+	VALGRIND_MAKE_MEM_DEFINED(ptr, sizeof(void*));
+#endif
 	++thr.count;
 	*(void**)ptr = thr.freelist;
 	//check(ptr, false);

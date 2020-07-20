@@ -133,6 +133,7 @@ struct TransactionOptions {
 	bool firstInBatch : 1;
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
+	bool expensiveClearCostEstimation : 1;
 
 	TransactionPriority priority;
 
