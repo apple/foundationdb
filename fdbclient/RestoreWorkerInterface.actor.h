@@ -19,7 +19,7 @@
  */
 
 // This file declare and define the interface for RestoreWorker and restore roles
-// which are RestoreMaster, RestoreLoader, and RestoreApplier
+// which are RestoreController, RestoreLoader, and RestoreApplier
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
