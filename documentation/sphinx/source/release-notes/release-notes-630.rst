@@ -58,6 +58,7 @@ Fixes
 * Fix multiple data races between threads on the client. `(PR #3026) <https://github.com/apple/foundationdb/pull/3026>`_
 * Transaction logs configured to spill by reference had an unintended delay between each spilled batch. `(PR #3153) <https://github.com/apple/foundationdb/pull/3153>`_
 * Added guards to honor ``DISABLE_POSIX_KERNEL_AIO``. `(PR #2888) <https://github.com/apple/foundationdb/pull/2888>`_
+* Prevent blob upload timeout if request timeout is lower than expected request time. `(PR #3533) <https://github.com/apple/foundationdb/pull/3533>`_
 
 Status
 ------
@@ -101,6 +102,7 @@ Other Changes
 * Added FreeBSD support. `(PR #2634) <https://github.com/apple/foundationdb/pull/2634>`_
 * Updated boost to 1.72.  `(PR #2684) <https://github.com/apple/foundationdb/pull/2684>`_
 * Calling ``fdb_run_network`` multiple times in a single run of a client program now returns an error instead of causing undefined behavior. [6.3.1] `(PR #3229) <https://github.com/apple/foundationdb/pull/3229>`_
+* Blob backup URL parameter ``request_timeout`` changed to ``request_timeout_min``, with prior name still supported. `(PR #3533) <https://github.com/apple/foundationdb/pull/3533>`_
 
 Fixes from previous versions
 ----------------------------
