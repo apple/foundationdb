@@ -179,7 +179,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                60 );
+	init( BLOBSTORE_REQUEST_TIMEOUT_MIN,            60 );
 
 	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
 	init( BLOBSTORE_CONCURRENT_LISTS,               20 );

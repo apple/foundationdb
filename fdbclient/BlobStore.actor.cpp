@@ -58,7 +58,7 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	connect_timeout = CLIENT_KNOBS->BLOBSTORE_CONNECT_TIMEOUT;
 	max_connection_life = CLIENT_KNOBS->BLOBSTORE_MAX_CONNECTION_LIFE;
 	request_tries = CLIENT_KNOBS->BLOBSTORE_REQUEST_TRIES;
-	request_timeout = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT;
+	request_timeout_min = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT_MIN;
 	requests_per_second = CLIENT_KNOBS->BLOBSTORE_REQUESTS_PER_SECOND;
 	concurrent_requests = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS;
 	list_requests_per_second = CLIENT_KNOBS->BLOBSTORE_LIST_REQUESTS_PER_SECOND;
@@ -85,7 +85,9 @@ bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(connect_timeout, cto);
 	TRY_PARAM(max_connection_life, mcl);
 	TRY_PARAM(request_tries, rt);
-	TRY_PARAM(request_timeout, rto);
+	TRY_PARAM(request_timeout_min, rtom);
+	// TODO: For backward compatibility because request_timeout was renamed to request_timeout_min
+	if(name == LiteralStringRef("request_timeout") || name == LiteralStringRef("rto")) { request_timeout_min = value; return true; }
 	TRY_PARAM(requests_per_second, rps);
 	TRY_PARAM(list_requests_per_second, lrps);
 	TRY_PARAM(write_requests_per_second, wrps);
@@ -117,7 +119,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(connect_timeout, cto);
 	_CHECK_PARAM(max_connection_life, mcl);
 	_CHECK_PARAM(request_tries, rt);
-	_CHECK_PARAM(request_timeout, rto);
+	_CHECK_PARAM(request_timeout_min, rto);
 	_CHECK_PARAM(requests_per_second, rps);
 	_CHECK_PARAM(list_requests_per_second, lrps);
 	_CHECK_PARAM(write_requests_per_second, wrps);
@@ -556,7 +558,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	// it would take to upload the content given the upload bandwidth and concurrency limits.
 	int bandwidthThisRequest = 1 + bstore->knobs.max_send_bytes_per_second / bstore->knobs.concurrent_uploads;
 	int contentUploadSeconds = contentLen / bandwidthThisRequest;
-	state int requestTimeout = std::max(bstore->knobs.request_timeout, 3 * contentUploadSeconds);
+	state int requestTimeout = std::max(bstore->knobs.request_timeout_min, 3 * contentUploadSeconds);
 
 	wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
