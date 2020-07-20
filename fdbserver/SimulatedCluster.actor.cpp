@@ -759,6 +759,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
+	//	set_config("ssd-rocksdb-experimental"); // not really working yet.  uncomment this line, and commment the above switch to test with RocksDB
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {
