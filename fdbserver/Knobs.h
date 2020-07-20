@@ -88,6 +88,12 @@ public:
 	double TLOG_MAX_CREATE_DURATION;
 	int PEEK_LOGGING_AMOUNT;
 	double PEEK_LOGGING_DELAY;
+	double PEEK_RESET_INTERVAL;
+	double PEEK_MAX_LATENCY;
+	bool PEEK_COUNT_SMALL_MESSAGES;
+	double PEEK_STATS_INTERVAL;
+	double PEEK_STATS_SLOW_AMOUNT;
+	double PEEK_STATS_SLOW_RATIO;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -165,6 +171,7 @@ public:
 	int64_t DD_SHARD_SIZE_GRANULARITY;
 	int64_t DD_SHARD_SIZE_GRANULARITY_SIM;
 	int DD_MOVE_KEYS_PARALLELISM;
+	int DD_FETCH_SOURCE_PARALLELISM;
 	int DD_MERGE_LIMIT;
 	double DD_SHARD_METRICS_TIMEOUT;
 	int64_t DD_LOCATION_CACHE_SIZE;
@@ -558,6 +565,7 @@ public:
 	bool FASTRESTORE_REQBATCH_LOG; // verbose log information for getReplyBatches
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
+	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
@@ -569,6 +577,10 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW;  // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of the window size
 	double REDWOOD_LOGGING_INTERVAL;
+	
+	// Server request latency measurement
+	int LATENCY_SAMPLE_SIZE;
+	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

@@ -1,5 +1,5 @@
 /*
- * RestoreMaster.h
+ * RestoreController.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,22 +18,22 @@
  * limitations under the License.
  */
 
-// This file declear RestoreMaster interface and actors
+// This file declear RestoreController interface and actors
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_MASTER_G_H)
-#define FDBSERVER_RESTORE_MASTER_G_H
-#include "fdbserver/RestoreMaster.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_MASTER_H)
-#define FDBSERVER_RESTORE_MASTER_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_CONTROLLER_G_H)
+#define FDBSERVER_RESTORE_CONTROLLER_G_H
+#include "fdbserver/RestoreController.actor.g.h"
+#elif !defined(FDBSERVER_RESTORE_CONTROLLER_H)
+#define FDBSERVER_RESTORE_CONTROLLER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "flow/Platform.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -69,16 +69,17 @@ struct VersionBatch {
 	bool isInVersionRange(Version version) const { return version >= beginVersion && version < endVersion; }
 };
 
-struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
-	// rangeToApplier is in master and loader node. Loader uses this to determine which applier a mutation should be sent.
+struct ControllerBatchData : public ReferenceCounted<ControllerBatchData> {
+	// rangeToApplier is in controller and loader node. Loader uses this to determine which applier a mutation should be
+	// sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
 	IndexedSet<Key, int64_t> samples; // sample of range and log files
 	double samplesSize; // sum of the metric of all samples
 	Optional<Future<Void>> applyToDB;
 
-	MasterBatchData() = default;
-	~MasterBatchData() = default;
+	ControllerBatchData() = default;
+	~ControllerBatchData() = default;
 
 	// Return true if pass the sanity check
 	bool sanityCheckApplierKeyRange() {
@@ -89,7 +90,7 @@ struct MasterBatchData : public ReferenceCounted<MasterBatchData> {
 			if (applierToRange.find(applier.second) == applierToRange.end()) {
 				applierToRange[applier.second] = applier.first;
 			} else {
-				TraceEvent(SevError, "FastRestoreMaster")
+				TraceEvent(SevError, "FastRestoreController")
 				    .detail("SanityCheckApplierKeyRange", applierToRange.size())
 				    .detail("ApplierID", applier.second)
 				    .detail("Key1", applierToRange[applier.second])
@@ -121,52 +122,52 @@ enum class RestoreApplyStatus { Applying, Applied };
 
 // Track restore progress of each RestoreAsset (RA) and
 // Use status to sanity check restore property, e.g., each RA should be processed exactly once.
-struct MasterBatchStatus : public ReferenceCounted<MasterBatchStatus> {
+struct ControllerBatchStatus : public ReferenceCounted<ControllerBatchStatus> {
 	std::map<RestoreAsset, RestoreAssetStatus> raStatus;
 	std::map<UID, RestoreSendStatus> loadStatus;
 	std::map<UID, RestoreApplyStatus> applyStatus;
 
-	void addref() { return ReferenceCounted<MasterBatchStatus>::addref(); }
-	void delref() { return ReferenceCounted<MasterBatchStatus>::delref(); }
+	void addref() { return ReferenceCounted<ControllerBatchStatus>::addref(); }
+	void delref() { return ReferenceCounted<ControllerBatchStatus>::delref(); }
 
-	MasterBatchStatus() = default;
-	~MasterBatchStatus() = default;
+	ControllerBatchStatus() = default;
+	~ControllerBatchStatus() = default;
 };
 
-struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMasterData> {
+struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreControllerData> {
 	std::map<Version, VersionBatch> versionBatches; // key is the beginVersion of the version batch
 
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
-	std::map<int, Reference<MasterBatchData>> batch;
-	std::map<int, Reference<MasterBatchStatus>> batchStatus;
+	std::map<int, Reference<ControllerBatchData>> batch;
+	std::map<int, Reference<ControllerBatchStatus>> batchStatus;
 
 	AsyncVar<int> runningVersionBatches; // Currently running version batches
 
-	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time master receives heart beat
+	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time controller receives heart beat
 
-	void addref() { return ReferenceCounted<RestoreMasterData>::addref(); }
-	void delref() { return ReferenceCounted<RestoreMasterData>::delref(); }
+	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
+	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 
-	RestoreMasterData() {
-		role = RestoreRole::Master;
+	RestoreControllerData() {
+		role = RestoreRole::Controller;
 		nodeID = UID();
 		runningVersionBatches.set(0);
 	}
 
-	~RestoreMasterData() = default;
+	~RestoreControllerData() = default;
 
 	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
 	void setVersionBatchState(int batchIndex, int vbState) final {}
 
 	void initVersionBatch(int batchIndex) {
-		TraceEvent("FastRestoreMasterInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);
+		TraceEvent("FastRestoreControllerInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);
 	}
 
-	// Reset master data at the beginning of each restore request
+	// Reset controller data at the beginning of each restore request
 	void resetPerRestoreRequest() {
-		TraceEvent("FastRestoreMasterReset").detail("OldVersionBatches", versionBatches.size());
+		TraceEvent("FastRestoreControllerReset").detail("OldVersionBatches", versionBatches.size());
 		versionBatches.clear();
 		batch.clear();
 		batchStatus.clear();
@@ -176,7 +177,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 
 	std::string describeNode() {
 		std::stringstream ss;
-		ss << "Master";
+		ss << "Controller";
 		return ss.str();
 	}
 
@@ -214,7 +215,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	                                                                   int rangeIdx,
 	                                                                   const std::vector<RestoreFileFR>& logFiles) {
 		double size = 0;
-		TraceEvent("FastRestoreGetVersionSize")
+		TraceEvent(SevDebug, "FastRestoreGetVersionSize")
 		    .detail("PreviousVersion", prevVersion)
 		    .detail("NextVersion", nextVersion)
 		    .detail("RangeFiles", rangeFiles.size())
@@ -281,7 +282,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					if (logIdx < logFiles.size()) {
 						nextVersion = logFiles[logIdx].endVersion;
 					} else {
-						TraceEvent("FastRestoreBuildVersionBatch")
+						TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 						    .detail("FinishAllLogFiles", logIdx)
 						    .detail("CurBatchIndex", vb.batchIndex)
 						    .detail("CurBatchSize", vb.size);
@@ -309,7 +310,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 			std::tie(nextVersionSize, nextRangeIdx, curLogFiles) =
 			    getVersionSize(prevEndVersion, nextVersion, rangeFiles, rangeIdx, logFiles);
 
-			TraceEvent("FastRestoreBuildVersionBatch")
+			TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 			    .detail("BatchIndex", vb.batchIndex)
 			    .detail("VersionBatchBeginVersion", vb.beginVersion)
 			    .detail("PreviousEndVersion", prevEndVersion)
@@ -378,13 +379,13 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 					ASSERT(prevEndVersion < nextVersion); // Ensure progress
 					nextVersion = (prevEndVersion + nextVersion) / 2;
 					rewriteNextVersion = true;
-					TraceEvent("FastRestoreBuildVersionBatch")
+					TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 					    .detail("NextVersionIntervalSize", nextVersionSize); // Duplicate Trace
 					continue;
 				}
 				// Finalize the current version batch
 				versionBatches->emplace(vb.beginVersion, vb); // copy vb to versionBatch
-				TraceEvent("FastRestoreBuildVersionBatch")
+				TraceEvent(SevFRDebugInfo, "FastRestoreBuildVersionBatch")
 				    .detail("FinishBatchIndex", vb.batchIndex)
 				    .detail("VersionBatchBeginVersion", vb.beginVersion)
 				    .detail("VersionBatchEndVersion", vb.endVersion)
@@ -429,7 +430,7 @@ struct RestoreMasterData : RestoreRoleData, public ReferenceCounted<RestoreMaste
 	}
 };
 
-ACTOR Future<Void> startRestoreMaster(Reference<RestoreWorkerData> masterWorker, Database cx);
+ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx);
 
 #include "flow/unactorcompiler.h"
 #endif

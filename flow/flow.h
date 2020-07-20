@@ -408,7 +408,7 @@ struct SingleCallback {
 	}
 };
 
-// SAV is short for Single Assigment Variable: It can be assigned for only once!
+// SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -794,7 +794,9 @@ public:
 	bool canBeSet() { return sav->canBeSet(); }
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
-	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	Promise(const Promise& rhs) : sav(rhs.sav) {
+		sav->addPromiseRef();
+	}
 	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~Promise() { if (sav) sav->delPromiseRef(); }
 

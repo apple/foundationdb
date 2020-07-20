@@ -19,24 +19,28 @@
  */
 
 // This file defines the commonly used data structure and functions
-// that are used by both RestoreWorker and RestoreRoles(Master, Loader, and Applier)
+// that are used by both RestoreWorker and RestoreRoles(Controller, Loader, and Applier)
 
 #ifndef FDBSERVER_RESTOREUTIL_H
 #define FDBSERVER_RESTOREUTIL_H
+
 #pragma once
 
 #include "fdbclient/Tuple.h"
 #include "fdbclient/CommitTransaction.h"
 #include "flow/flow.h"
-#include "flow/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/Stats.h"
 #include <cstdint>
 #include <cstdarg>
 
 #define SevFRMutationInfo SevVerbose
 //#define SevFRMutationInfo SevInfo
+
+#define SevFRDebugInfo SevVerbose
+//#define SevFRDebugInfo SevInfo
 
 struct VersionedMutation {
 	MutationRef mutation;
@@ -58,7 +62,7 @@ using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
 using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
 
-enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
+enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);
 extern const std::vector<std::string> RestoreRoleStr;
@@ -109,4 +113,4 @@ struct RestoreSimpleRequest : TimedRequest {
 
 bool isRangeMutation(MutationRef m);
 
-#endif // FDBSERVER_RESTOREUTIL_ACTOR_H
+#endif // FDBSERVER_RESTOREUTIL_H

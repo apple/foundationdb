@@ -33,6 +33,7 @@
 #include <string>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <sstream>
@@ -89,24 +90,33 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
+// An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
+// on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
+// ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
+// memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
-	inline Arena();
-	inline explicit Arena( size_t reservedSize );
+	Arena();
+	explicit Arena(size_t reservedSize);
 	//~Arena();
 	Arena(const Arena&);
 	Arena(Arena && r) BOOST_NOEXCEPT;
 	Arena& operator=(const Arena&);
 	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
 
-	inline void dependsOn( const Arena& p );
-	inline size_t getSize() const;
+	void dependsOn(const Arena& p);
+	size_t getSize() const;
 
-	inline bool hasFree( size_t size, const void *address );
+	bool hasFree(size_t size, const void* address);
 
 	friend void* operator new ( size_t size, Arena& p );
 	friend void* operator new[] ( size_t size, Arena& p );
-//private:
+
+	bool sameArena(const Arena& other) const {
+		return impl.getPtr() == other.impl.getPtr();
+	}
+
+private:
 	Reference<struct ArenaBlock> impl;
 };
 
@@ -143,6 +153,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	uint32_t bigSize, bigUsed;	  // include block header
 	uint32_t nextBlockOffset;
 
+	void addref();
 	void delref();
 	bool isTiny() const;
 	int size() const;
@@ -166,28 +177,6 @@ private:
 	static void* operator new(size_t s); // not implemented
 };
 
-inline Arena::Arena() : impl( NULL ) {}
-inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
-	UNSTOPPABLE_ASSERT( reservedSize < std::numeric_limits<int>::max() );
-	if (reservedSize)
-		ArenaBlock::create((int)reservedSize,impl);
-}
-inline Arena::Arena( const Arena& r ) : impl( r.impl ) {}
-inline Arena::Arena(Arena && r) BOOST_NOEXCEPT : impl(std::move(r.impl)) {}
-inline Arena& Arena::operator=(const Arena& r) {
-	impl = r.impl;
-	return *this;
-}
-inline Arena& Arena::operator=(Arena&& r) BOOST_NOEXCEPT {
-	impl = std::move(r.impl);
-	return *this;
-}
-inline void Arena::dependsOn( const Arena& p ) {
-	if (p.impl)
-		ArenaBlock::dependOn( impl, p.impl.getPtr() );
-}
-inline size_t Arena::getSize() const { return impl ? impl->totalSize() : 0; }
-inline bool Arena::hasFree( size_t size, const void *address ) { return impl && impl->unused() >= size && impl->getNextData() == address; }
 inline void* operator new ( size_t size, Arena& p ) {
 	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );
 	return ArenaBlock::allocate( p.impl, (int)size );
@@ -208,26 +197,35 @@ inline void save( Archive& ar, const Arena& p ) {
 	// No action required
 }
 
+// Optional is a wrapper for std::optional. There
+// are two primary reasons to use this wrapper instead
+// of using std::optional directly:
+//
+// 1) Legacy: A lot of code was written using Optional before
+//    std::optional was available.
+// 2) When you call get but no value is present Optional gives an
+//    assertion failure. std::optional, on the other hand, would
+//    throw std::bad_optional_access. It is easier to debug assertion
+//    failures, and FDB generally does not handle std exceptions, so
+//    assertion failures are preferable. This is the main reason we
+//    don't intend to use std::optional directly.
 template <class T>
 class Optional : public ComposedIdentifier<T, 0x10> {
 public:
-	Optional() : valid(false) { memset(&value, 0, sizeof(value)); }
-	Optional(const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(o.get());
-	}
+	Optional() = default;
 
 	template <class U>
-	Optional(const U& t) : valid(true) { new (&value) T(t); }
+	Optional(const U& t) : impl(std::in_place, t) {}
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
 	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
 	Use .castTo<>() instead.
 	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
-	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(a, o.get());
+	Optional(Arena& a, const Optional<T>& o) {
+		if (o.present()) impl = std::make_optional<T>(a, o.get());
 	}
-	int expectedSize() const { return valid ? get().expectedSize() : 0; }
+	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
 	template <class R> Optional<R> castTo() const {
 		return map<R>([](const T& v){ return (R)v; });
@@ -242,44 +240,16 @@ public:
 		}
 	}
 
-	~Optional() {
-		if (valid) ((T*)&value)->~T();
-	}
-
-	Optional & operator=(Optional const& o) {
-		if (valid) {
-			valid = false;
-			((T*)&value)->~T();
-		}
-		if (o.valid) {
-			new (&value) T(o.get());
-			valid = true;
-		}
-		return *this;
-	}
-
-	bool present() const { return valid; }
+	bool present() const { return impl.has_value(); }
 	T& get() {
-		UNSTOPPABLE_ASSERT(valid);
-		return *(T*)&value;
+		UNSTOPPABLE_ASSERT(impl.has_value());
+		return impl.value();
 	}
 	T const& get() const {
-		UNSTOPPABLE_ASSERT(valid);
-		return *(T const*)&value;
+		UNSTOPPABLE_ASSERT(impl.has_value());
+		return impl.value();
 	}
-	T orDefault(T const& default_value) const { if (valid) return get(); else return default_value; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		// SOMEDAY: specialize for space efficiency?
-		if (valid && Ar::isDeserializing)
-			(*(T *)&value).~T();
-		serializer(ar, valid);
-		if (valid) {
-			if (Ar::isDeserializing) new (&value) T();
-			serializer(ar, *(T*)&value);
-		}
-	}
+	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
 
 	// Spaceship operator.  Treats not-present as less-than present.
 	int compare(Optional const & rhs) const {
@@ -289,29 +259,39 @@ public:
 		return present() ? 1 : -1;
 	}
 
-	bool operator == (Optional const& o) const {
-		return present() == o.present() && (!present() || get() == o.get());
-	}
+	bool operator==(Optional const& o) const { return impl == o.impl; }
 	bool operator != (Optional const& o) const {
 		return !(*this == o);
 	}
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
-	bool operator < (Optional const& o) const {
-		if (present() != o.present()) return o.present();
-		if (!present()) return false;
-		return get() < o.get();
-	}
+	bool operator<(Optional const& o) const { return impl < o.impl; }
 
-	void reset() {
-		if (valid) {
-			valid = false;
-			((T*)&value)->~T();
-		}
-	}
+	void reset() { impl.reset(); }
+
 private:
-	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
-	bool valid;
+	std::optional<T> impl;
 };
+
+template <class Archive, class T>
+inline void load(Archive& ar, Optional<T>& value) {
+	bool valid;
+	ar >> valid;
+	if (valid) {
+		T t;
+		ar >> t;
+		value = Optional<T>(t);
+	} else {
+		value.reset();
+	}
+}
+
+template <class Archive, class T>
+inline void save(Archive& ar, const Optional<T>& value) {
+	ar << value.present();
+	if (value.present()) {
+		ar << value.get();
+	}
+}
 
 template<class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
@@ -794,7 +774,9 @@ public:
 	using value_type = T;
 	static_assert(SerStrategy == VecSerStrategy::FlatBuffers || string_serialized_traits<T>::value);
 
-	// T must be trivially destructible (and copyable)!
+	// T must be trivially copyable!
+	// T must be trivially destructible, because ~T is never called
+	static_assert(std::is_trivially_destructible_v<T>);
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
 	template <VecSerStrategy S>

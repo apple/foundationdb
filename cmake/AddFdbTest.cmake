@@ -237,7 +237,9 @@ function(create_correctness_package)
                                      ${out_dir}/joshua_test
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
                                      ${out_dir}/joshua_timeout
-    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} *
+    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
+                                                    ${out_dir}/joshua_test
+                                                    ${out_dir}/joshua_timeout
     WORKING_DIRECTORY ${out_dir}
     COMMENT "Package correctness archive"
     )
@@ -262,7 +264,9 @@ function(create_valgrind_correctness_package)
                                        ${out_dir}/joshua_test
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh
                                        ${out_dir}/joshua_timeout
-      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} *
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
+                                                      ${out_dir}/joshua_test
+                                                      ${out_dir}/joshua_timeout
       WORKING_DIRECTORY ${out_dir}
       COMMENT "Package valgrind correctness archive"
       )

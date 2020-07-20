@@ -613,11 +613,11 @@ protected:
 		Promise<Void> noDestroy = trigger;  // The send(Void()) or even V::operator= could cause destroyOnCancel,
 			                                // which could undo the change to i.value here.  Keeping the promise reference count >= 2
 			                                // prevents destroyOnCancel from erasing anything from the map.
-
-		if (v == defaultValue)
+		if (v == defaultValue) {
 			items.erase(k);
-		else
+		} else {
 			i.value = v;
+		}
 
 		trigger.send(Void());
 	}

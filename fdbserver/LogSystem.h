@@ -406,6 +406,12 @@ struct ILogSystem {
 		Deque<Future<TLogPeekReply>> futureResults;
 		Future<Void> interfaceChanged;
 
+		double lastReset;
+		Future<Void> resetCheck;
+		int slowReplies;
+		int fastReplies;
+		int unknownReplies;
+
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag );
 
