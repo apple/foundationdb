@@ -1,0 +1,27 @@
+minimumReplication = 2
+
+[[test]]
+testTitle = 'Clogged'
+connectionFailuresDisableDuration = 60
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 1000.0
+    testDuration = 300.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'LowLatency'
+    testDuration = 300.0
+    maxGRVLatency = 50.0
+    testWrites = false
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 300.0
+    waitForVersion = true
+    allowFaultInjection = false
+    killDc = false

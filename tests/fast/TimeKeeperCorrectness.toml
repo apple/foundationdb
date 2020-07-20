@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'TimeKeeperCorrectness'
+
+    [[test.workload]]
+    testName = 'TimeKeeperCorrectness'
+    testDuration = 40.0

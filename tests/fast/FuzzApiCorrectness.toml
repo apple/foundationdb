@@ -1,0 +1,31 @@
+StderrSeverity = 30
+
+[[test]]
+testTitle = 'FuzzApiCorrectness'
+
+    [[test.workload]]
+    testName = 'FuzzApiCorrectness'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0

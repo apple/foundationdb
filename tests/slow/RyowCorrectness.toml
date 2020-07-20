@@ -1,0 +1,19 @@
+[[test]]
+testTitle = 'RyowCorrectnessTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'RyowCorrectness'
+    numKeys = 5000
+    onlyLowerCase = true
+    shortKeysRatio = 0.5
+    minShortKeyLength = 1
+    maxShortKeyLength = 3
+    minLongKeyLength = 1
+    maxLongKeyLength = 128
+    minValueLength = 1
+    maxValueLength = 1000
+    duration = 60
+    opsPerTransaction = 50

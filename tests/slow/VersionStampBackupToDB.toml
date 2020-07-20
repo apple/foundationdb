@@ -1,0 +1,22 @@
+extraDB = 2
+
+[[test]]
+testTitle = 'VersionStampBackupToDB'
+simBackupAgents = 'BackupToDB'
+
+    [[test.workload]]
+    testName = 'VersionStamp'
+    failIfDataLost = false
+    validateExtraDB = true
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'BackupToDBAbort'
+    abortDelay = 40.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0

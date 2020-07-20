@@ -1,4 +1,0 @@
-StderrSeverity=30
-
-testTitle=WriteDuringReadTest
-    testName=WriteDuringRead

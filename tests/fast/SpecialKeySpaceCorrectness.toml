@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'SpecialKeySpaceCorrectnessTest'
+
+    [[test.workload]]
+    testName = 'SpecialKeySpaceCorrectness'
+    testDuration = 30.0
+    valueBytes = 16
+    keyBytes = 16
