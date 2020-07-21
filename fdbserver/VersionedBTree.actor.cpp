@@ -7331,7 +7331,7 @@ TEST_CASE("!/redwood/performance/set") {
 	state int maxConsecutiveRun = 10;
 	state char firstKeyChar = 'a';
 	state char lastKeyChar = 'm';
-	state Version remapCleanupWindow = 100;
+	state Version remapCleanupWindow = SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
 
 	printf("pageSize: %d\n", pageSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
