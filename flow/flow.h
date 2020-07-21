@@ -882,20 +882,20 @@ private:
 };
 
 template <class Request>
-decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) { return r.reply; }
-
-
+decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
-#define REPLY_TYPE(RequestType) decltype( getReplyPromise( fake<RequestType>() ).getFuture().getValue() )
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( fake<RequestType>() ).getValue() )
+#define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
+//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
 	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
 	//   breaks IntelliSense in VS2010; this is a workaround.
-	typedef decltype(fake<T>().reply.getFuture().getValue()) Type;
+	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
 };
 template <class T> class ReplyPromise;
 template <class T>

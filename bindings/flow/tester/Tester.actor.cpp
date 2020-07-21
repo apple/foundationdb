@@ -1365,12 +1365,12 @@ const char* StartThreadFunc::name = "START_THREAD";
 REGISTER_INSTRUCTION_FUNC(StartThreadFunc);
 
 ACTOR template <class Function>
-Future<decltype(fake<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
-                                                                                 Function func) {
+Future<decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
+                                                                                         Function func) {
 	state Reference<ReadTransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state decltype(fake<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
+			state decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
 			return result;
 		} catch (Error& e) {
 			wait(tr->onError(e));
