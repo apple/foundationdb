@@ -2474,7 +2474,8 @@ namespace fileBackup {
 			state Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 			state Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
 			state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
-			wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog));
+			state Future<Optional<bool>> incrementalBackupOnly = config.incrementalBackupOnly().get(tr);
+			wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog) && success(incrementalBackupOnly));
 			std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 			Key destUidValue = destUidValueFuture.get();
 
@@ -2494,7 +2495,10 @@ namespace fileBackup {
 			wait(config.initNewSnapshot(tr, 0));
 
 			// Using priority 1 for both of these to at least start both tasks soon
-			wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			// Do not add snapshot task if we only want the incremental backup
+			if (!incrementalBackupOnly.get().present() || !incrementalBackupOnly.get().get()) {
+				wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			}
 			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
@@ -3760,7 +3764,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer, int snapshotIntervalSeconds, std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
-	                                       bool partitionedLog) {
+	                                       bool partitionedLog, bool incrementalBackupOnly) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -3863,6 +3867,7 @@ public:
 		config.backupRanges().set(tr, normalizedRanges);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
+		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
@@ -4683,9 +4688,9 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer,
                                            int snapshotIntervalSeconds, std::string tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
-                                           bool partitionedLog) {
+                                           bool partitionedLog, bool incrementalBackupOnly) {
 	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges,
-	                                         stopWhenDone, partitionedLog);
+	                                         stopWhenDone, partitionedLog, incrementalBackupOnly);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName){

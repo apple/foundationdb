@@ -315,13 +315,14 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
 	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true, bool partitionedLog = false);
+	                          bool stopWhenDone = true, bool partitionedLog = false,
+	                          bool incrementalBackupOnly = false);
 	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
-	                          bool partitionedLog = false) {
+	                          bool partitionedLog = false, bool incrementalBackupOnly = false) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
-			                    partitionedLog);
+			                    partitionedLog, incrementalBackupOnly);
 		});
 	}
 
@@ -807,6 +808,11 @@ public:
 
 	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
 	KeyBackedProperty<bool> partitionedLogEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if only requesting incremental backup without base snapshot.
+	KeyBackedProperty<bool> incrementalBackupOnly() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
