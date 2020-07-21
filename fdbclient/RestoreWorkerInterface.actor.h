@@ -71,7 +71,7 @@ struct RestoreSysInfo {
 };
 
 struct RestoreWorkerInterface {
-	constexpr static FileIdentifier file_identifier = 99601798;
+	constexpr static FileIdentifier file_identifier = 15715718;
 	UID interfID;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
@@ -101,7 +101,7 @@ struct RestoreWorkerInterface {
 };
 
 struct RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 62531339;
+	constexpr static FileIdentifier file_identifier = 12199691;
 	UID nodeID;
 	RestoreRole role;
 
@@ -124,7 +124,7 @@ struct RestoreRoleInterface {
 };
 
 struct RestoreLoaderInterface : RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 84244651;
+	constexpr static FileIdentifier file_identifier = 358571;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
@@ -165,7 +165,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 };
 
 struct RestoreApplierInterface : RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 54253048;
+	constexpr static FileIdentifier file_identifier = 3921400;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSendVersionedMutationsRequest> sendMutationVector;
@@ -289,7 +289,7 @@ struct RestoreAsset {
 };
 
 struct LoadingParam {
-	constexpr static FileIdentifier file_identifier = 17023837;
+	constexpr static FileIdentifier file_identifier = 246621;
 
 	bool isRangeFile;
 	Key url;
@@ -326,7 +326,7 @@ struct LoadingParam {
 };
 
 struct RestoreRecruitRoleReply : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 30310092;
+	constexpr static FileIdentifier file_identifier = 13532876;
 
 	UID id;
 	RestoreRole role;
@@ -359,7 +359,7 @@ struct RestoreRecruitRoleReply : TimedRequest {
 };
 
 struct RestoreRecruitRoleRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 87022360;
+	constexpr static FileIdentifier file_identifier = 3136280;
 
 	RestoreRole role;
 	int nodeIndex; // Each role is a node
@@ -385,7 +385,7 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 
 // Static info. across version batches
 struct RestoreSysInfoRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 75960741;
+	constexpr static FileIdentifier file_identifier = 8851877;
 
 	RestoreSysInfo sysInfo;
 	Standalone<VectorRef<std::pair<KeyRangeRef, Version>>> rangeVersions;
@@ -411,7 +411,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 };
 
 struct RestoreLoadFileReply : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 34077902;
+	constexpr static FileIdentifier file_identifier = 523470;
 
 	LoadingParam param;
 	MutationsVec samples; // sampled mutations
@@ -436,7 +436,7 @@ struct RestoreLoadFileReply : TimedRequest {
 
 // Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
 struct RestoreLoadFileRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 26557364;
+	constexpr static FileIdentifier file_identifier = 9780148;
 
 	int batchIndex;
 	LoadingParam param;
@@ -459,7 +459,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 };
 
 struct RestoreSendMutationsToAppliersRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 68827305;
+	constexpr static FileIdentifier file_identifier = 1718441;
 
 	int batchIndex; // version batch index
 	std::map<Key, UID> rangeToApplier;
@@ -485,7 +485,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 };
 
 struct RestoreSendVersionedMutationsRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 69764565;
+	constexpr static FileIdentifier file_identifier = 2655701;
 
 	int batchIndex; // version batch index
 	RestoreAsset asset; // Unique identifier for the current restore asset
@@ -516,7 +516,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 };
 
 struct RestoreVersionBatchRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 97223537;
+	constexpr static FileIdentifier file_identifier = 13337457;
 
 	int batchIndex;
 
@@ -560,7 +560,7 @@ struct RestoreFinishRequest : TimedRequest {
 };
 
 struct RestoreRequest {
-	constexpr static FileIdentifier file_identifier = 49589770;
+	constexpr static FileIdentifier file_identifier = 16035338;
 
 	int index;
 	Key tagName;

@@ -378,7 +378,7 @@ struct InitializeLogRouterRequest {
 };
 
 struct InitializeBackupReply {
-	constexpr static FileIdentifier file_identifier = 63843557;
+	constexpr static FileIdentifier file_identifier = 13511909;
 	struct BackupInterface interf;
 	LogEpoch backupEpoch;
 
@@ -392,7 +392,7 @@ struct InitializeBackupReply {
 };
 
 struct InitializeBackupRequest {
-	constexpr static FileIdentifier file_identifier = 68354279;
+	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
 	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers

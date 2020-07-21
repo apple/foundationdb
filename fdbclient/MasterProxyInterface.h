@@ -433,7 +433,7 @@ struct GetDDMetricsRequest {
 
 struct ProxySnapRequest
 {
-	constexpr static FileIdentifier file_identifier = 22204900;
+	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
 	StringRef snapPayload;
 	UID snapUID;

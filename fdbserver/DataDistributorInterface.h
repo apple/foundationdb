@@ -96,7 +96,7 @@ struct GetDataDistributorMetricsRequest {
 
 struct DistributorSnapRequest
 {
-	constexpr static FileIdentifier file_identifier = 22204900;
+	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
 	StringRef snapPayload;
 	UID snapUID;
@@ -114,7 +114,7 @@ struct DistributorSnapRequest
 
 struct DistributorExclusionSafetyCheckReply
 {
-	constexpr static FileIdentifier file_identifier = 382104712;
+	constexpr static FileIdentifier file_identifier = 13005960;
 	bool safe;
 
 	DistributorExclusionSafetyCheckReply() : safe(false) {}
