@@ -1089,14 +1089,19 @@ struct AutoQuorumChange : IQuorumChange {
 		// Check availability
 		ClientCoordinators coord(ccf);
 		vector<Future<Optional<LeaderInfo>>> leaderServers;
-		for( int i = 0; i < coord.clientLeaderServers.size(); i++ )
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 			leaderServers.push_back( retryBrokenPromise( coord.clientLeaderServers[i].getLeader, GetLeaderRequest( coord.clusterKey, UID() ), TaskPriority::CoordinationReply ) );
+		}
 		Optional<vector<Optional<LeaderInfo>>> results =
 		    wait(timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY));
-		if (!results.present()) return false; // Not all responded
-		for (auto& r : results.get())
-			if (!r.present())
+		if (!results.present()) {
+			return false;
+		} // Not all responded
+		for (auto& r : results.get()) {
+			if (!r.present()) {
 				return false;   // Coordinator doesn't know about this database?
+			}
+		}
 
 		// Check exclusions
 		for(auto& c : oldCoordinators) {
