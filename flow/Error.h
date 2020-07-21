@@ -84,6 +84,8 @@ enum { error_code_actor_cancelled = error_code_operation_cancelled };
 
 extern Error internal_error_impl( const char* file, int line );
 extern Error internal_error_impl(const char* msg, const char* file, int line);
+extern Error internal_error_impl(const char * a_nm, long long a, const char * op_nm, const char * b_nm, long long b, const char * file, int line);
+
 #define inernal_error_msg(msg) internal_error_impl(msg, __FILE__, __LINE__)
 
 extern bool isAssertDisabled( int line );
@@ -109,6 +111,79 @@ extern bool isAssertDisabled( int line );
 	} while (false)
 #define UNREACHABLE()                                                                                                  \
 	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
+
+enum assert_op { EQ, NE, LT, GT, LE, GE };
+
+// TODO: magic so this works even if const-ness doesn not match.
+template<typename T, typename U>
+void assert_num_impl(char const * a_nm,
+					T const & a,
+					assert_op op,
+					char const * b_nm,
+					U const & b,
+					char const * file,
+					int line) {
+  bool success;
+  char const * op_name;
+  switch (op) {
+    case EQ:
+      success = a == b;
+      op_name = "==";
+      break;
+    case NE:
+      success = a != b;
+      op_name = "!=";
+      break;
+    case LT:
+      success = a < b;
+      op_name = "<";
+      break;
+    case GT:
+      success = a > b;
+      op_name = ">";
+      break;
+    case LE:
+      success = a <= b;
+      op_name = "<=";
+      break;
+    case GE:
+      success = a >= b;
+      op_name = ">=";
+      break;
+    default:
+      success = false;
+      op_name = "UNKNOWN OP";
+  }
+
+  if (!success) {
+	  throw internal_error_impl(a_nm, (long long)a, op_name, b_nm, (long long)b, file, line);
+  }
+}
+
+#define ASSERT_EQ(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::EQ, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_NE(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::NE, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_LT(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::LT, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_LE(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::LE, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_GT(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::GT, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_GE(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::GE, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
 
 // ASSERT_WE_THINK() is to be used for assertions that we want to validate in testing, but which are judged too
 // risky to evaluate at runtime, because the code should work even if they are false and throwing internal_error() would
