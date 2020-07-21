@@ -84,7 +84,6 @@ struct RelocateData {
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
 public:
 	vector<Reference<IDataDistributionTeam>> teams;
-	vector<UID> tempServerIDs;
 
 	ParallelTCInfo() { }
 
@@ -96,47 +95,44 @@ public:
 		teams.clear();
 	}
 
-	int64_t sum(std::function<int64_t(Reference<IDataDistributionTeam>)> func) {
+	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result += func(*it);
+		for (const auto& team : teams) {
+			result += func(*team);
 		}
 		return result;
 	}
 
-	template<class T>
-	vector<T> collect(std::function < vector<T>(Reference<IDataDistributionTeam>)> func) {
-		vector<T> result;
+	template <class T>
+	vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
+		vector<T> result(teams.size());
 
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			vector<T> newItems = func(*it);
+		for (const auto& team : teams) {
+			vector<T> newItems = func(*team);
 			result.insert(result.end(), newItems.begin(), newItems.end());
 		}
 		return result;
 	}
 
-	bool any(std::function<bool(Reference<IDataDistributionTeam>)> func) {
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			if (func(*it)) {
+	bool any(std::function<bool(IDataDistributionTeam const&)> func) const {
+		for (const auto& team : teams) {
+			if (func(*team)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	bool all(std::function<bool(Reference<IDataDistributionTeam>)> func) {
-		return !any([func](Reference<IDataDistributionTeam> team) {
-			return !func(team);
-		});
+	bool all(std::function<bool(IDataDistributionTeam const&)> func) const {
+		return !any([func](IDataDistributionTeam const& team) { return !func(team); });
 	}
 
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() {
-		return collect<StorageServerInterface>([](Reference<IDataDistributionTeam> team) {
-			return team->getLastKnownServerInterfaces();
-		});
+	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
+		return collect<StorageServerInterface>(
+		    [](IDataDistributionTeam const& team) { return team.getLastKnownServerInterfaces(); });
 	}
 
-	virtual int size() {
+	int size() const override {
 		int totalSize = 0;
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			totalSize += (*it)->size();
@@ -144,94 +140,85 @@ public:
 		return totalSize;
 	}
 
-	virtual vector<UID> const& getServerIDs() {
+	vector<UID> const& getServerIDs() const override {
+		static vector<UID> tempServerIDs;
 		tempServerIDs.clear();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			vector<UID> const& childIDs = (*it)->getServerIDs();
+		for (const auto& team : teams) {
+			vector<UID> const &childIDs = team->getServerIDs();
 			tempServerIDs.insert(tempServerIDs.end(), childIDs.begin(), childIDs.end());
 		}
 		return tempServerIDs;
 	}
 
-	virtual void addDataInFlightToTeam(int64_t delta) {
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			(*it)->addDataInFlightToTeam(delta);
+	void addDataInFlightToTeam(int64_t delta) override {
+		for (auto& team : teams) {
+			team->addDataInFlightToTeam(delta);
 		}
 	}
 
-	virtual int64_t getDataInFlightToTeam() {
-		return sum([](Reference<IDataDistributionTeam> team) {
-			return team->getDataInFlightToTeam();
+	int64_t getDataInFlightToTeam() const override {
+		return sum([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
+	}
+
+	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
+		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+			return team.getLoadBytes(includeInFlight, inflightPenalty);
 		});
 	}
 
-	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0 ) {
-		return sum([includeInFlight, inflightPenalty](Reference<IDataDistributionTeam> team) {
-			return team->getLoadBytes(includeInFlight, inflightPenalty);
-		});
-	}
-
-	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) {
+	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinAvailableSpace(includeInFlight));
+		for (const auto& team : teams) {
+			result = std::min(result, team->getMinAvailableSpace(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) {
+	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override {
 		double result = std::numeric_limits<double>::max();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinAvailableSpaceRatio(includeInFlight));
+		for (const auto& team : teams) {
+			result = std::min(result, team->getMinAvailableSpaceRatio(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual bool hasHealthyAvailableSpace(double minRatio) {
-		return all([minRatio](Reference<IDataDistributionTeam> team) {
-			return team->hasHealthyAvailableSpace(minRatio);
-		});
+	bool hasHealthyAvailableSpace(double minRatio) const {
+		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
 		vector<Future<Void>> futures;
 
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			futures.push_back((*it)->updateStorageMetrics());
+		for (auto& team : teams) {
+			futures.push_back(team->updateStorageMetrics());
 		}
 		return waitForAll(futures);
 	}
 
-	virtual bool isOptimal() {
-		return all([](Reference<IDataDistributionTeam> team) {
-			return team->isOptimal();
-		});
+	bool isOptimal() const override {
+		return all([](IDataDistributionTeam const& team) { return team.isOptimal(); });
 	}
 
-	virtual bool isWrongConfiguration() {
-		return any([](Reference<IDataDistributionTeam> team) {
-			return team->isWrongConfiguration();
-		});
+	bool isWrongConfiguration() const override {
+		return any([](IDataDistributionTeam const& team) { return team.isWrongConfiguration(); });
 	}
-	virtual void setWrongConfiguration(bool wrongConfiguration) {
+	void setWrongConfiguration(bool wrongConfiguration) override {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setWrongConfiguration(wrongConfiguration);
 		}
 	}
 
-	virtual bool isHealthy() {
-		return all([](Reference<IDataDistributionTeam> team) {
-			return team->isHealthy();
-		});
+	bool isHealthy() const override {
+		return all([](IDataDistributionTeam const& team) { return team.isHealthy(); });
 	}
 
-	virtual void setHealthy(bool h) {
+	void setHealthy(bool h) override {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setHealthy(h);
 		}
 	}
 
-	virtual int getPriority() {
+	int getPriority() const override {
 		int priority = 0;
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			priority = std::max(priority, (*it)->getPriority());
@@ -239,7 +226,7 @@ public:
 		return priority;
 	}
 
-	virtual void setPriority(int p) {
+	void setPriority(int p) override {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setPriority(p);
 		}
@@ -247,7 +234,7 @@ public:
 	virtual void addref() { ReferenceCounted<ParallelTCInfo>::addref(); }
 	virtual void delref() { ReferenceCounted<ParallelTCInfo>::delref(); }
 
-	virtual void addServers(const std::vector<UID>& servers) {
+	void addServers(const std::vector<UID>& servers) override {
 		ASSERT(!teams.empty());
 		teams[0]->addServers(servers);
 	}
