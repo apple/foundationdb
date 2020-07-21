@@ -193,6 +193,7 @@ ACTOR Future<Void> unlockDatabase( Database  cx, UID  id );
 // then a database_locked error is thrown. If (part of) the range is already
 // locked, then a range_locked error is thrown during commit.
 ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range);
+ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges);
 
 // Unlocks a range in the normal key space. If the database is already locked,
 // then a database_locked error is thrown. If the range is not locked, then

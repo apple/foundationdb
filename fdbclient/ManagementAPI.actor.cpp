@@ -2009,6 +2009,34 @@ ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range) {
 	}
 }
 
+ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges) {
+	if (ranges.size() > 1) {
+		// Check ranges are disjoint
+		std::sort(ranges.begin(), ranges.end(), [](const KeyRangeRef& a, const KeyRangeRef& b) {
+			return a.begin == b.begin ? a.end < b.end : a.begin < b.begin;
+		});
+		for (int i = 1; i < ranges.size(); i++) {
+			if (ranges[i - 1].intersects(ranges[i])) {
+				throw client_invalid_operation();
+			}
+		}
+	}
+
+	state Transaction tr(cx);
+	loop {
+		try {
+			for (const auto& range : ranges) {
+				wait(lockRange(&tr, range));
+			}
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_database_locked) throw e;
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
