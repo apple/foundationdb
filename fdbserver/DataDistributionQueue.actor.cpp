@@ -82,18 +82,7 @@ struct RelocateData {
 };
 
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
-public:
 	vector<Reference<IDataDistributionTeam>> teams;
-
-	ParallelTCInfo() { }
-
-	void addTeam(Reference<IDataDistributionTeam> team) {
-		teams.push_back(team);
-	}
-
-	void clear() {
-		teams.clear();
-	}
 
 	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
@@ -122,6 +111,13 @@ public:
 		}
 		return false;
 	}
+
+public:
+	ParallelTCInfo() = default;
+
+	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
+
+	void clear() { teams.clear(); }
 
 	bool all(std::function<bool(IDataDistributionTeam const&)> func) const {
 		return !any([func](IDataDistributionTeam const& team) { return !func(team); });

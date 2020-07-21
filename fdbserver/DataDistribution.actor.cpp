@@ -153,14 +153,15 @@ public:
 
 // TeamCollection's server team info.
 class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-public:
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
-	Reference<TCMachineTeamInfo> machineTeam;
-	Future<Void> tracker;
 	bool healthy;
 	bool wrongConfiguration; //True if any of the servers in the team have the wrong configuration
 	int priority;
+
+public:
+	Reference<TCMachineTeamInfo> machineTeam;
+	Future<Void> tracker;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
 	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
