@@ -808,10 +808,11 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 // Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
-	vector<CommitTransactionRequest> trs,
+	vector<CommitTransactionRequest>* pTrs,
 	int currentBatchMemBytesCount)
 {
 	//WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as possible
+	state std::vector<CommitTransactionRequest> trs(std::move(*(const_cast<std::vector<CommitTransactionRequest>*>(pTrs))));
 	state int64_t localBatchNumber = ++self->localCommitBatchesStarted;
 	state LogPushData toCommit(self->logSystem);
 	state double t1 = now();
@@ -2156,7 +2157,11 @@ ACTOR Future<Void> masterProxyServerCore(
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {
-					lastCommitComplete = commitBatch(&commitData, trs, batchBytes);
+					lastCommitComplete = commitBatch(
+						&commitData,
+						const_cast<std::vector<CommitTransactionRequest>*>(&batchedRequests.first),
+						batchBytes
+					);
 					addActor.send(lastCommitComplete);
 				}
 			}
