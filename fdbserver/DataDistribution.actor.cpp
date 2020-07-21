@@ -186,7 +186,7 @@ public:
 	vector<UID> const& getServerIDs() const override { return serverIDs; }
 	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
 
-	std::string getServerIDsStr() const override {
+	std::string getServerIDsStr() const {
 		std::stringstream ss;
 
 		if (serverIDs.empty()) return "[unset]";
