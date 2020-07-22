@@ -696,8 +696,9 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
 
-void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl) {
-	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get());
+void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module,
+                                                    std::unique_ptr<SpecialKeyRangeBaseImpl> impl, int apiVersion) {
+	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get(), apiVersion);
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 
@@ -895,17 +896,26 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 	if (apiVersionAtLeast(630)) {
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		int apiVersion = 630;
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION,
+		                              std::make_unique<ConflictingKeysImpl>(conflictingKeysRange), apiVersion);
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION,
+		                              std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange), apiVersion);
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION,
+		                              std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange),
+		                              apiVersion);
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
-		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
+		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange), apiVersion);
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::METRICS,
 		    std::make_unique<HealthMetricsRangeImpl>(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/"),
-		                                                         LiteralStringRef("\xff\xff/metrics/health0"))));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
-		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
+		                                                         LiteralStringRef("\xff\xff/metrics/health0"))),
+		    apiVersion);
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::WORKERINTERFACE,
+		    std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		        LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))),
+		    apiVersion);
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::STATUSJSON,
 		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
@@ -916,7 +926,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 			                                           } else {
 				                                           return Optional<Value>();
 			                                           }
-		                                           }));
+		                                           }),
+		    apiVersion);
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CLUSTERFILEPATH,
 		    std::make_unique<SingleSpecialKeyImpl>(
@@ -931,7 +942,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 				        return e;
 			        }
 			        return Optional<Value>();
-		        }));
+		        }),
+		    apiVersion);
 
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
@@ -948,7 +960,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 				        return e;
 			        }
 			        return Optional<Value>();
-		        }));
+		        }),
+		    apiVersion);
 	}
 	throttleExpirer = recurring([this](){ expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 

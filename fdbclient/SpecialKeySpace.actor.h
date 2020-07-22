@@ -109,10 +109,10 @@ public:
 	                                            GetRangeLimits limits, bool reverse = false);
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
-	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(nullptr, spaceEndKey),
+	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(std::make_pair(0, nullptr), spaceEndKey),
 	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
 		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
-		impls.insert(range, nullptr);
+		impls.insert(range, std::make_pair(0, nullptr));
 		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
 	}
 	// Initialize module boundaries, used to handle cross_module_read
@@ -124,27 +124,40 @@ public:
 			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
 			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
 			modules.insert(pair.second, pair.first);
-			impls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
-			                                    // important to make cross_module_read being handled correctly
+			impls.insert(pair.second,
+			             std::make_pair(0, nullptr)); // Note: Due to underlying implementation, the insertion here is
+			                                          // important to make cross_module_read being handled correctly
 		}
 	}
-	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
+	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl,
+	                      int version) {
 		// module boundary check
 		if (module == SpecialKeySpace::MODULE::TESTONLY)
 			ASSERT(normalKeys.contains(kr));
 		else
 			ASSERT(moduleToBoundary.at(module).contains(kr));
-		// make sure the registered range is not overlapping with existing ones
-		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
+		// Skip if the range is overlapping with ranges registered with higher version
+		// No overlapping ranges are allowed to register with the same version
+		// Overlapping ranges registered with lower versions will be overwritten
+		// Note(Overlapping definition): kr.end should not be the same as another range's begin,
+		// although it should work even they are the same.
+		bool skip = false;
 		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
-			ASSERT(iter->value() == nullptr);
-			if (iter == impls.rangeContaining(kr.end))
+			if (iter->value().second != nullptr) {
+				// Registration is only allowed in descending order, which means
+				// if (apiVersionAtLeast(800)) { // register implementations added in 800 }
+				// if (apiVersionAtLeast(700)) { // register implementations added in 700 }
+				// ... lower versions ...
+				ASSERT(iter->value().first > version);
+				skip = true;
+			}
+			if (skip || iter == impls.rangeContaining(kr.end))
 				break; // relax the condition that the end can be another range's start, if needed
 		}
-		impls.insert(kr, impl);
+		if (!skip) impls.insert(kr, std::make_pair(version, impl));
 	}
 
-	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
+	KeyRangeMap<std::pair<int, SpecialKeyRangeBaseImpl*>>& getImpls() { return impls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
 
@@ -160,7 +173,7 @@ private:
 	                                                                         KeySelector begin, KeySelector end,
 	                                                                         GetRangeLimits limits, bool reverse);
 	KeyRange range;
-	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
+	KeyRangeMap<std::pair<int, SpecialKeyRangeBaseImpl*>> impls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;

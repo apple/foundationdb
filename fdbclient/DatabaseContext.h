@@ -343,7 +343,8 @@ public:
 	AsyncTrigger updateCache;
 	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
-	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);
+	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl,
+	                                   int apiVersion);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 

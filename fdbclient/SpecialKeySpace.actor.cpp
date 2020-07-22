@@ -115,12 +115,12 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
-	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::iterator iter =
+	state RangeMap<Key, std::pair<int, SpecialKeyRangeBaseImpl*>, KeyRangeRef>::iterator iter =
 	    ks->offset < 1 ? sks->getImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
-		if (iter->value() != nullptr) {
-			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
+		if (iter->value().second != nullptr) {
+			wait(moveKeySelectorOverRangeActor(iter->value().second, ryw, ks, cache));
 		}
 		ks->offset < 1 ? --iter : ++iter;
 	}
@@ -164,7 +164,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// KeySelector, GetRangeLimits and reverse are all handled here
 	state Standalone<RangeResultRef> result;
 	state Standalone<RangeResultRef> pairs;
-	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::iterator iter;
+	state RangeMap<Key, std::pair<int, SpecialKeyRangeBaseImpl*>, KeyRangeRef>::iterator iter;
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state KeyRangeRef moduleBoundary;
@@ -203,7 +203,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 		TEST(true);
 		return result;
 	}
-	state RangeMap<Key, SpecialKeyRangeBaseImpl*, KeyRangeRef>::Ranges ranges =
+	state RangeMap<Key, std::pair<int, SpecialKeyRangeBaseImpl*>, KeyRangeRef>::Ranges ranges =
 	    sks->impls.intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
 	// TODO : workaround to write this two together to make the code compact
 	// The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
@@ -211,16 +211,18 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	if (reverse) {
 		while (iter != ranges.begin()) {
 			--iter;
-			if (iter->value() == nullptr) continue;
+			if (iter->value().second == nullptr) continue;
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
-				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
+			if (iter->value().second->isAsync() && cache.present()) {
+				const SpecialKeyRangeAsyncImpl* ptr =
+				    dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value().second);
 				Standalone<RangeResultRef> pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
 				pairs = pairs_;
 			} else {
-				Standalone<RangeResultRef> pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+				Standalone<RangeResultRef> pairs_ =
+				    wait(iter->value().second->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 				pairs = pairs_;
 			}
 			result.arena().dependsOn(pairs.arena());
@@ -240,16 +242,18 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 		}
 	} else {
 		for (iter = ranges.begin(); iter != ranges.end(); ++iter) {
-			if (iter->value() == nullptr) continue;
+			if (iter->value().second == nullptr) continue;
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
-				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
+			if (iter->value().second->isAsync() && cache.present()) {
+				const SpecialKeyRangeAsyncImpl* ptr =
+				    dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value().second);
 				Standalone<RangeResultRef> pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
 				pairs = pairs_;
 			} else {
-				Standalone<RangeResultRef> pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+				Standalone<RangeResultRef> pairs_ =
+				    wait(iter->value().second->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
 				pairs = pairs_;
 			}
 			result.arena().dependsOn(pairs.arena());
