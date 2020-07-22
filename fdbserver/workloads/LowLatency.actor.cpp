@@ -28,17 +28,23 @@
 
 struct LowLatencyWorkload : TestWorkload {
 	double testDuration;
-	double maxLatency;
+	double maxGRVLatency;
+	double maxCommitLatency;
 	double checkDelay;
 	PerfIntCounter operations, retries;
+	bool testWrites;
+	Key testKey;
 	bool ok;
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), operations("Operations"), retries("Retries") , ok(true)
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
-		maxLatency = getOption( options, LiteralStringRef("maxLatency"), 20.0 );
+		maxGRVLatency = getOption(options, LiteralStringRef("maxGRVLatency"), 20.0);
+		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 30.0);
 		checkDelay = getOption( options, LiteralStringRef("checkDelay"), 1.0 );
+		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
+		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
 	}
 
 	virtual std::string description() { return "LowLatency"; }
@@ -60,20 +66,30 @@ struct LowLatencyWorkload : TestWorkload {
 				wait( delay( self->checkDelay ) );
 				state Transaction tr( cx );
 				state double operationStart = now();
+				state bool doCommit = self->testWrites && deterministicRandom()->coinflip();
+				state double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
 				++self->operations;
 				loop {
 					try {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						wait(success(tr.getReadVersion()));
+						if (doCommit) {
+							tr.set(self->testKey, LiteralStringRef(""));
+							wait(tr.commit());
+						} else {
+							wait(success(tr.getReadVersion()));
+						}
 						break;
 					} catch( Error &e ) {
 						wait( tr.onError(e) );
 						++self->retries;
 					}
 				}
-				if(now() - operationStart > self->maxLatency) {
-					TraceEvent(SevError, "LatencyTooLarge").detail("MaxLatency", self->maxLatency).detail("ObservedLatency", now() - operationStart);
+				if (now() - operationStart > maxLatency) {
+					TraceEvent(SevError, "LatencyTooLarge")
+					    .detail("MaxLatency", maxLatency)
+					    .detail("ObservedLatency", now() - operationStart)
+					    .detail("IsCommit", doCommit);
 					self->ok = false;
 				}
 				if( now() - testStart > self->testDuration )

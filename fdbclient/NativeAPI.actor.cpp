@@ -36,6 +36,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -46,6 +47,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/versions.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
@@ -53,17 +55,16 @@
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/Trace.h"
+#include "flow/Tracing.h"
 #include "flow/UnitTest.h"
 #include "flow/serialize.h"
-
-#include "fdbclient/versions.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -746,6 +747,97 @@ private:
 	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
 };
 
+class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit HealthMetricsRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
+	Standalone<RangeResultRef> result;
+	if (CLIENT_BUGGIFY) return result;
+	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate")) && metrics.worstStorageDurabilityLag != 0) {
+		json_spirit::mObject statsObj;
+		statsObj["batch_limited"] = metrics.batchLimited;
+		statsObj["tps_limit"] = metrics.tpsLimit;
+		statsObj["worst_storage_durability_lag"] = metrics.worstStorageDurabilityLag;
+		statsObj["worst_storage_queue"] = metrics.worstStorageQueue;
+		statsObj["worst_log_queue"] = metrics.worstTLogQueue;
+		std::string statsString =
+		    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+		ValueRef bytes(result.arena(), statsString);
+		result.push_back(result.arena(), KeyValueRef(LiteralStringRef("\xff\xff/metrics/health/aggregate"), bytes));
+	}
+	// tlog stats
+	{
+		int phase = 0; // Avoid comparing twice per loop iteration
+		for (const auto& [uid, logStats] : metrics.tLogQueue) {
+			StringRef k{
+				StringRef(uid.toString()).withPrefix(LiteralStringRef("\xff\xff/metrics/health/log/"), result.arena())
+			};
+			if (phase == 0 && k >= kr.begin) {
+				phase = 1;
+			}
+			if (phase == 1) {
+				if (k < kr.end) {
+					json_spirit::mObject statsObj;
+					statsObj["log_queue"] = logStats;
+					std::string statsString =
+					    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+					ValueRef bytes(result.arena(), statsString);
+					result.push_back(result.arena(), KeyValueRef(k, bytes));
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	// Storage stats
+	{
+		int phase = 0; // Avoid comparing twice per loop iteration
+		for (const auto& [uid, storageStats] : metrics.storageStats) {
+			StringRef k{ StringRef(uid.toString())
+				             .withPrefix(LiteralStringRef("\xff\xff/metrics/health/storage/"), result.arena()) };
+			if (phase == 0 && k >= kr.begin) {
+				phase = 1;
+			}
+			if (phase == 1) {
+				if (k < kr.end) {
+					json_spirit::mObject statsObj;
+					statsObj["storage_durability_lag"] = storageStats.storageDurabilityLag;
+					statsObj["storage_queue"] = storageStats.storageQueue;
+					statsObj["cpu_usage"] = storageStats.cpuUsage;
+					statsObj["disk_usage"] = storageStats.diskUsage;
+					std::string statsString =
+					    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
+					ValueRef bytes(result.arena(), statsString);
+					result.push_back(result.arena(), KeyValueRef(k, bytes));
+				} else {
+					break;
+				}
+			}
+		}
+	}
+	return result;
+}
+
+ACTOR static Future<Standalone<RangeResultRef>> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                           KeyRangeRef kr) {
+	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
+	    /*detailed ("per process")*/ kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/storage/"),
+	                                                           LiteralStringRef("\xff\xff/metrics/health/storage0"))) ||
+	    kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/log/"),
+	                              LiteralStringRef("\xff\xff/metrics/health/log0")))));
+	return healthMetricsToKVPairs(metrics, kr);
+}
+
+HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                    KeyRangeRef kr) const {
+	return healthMetricsGetRangeActor(ryw, kr);
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
                                  TaskPriority taskID, LocalityData const& clientLocality,
@@ -808,6 +900,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
 		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::METRICS,
+		    std::make_unique<HealthMetricsRangeImpl>(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/"),
+		                                                         LiteralStringRef("\xff\xff/metrics/health0"))));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
 		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(
@@ -1532,7 +1628,10 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 }
 
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
-ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
+ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Database cx, Key key,
+                                                                              TransactionInfo info,
+                                                                              bool isBackward = false) {
+	state Span span("NAPI:getKeyLocation"_loc, info.spanID);
 	if (isBackward) {
 		ASSERT( key != allKeys.begin && key <= allKeys.end );
 	} else {
@@ -1546,7 +1645,10 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply rep = wait( basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
+			when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+			         cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations,
+			         GetKeyServerLocationsRequest(span.context, key, Optional<KeyRef>(), 100, isBackward, key.arena()),
+			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
@@ -1581,7 +1683,10 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
 	return ssi;
 }
 
-ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
+ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations_internal(Database cx, KeyRange keys,
+                                                                                            int limit, bool reverse,
+                                                                                            TransactionInfo info) {
+	state Span span("NAPI:getKeyRangeLocations"_loc, info.spanID);
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
@@ -1589,7 +1694,10 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply _rep = wait( basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
+			when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
+			         cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations,
+			         GetKeyServerLocationsRequest(span.context, keys.begin, keys.end, limit, reverse, keys.arena()),
+			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				state GetKeyServerLocationsReply rep = _rep;
 				if( info.debugID.present() )
@@ -1680,6 +1788,7 @@ Future<Void> Transaction::warmRange(Database cx, KeyRange keys) {
 ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Database cx, TransactionInfo info, Reference<TransactionLogInfo> trLogInfo, TagSet tags )
 {
 	state Version ver = wait( version );
+	state Span span("NAPI:getValue"_loc, info.spanID);
 	cx->validateVersion(ver);
 
 	loop {
@@ -1712,10 +1821,12 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				}
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
-					when(GetValueReply _reply =
-							wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::getValue,
-											GetValueRequest(key, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID), TaskPriority::DefaultPromiseEndpoint, false,
-											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+					when(GetValueReply _reply = wait(
+					         loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::getValue,
+					                     GetValueRequest(span.context, key, ver,
+					                                     cx->sampleReadTags() ? tags : Optional<TagSet>(), getValueID),
+					                     TaskPriority::DefaultPromiseEndpoint, false,
+					                     cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
 				}
@@ -1773,6 +1884,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
+	state Span span("NAPI:getKey"_loc, info.spanID);
 	if( info.debugID.present() ) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
 
@@ -1801,9 +1913,11 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 				choose {
 					when(wait(cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyReply _reply =
-							wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get(), cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID),
-											TaskPriority::DefaultPromiseEndpoint, false,
-											cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
+					         wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::getKey,
+					                          GetKeyRequest(span.context, k, version.get(),
+					                                        cx->sampleReadTags() ? tags : Optional<TagSet>(), getKeyID),
+					                          TaskPriority::DefaultPromiseEndpoint, false,
+					                          cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr))) {
 						reply = _reply;
 					}
 				}
@@ -1836,12 +1950,15 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 	}
 }
 
-ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
+ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, SpanID spanContext ) {
+	state Span span("NAPI:waitForCommittedVersion"_loc, { spanContext });
 	try {
 		loop {
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
+				when(GetReadVersionReply v = wait(basicLoadBalance(
+				         cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
+				         GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 
 					if (v.version >= version)
@@ -1857,11 +1974,14 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	}
 }
 
-ACTOR Future<Version> getRawVersion( Database cx ) {
+ACTOR Future<Version> getRawVersion( Database cx, SpanID spanContext ) {
+	state Span span("NAPI:getRawVersion"_loc, { spanContext });
 	loop {
 		choose {
 			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
+			when(GetReadVersionReply v =
+			         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
+			                               GetReadVersionRequest(spanContext, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 				return v.version;
 			}
 		}
@@ -1875,6 +1995,7 @@ ACTOR Future<Void> readVersionBatcher(
 ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> value, Database cx,
                               TransactionInfo info, TagSet tags) {
 	state Version ver = wait( version );
+	state Span span("NAPI:watchValue"_loc, info.spanID);
 	cx->validateVersion(ver);
 	ASSERT(ver != latestVersion);
 
@@ -1891,9 +2012,11 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 			}
 			state WatchValueReply resp;
 			choose {
-				when(WatchValueReply r = wait(loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::watchValue,
-				                                          WatchValueRequest(key, value, ver, cx->sampleReadTags() ? tags : Optional<TagSet>(), watchValueID),
-				                                          TaskPriority::DefaultPromiseEndpoint))) {
+				when(WatchValueReply r = wait(
+				         loadBalance(cx.getPtr(), ssi.second, &StorageServerInterface::watchValue,
+				                     WatchValueRequest(span.context, key, value, ver,
+				                                       cx->sampleReadTags() ? tags : Optional<TagSet>(), watchValueID),
+				                     TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
 				when(wait(cx->connectionFile ? cx->connectionFile->onChange() : Never())) { wait(Never()); }
@@ -1904,7 +2027,7 @@ ACTOR Future<Void> watchValue(Future<Version> version, Key key, Optional<Value> 
 
 			//FIXME: wait for known committed version on the storage server before replying,
 			//cannot do this until the storage server is notified on knownCommittedVersion changes from tlog (faster than the current update loop)
-			Version v = wait(waitForCommittedVersion(cx, resp.version));
+			Version v = wait(waitForCommittedVersion(cx, resp.version, span.context));
 
 			//TraceEvent("WatcherCommitted").detail("CommittedVersion", v).detail("WatchVersion", resp.version).detail("Key",  key ).detail("Value", value);
 
@@ -1957,6 +2080,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 	KeyRange keys, GetRangeLimits limits, bool reverse, TransactionInfo info, TagSet tags )
 {
 	state Standalone<RangeResultRef> output;
+	state Span span("NAPI:getExactRange"_loc, info.spanID);
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
@@ -1970,6 +2094,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 			req.version = version;
 			req.begin = firstGreaterOrEqual( range.begin );
 			req.end = firstGreaterOrEqual( range.end );
+			req.spanContext = span.context;
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
@@ -2214,6 +2339,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state Standalone<RangeResultRef> output;
+	state Span span("NAPI:getRange"_loc, info.spanID);
 
 	try {
 		state Version version = wait( fVersion );
@@ -2266,6 +2392,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 
 			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
 			req.debugID = info.debugID;
+			req.spanContext = span.context;
 			try {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
@@ -2460,10 +2587,11 @@ void debugAddTags(Transaction *tr) {
 
 }
 
-Transaction::Transaction( Database const& cx )
-	: cx(cx), info(cx->taskID), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0), trLogInfo(createTrLogInfoProbabilistically(cx))
-{
-	if(DatabaseContext::debugUseTags) {
+Transaction::Transaction(Database const& cx)
+  : cx(cx), info(cx->taskID, deterministicRandom()->randomUniqueID()), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
+    committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
+    trLogInfo(createTrLogInfoProbabilistically(cx)), span(info.spanID, "Transaction"_loc) {
+	if (DatabaseContext::debugUseTags) {
 		debugAddTags(this);
 	}
 }
@@ -2603,7 +2731,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch, Database cx, TagSet tags, Trans
 }
 
 Future<Version> Transaction::getRawReadVersion() {
-	return ::getRawVersion(cx);
+	return ::getRawVersion(cx, info.spanID);
 }
 
 Future< Void > Transaction::watch( Reference<Watch> watch ) {
@@ -2931,6 +3059,7 @@ void TransactionOptions::clear() {
 	tags = TagSet{};
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
+	expensiveClearCostEstimation = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -2966,6 +3095,8 @@ void Transaction::reset() {
 
 void Transaction::fullReset() {
 	reset();
+	span = Span(span.location);
+	info.spanID = span.context;
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
 
@@ -3042,7 +3173,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		tr.setVersion( version );
 		state int checkedRanges = 0;
 		state KeyRangeMap<MutationBlock>::Ranges ranges = expectedValues.ranges();
-		state KeyRangeMap<MutationBlock>::Iterator it = ranges.begin();
+		state KeyRangeMap<MutationBlock>::iterator it = ranges.begin();
 		for(; it != ranges.end(); ++it) {
 			state MutationBlock m = it->value();
 			if( m.mutated ) {
@@ -3082,6 +3213,8 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, TransactionInfo info, TransactionOptions options ) {
 	state Transaction tr(cx);
 	state int retries = 0;
+	state Span span("NAPI:dummyTransaction"_loc, info.spanID);
+	tr.span.addParent(span.context);
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
@@ -3125,9 +3258,41 @@ void Transaction::setupWatches() {
 	}
 }
 
+ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self,
+                                                                  CommitTransactionRef* transaction) {
+	state MutationRef* it = transaction->mutations.begin();
+	state MutationRef* end = transaction->mutations.end();
+	state TransactionCommitCostEstimation trCommitCosts;
+	state KeyRange keyRange;
+	for (; it != end; ++it) {
+		if (it->type == MutationRef::Type::SetValue) {
+			trCommitCosts.bytesWrite += it->expectedSize();
+			trCommitCosts.numWrite++;
+		} else if (it->isAtomicOp()) {
+			trCommitCosts.bytesAtomicWrite += it->expectedSize();
+			trCommitCosts.numAtomicWrite++;
+		} else if (it->type == MutationRef::Type::ClearRange) {
+			trCommitCosts.numClear++;
+			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
+			if (self->options.expensiveClearCostEstimation) {
+				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));
+				trCommitCosts.bytesClearEst += m.bytes;
+			}
+			else {
+				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+					self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false, &StorageServerInterface::getShardState, self->info));
+				trCommitCosts.numClearShards += locations.size();
+			}
+		}
+	}
+	return trCommitCosts;
+}
+
 ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime = now();
+	state Span span("NAPI:tryCommit"_loc, info.spanID);
+	req.spanContext = span.context;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 	try {
@@ -3139,8 +3304,12 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		Version v = wait( readVersion );
-		req.transaction.read_snapshot = v;
+		if (!req.tagSet.present()) {
+			wait(store(req.transaction.read_snapshot, readVersion));
+		} else {
+			req.commitCostEstimation = TransactionCommitCostEstimation();
+			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
+		}
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -3267,6 +3436,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	}
 }
 
+
 Future<Void> Transaction::commitMutations() {
 	try {
 		//if this is a read-only transaction return immediately
@@ -3285,6 +3455,8 @@ Future<Void> Transaction::commitMutations() {
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
+		if(options.tags.size())
+			tr.tagSet = options.tags;
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
@@ -3551,23 +3723,39 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			options.readTags.addTag(value.get());
 			break;
 
-	    case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
-		    validateOptionValue(value, false);
-		    options.reportConflictingKeys = true;
-		    break;
+		case FDBTransactionOptions::SPAN_PARENT:
+			validateOptionValue(value, true);
+			if (value.get().size() != 16) {
+				throw invalid_option_value();
+			}
+			span.addParent(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()));
+			break;
 
-	    default:
+		case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
+			validateOptionValue(value, false);
+			options.reportConflictingKeys = true;
+			break;
+		
+		case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
+			validateOptionValue(value, false);
+			options.expensiveClearCostEstimation = true;
+			break;
+
+		default:
 			break;
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, TransactionPriority priority, uint32_t flags, TransactionTagMap<uint32_t> tags, Optional<UID> debugID ) {
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, DatabaseContext* cx, uint32_t transactionCount,
+                                                           TransactionPriority priority, uint32_t flags,
+                                                           TransactionTagMap<uint32_t> tags, Optional<UID> debugID) {
+	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
 	try {
 		++cx->transactionReadVersionBatches;
 		if( debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 		loop {
-			state GetReadVersionRequest req( transactionCount, priority, flags, tags, debugID );
+			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
@@ -3618,6 +3806,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	state PromiseStream<double> replyTimes;
 	state PromiseStream<Error> _errorStream;
 	state double batchTime = 0;
+	state Span span("NAPI:readVersionBatcher"_loc);
 	loop {
 		send_batch = false;
 		choose {
@@ -3628,6 +3817,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 					}
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
+				span.addParent(req.spanContext);
 				requests.push_back(req.reply);
 				for(auto tag : req.tags) {
 					++tags[tag];
@@ -3655,9 +3845,10 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(cx, count, priority, flags, std::move(tags), std::move(debugID)),
+			    getConsistentReadVersion(span.context, cx, count, priority, flags, std::move(tags), std::move(debugID)),
 			    std::move(requests), CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
+			span = Span("NAPI:readVersionBatcher"_loc);
 			tags.clear();
 			debugID = Optional<UID>();
 			requests.clear();
@@ -3667,7 +3858,11 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, TransactionPriority priority, Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f, bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion, TagSet tags) {
+ACTOR Future<Version> extractReadVersion(SpanID parentSpan, DatabaseContext* cx, TransactionPriority priority,
+                                         Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
+                                         bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
+                                         TagSet tags) {
+	// parentSpan here is only used to keep the parent alive until the request completes
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
@@ -3789,10 +3984,12 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), options.priority, flags );
 		}
 
-		auto const req = DatabaseContext::VersionRequest(options.tags, info.debugID);
+		Span span("NAPI:getReadVersion"_loc, info.spanID);
+		auto const req = DatabaseContext::VersionRequest(span.context, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion( cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
+		readVersion = extractReadVersion(span.context, cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(),
+		                                 options.lockAware, startTime, metadataVersion, options.tags);
 	}
 	return readVersion;
 }
@@ -3889,14 +4086,18 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, 
 }
 
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys) {
-
-	vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-	    cx, keys, std::numeric_limits<int>::max(), false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution)));
+	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
+	vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(
+	    getKeyRangeLocations(cx, keys, std::numeric_limits<int>::max(), false, &StorageServerInterface::waitMetrics,
+	                         TransactionInfo(TaskPriority::DataDistribution, span.context)));
 	state int nLocs = locations.size();
 	state vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
+	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		fx[i] = doGetStorageMetrics(cx, locations[i].first, locations[i].second);
+		partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+		partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -3969,12 +4170,13 @@ ACTOR Future< StorageMetrics > extractMetrics( Future<std::pair<Optional<Storage
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, KeyRange keys) {
+	state Span span("NAPI:GetReadHotRanges"_loc);
 	loop {
 		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only used
 		                          // to find the read-hot sub ranges within a read-hot shard.
 		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx, keys, shardLimit, false, &StorageServerInterface::getReadHotRanges,
-		                              TransactionInfo(TaskPriority::DataDistribution)));
+		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
 			// TODO: how to handle this?
 			// This function is called whenever a shard becomes read-hot. But somehow the shard was splitted across more
@@ -4022,9 +4224,12 @@ ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 	int shardLimit,
 	int expectedShardCount )
 {
+	state Span span("NAPI:WaitStorageMetrics"_loc);
 	loop {
-		vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskPriority::DataDistribution) ) );
-		if(expectedShardCount >= 0 && locations.size() != expectedShardCount) {
+		vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+		    wait(getKeyRangeLocations(cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics,
+		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
+		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
 			return std::make_pair(Optional<StorageMetrics>(), locations.size());
 		}
 
@@ -4107,8 +4312,11 @@ Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRang
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
 {
+	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, &StorageServerInterface::splitMetrics, TransactionInfo(TaskPriority::DataDistribution) ) );
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
+		    cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, &StorageServerInterface::splitMetrics,
+		    TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		state StorageMetrics used;
 		state Standalone<VectorRef<KeyRef>> results;
 

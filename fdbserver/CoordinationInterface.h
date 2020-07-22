@@ -138,7 +138,7 @@ struct CandidacyRequest {
 };
 
 struct ElectionResultRequest {
-	constexpr static FileIdentifier file_identifier = 78924329;
+	constexpr static FileIdentifier file_identifier = 11815465;
 	Key key;
 	vector<NetworkAddress> coordinators;
 	UID knownLeader;

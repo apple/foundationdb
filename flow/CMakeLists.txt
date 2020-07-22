@@ -28,6 +28,7 @@ set(FLOW_SRCS
   IRandom.h
   IThreadPool.cpp
   IThreadPool.h
+  ITrace.h
   IndexedSet.actor.h
   IndexedSet.cpp
   IndexedSet.h
@@ -47,8 +48,6 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
-  Stats.actor.cpp
-  Stats.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h
@@ -62,6 +61,8 @@ set(FLOW_SRCS
   ThreadSafeQueue.h
   Trace.cpp
   Trace.h
+  Tracing.h
+  Tracing.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h
