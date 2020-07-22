@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/LockRange.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"

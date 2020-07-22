@@ -31,6 +31,8 @@ set(FDBCLIENT_SRCS
   KeyRangeMap.h
   Knobs.cpp
   Knobs.h
+  LockRange.actor.cpp
+  LockRange.actor.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
   CommitProxyInterface.h
