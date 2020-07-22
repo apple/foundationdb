@@ -181,8 +181,6 @@ struct ThrottlingWorkload : KVWorkload {
 	}
 
 	ACTOR static Future<Void> _start(Database cx, ThrottlingWorkload* self) {
-		// state Future<Void> hmChecker = timeout(healthMetricsChecker(cx, self), self->testDuration, Void());
-
 		state vector<Future<Void>> clientActors;
 		state int actorId;
 		for (actorId = 0; actorId < self->actorsPerClient; ++actorId) {
