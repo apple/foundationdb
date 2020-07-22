@@ -782,10 +782,7 @@ public:
 			if ((*this)[i] != rhs[i]) return false;
 		return true;
 	}
-	template <VecSerStrategy S>
-	bool operator!=(VectorRef<T, S> const& rhs) const {
-		return !(*this == rhs);
-	}
+	bool operator!=(VectorRef<T> const& rhs) const { return !(*this == rhs); }
 
 	// Warning: Do not mutate a VectorRef that has previously been copy constructed or assigned,
 	// since copies will share data
