@@ -104,7 +104,7 @@ struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
 	vector< GrvProxyInterface > grvProxies;
-	vector< MasterProxyInterface > proxies;
+	vector< MasterProxyInterface > masterProxies;
 	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
@@ -121,7 +121,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
+		serializer(ar, grvProxies, masterProxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
 	}
 };
 

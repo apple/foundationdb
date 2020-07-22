@@ -654,7 +654,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 				oldMachinesWithTransaction.insert(machineId);
 			}
 
-//			if(processClass.classType() == ProcessClass::TransactionClass || processClass.classType() == ProcessClass::ProxyClass || processClass.classType() == ProcessClass::GrvProxyClass || processClass.classType() == ProcessClass::ResolutionClass || processClass.classType() == ProcessClass::StatelessClass || processClass.classType() == ProcessClass::LogClass) {
 			if(processClass.classType() == ProcessClass::TransactionClass || processClass.classType() == ProcessClass::ProxyClass || processClass.classType() == ProcessClass::ResolutionClass || processClass.classType() == ProcessClass::StatelessClass || processClass.classType() == ProcessClass::LogClass) {
 				oldTransactionProcesses++;
 			}
@@ -684,7 +683,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	std::set<std::string> machinesWithStorage;
 	int totalTransactionProcesses = 0;
 	int existingProxyCount = 0;
-//	int existingGrvProxyCount = 0;
 	int existingResolverCount = 0;
 	int existingStatelessCount = 0;
 	for( auto& it : machine_processes ) {
@@ -699,9 +697,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 			if(proc.second == ProcessClass::ProxyClass) {
 				existingProxyCount++;
 			}
-//			if(proc.second == ProcessClass::GrvProxyClass) {
-//				existingGrvProxyCount++;
-//			}
 			if(proc.second == ProcessClass::ResolutionClass) {
 				existingResolverCount++;
 			}
@@ -740,19 +735,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		result.auto_proxies = result.old_proxies;
 		proxyCount = result.old_proxies;
 	}
-	TraceEvent("ProxyCountManagementApi").detail("Count", proxyCount);
-
-//	result.desired_grv_proxies = std::min( 4, processCount / 15 );
-//	int grvProxyCount;
-//	if (!statusObjConfig.get("grv_proxies", result.old_grv_proxies)) {
-//		result.old_grv_proxies = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
-//		statusObjConfig.get("auto_grv_proxies", result.old_grv_proxies);
-//		result.auto_grv_proxies = result.desired_grv_proxies;
-//		grvProxyCount = result.auto_grv_proxies;
-//	} else {
-//		result.auto_grv_proxies = result.old_grv_proxies;
-//		grvProxyCount = result.old_grv_proxies;
-//	}
 
 	result.desired_logs = std::min( 12, processCount / 20 );
 	result.desired_logs = std::max( result.desired_logs, log_replication + 1 );
@@ -771,7 +753,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	logCount = std::max(logCount, log_replication);
 
 	totalTransactionProcesses += std::min(existingProxyCount, proxyCount);
-//	totalTransactionProcesses += std::min(existingGrvProxyCount, grvProxyCount);
 	totalTransactionProcesses += std::min(existingResolverCount, resolverCount);
 	totalTransactionProcesses += existingStatelessCount;
 
@@ -788,7 +769,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	}
 
 	int desiredTotalTransactionProcesses = logCount + resolverCount + proxyCount;
-	// + grvProxyCount;
 
 	//add machines with all transaction class until we have enough processes and enough machines
 	for( auto& it : count_processes ) {
@@ -855,9 +835,6 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 
 			if(conf.auto_proxies != conf.old_proxies)
 				tr.set(configKeysPrefix.toString() + "auto_proxies", format("%d", conf.auto_proxies));
-
-//			if(conf.auto_grv_proxies != conf.old_grv_proxies)
-//				tr.set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));
 
 			if(conf.auto_resolvers != conf.old_resolvers)
 				tr.set(configKeysPrefix.toString() + "auto_resolvers", format("%d", conf.auto_resolvers));
@@ -1306,7 +1283,6 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 
 			wait( tr.commit() );
-			TraceEvent("ExcludeServersCommitDone");
 			return Void();
 		} catch (Error& e) {
 			wait( tr.onError(e) );

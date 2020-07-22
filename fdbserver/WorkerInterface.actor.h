@@ -74,12 +74,6 @@ struct WorkerInterface {
 	Optional<NetworkAddress> secondaryAddress() const { return tLog.getEndpoint().addresses.secondaryAddress; }
 	NetworkAddressList addresses() const { return tLog.getEndpoint().addresses; }
 
-	std::string toString() const {
-		return "locality: " + locality.toString() + "\n" +
-		       "id: " + id().toString() + "\n" +
-		       "address: " + address().toString() + "\n";
-	}
-
 	WorkerInterface() {}
 	WorkerInterface( const LocalityData& locality ) : locality( locality ) {}
 
@@ -186,7 +180,7 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	std::vector<MasterProxyInterface> proxies;
+	std::vector<MasterProxyInterface> masterProxies;
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
@@ -205,7 +199,7 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, proxies, grvProxies, resolvers, recoveryCount, registrationCount,
+		serializer(ar, id, mi, logSystemConfig, masterProxies, grvProxies, resolvers, recoveryCount, registrationCount,
 		           configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
@@ -215,7 +209,7 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> backupWorkers;
 	std::vector<WorkerInterface> tLogs;
 	std::vector<WorkerInterface> satelliteTLogs;
-	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> masterProxies;
 	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
@@ -223,32 +217,11 @@ struct RecruitFromConfigurationReply {
 	Optional<Key> dcId;
 	bool satelliteFallback;
 
-	std::string toString(std::string name, std::vector<WorkerInterface>& workers) {
-		std::string res = name + " of size " + std::to_string(workers.size()) + "\n";
-//		for (const auto& w : workers) {
-//			res += w.toString();
-//		}
-		return res;
-	}
-
-	std::string toString() {
-		std::string res = "DC id: " + (dcId.present() ? dcId.get().toString() : "")+ "\n";
-		res += toString("grvProxies", grvProxies);
-		res += toString("proxies", proxies);
-		res += toString("resolvers", resolvers);
-		res += toString("storageServers", storageServers);
-		res += toString("tLogs", tLogs);
-		res += toString("backupWorkers", backupWorkers);
-		res += toString("oldLogRouters", oldLogRouters);
-		res += toString("satelliteTLogs", satelliteTLogs);
-		return res;
-	}
-
 	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
+		serializer(ar, tLogs, satelliteTLogs, masterProxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
 		           satelliteFallback, backupWorkers);
 	}
 };
@@ -477,8 +450,8 @@ struct InitializeMasterProxyRequest {
 struct InitializeGrvProxyRequest {
 	constexpr static FileIdentifier file_identifier = 313542387;
 	MasterInterface master;
-	uint64_t recoveryCount;
-	Version recoveryTransactionVersion;
+	uint64_t recoveryCount; // needed?
+	Version recoveryTransactionVersion; // needed?
 	ReplyPromise<GrvProxyInterface> reply;
 
 	template <class Ar>

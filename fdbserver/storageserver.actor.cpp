@@ -3773,7 +3773,6 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				dbInfoChange = self->db->onChange();
 				if( self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
-					TraceEvent("LogSystemCreate").detail("Role", "StorageServer").detail("UID", self->thisServerID).detail("DBInfoChange", "");
 					if (self->logSystem) {
 						if(self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
@@ -3940,7 +3939,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.proxies) );
+		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.masterProxies) );
 		choose {
 			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
 				state GetStorageServerRejoinInfoReply rep = _rep;

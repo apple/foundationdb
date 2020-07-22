@@ -23,11 +23,10 @@
 #define FOUNDATIONDB_GRVPROXYINTERFACE_H
 #pragma once
 
+// GrvProxy is proxy primarily specializing on serving GetReadVersion. It also serves health metrics since it communicates
+// with RateKeeper to gather health information of the cluster.
 struct GrvProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8743216;
-
-	enum { LocationAwareLoadBalance = 1 };
-	enum { AlwaysFresh = 1 };
 
 	Optional<Key> processId;
 	bool provisional;
@@ -37,12 +36,10 @@ struct GrvProxyInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure; // reports heartbeat to master.
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 
-	// every role has this?
 	UID id() const { return getConsistentReadVersion.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == (GrvProxyInterface const& r) const { return id() == r.id(); }
 	bool operator != (GrvProxyInterface const& r) const { return id() != r.id(); }
-	// every role has this?
 	NetworkAddress address() const { return getConsistentReadVersion.getEndpoint().getPrimaryAddress(); }
 
 	template <class Archive>

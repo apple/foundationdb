@@ -412,7 +412,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						}
 					} // End of For
 				}
-				when(wait(cx->onMasterProxiesChanged())) { }
+				when(wait(cx->onProxiesChanged())) { }
 			} // End of choose
 
 			if (!keyServersInsertedForThisIteration) // Retry the entire workflow
@@ -1457,19 +1457,16 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		// Check proxy
-		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
-		for (auto masterProxy : db.client.proxies) {
-			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestMasterProxyFitness", bestMasterProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
+		ProcessClass::Fitness bestProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
+		for (auto masterProxy : db.client.masterProxies) {
+			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestProxyFitness) {
+				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestProxyFitness", bestProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}
-
-		// Check grv proxy
-		ProcessClass::Fitness bestGrvProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
 		for (auto grvProxy : db.client.grvProxies) {
-			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) || nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestGrvProxyFitness) {
-				TraceEvent("ConsistencyCheck_GrvProxyNotBest").detail("BestGrvProxyFitness", bestGrvProxyFitness).detail("ExistingGrvProxyFitness", nonExcludedWorkerProcessMap.count(grvProxy.address()) ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
+			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) || nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestProxyFitness) {
+				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestProxyFitness", bestProxyFitness).detail("ExistingGrvProxyFitness", nonExcludedWorkerProcessMap.count(grvProxy.address()) ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}

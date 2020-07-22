@@ -48,7 +48,7 @@ public:
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_PROXY_CONNECTIONS;
+	int MAX_MASTER_PROXY_CONNECTIONS;
 	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
 
@@ -167,8 +167,7 @@ public:
 
 	// Configuration
 	int32_t DEFAULT_AUTO_PROXIES;
-	double GRV_PROXIES_RATIO;
-//	int32_t DEFAULT_AUTO_GRV_PROXIES;
+	double GRV_PROXIES_RATIO; // The ratio between the number of GRV proxies and the number of total proxies.
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 

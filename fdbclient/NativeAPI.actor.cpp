@@ -482,37 +482,21 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
+ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
 	state vector< MasterProxyInterface > curProxies;
 	state vector< GrvProxyInterface > curGrvProxies;
-	curProxies = clientDBInfo->get().proxies;
+	curProxies = clientDBInfo->get().masterProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop{
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().proxies != curProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
-			TraceEvent("ClientDbInfoChange")
-			    .detail("MPSizeOld", curProxies.size()).detail("MPSizeNew", clientDBInfo->get().proxies.size())
-				.detail("GPSizeOld", curGrvProxies.size()).detail("GPSizeNew", clientDBInfo->get().grvProxies.size());
-			curProxies = clientDBInfo->get().proxies;
+		if (clientDBInfo->get().masterProxies != curProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
+			curProxies = clientDBInfo->get().masterProxies;
 			curGrvProxies = clientDBInfo->get().grvProxies;
 			triggerVar->trigger();
 		}
 	}
 }
-
-//ACTOR static Future<Void> monitorGrvProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
-//	state vector< GrvProxyInterface > curProxies;
-//	curProxies = clientDBInfo->get().grvProxies;
-//
-//	loop{
-//		wait(clientDBInfo->onChange());
-//		if (clientDBInfo->get().grvProxies != curProxies) {
-//			curProxies = clientDBInfo->get().grvProxies;
-//			triggerVar->trigger();
-//		}
-//	}
-//}
 
 void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, StorageServerInterface>& removed,
 								   const std::map<UID, StorageServerInterface>& added) {
@@ -689,7 +673,7 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 		CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
 	loop {
 		choose {
-			when(wait(cx->onMasterProxiesChanged())) {}
+			when(wait(cx->onProxiesChanged())) {}
 			when(GetHealthMetricsReply rep =
 				 wait(basicLoadBalance(cx->getGrvProxies(false), &GrvProxyInterface::getHealthMetrics,
 							 GetHealthMetricsRequest(sendDetailedRequest)))) {
@@ -804,7 +788,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
-	connected = (clientInfo->get().proxies.size() && clientInfo->get().grvProxies.size()) ? Void() : clientInfo->onChange(); // ?
+	connected = (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size()) ? Void() : clientInfo->onChange(); // ?
 
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
@@ -819,8 +803,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
-//	monitorGrvProxiesInfoChange = monitorGrvProxiesChange(clientInfo, &grvProxiesChangeTrigger);
+	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 	if (apiVersionAtLeast(630)) {
@@ -905,8 +888,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
-	monitorMasterProxiesInfoChange.cancel();
-//	monitorGrvProxiesInfoChange.cancel();
+	monitorProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -985,13 +967,9 @@ void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 }
 
-Future<Void> DatabaseContext::onMasterProxiesChanged() {
-	return this->masterProxiesChangeTrigger.onTrigger();
+Future<Void> DatabaseContext::onProxiesChanged() {
+	return this->proxiesChangeTrigger.onTrigger();
 }
-
-//Future<Void> DatabaseContext::onGrvProxiesChanged() {
-//	return this->grvProxiesChangeTrigger.onTrigger();
-//}
 
 bool DatabaseContext::sampleReadTags() {
 	return clientInfo->get().transactionTagSampleRate > 0 && deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
@@ -1033,8 +1011,8 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::MACHINE_ID:
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ) );
+				if( clientInfo->get().masterProxies.size() )
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies) );
 				if( clientInfo->get().grvProxies.size() )
 					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ) );
 				server_interf.clear();
@@ -1045,8 +1023,8 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::DATACENTER_ID:
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
+				if( clientInfo->get().masterProxies.size() )
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies));
 				if( clientInfo->get().grvProxies.size() )
 					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
 				server_interf.clear();
@@ -1095,7 +1073,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	self->invalidateCache(allKeys);
 
 	auto clearedClientInfo = self->clientInfo->get();
-	clearedClientInfo.proxies.clear();
+	clearedClientInfo.masterProxies.clear();
 	clearedClientInfo.grvProxies.clear();
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
@@ -1432,9 +1410,9 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 		TraceEvent("MasterProxiesFoundChanged");
 		masterProxiesLastChange = clientInfo->get().id;
 		masterProxies.clear();
-		if( clientInfo->get().proxies.size() ) {
-			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
-			masterProxyProvisional = clientInfo->get().proxies[0].provisional;
+		if( clientInfo->get().masterProxies.size() ) {
+			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies));
+			masterProxyProvisional = clientInfo->get().masterProxies[0].provisional;
 		}
 	}
 	if(masterProxyProvisional && !useProvisionalProxies) {
@@ -1471,27 +1449,13 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxie
 	return grvProxies;
 }
 
-ACTOR Future<Reference<GrvProxyInfo>> getGrvProxiesFuture(DatabaseContext *cx, bool useProvisionalProxies) {
-	loop{
-		Reference<GrvProxyInfo> proxies = cx->getGrvProxies(useProvisionalProxies);
-		if (proxies)
-			return proxies;
-		wait( cx->onMasterProxiesChanged() );
-	}
-}
-
-//Returns a future which will not be set until the ProxyInfo of this DatabaseContext is not NULL
-Future<Reference<GrvProxyInfo>> DatabaseContext::getGrvProxiesFuture(bool useProvisionalProxies) {
-	return ::getGrvProxiesFuture(this, useProvisionalProxies);
-}
-
 //Actor which will wait until the MultiInterface<MasterProxyInterface> returned by the DatabaseContext cx is not NULL
 ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, bool useProvisionalProxies) {
 	loop{
 		Reference<ProxyInfo> proxies = cx->getMasterProxies(useProvisionalProxies);
 		if (proxies)
 			return proxies;
-		wait( cx->onMasterProxiesChanged() );
+		wait( cx->onProxiesChanged() );
 	}
 }
 
@@ -1620,7 +1584,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 	loop {
 		++cx->transactionKeyServerLocationRequests;
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( wait( cx->onProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply rep = wait( basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				if( info.debugID.present() )
@@ -1663,7 +1627,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 	loop {
 		++cx->transactionKeyServerLocationRequests;
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( wait( cx->onProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply _rep = wait( basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskPriority::DefaultPromiseEndpoint ) ) ) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				state GetKeyServerLocationsReply rep = _rep;
@@ -1915,7 +1879,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	try {
 		loop {
 			choose {
-				when ( wait( cx->onMasterProxiesChanged() ) ) {}
+				when ( wait( cx->onProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 
@@ -1935,7 +1899,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 ACTOR Future<Version> getRawVersion( Database cx ) {
 	loop {
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( wait( cx->onProxiesChanged() ) ) {}
 			when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, TransactionPriority::IMMEDIATE ), cx->taskID ) ) ) {
 				return v.version;
 			}
@@ -3214,9 +3178,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		TraceEvent("BeforeWaitReadVersion");
 		Version v = wait( readVersion );
-		TraceEvent("AfterWaitReadVersion").detail("V", v);
 		req.transaction.read_snapshot = v;
 
 		startTime = now();
@@ -3230,22 +3192,19 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
 		if (options.commitOnFirstProxy) {
-			TraceEvent("NativeBeforeCommit").detail("CommitOnFirst", "Yes");
 			if(cx->clientInfo->get().firstProxy.present()) {
 				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
 			} else {
-				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
+				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().masterProxies;
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
 		} else {
-			TraceEvent("NativeBeforeCommit").detail("CommitOnFirst", "No").detail("UseProvisional", info.useProvisionalProxies);
 			reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 		}
 
-		TraceEvent("NativeBeforeCommit1");
 
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {
+			when ( wait( cx->onProxiesChanged() ) ) {
 				reply.cancel();
 				throw request_maybe_delivered();
 			}
@@ -3420,7 +3379,6 @@ Future<Void> Transaction::commitMutations() {
 			tr.transaction.report_conflicting_keys = true;
 		}
 
-		TraceEvent("NativeTryCommit");
 		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options );
 
 		if (isCheckingWrites) {
@@ -3651,12 +3609,9 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 		loop {
 			state GetReadVersionRequest req( transactionCount, priority, flags, tags, debugID );
-			TraceEvent("NativeClientGRVStart").detail("Provisional", flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES);
 			choose {
-				when ( wait( cx->onMasterProxiesChanged() ) ) {}
+				when ( wait( cx->onProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
-//					TraceEvent("NativeClientGRVGot").detail("V", v.version);
-					TraceEvent("NativeClientGRVGot");
 					if(tags.size() != 0) {
 						auto &priorityThrottledTags = cx->throttledTags[priority];
 						for(auto& tag : tags) {
@@ -4173,7 +4128,7 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 	state Future<Void> clientTimeout = delay(5.0);
 	loop {
 		choose {
-			when(wait(cx->onMasterProxiesChanged())) {}
+			when(wait(cx->onProxiesChanged())) {}
 			when(ErrorOr<GetDDMetricsReply> rep =
 			         wait(errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
 			                                  GetDDMetricsRequest(keys, shardLimit))))) {
@@ -4277,7 +4232,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 	try {
 		loop {
 			choose {
-				when(wait(cx->onMasterProxiesChanged())) {}
+				when(wait(cx->onProxiesChanged())) {}
 				when(wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID, true /*atmostOnce*/ ))) {
 					TraceEvent("SnapCreateExit")
 						.detail("SnapCmd", snapCmd.toString())
@@ -4304,7 +4259,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	try {
 		loop {
 			choose {
-				when(wait(cx->onMasterProxiesChanged())) {}
+				when(wait(cx->onProxiesChanged())) {}
 				when(ExclusionSafetyCheckReply _ddCheck =
 				         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
 				                          req, cx->taskID))) {

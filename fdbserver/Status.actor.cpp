@@ -1007,14 +1007,12 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
 			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
 			int requiredProxies = atoi( md.getValue("RequiredProxies").c_str() );
-			int requiredGrvProxies = atoi( md.getValue("RequiredGrvProxies").c_str() );
 			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
 			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredProxies));
 			//int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
 			message["required_proxies"] = requiredProxies;
-			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
@@ -1589,7 +1587,7 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 
 ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().client.proxies, address_workers, std::vector<std::string>{ "CommitLatencyMetrics" }));
+	    db->get().client.masterProxies, address_workers, std::vector<std::string>{ "CommitLatencyMetrics" }));
 
 	return results;
 }
@@ -1679,7 +1677,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		for (auto const& w : workers) {
 			workersMap[w.interf.address()] = w;
 		}
-		for (auto &p : db->get().client.proxies) {
+		for (auto &p : db->get().client.masterProxies) {
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
 				proxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))), 1.0));
@@ -1696,7 +1694,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		state vector<TraceEventFields> proxyStats = wait(getAll(proxyStatFutures));
 		state vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
 
-		// These fields should be populated through GRV proxies?
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
 		StatusCounter txnDefaultPriorityStartOut;

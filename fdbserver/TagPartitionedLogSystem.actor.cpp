@@ -1110,9 +1110,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			try {
 				if( !log->get().present() )
 					return Void();
-				auto req = TLogPopRequest( to.first, to.second, tag );
-				req.debugId = self->dbgid;
-				wait(log->get().interf().popMessages.getReply( req, TaskPriority::TLogPop ) );
+				wait(log->get().interf().popMessages.getReply( TLogPopRequest( to.first, to.second, tag ), TaskPriority::TLogPop ) );
 
 				last = to.first;
 			} catch (Error& e) {

@@ -433,19 +433,12 @@ struct BackupData {
 			GetReadVersionRequest request(1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
-				when(wait(self->cx->onMasterProxiesChanged())) {}
+				when(wait(self->cx->onProxiesChanged())) {}
 				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(false),
 				                                                  &GrvProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
-//					TraceEvent("MinKnownCommittedVersion").detail("V", reply.version);
 					return reply.version;
 				}
-//				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
-//																	   &MasterProxyInterface::getConsistentReadVersion,
-//						 request, self->cx->taskID))) {
-//					TraceEvent("MinKnownCommittedVersion").detail("V", reply.version);
-//					return reply.version;
-//				}
 			}
 		}
 	}
@@ -955,13 +948,10 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			// Even though the snapshot is done, mutation logs may not be written
 			// out yet. We need to make sure mutations up to this point is written.
 			Version currentVersion = wait(self->getMinKnownCommittedVersion());
-//			TraceEvent("KeyPresentBackupCurrentVersion").detail("V", currentVersion);
 			wait(self->pulledVersion.whenAtLeast(currentVersion));
 			pullFinished = Future<Void>(); // cancels pullAsyncData()
 			self->pulling = false;
-//			TraceEvent("BackupWorkerPaused", self->myId).detail("Reason", "NoBackup");
 		} else {
-
 			// Backup key is not present, enter this NOOP POP mode.
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
 
@@ -969,11 +959,6 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 				when(wait(success(present))) { break; }
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
-//						TraceEvent("KeyNotPresentCommittedVersionReady")
-//						    .detail("PopVBefore", self->popVersion)
-//							.detail("PopVAfter", std::max(self->popVersion, std::max(committedVersion.get(), self->savedVersion)))
-//						    .detail("MinBefore", self->minKnownCommittedVersion)
-//							.detail("MinAfter", std::max(committedVersion.get(), self->minKnownCommittedVersion));
 						self->popVersion =
 						    std::max(self->popVersion, std::max(committedVersion.get(), self->savedVersion));
 						self->minKnownCommittedVersion =
@@ -984,8 +969,6 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 						self->pop(); // Pop while the worker is in this NOOP state.
 						committedVersion = Never();
 					} else {
-//						TraceEvent("KeyNotPresentCommittedVersionNotReady")
-//							.detail("AssignCommittedVersion", "");
 						committedVersion = self->getMinKnownCommittedVersion();
 					}
 				}
@@ -1078,7 +1061,6 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
 				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
-				TraceEvent("LogSystemCreate").detail("Role", "Backup").detail("UID", self.myId);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);

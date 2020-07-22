@@ -2046,7 +2046,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			self.logSystem = ILogSystem::fromServerDBInfo( self.thisServerID, self.db->get() );
-			TraceEvent("LogSystemCreate").detail("Role", "StorageCache").detail("UID", self.thisServerID).detail("DBInfoChange", "");
 		}
 		when( GetValueRequest req = waitNext(ssi.getValue.getFuture()) ) {
 			// TODO do we need to add throttling for cache servers? Probably not

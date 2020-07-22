@@ -624,7 +624,7 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		choose {
 			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
 				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id())
-				    .detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID())
+				    .detail("MasterProxy0", ni.masterProxies.size() ? ni.masterProxies[0].id() : UID())
 					.detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
 				    .detail("ClientID", ni.id);
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
@@ -681,24 +681,24 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 	}
 }
 
-void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies,
+void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastMasterProxyUIDs, std::vector<MasterProxyInterface>& lastMasterProxies,
 					  std::vector<UID>& lastGrvProxyUIDs, std::vector<GrvProxyInterface>& lastGrvProxies) {
-	if(ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
-		std::vector<UID> proxyUIDs;
-		for(auto& proxy : ni.proxies) {
-			proxyUIDs.push_back(proxy.id());
+	if(ni.masterProxies.size() > CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS) {
+		std::vector<UID> masterProxyUIDs;
+		for(auto& masterProxy : ni.masterProxies) {
+			masterProxyUIDs.push_back(masterProxy.id());
 		}
-		if(proxyUIDs != lastProxyUIDs) {
-			lastProxyUIDs = proxyUIDs;
-			lastProxies = ni.proxies;
-			deterministicRandom()->randomShuffle(lastProxies);
-			lastProxies.resize(CLIENT_KNOBS->MAX_PROXY_CONNECTIONS);
-			for(int i = 0; i < lastProxies.size(); i++) {
-				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
+		if(masterProxyUIDs != lastMasterProxyUIDs) {
+			lastMasterProxyUIDs = masterProxyUIDs;
+			lastMasterProxies = ni.masterProxies;
+			deterministicRandom()->randomShuffle(lastMasterProxies);
+			lastMasterProxies.resize(CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS);
+			for(int i = 0; i < lastMasterProxies.size(); i++) {
+				TraceEvent("ConnectedMasterProxy").detail("MasterProxy", lastMasterProxies[i].id());
 			}
 		}
-		ni.firstProxy = ni.proxies[0];
-		ni.proxies = lastProxies;
+		ni.firstProxy = ni.masterProxies[0];
+		ni.masterProxies = lastMasterProxies;
 	}
 	if(ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
 		std::vector<UID> grvProxyUIDs;

@@ -302,11 +302,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 {
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
-//			ASSERT(false); // This endpoint should not be triggered at any time.
-			// This endpoint only serves an internal request now to catch up other proxies.
-//			ASSERT(req.priority == TransactionPriority::IMMEDIATE);
-//			ASSERT(req.transactionCount == 0);
-//			ASSERT(req.flags == GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY);
+			ASSERT(false); // Master proxy shouldn't receive any GRV traffic for now.
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			stats->addRequest();
 			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
@@ -340,7 +336,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 					defaultQueue->push_back(req);
 				} else {
 					// Return error for batch_priority GRV requests
-					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
+					int64_t proxiesCount = std::max((int)db->get().client.masterProxies.size(), 1);
 					if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
 						req.reply.sendError(batch_transaction_throttled());
 						stats->txnThrottled += req.transactionCount;
@@ -432,10 +428,6 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
-
-	Reference<GrvProxyInfo> getGrvProxies() {
-		return cx->getGrvProxies(false);
-	}
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -604,11 +596,6 @@ struct ResolutionRequestBuilder {
 
 ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int> > out, FutureStream<CommitTransactionRequest> in, int desiredBytes, int64_t memBytesLimit) {
 
-//	while (!commitData->getGrvProxies() || commitData->getGrvProxies()->size() == 0) {
-//		TraceEvent("CommitBatcherWait").detail("WaitAtLeastOneGrvProxy", "");
-//		wait(commitData->cx->onMasterProxiesChanged());
-//	}
-//	// May have a problem.
 //	TraceEvent("CommitBatcherWaitFinish").detail("GrvProxiesSize", commitData->getGrvProxies()->size());
 	wait(delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher));
 
@@ -629,7 +616,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 		while(!timeout.isReady() && !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
 			choose{
 				when(CommitTransactionRequest req = waitNext(in)) {
-					TraceEvent("MPReceiveRequest").detail("V", req.transaction.read_snapshot);
 					//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 					commitData->stats.addRequest();
 					int bytes = getBytes(req);
@@ -863,14 +849,13 @@ ACTOR Future<Void> commitBatch(
 	state Version commitVersion = versionReply.version;
 	state Version prevVersion = versionReply.prevVersion;
 
-
 	for(auto it : versionReply.resolverChanges) {
 		auto rs = self->keyResolvers.modify(it.range);
 		for(auto r = rs.begin(); r != rs.end(); ++r)
 			r->value().emplace_back(versionReply.resolverChangesVersion,it.dest);
 	}
 
-	TraceEvent("ProxyGotVer").detail("Commit", commitVersion).detail("Prev", prevVersion);
+//	TraceEvent("ProxyGotVer").detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GotCommitVersion");
@@ -905,7 +890,6 @@ ACTOR Future<Void> commitBatch(
 	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
-	TraceEvent("ProxyCommitPhase2").detail("Commit", commitVersion).detail("Prev", prevVersion);
 	state vector<ResolveTransactionBatchReply> resolution = wait( getAll(replies) );
 
 	if (debugID.present())
@@ -1198,12 +1182,8 @@ ACTOR Future<Void> commitBatch(
 					wait(yield());
 					break; 
 				}
-				// Should ask master instead of GRV proxies? But don't get the benefit of batching.
-				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply v =
-				         wait(basicLoadBalance(self->cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY), TaskPriority::GetLiveCommittedVersion))) {
-//				when(GetReadVersionReply v = wait(self->getConsistentReadVersion.getReply(GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
-					TraceEvent("MPAskGp").detail("Own", self->committedVersion.get()).detail("V", v.version);
+				when(wait(self->cx->onProxiesChanged())) {}
+				when(GetReadVersionReply v = wait(basicLoadBalance(self->cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion, GetReadVersionRequest(0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY), TaskPriority::GetLiveCommittedVersion))) {
 					if(v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
 						self->metadataVersion = v.metadataVersion;
@@ -1261,23 +1241,15 @@ ACTOR Future<Void> commitBatch(
 		}
 	}
 
-	TraceEvent("ProxyPhase3Finish").detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
 
-	state long c1 = 0;
-	state long c2 = 0;
 	try {
 		choose {
 			when(Version ver = wait(loggingComplete)) {
-//				TraceEvent("LoggingComplete").detail("C1", c1).detail("V", ver).detail("MinKnown", self->minKnownCommittedVersion);
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, ver);
-				c1++;
 			}
-			when(wait(self->committedVersion.whenAtLeast( commitVersion+1 ))) {
-				c2++;
-//				TraceEvent("CommittedVersionLargeEnough").detail("C2", c2);
-			}
+			when(wait(self->committedVersion.whenAtLeast( commitVersion+1 ))) {}
 		}
 	} catch(Error &e) {
 		if(e.code() == error_code_broken_promise) {
@@ -1285,7 +1257,6 @@ ACTOR Future<Void> commitBatch(
 		}
 		throw;
 	}
-	TraceEvent("ProxyPhase41").detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	self->lastCommitLatency = now()-commitStartTime;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), commitStartTime);
@@ -1300,8 +1271,6 @@ ACTOR Future<Void> commitBatch(
 		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
 	self->logSystem->popTxs(msg.popTo);
-
-	TraceEvent("ProxyPhase42").detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
@@ -1325,7 +1294,6 @@ ACTOR Future<Void> commitBatch(
 	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion > self->committedVersion.get()) {
-//		TraceEvent("ProxyReportMinKnownCommittedVersion").detail("V", self->minKnownCommittedVersion);
 		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter, self->minKnownCommittedVersion), TaskPriority::ProxyMasterVersionReply));
 	}
 	if( commitVersion > self->committedVersion.get() ) {
@@ -1333,7 +1301,7 @@ ACTOR Future<Void> commitBatch(
 		self->metadataVersion = metadataVersionAfter;
 		self->committedVersion.set(commitVersion);
 	}
-	TraceEvent("AfterCommit").detail("V", self->committedVersion.get());
+//	TraceEvent("AfterCommit").detail("V", self->committedVersion.get());
 
 	if (forceRecovery) {
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "ProxyShutdown");
@@ -1537,7 +1505,6 @@ ACTOR static Future<Void> transactionStarter(
 	state PromiseStream<Void> GRVTimer;
 	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
 
-	// for what
 	state int64_t transactionCount = 0;
 	state int64_t batchTransactionCount = 0;
 	state TransactionRateInfo normalRateInfo(10);
@@ -1560,13 +1527,13 @@ ACTOR static Future<Void> transactionStarter(
 //	                                            &transactionTagCounter));
 
 	// Get a list of the other proxies that go together with us
-	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
+	while (std::find(db->get().client.masterProxies.begin(), db->get().client.masterProxies.end(), proxy) == db->get().client.masterProxies.end())
 		wait(db->onChange());
-	for (MasterProxyInterface mp : db->get().client.proxies) {
+	// TODO: remove other proxies because we don't
+	for (MasterProxyInterface mp : db->get().client.masterProxies) {
 		if (mp != proxy)
 			otherProxies.push_back(mp);
 	}
-	TraceEvent("OtherProxies").detail("Size", otherProxies.size());
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
 
@@ -2070,7 +2037,6 @@ ACTOR Future<Void> masterProxyServerCore(
 		r->value().emplace_back(0,0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-	TraceEvent("LogSystemCreate").detail("Role", "MasterProxy").detail("UID", proxy.id());
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
@@ -2092,6 +2058,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
 
+	// Disabled for now since this is done by GrvProxy.
 //	if(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
 //		addActor.send(lastCommitUpdater(&commitData, addActor));
 //	}
@@ -2100,7 +2067,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	    (int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX,
 	                          std::max<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MIN,
 	                                           SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE *
-	                                               pow(commitData.db->get().client.proxies.size(),
+	                                               pow(commitData.db->get().client.masterProxies.size(),
 	                                                   SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER)));
 
 	commitBatcherActor = commitBatcher(&commitData, batchedCommits, proxy.commit.getFuture(), commitBatchByteLimit, commitBatchesMemoryLimit);
@@ -2109,7 +2076,6 @@ ACTOR Future<Void> masterProxyServerCore(
 			dbInfoChange = commitData.db->onChange();
 			if(commitData.db->get().master.id() == master.id() && commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
-				TraceEvent("LogSystemCreate").detail("Role", "MasterProxy").detail("UID", proxy.id()).detail("DBInfoChange", "");
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}
@@ -2122,11 +2088,9 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(std::pair<vector<CommitTransactionRequest>, int> batchedRequests = waitNext(batchedCommits.getFuture())) {
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			const vector<CommitTransactionRequest> &trs = batchedRequests.first;
-			TraceEvent("MPReceiveBatch").detail("Size", trs.size());
 			int batchBytes = batchedRequests.second;
 			//TraceEvent("MasterProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
 			if (trs.size() || (commitData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && now() - lastCommit >= SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL)) {
-				TraceEvent("StartCommit");
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {
@@ -2232,7 +2196,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, MasterProxyInterface myInterface) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface)) {
+		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.masterProxies.begin(), db->get().client.masterProxies.end(), myInterface)) {
 			throw worker_removed();
 		}
 		wait(db->onChange());

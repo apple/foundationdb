@@ -59,12 +59,12 @@ struct RollbackWorkload : TestWorkload {
 		state ServerDBInfo system = self->dbInfo->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
 		
-		if( tlogs.empty() || system.client.proxies.empty() ) {
+		if( tlogs.empty() || system.client.masterProxies.empty() ) {
 			TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "No tlogs in System Map");
 			return Void();
 		}
 
-		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.proxies );
+		state MasterProxyInterface proxy = deterministicRandom()->randomChoice( system.client.masterProxies);
 
 		int utIndex = deterministicRandom()->randomInt(0, tlogs.size());
 		state NetworkAddress uncloggedTLog = tlogs[utIndex].address();

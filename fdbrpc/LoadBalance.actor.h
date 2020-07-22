@@ -478,7 +478,6 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 	if (!alternatives) {
 		return Never();
 	}
-	TraceEvent("InsideLoadBalance").detail("Size", alternatives->size());
 
 	ASSERT( alternatives->size() && alternatives->alwaysFresh() );
 
@@ -506,7 +505,6 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 			stream = &alternatives->get( useAlt, channel );
 			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed)
 				break;
-			TraceEvent("FailedAlternative").detail("Which", useAlt);
 			nextAlt = (nextAlt+1) % alternatives->size();
 			stream=NULL;
 		}
@@ -514,21 +512,18 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 		if(!stream) {
 			// Everything is down!  Wait for someone to be up.
 
-			TraceEvent("EverythingDown");
 			vector<Future<Void>> ok( alternatives->size() );
 			for(int i=0; i<ok.size(); i++) {
 				ok[i] = IFailureMonitor::failureMonitor().onStateEqual( alternatives->get(i, channel).getEndpoint(), FailureStatus(false) );
 			}
 			wait( quorum( ok, 1 ) );
 
-			TraceEvent("SomethingCameup");
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else {
 			if(backoff > 0.0) {
 				wait(delay(backoff));
 			}
 
-			TraceEvent("BeforeSendRequest").detail("Which", useAlt).detail("AtmostoNCE", atMostOnce);
 			ErrorOr<REPLY_TYPE(Request)> result = wait(stream->tryGetReply(request));
 
 			if(result.present()) {
@@ -536,11 +531,9 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 				if(loadBalancedReply.present()) {
 					alternatives->updateRecent( useAlt, loadBalancedReply.get().recentRequests );
 				}
-				TraceEvent("GotResponse").detail("Which", useAlt);
 				return result.get();
 			}
 
-			TraceEvent("GotResponseError").detail("Which", useAlt);
 
 			if(result.getError().code() != error_code_broken_promise && result.getError().code() != error_code_request_maybe_delivered) {
 				throw result.getError();

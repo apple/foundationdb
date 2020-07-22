@@ -114,9 +114,7 @@ struct WatchesWorkload : TestWorkload {
 					tr.set(extraKey, extraValue);
 					//TraceEvent("WatcherInitialSetupExtra").detail("Key", printable(extraKey)).detail("Value", printable(extraValue));
 				}
-				TraceEvent("WatchCommitSetKeyTry");
 				wait( tr.commit() );
-				TraceEvent("WatchCommitSetKeyDone");
 				extraLoc += 1000;
 				//TraceEvent("WatcherInitialSetup").detail("Watch", printable(watchKey)).detail("Ver", tr.getCommittedVersion());
 			} catch( Error &e ) {
@@ -155,16 +153,12 @@ struct WatchesWorkload : TestWorkload {
 						else
 							tr->clear(setKey);
 						//TraceEvent("WatcherSetStart").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) );
-						TraceEvent("WatchCommitSetKeyTry");
 						wait(tr->commit());
-						TraceEvent("WatchCommitSetKeyDone");
 						//TraceEvent("WatcherSetFinish").detail("Watch", printable(watchKey)).detail("Set", printable(setKey)).detail("Value", printable( watchValue ) ).detail("Ver", tr->getCommittedVersion());
 					} else {
 						//TraceEvent("WatcherWatch").detail("Watch", printable(watchKey));
 						state Future<Void> watchFuture = tr->watch(Reference<Watch>(new Watch(watchKey, watchValue)));
-						TraceEvent("WatchCommitSetKeyTry");
 						wait(tr->commit());
-						TraceEvent("WatchCommitSetKeyDone");
 						if (BUGGIFY) {
 							// Make watch future outlive transaction
 							tr.reset();
@@ -215,9 +209,7 @@ struct WatchesWorkload : TestWorkload {
 					else
 						tr.clear( startKey );
 
-					TraceEvent("WatchCommitSetKeyTry");
 					wait( tr.commit() );
-					TraceEvent("WatchCommitSetKeyDone");
 					break;
 				} catch( Error &e ) {
 					wait( tr.onError(e) );
@@ -240,9 +232,7 @@ struct WatchesWorkload : TestWorkload {
 							TraceEvent(SevError, "WatcherError").detail("FirstAttempt", firstAttempt).detail("StartValue", printable( startValue )).detail("EndValue", printable( endValue )).detail("ExpectedValue", printable(expectedValue)).detail("EndVersion", tr2.getReadVersion().get()); 
 						}
 						state Future<Void> watchFuture = tr2.watch( Reference<Watch>( new Watch(endKey, startValue) ) );
-						TraceEvent("WatchCommitSetKeyTry");
 						wait( tr2.commit() );
-						TraceEvent("WatchCommitSetKeyDone");
 						wait( watchFuture );
 						firstAttempt = false;
 						break;
