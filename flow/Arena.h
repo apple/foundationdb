@@ -719,7 +719,7 @@ template <class A, class B>
 struct flow_ref<std::pair<A, B>> : std::integral_constant<bool, false> {};
 
 template <class T>
-class VectorRef : public ComposedIdentifier<T, 0x8> {
+class VectorRef : public ComposedIdentifier<T, 3> {
 public:
 	using value_type = T;
 
