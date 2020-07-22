@@ -223,6 +223,9 @@ struct NetworkAddress {
 			return ip < r.ip;
 		return port < r.port;
 	}
+	bool operator>(NetworkAddress const& r) const { return r < *this; }
+	bool operator<=(NetworkAddress const& r) const { return !(*this > r); }
+	bool operator>=(NetworkAddress const& r) const { return !(*this < r); }
 
 	bool isValid() const { return ip.isValid() || port != 0; }
 	bool isPublic() const { return !(flags & FLAG_PRIVATE); }

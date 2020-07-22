@@ -33,6 +33,7 @@ struct PeekTxsInfo {
 	bool operator == (const PeekTxsInfo& r) const {
 		return primaryLocality == r.primaryLocality && secondaryLocality == r.secondaryLocality && knownCommittedVersion == r.knownCommittedVersion;
 	}
+	bool operator!=(const PeekTxsInfo& r) const { return !(*this == r); }
 
 	PeekTxsInfo(int8_t primaryLocality, int8_t secondaryLocality, Version knownCommittedVersion) : primaryLocality(primaryLocality), secondaryLocality(secondaryLocality), knownCommittedVersion(knownCommittedVersion) {}
 };

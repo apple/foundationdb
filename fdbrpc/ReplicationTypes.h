@@ -49,10 +49,12 @@ struct AttribValue {
 	int	_id;
 	explicit AttribValue():_id(-1) {}
 	explicit AttribValue(int id):_id(id) {}
-	bool operator==(AttribValue const& source) const
-	{	return _id == source._id;	}
-	bool operator<(AttribValue const& source) const
-	{	return _id < source._id;	}
+	bool operator==(AttribValue const& source) const { return _id == source._id; }
+	bool operator!=(AttribValue const& source) const { return !(*this == source); }
+	bool operator<(AttribValue const& source) const { return _id < source._id; }
+	bool operator>(AttribValue const& source) const { return source < *this; }
+	bool operator<=(AttribValue const& source) const { return !(*this > source); }
+	bool operator>=(AttribValue const& source) const { return !(*this < source); }
 };
 struct LocalityEntry {
 	int	_id;

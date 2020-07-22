@@ -63,9 +63,13 @@ struct UniqueGeneration {
 		if (r.generation < generation) return false;
 		return uid < r.uid;
 	}
+	bool operator>(UniqueGeneration const& r) const { return r < *this; }
+	bool operator<=(UniqueGeneration const& r) const { return !(*this > r); }
+	bool operator>=(UniqueGeneration const& r) const { return !(*this < r); }
 	bool operator == (UniqueGeneration const& r) const {
 		return generation == r.generation && uid == r.uid;
 	}
+	bool operator!=(UniqueGeneration const& r) const { return !(*this == r); }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, generation, uid);
