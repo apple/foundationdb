@@ -1,29 +1,32 @@
 ;write 1000 Keys ending with even number
 testTitle=SnapSimplePre
+clearAfterTest=false
+
         testName=SnapTest
         numSnaps=1
         maxSnapDelay=30.0
         testID=0
-        clearAfterTest=false
 
 ;take snap
 testTitle=SnapSimpleTakeSnap
+clearAfterTest=false
+
         testName=SnapTest
         numSnaps=1
         maxSnapDelay=5.0
         testID=1
-        clearAfterTest=false
 
 ;write 1000 Keys ending with odd number
 testTitle=SnapSimplePost
+clearAfterTest=false
+
         testName=SnapTest
         numSnaps=1
         maxSnapDelay=3.0
         testID=2
-        clearAfterTest=false
 
 ;snapCreate with binary path that is not whitelisted
-        testTitle=SnapCreateNotWhitelistedBinaryPath
+testTitle=SnapCreateNotWhitelistedBinaryPath
         testName=SnapTest
         numSnaps=1
         maxSnapDelay=3.0

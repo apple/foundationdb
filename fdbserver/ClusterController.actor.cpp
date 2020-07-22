@@ -588,6 +588,9 @@ public:
 			if (role != ProcessClass::TLog && role != ProcessClass::LogRouter && bestFit != r.bestFit) return bestFit < r.bestFit;
 			return count > r.count;
 		}
+		bool operator>(RoleFitness const& r) const { return r < *this; }
+		bool operator<=(RoleFitness const& r) const { return !(*this > r); }
+		bool operator>=(RoleFitness const& r) const { return !(*this < r); }
 
 		bool betterFitness (RoleFitness const& r) const {
 			if (worstFit != r.worstFit) return worstFit < r.worstFit;
@@ -633,6 +636,9 @@ public:
 			}
 			return resolver.count > r.resolver.count;
 		}
+		bool operator>(RoleFitnessPair const& r) const { return r < *this; }
+		bool operator<=(RoleFitnessPair const& r) const { return !(*this > r); }
+		bool operator>=(RoleFitnessPair const& r) const { return !(*this < r); }
 
 		bool operator == (RoleFitnessPair const& r) const { return proxy == r.proxy && resolver == r.resolver; }
 	};

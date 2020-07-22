@@ -1841,7 +1841,8 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 					return f;
 				}
 			}
-			//Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.  This way, they can both keep up with the time to start the next operation
+			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
+			// This way, they can both keep up with the time to start the next operation
 			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
 			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
 		}

@@ -382,7 +382,7 @@ struct InitializeLogRouterRequest {
 };
 
 struct InitializeBackupReply {
-	constexpr static FileIdentifier file_identifier = 63843557;
+	constexpr static FileIdentifier file_identifier = 13511909;
 	struct BackupInterface interf;
 	LogEpoch backupEpoch;
 
@@ -396,7 +396,7 @@ struct InitializeBackupReply {
 };
 
 struct InitializeBackupRequest {
-	constexpr static FileIdentifier file_identifier = 68354279;
+	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
 	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
@@ -654,11 +654,6 @@ struct DebugEntryRef {
 		serializer(ar, time, address, context, version, mutation);
 	}
 };
-
-// TODO: This is necessary because IPAddress uses boost::variant
-// instead of std::variant. If we switch to std::variant, we don't
-// need to explicitly mark DebugEntryRef trivially destructible
-TRIVIALLY_DESTRUCTIBLE(DebugEntryRef); // Allows VectorRef<DebugEntryRef>
 
 struct DiskStoreRequest {
 	constexpr static FileIdentifier file_identifier = 1986262;

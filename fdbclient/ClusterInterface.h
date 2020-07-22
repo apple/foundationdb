@@ -184,8 +184,6 @@ struct SystemFailureStatus {
 	}
 };
 
-TRIVIALLY_DESTRUCTIBLE(SystemFailureStatus); // Allows VectorRef<SystemFailureStatus>
-
 struct FailureMonitoringReply {
 	constexpr static FileIdentifier file_identifier = 6820325;
 	VectorRef< SystemFailureStatus > changes;

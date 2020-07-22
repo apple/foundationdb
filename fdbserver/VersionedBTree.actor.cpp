@@ -2153,6 +2153,7 @@ struct SplitStringRef {
 		const uint8_t* next;
 
 		inline bool operator==(const const_iterator& rhs) const { return ptr == rhs.ptr; }
+		inline bool operator!=(const const_iterator& rhs) const { return !(*this == rhs); }
 
 		inline const_iterator& operator++() {
 			++ptr;
@@ -2731,8 +2732,6 @@ struct RedwoodRecordRef {
 		return r;
 	}
 };
-
-TRIVIALLY_DESTRUCTIBLE(RedwoodRecordRef); // Allows VectorRef<RedwoodRecordRef>
 
 struct BTreePage {
 	typedef DeltaTree<RedwoodRecordRef> BinaryTree;
@@ -6256,8 +6255,12 @@ struct IntIntPair {
 	}
 
 	bool operator==(const IntIntPair& rhs) const { return compare(rhs) == 0; }
+	bool operator!=(const IntIntPair& rhs) const { return compare(rhs) != 0; }
 
 	bool operator<(const IntIntPair& rhs) const { return compare(rhs) < 0; }
+	bool operator>(const IntIntPair& rhs) const { return compare(rhs) > 0; }
+	bool operator<=(const IntIntPair& rhs) const { return compare(rhs) <= 0; }
+	bool operator>=(const IntIntPair& rhs) const { return compare(rhs) >= 0; }
 
 	int deltaSize(const IntIntPair& base, int skipLen, bool worstcase) const { return sizeof(Delta); }
 

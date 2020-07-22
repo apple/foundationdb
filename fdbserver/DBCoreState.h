@@ -149,15 +149,10 @@ struct DBCoreState {
 		       pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
+	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		if(g_network->isSimulated() && !ar.protocolVersion().hasMultiGenerationTLog()) {
-			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
-			flushAndExit(0);
-		}
-		
 		ASSERT(ar.protocolVersion().hasMultiGenerationTLog());
 		if(ar.protocolVersion().hasTagLocality()) {
 			serializer(ar, tLogs, logRouterTags, oldTLogData, recoveryCount, logSystemType);

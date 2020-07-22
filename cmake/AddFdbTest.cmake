@@ -16,6 +16,8 @@ function(configure_testing)
   set(no_tests YES)
   if(CONFIGURE_TESTING_ERROR_ON_ADDITIONAL_FILES)
     file(GLOB_RECURSE candidates "${CONFIGURE_TESTING_TEST_DIRECTORY}/*.txt")
+    file(GLOB_RECURSE toml_candidates "${CONFIGURE_TESTING_TEST_DIRECTORY}/*.toml")
+    list(APPEND candidates ${toml_candidates})
     foreach(candidate IN LISTS candidates)
       set(candidate_is_test YES)
       foreach(pattern IN LISTS CONFIGURE_TESTING_IGNORE_PATTERNS)
@@ -79,7 +81,7 @@ function(add_fdb_test)
     set(test_type "test")
   endif()
   list(GET ADD_FDB_TEST_TEST_FILES 0 first_file)
-  string(REGEX REPLACE "^(.*)\\.txt$" "\\1" test_name ${first_file})
+  string(REGEX REPLACE "^(.*)\\.(txt|toml)$" "\\1" test_name ${first_file})
   if("${test_name}" MATCHES "(-\\d)$")
     string(REGEX REPLACE "(.*)(-\\d)$" "\\1" test_name_1 ${test_name})
     message(STATUS "new testname ${test_name_1}")
@@ -237,7 +239,9 @@ function(create_correctness_package)
                                      ${out_dir}/joshua_test
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
                                      ${out_dir}/joshua_timeout
-    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} *
+    COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
+                                                    ${out_dir}/joshua_test
+                                                    ${out_dir}/joshua_timeout
     WORKING_DIRECTORY ${out_dir}
     COMMENT "Package correctness archive"
     )
@@ -262,7 +266,9 @@ function(create_valgrind_correctness_package)
                                        ${out_dir}/joshua_test
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/valgrindTimeout.sh
                                        ${out_dir}/joshua_timeout
-      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} *
+      COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
+                                                      ${out_dir}/joshua_test
+                                                      ${out_dir}/joshua_timeout
       WORKING_DIRECTORY ${out_dir}
       COMMENT "Package valgrind correctness archive"
       )

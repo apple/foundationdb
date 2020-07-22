@@ -36,6 +36,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
+typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1,
@@ -278,6 +279,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef( const KeyRef& begin, const KeyRef& end ) : begin(begin), end(end) {
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		}
 	}
@@ -856,6 +858,9 @@ struct LogMessageVersion {
 		if (r.version<version) return false;
 		return sub < r.sub;
 	}
+	bool operator>(LogMessageVersion const& r) const { return r < *this; }
+	bool operator<=(LogMessageVersion const& r) const { return !(*this > r); }
+	bool operator>=(LogMessageVersion const& r) const { return !(*this < r); }
 
 	bool operator==(LogMessageVersion const& r) const { return version == r.version && sub == r.sub; }
 
@@ -942,6 +947,7 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
+	bool operator!=(ClusterControllerPriorityInfo const& r) const { return !(*this == r); }
 	ClusterControllerPriorityInfo()
 	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
