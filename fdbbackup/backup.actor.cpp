@@ -1012,6 +1012,8 @@ static void printBackupUsage(bool devhelp) {
 	       "                 remove mutations for it. By default this is set to one hour.\n");
 	printf("  --delete_data\n"
 		   "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
+	printf("  --incremental\n"
+	       "                 Performs incremental backup without the base backup.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1069,8 +1071,10 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  --incremental\n"
+	       "                 Performs incremental restore without the base backup.\n")
 #ifndef TLS_DISABLED
-	printf(TLS_HELP);
+	    printf(TLS_HELP);
 #endif
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
