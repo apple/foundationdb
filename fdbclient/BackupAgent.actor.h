@@ -286,11 +286,18 @@ public:
 	//   - submit a restore on the given tagName
 	//   - Optionally wait for the restore's completion.  Will restore_error if restore fails or is aborted.
 	// restore() will return the targetVersion which will be either the valid version passed in or the max restorable version for the given url.
-	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true);
-	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true) {
+	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url,
+	                        Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true,
+	                        Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(),
+	                        Key removePrefix = Key(), bool incrementalBackupOnly = false, bool lockDB = true);
+	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, bool waitForComplete = true,
+	                        Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys,
+	                        Key addPrefix = Key(), Key removePrefix = Key(), bool incrementalBackupOnly = false,
+	                        bool lockDB = true) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
-		return restore(cx, cxOrig, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB);
+		return restore(cx, cxOrig, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix,
+		               removePrefix, incrementalBackupOnly, lockDB);
 	}
 	Future<Version> atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix = Key(), Key removePrefix = Key());
 	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key()) {
