@@ -153,14 +153,15 @@ public:
 
 // TeamCollection's server team info.
 class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-public:
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
-	Reference<TCMachineTeamInfo> machineTeam;
-	Future<Void> tracker;
 	bool healthy;
 	bool wrongConfiguration; //True if any of the servers in the team have the wrong configuration
 	int priority;
+
+public:
+	Reference<TCMachineTeamInfo> machineTeam;
+	Future<Void> tracker;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
 	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
@@ -173,21 +174,19 @@ public:
 		}
 	}
 
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() {
-		vector<StorageServerInterface> v;
-		v.reserve(servers.size());
-		for(int i=0; i<servers.size(); i++)
-			v.push_back(servers[i]->lastKnownInterface);
+	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
+		vector<StorageServerInterface> v(servers.size());
+		for (const auto& server : servers) v.push_back(server->lastKnownInterface);
 		return v;
 	}
-	virtual int size() {
+	int size() const override {
 		ASSERT(servers.size() == serverIDs.size());
 		return servers.size();
 	}
-	virtual vector<UID> const& getServerIDs() { return serverIDs; }
+	vector<UID> const& getServerIDs() const override { return serverIDs; }
 	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
 
-	virtual std::string getServerIDsStr() {
+	std::string getServerIDsStr() const {
 		std::stringstream ss;
 
 		if (serverIDs.empty()) return "[unset]";
@@ -199,18 +198,18 @@ public:
 		return ss.str();
 	}
 
-	virtual void addDataInFlightToTeam( int64_t delta ) {
+	void addDataInFlightToTeam(int64_t delta) override {
 		for(int i=0; i<servers.size(); i++)
 			servers[i]->dataInFlightToServer += delta;
 	}
-	virtual int64_t getDataInFlightToTeam() {
+	int64_t getDataInFlightToTeam() const override {
 		int64_t dataInFlight = 0.0;
 		for(int i=0; i<servers.size(); i++)
 			dataInFlight += servers[i]->dataInFlightToServer;
 		return dataInFlight;
 	}
 
-	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) {
+	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
 		int64_t physicalBytes = getLoadAverage();
 		double minAvailableSpaceRatio = getMinAvailableSpaceRatio(includeInFlight);
 		int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
@@ -227,18 +226,18 @@ public:
 		return (physicalBytes + (inflightPenalty*inFlightBytes)) * availableSpaceMultiplier;
 	}
 
-	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) {
+	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
-		for(int i=0; i<servers.size(); i++) {
-			if( servers[i]->serverMetrics.present() ) {
-				auto& replyValue = servers[i]->serverMetrics.get();
+		for (const auto& server : servers) {
+			if (server->serverMetrics.present()) {
+				auto& replyValue = server->serverMetrics.get();
 
 				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
 				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesAvailable -= servers[i]->dataInFlightToServer;
+					bytesAvailable -= server->dataInFlightToServer;
 				}
 
 				minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
@@ -248,18 +247,18 @@ public:
 		return minAvailableSpace; // Could be negative
 	}
 
-	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) {
+	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override {
 		double minRatio = 1.0;
-		for(int i=0; i<servers.size(); i++) {
-			if( servers[i]->serverMetrics.present() ) {
-				auto& replyValue = servers[i]->serverMetrics.get();
+		for (const auto& server : servers) {
+			if (server->serverMetrics.present()) {
+				auto& replyValue = server->serverMetrics.get();
 
 				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
 				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesAvailable = std::max((int64_t)0, bytesAvailable - servers[i]->dataInFlightToServer);
+					bytesAvailable = std::max((int64_t)0, bytesAvailable - server->dataInFlightToServer);
 				}
 
 				if(replyValue.capacity.bytes == 0)
@@ -272,29 +271,27 @@ public:
 		return minRatio;
 	}
 
-	virtual bool hasHealthyAvailableSpace(double minRatio) {
+	bool hasHealthyAvailableSpace(double minRatio) const override {
 		return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
 	}
 
-	virtual Future<Void> updateStorageMetrics() {
-		return doUpdateStorageMetrics( this );
-	}
+	Future<Void> updateStorageMetrics() override { return doUpdateStorageMetrics(this); }
 
-	virtual bool isOptimal() {
-		for(int i=0; i<servers.size(); i++) {
-			if( servers[i]->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
+	bool isOptimal() const override {
+		for (const auto& server : servers) {
+			if (server->lastKnownClass.machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
 				return false;
 			}
 		}
 		return true;
 	}
 
-	virtual bool isWrongConfiguration() { return wrongConfiguration; }
-	virtual void setWrongConfiguration(bool wrongConfiguration) { this->wrongConfiguration = wrongConfiguration; }
-	virtual bool isHealthy() { return healthy; }
-	virtual void setHealthy(bool h) { healthy = h; }
-	virtual int getPriority() { return priority; }
-	virtual void setPriority(int p) { priority = p; }
+	bool isWrongConfiguration() const override { return wrongConfiguration; }
+	void setWrongConfiguration(bool wrongConfiguration) override { this->wrongConfiguration = wrongConfiguration; }
+	bool isHealthy() const override { return healthy; }
+	void setHealthy(bool h) override { healthy = h; }
+	int getPriority() const override { return priority; }
+	void setPriority(int p) override { priority = p; }
 	virtual void addref() { ReferenceCounted<TCTeamInfo>::addref(); }
 	virtual void delref() { ReferenceCounted<TCTeamInfo>::delref(); }
 
@@ -307,7 +304,7 @@ public:
 
 private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all replies.
-	int64_t getLoadAverage() {
+	int64_t getLoadAverage() const {
 		int64_t bytesSum = 0;
 		int added = 0;
 		for(int i=0; i<servers.size(); i++)
