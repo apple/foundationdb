@@ -553,6 +553,10 @@ void initHelp() {
 		"kill all|list|<ADDRESS>*",
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
+	helpMap["suspend"] = CommandHelp(
+		"suspend <SECONDS> <ADDRESS>*",
+		"attempts to suspend one or more processes in the cluster",
+		"If no parameters are specified, populates the list of processes which can be suspended. Processes cannot be suspended before this list has been populated.\n\nFor each IP:port pair in <ADDRESS>*, attempt to suspend the processes for the specified SECONDS after which the process will die.");
 	helpMap["profile"] = CommandHelp(
 		"<type> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
@@ -3234,6 +3238,59 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
+						}
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "suspend")) {
+					getTransaction(db, tr, options, intrans);
+					if (tokens.size() == 1) {
+						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						std::vector<Future<Void>> addInterfs;
+						for( auto it : kvs ) {
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
+						}
+						wait( waitForAll(addInterfs) );
+						if(address_interface.size() == 0) {
+							printf("\nNo addresses can be suspended.\n");
+						} else if(address_interface.size() == 1) {
+							printf("\nThe following address can be suspended:\n");
+						} else {
+							printf("\nThe following %zu addresses can be suspended:\n", address_interface.size());
+						}
+						for( auto it : address_interface ) {
+							printf("%s\n", printable(it.first).c_str());
+						}
+						printf("\n");
+					} else if(tokens.size() == 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						for(int i = 2; i < tokens.size(); i++) {
+							if(!address_interface.count(tokens[i])) {
+								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+								is_error = true;
+								break;
+							}
+						}
+
+						if(!is_error) {
+							double seconds;
+							int n=0;
+							auto secondsStr = tokens[1].toString();
+							if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+							} else {
+								int64_t timeout_ms = seconds*1000;
+								tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t *)&timeout_ms, sizeof(int64_t)));
+								for(int i = 2; i < tokens.size(); i++) {
+									tr->set(LiteralStringRef("\xff\xff/suspend_worker"), address_interface[tokens[i]].first);
+								}
+								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
+							}
 						}
 					}
 					continue;
