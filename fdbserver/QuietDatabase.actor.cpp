@@ -123,6 +123,7 @@ int64_t getQueueSize( const TraceEventFields& md ) {
 
 	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %" SCNd64, &inputRate, &inputRoughness, &inputBytes);
 	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %" SCNd64, &durableRate, &durableRoughness, &durableBytes);
+
 	return inputBytes - durableBytes;
 }
 
@@ -566,9 +567,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
 			    .detail("NumSuccesses", numSuccesses);
 
-			if (dataInFlight.get() > dataInFlightGate ||
-			    tLogQueueInfo.get().first > maxTLogQueueGate ||
-			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
+			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate || tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
 			    storageQueueSize.get() > maxStorageServerQueueGate || dataDistributionActive.get() == false ||
 			    storageServersRecruiting.get() == true || teamCollectionValid.get() == false) {

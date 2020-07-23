@@ -1410,7 +1410,7 @@ ACTOR Future<Void> workerServer(
 
 				//printf("Recruited as grvProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::GRV_PROXY, recruited.id(),
-																	 grvProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+						grvProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {

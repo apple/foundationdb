@@ -624,7 +624,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs,
     vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-	vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
+    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 

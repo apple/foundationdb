@@ -460,9 +460,7 @@ public:
 		return bestFitness;
 	}
 
-	WorkerFitnessInfo getWorkerForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role,
-	                                               ProcessClass::Fitness unacceptableFitness, DatabaseConfiguration const& conf,
-	                                               std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false ) {
+	WorkerFitnessInfo getWorkerForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, ProcessClass::Fitness unacceptableFitness, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false ) {
 		std::map<std::pair<ProcessClass::Fitness,int>, std::pair<vector<WorkerDetails>,vector<WorkerDetails>>> fitness_workers;
 
 		for( auto& it : id_worker ) {
@@ -493,10 +491,7 @@ public:
 		throw no_more_servers();
 	}
 
-	vector<WorkerDetails> getWorkersForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role,
-	                                                    int amount, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used,
-	                                                    Optional<std::vector<WorkerFitnessInfo>> minWorkers = Optional<std::vector<WorkerFitnessInfo>>(), bool checkStable = false ) {
-
+	vector<WorkerDetails> getWorkersForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, int amount, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, Optional<std::vector<WorkerFitnessInfo>> minWorkers = Optional<std::vector<WorkerFitnessInfo>>(), bool checkStable = false ) {
 		std::map<std::pair<ProcessClass::Fitness,int>, std::pair<vector<WorkerDetails>,vector<WorkerDetails>>> fitness_workers;
 		vector<WorkerDetails> results;
 		if(minWorkers.present()) {
@@ -737,14 +732,14 @@ public:
 		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_two_proxies );
 		ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 		int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
-		ASSERT(grvProxiesCount >= 1);
 		for(int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
+		deterministicRandom()->randomShuffle(proxies);
 		for(int i = 0; i < proxies.size(); i++) {
-			if (i < proxies.size() - grvProxiesCount) {
-				result.masterProxies.push_back(proxies[i].interf);
-			} else {
+			if (i < grvProxiesCount) {
 				result.grvProxies.push_back(proxies[i].interf);
+			} else {
+				result.masterProxies.push_back(proxies[i].interf);
 			}
 		}
 
@@ -895,14 +890,13 @@ public:
 							result.resolvers.push_back(resolvers[i].interf);
 
 						ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
-						// TODO: Consider shuffle the proxies array before assigning grv proxies and normal proxies.
+						deterministicRandom()->randomShuffle(proxies);
 						int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
-						ASSERT(grvProxiesCount >= 1);
 						for(int i = 0; i < proxies.size(); i++) {
-							if (i < proxies.size() - grvProxiesCount) {
-								result.masterProxies.push_back(proxies[i].interf);
-							} else {
+							if (i < grvProxiesCount) {
 								result.grvProxies.push_back(proxies[i].interf);
+							} else {
+								result.masterProxies.push_back(proxies[i].interf);
 							}
 						}
 
@@ -1840,9 +1834,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 	TEST(true); //ClusterController RecruitTLogsRequest
 	loop {
 		try {
-//			TraceEvent("DatabaseConfigurationRequest").detail("Config", req.configuration.toString());
 			auto rep = self->findWorkersForConfiguration( req );
-//			TraceEvent("RecruitResult").detail("Res", rep.toString());
 			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
@@ -1897,7 +1889,8 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	    .detail("Resolvers", req.resolvers.size())
 	    .detail("RecoveryState", (int)req.recoveryState)
 	    .detail("RegistrationCount", req.registrationCount)
-	    .detail("Proxies", req.masterProxies.size())
+	    .detail("MasterProxies", req.masterProxies.size())
+		.detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
 	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);

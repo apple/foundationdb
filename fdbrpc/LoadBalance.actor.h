@@ -475,9 +475,8 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 	bool atMostOnce = false) 
 {
 	setReplyPriority(request, taskID);
-	if (!alternatives) {
+	if (!alternatives)
 		return Never();
-	}
 
 	ASSERT( alternatives->size() && alternatives->alwaysFresh() );
 
@@ -531,9 +530,9 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 				if(loadBalancedReply.present()) {
 					alternatives->updateRecent( useAlt, loadBalancedReply.get().recentRequests );
 				}
+
 				return result.get();
 			}
-
 
 			if(result.getError().code() != error_code_broken_promise && result.getError().code() != error_code_request_maybe_delivered) {
 				throw result.getError();

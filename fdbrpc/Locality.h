@@ -121,7 +121,6 @@ public:
 			case TransactionClass: return "transaction";
 			case ResolutionClass: return "resolution";
 			case ProxyClass: return "proxy";
-//			case GrvProxyClass: return "grv_proxy";
 			case MasterClass: return "master";
 			case TesterClass: return "test";
 			case StatelessClass: return "stateless";

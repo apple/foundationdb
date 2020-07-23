@@ -18,6 +18,7 @@ struct GrvProxyStats {
 	Counter txnThrottled;
 
 	LatencyBands grvLatencyBands;
+	LatencySample grvLatencySample;
 
 	Future<Void> logger;
 
@@ -58,6 +59,7 @@ struct GrvProxyStats {
 		  txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
 		  txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc),
 	      txnThrottled("TxnThrottled", cc),
+		  grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	      grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		logger = traceCounters("GrvProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "GrvProxyMetrics");
 		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
@@ -146,12 +148,10 @@ struct GrvProxyData {
 	GrvProxyStats stats;
 	MasterInterface master;
 	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
-	IKeyValueStore* txnStateStore;
 
 	Database cx;
-	Reference<AsyncVar<ServerDBInfo>> db; //maybe
+	Reference<AsyncVar<ServerDBInfo>> db;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
@@ -199,9 +199,13 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy, GetHea
 	}
 }
 
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, GrvTransactionRateInfo *transactionRateInfo,
-						   GrvTransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
-						   TransactionTagMap<uint64_t>* transactionTagCounter, PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
+
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount,
+						   int64_t* inBatchTransactionCount, GrvTransactionRateInfo* transactionRateInfo,
+						   GrvTransactionRateInfo* batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply,
+						   GetHealthMetricsReply* detailedHealthMetricsReply,
+						   TransactionTagMap<uint64_t>* transactionTagCounter,
+						   PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -225,7 +229,16 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			when ( wait( nextRequestTimer ) ) {
 				nextRequestTimer = Never();
 				bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-				reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter, detailed)));
+
+				TransactionTagMap<uint64_t> tagCounts;
+				for(auto itr : *throttledTags) {
+					for(auto priorityThrottles : itr.second) {
+						tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
+					}
+				}
+				reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
+					GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
+									   TransactionTagMap<TransactionCommitCostEstimation>(), detailed)));
 				transactionTagCounter->clear();
 				expectingDetailedReply = detailed;
 			}
@@ -234,7 +247,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 
 				transactionRateInfo->setRate(rep.transactionRate);
 				batchTransactionRateInfo->setRate(rep.batchTransactionRate);
-				//TraceEvent("GrvProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 				lastTC = *inTransactionCount;
 				leaseTimeout = delay(rep.leaseDuration);
 				nextRequestTimer = delayJittered(rep.leaseDuration / 2);
@@ -254,18 +266,17 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 				transactionRateInfo->disable();
 				batchTransactionRateInfo->disable();
 				TraceEvent(SevWarn, "GrvProxyRateLeaseExpired", myID).suppressFor(5.0);
-				//TraceEvent("GrvProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
+				//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 				leaseTimeout = Never();
 			}
 		}
 }
 
-
 ACTOR Future<Void> queueGetReadVersionRequests(
 	Reference<AsyncVar<ServerDBInfo>> db,
-	Deque<GetReadVersionRequest> *systemQueue,
-	Deque<GetReadVersionRequest> *defaultQueue,
-	Deque<GetReadVersionRequest> *batchQueue,
+	SpannedDeque<GetReadVersionRequest> *systemQueue,
+	SpannedDeque<GetReadVersionRequest> *defaultQueue,
+	SpannedDeque<GetReadVersionRequest> *batchQueue,
 	FutureStream<GetReadVersionRequest> readVersionRequests,
 	PromiseStream<Void> GRVTimer, double *lastGRVTime,
 	double *GRVBatchTime, FutureStream<double> replyTimes,
@@ -302,9 +313,11 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 					if (req.priority >= TransactionPriority::IMMEDIATE) {
 						stats->txnSystemPriorityStartIn += req.transactionCount;
 						systemQueue->push_back(req);
+						systemQueue->span.addParent(req.spanContext);
 					} else if (req.priority >= TransactionPriority::DEFAULT) {
 						stats->txnDefaultPriorityStartIn += req.transactionCount;
 						defaultQueue->push_back(req);
+					    defaultQueue->span.addParent(req.spanContext);
 					} else {
 						// Return error for batch_priority GRV requests
 						int64_t proxiesCount = std::max((int)db->get().client.masterProxies.size(), 1);
@@ -316,6 +329,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 
 						stats->txnBatchPriorityStartIn += req.transactionCount;
 						batchQueue->push_back(req);
+						batchQueue->span.addParent(req.spanContext);
 					}
 				}
 			}
@@ -361,26 +375,19 @@ ACTOR Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Vo
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(GrvProxyData* grvProxyData, uint32_t flags, Optional<UID> debugID,
+ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, GrvProxyData* grvProxyData, uint32_t flags, Optional<UID> debugID,
 														  int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 	// (1) The version returned is the committedVersion of some proxy at some point before the request returns, so it is committed.
 	// (2) No proxy on our list reported committed a higher version before this request was received, because then its committedVersion would have been higher,
 	//     and no other proxy could have already committed anything without first ending the epoch
+	state Span span("GP:getLiveCommittedVersion"_loc, parentSpan);
 	++grvProxyData->stats.txnStartBatch;
 	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
-	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(GetRawCommittedVersionRequest(debugID), TaskPriority::GetLiveCommittedVersionReply);
+	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
+	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
 
-	// TODO: figure out what's this
-	// Causal read risky means it has risks to serve stale read versions which mainly happens in recovery stage in which we
-	// may serve read versions in the last epoch. To minimize that risk, we want to confirm the epoch is still live.
-	// FLAG_CAUSAL_READ_RISKY means the request can tolerate the stale read version because it may just want a version and doesn't need to read data.
-
-	// Here this means if the system is not always causal read risky and the request really wants a causal read, then
-	// we must need to confirm we can still write to the current epoch of tlogs.
-	// If not, we also want to make sure the last commit time is less than REQUIRED_MIN_RECOVERY_DURATION ago which decreases
-	// the risk of stale read versions.
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(updateLastCommit(grvProxyData, debugID));
 	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 &&
@@ -421,6 +428,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
+		if(request.priority == TransactionPriority::DEFAULT) {
+			stats->grvLatencySample.addMeasurement(end - request.requestTime());
+		}
+
 		if(request.priority >= TransactionPriority::DEFAULT) {
 			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
 		}
@@ -479,14 +490,15 @@ ACTOR static Future<Void> getReadVersionServer(
 	state GrvTransactionRateInfo normalRateInfo(10);
 	state GrvTransactionRateInfo batchRateInfo(0);
 
-	state Deque<GetReadVersionRequest> systemQueue;
-	state Deque<GetReadVersionRequest> defaultQueue;
-	state Deque<GetReadVersionRequest> batchQueue;
+	state SpannedDeque<GetReadVersionRequest> systemQueue("GP:getReadVersionServerSystemQueue"_loc);
+	state SpannedDeque<GetReadVersionRequest> defaultQueue("GP:getReadVersionServerDefaultQueue"_loc);
+	state SpannedDeque<GetReadVersionRequest> batchQueue("GP:getReadVersionServerBatchQueue"_loc);
 
 	state TransactionTagMap<uint64_t> transactionTagCounter;
 	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> replyTimes;
+	state Span span;
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueGetReadVersionRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
@@ -530,7 +542,7 @@ ACTOR static Future<Void> getReadVersionServer(
 		int requestsToStart = 0;
 
 		while (requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
-			Deque<GetReadVersionRequest>* transactionQueue;
+			SpannedDeque<GetReadVersionRequest>* transactionQueue;
 			if(!systemQueue.empty()) {
 				transactionQueue = &systemQueue;
 			} else if(!defaultQueue.empty()) {
@@ -540,6 +552,7 @@ ACTOR static Future<Void> getReadVersionServer(
 			} else {
 				break;
 			}
+			transactionQueue->span.swap(span);
 
 			auto& req = transactionQueue->front();
 			int tc = req.transactionCount;
@@ -601,7 +614,8 @@ ACTOR static Future<Void> getReadVersionServer(
 
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
-				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(grvProxyData, i, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
+				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(
+				    span.context, grvProxyData, i, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &grvProxyData->stats,
 											 grvProxyData->minKnownCommittedVersion, throttledTags));
 
@@ -611,6 +625,7 @@ ACTOR static Future<Void> getReadVersionServer(
 				}
 			}
 		}
+		span = Span(span.location);
 	}
 }
 
@@ -632,22 +647,13 @@ ACTOR Future<Void> grvProxyServerCore(
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(grvProxyData.db->get().master.id() == master.id() && grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
-		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(grvProxyData.db->onChange());
 	}
 	// Do we need to wait for any db info change? Yes. To update latency band.
 	state Future<Void> dbInfoChange = grvProxyData.db->onChange();
-
-
 	grvProxyData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
-	TraceEvent("LogSystemCreate").detail("Role", "GRV").detail("UID", proxy.id());
-//	grvProxyData.logAdapter = new LogSystemDiskQueueAdapter(grvProxyData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-//	grvProxyData.txnStateStore = keyValueStoreLogSystem(grvProxyData.logAdapter, proxy.id(), 2e9, true, true, true);
 
 	grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
-
-//	// wait for txnStateStore recovery
-//	wait(success(grvProxyData.txnStateStore->readValue(StringRef())));
 
 	addActor.send(getReadVersionServer(proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
@@ -683,18 +689,15 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 ACTOR Future<Void> grvProxyServer(
 	GrvProxyInterface proxy,
 	InitializeGrvProxyRequest req,
-	Reference<AsyncVar<ServerDBInfo>> db,
-	std::string whitelistBinPaths)
+	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	try {
 		state Future<Void> core = grvProxyServerCore(proxy, req.master, db);
-		// do we need wait for the recovery?
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	}
 	catch (Error& e) {
 		TraceEvent("GrvProxyTerminated", proxy.id()).error(e, true);
 
-		// Examine all the unnecessary codes.
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 			e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
 			e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {

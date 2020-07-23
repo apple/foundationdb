@@ -448,15 +448,14 @@ struct InitializeMasterProxyRequest {
 };
 
 struct InitializeGrvProxyRequest {
-	constexpr static FileIdentifier file_identifier = 313542387;
+	constexpr static FileIdentifier file_identifier = 8265613;
 	MasterInterface master;
-	uint64_t recoveryCount; // needed?
-	Version recoveryTransactionVersion; // needed?
+	uint64_t recoveryCount;
 	ReplyPromise<GrvProxyInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, recoveryCount, recoveryTransactionVersion, reply);
+		serializer(ar, master, recoveryCount, reply);
 	}
 };
 
@@ -738,8 +737,7 @@ ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBI
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
-ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy, InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
+ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy, InitializeGrvProxyRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, UID workerID, 

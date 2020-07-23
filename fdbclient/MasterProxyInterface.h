@@ -302,14 +302,15 @@ struct GetKeyServerLocationsRequest {
 };
 
 struct GetRawCommittedVersionReply {
-	constexpr static FileIdentifier file_identifier = 61314632;
+	constexpr static FileIdentifier file_identifier = 1314732;
 	Optional<UID> debugID;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
 
-	GetRawCommittedVersionReply(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	GetRawCommittedVersionReply(): debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()), minKnownCommittedVersion(invalidVersion) {}
+//	GetRawCommittedVersionReply(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

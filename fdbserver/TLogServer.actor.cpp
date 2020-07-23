@@ -397,6 +397,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 				Version version = self->versionMessages.front().first;
 				std::pair<int,int> &sizes = logData->version_sizes[version];
 				int64_t messagesErased = 0;
+
 				while(!self->versionMessages.empty() && self->versionMessages.front().first == version) {
 					auto const& m = self->versionMessages.front();
 					++messagesErased;
@@ -446,7 +447,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool stopped, initialized;
 	DBRecoveryCount recoveryCount;
 
-	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion; // ? // The last version number in the portion of the log (written|durable) to persistentData
+	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to persistentData
 	NotifiedVersion version, queueCommittedVersion;
 	Version queueCommittingVersion;
 	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
@@ -471,7 +472,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered) {
-		if(tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && tag != txsTag && !allTags.empty() && !allTags.count(tag) && popped <= recoveredAt) {
+		if(tag.locality != tagLocalityLogRouter && tag.locality != tagLocalityTxs && tag != txsTag && allTags.size() && !allTags.count(tag) && popped <= recoveredAt) {
 			popped = recoveredAt + 1;
 		}
 		Reference<TagData> newTagData = Reference<TagData>( new TagData(tag, popped, 0, nothingPersistent, poppedRecently, unpoppedRecovered) );
@@ -1052,9 +1053,8 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 			}
 		}
 
-		if (upTo > logData->persistentDataDurableVersion) {
+		if (upTo > logData->persistentDataDurableVersion)
 			wait(tagData->eraseMessagesBefore(upTo, self, logData, TaskPriority::TLogPop));
-		}
 		//TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
 	}
 	return Void();
@@ -1144,6 +1144,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 
 				wait( logData->queueCommittedVersion.whenAtLeast( nextVersion ) );
 				wait( delay(0, TaskPriority::UpdateStorage) );
+
 				//TraceEvent("TlogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
 				if (nextVersion > logData->persistentDataVersion) {
 					wait( self->persistentDataCommitLock.take() );

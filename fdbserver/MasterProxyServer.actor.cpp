@@ -1474,20 +1474,20 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Pro
 	rep.metadataVersion = commitData->metadataVersion;
 	rep.version = commitData->committedVersion.get();
 
-	GetRawCommittedVersionReply replyFromMaster = wait(replyFromMasterFuture);
 	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+		state GetRawCommittedVersionReply replyFromMaster = wait(replyFromMasterFuture);
 		if (replyFromMaster.version > rep.version) {
 			rep.locked = replyFromMaster.locked;
 			rep.metadataVersion = replyFromMaster.metadataVersion;
 			rep.version = replyFromMaster.version;
 		}
 	} else {
-		vector<GetRawCommittedVersionReply> versions = wait(getAll(proxyVersions));
-		for (auto v : versions) {
+		state vector<GetRawCommittedVersionReply> versionsFromProxies = wait(getAll(proxyVersions));
+		for (auto v : versionsFromProxies) {
 			if (v.version > rep.version) {
-				rep.locked = replyFromMaster.locked;
-				rep.metadataVersion = replyFromMaster.metadataVersion;
-				rep.version = replyFromMaster.version;
+				rep.locked = v.locked;
+				rep.metadataVersion = v.metadataVersion;
+				rep.version = v.version;
 			}
 		}
 	}

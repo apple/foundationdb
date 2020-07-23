@@ -260,7 +260,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  lastEpochEnd(invalidVersion),
 		  liveCommittedVersion(invalidVersion),
 		  databaseLocked(false),
-		  minKnownCommittedVersion(0),
+		  minKnownCommittedVersion(invalidVersion),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),
 		  registrationCount(0),
@@ -305,7 +305,6 @@ ACTOR Future<Void> newGrvProxies( Reference<MasterData> self, RecruitFromConfigu
 		InitializeGrvProxyRequest req;
 		req.master = self->myInterface;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
-		req.recoveryTransactionVersion = self->recoveryTransactionVersion; // may not need it
 		TraceEvent("GrvProxyReplies",self->dbgid).detail("WorkerID", recr.grvProxies[i].id());
 		initializationReplies.push_back( transformErrors( throwErrorOr( recr.grvProxies[i].grvProxy.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 	}
@@ -494,13 +493,15 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 	}
 }
 
-Future<Void> sendMasterRegistration(MasterData* self,
-									LogSystemConfig const& logSystemConfig,
-									vector<MasterProxyInterface> proxies,
-									vector<GrvProxyInterface> grvProxies,
-									vector<ResolverInterface> resolvers,
-									DBRecoveryCount recoveryCount,
-									vector<UID> priorCommittedLogServers ) {
+Future<Void> sendMasterRegistration(
+    MasterData* self,
+    LogSystemConfig const& logSystemConfig,
+	vector<MasterProxyInterface> proxies,
+	vector<GrvProxyInterface> grvProxies,
+	vector<ResolverInterface> resolvers,
+	DBRecoveryCount recoveryCount,
+	vector<UID> priorCommittedLogServers ) {
+
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
@@ -1067,11 +1068,9 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-//				TraceEvent("ServerServeGet").detail("Own", self->minKnownCommittedVersion);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
-//				TraceEvent("ServerReceiveReport").detail("MV", req.minKnownCommittedVersion).detail("Own", self->minKnownCommittedVersion);
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
 				if (req.version > self->liveCommittedVersion) {
 					self->liveCommittedVersion = req.version;
