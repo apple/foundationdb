@@ -2207,7 +2207,9 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix), incrementalBackupOnly));
+			Version restoredVersion = wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges,
+			                                                   waitForDone, targetVersion, verbose, KeyRef(addPrefix),
+			                                                   KeyRef(removePrefix), true, incrementalBackupOnly));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
