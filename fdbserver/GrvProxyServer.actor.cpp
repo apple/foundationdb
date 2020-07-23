@@ -247,6 +247,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 
 				transactionRateInfo->setRate(rep.transactionRate);
 				batchTransactionRateInfo->setRate(rep.batchTransactionRate);
+				//TraceEvent("GrvProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 				lastTC = *inTransactionCount;
 				leaseTimeout = delay(rep.leaseDuration);
 				nextRequestTimer = delayJittered(rep.leaseDuration / 2);
@@ -266,7 +267,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 				transactionRateInfo->disable();
 				batchTransactionRateInfo->disable();
 				TraceEvent(SevWarn, "GrvProxyRateLeaseExpired", myID).suppressFor(5.0);
-				//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
+				//TraceEvent("GrvProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 				leaseTimeout = Never();
 			}
 		}
@@ -428,18 +429,18 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 
 	double end = g_network->timer();
 	for(GetReadVersionRequest const& request : requests) {
+		double duration = end - request.requestTime();
 		if(request.priority == TransactionPriority::DEFAULT) {
-			stats->grvLatencySample.addMeasurement(end - request.requestTime());
+			stats->grvLatencySample.addMeasurement(duration);
 		}
 
 		if(request.priority >= TransactionPriority::DEFAULT) {
-			stats->grvLatencyBands.addMeasurement(end - request.requestTime());
+			stats->grvLatencyBands.addMeasurement(duration);
 		}
 
 		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
 			// Only backup worker may infrequently use this flag.
 			reply.version = minKnownCommittedVersion;
-			TraceEvent("GrvServeMinKnownCommittedVersion").detail("V", minKnownCommittedVersion);
 		}
 		else {
 			reply.version = replyVersion;
@@ -453,8 +454,13 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if(tagItr != priorityThrottledTags.end()) {
 					if(tagItr->second.expiration > now()) {
-						TEST(true); // Proxy returning tag throttle
-						reply.tagThrottleInfo[tag.first] = tagItr->second;
+						if(tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
+							TEST(true); // Auto TPS rate is unlimited
+						}
+						else {
+							TEST(true); // Proxy returning tag throttle
+							reply.tagThrottleInfo[tag.first] = tagItr->second;
+						}
 					}
 					else {
 						// This isn't required, but we might as well
@@ -465,7 +471,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 			}
 		}
 
-		TraceEvent("ServeReadVersion").detail("RV", reply.version);
 		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
@@ -505,18 +510,10 @@ ACTOR static Future<Void> getReadVersionServer(
 											  GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &grvProxyData->stats, &batchRateInfo,
 											  &transactionTagCounter));
 
-	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) == db->get().client.grvProxies.end())
 		wait(db->onChange());
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions from master.
-
-	std::vector<GrvProxyInterface> otherGrvProxies;
-	for (GrvProxyInterface gp : db->get().client.grvProxies) {
-		if (gp != proxy)
-			otherGrvProxies.push_back(gp);
-	}
-
 	TraceEvent("GrvProxyReadyForTxnStarts", proxy.id());
 
 	loop{
@@ -668,7 +665,6 @@ ACTOR Future<Void> grvProxyServerCore(
 
 				if(grvProxyData.db->get().master.id() == master.id() && grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 					grvProxyData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
-					TraceEvent("LogSystemCreate").detail("Role", "GRV").detail("UID", proxy.id()).detail("DBInfoChange", "");
 				}
 				grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 			}

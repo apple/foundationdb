@@ -310,7 +310,6 @@ struct GetRawCommittedVersionReply {
 	Version minKnownCommittedVersion;
 
 	GetRawCommittedVersionReply(): debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()), minKnownCommittedVersion(invalidVersion) {}
-//	GetRawCommittedVersionReply(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

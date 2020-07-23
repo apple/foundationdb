@@ -720,7 +720,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	state std::vector<std::pair<GrvProxyInterface, EventMap>>::iterator grvProxy;
 	for(grvProxy = grvProxies.begin(); grvProxy != grvProxies.end(); ++grvProxy) {
-		roles.addRole( "grv_proxy", grvProxy->first, grvProxy->second );
+		roles.addRole( "proxy", grvProxy->first, grvProxy->second );
 		wait(yield());
 	}
 
