@@ -556,7 +556,7 @@ void initHelp() {
 	helpMap["suspend"] = CommandHelp(
 		"suspend <SECONDS> <ADDRESS>*",
 		"attempts to suspend one or more processes in the cluster",
-		"If parameters are specified, populates the list of processes which can be suspended. Processes cannot be suspended before this list has been populated.\n\nFor each IP:port pair in <ADDRESS>*, attempt to suspend the processes for the specified SECONDS after which the process will die.");
+		"If no parameters are specified, populates the list of processes which can be suspended. Processes cannot be suspended before this list has been populated.\n\nFor each IP:port pair in <ADDRESS>*, attempt to suspend the processes for the specified SECONDS after which the process will die.");
 	helpMap["profile"] = CommandHelp(
 		"<type> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
