@@ -543,6 +543,29 @@ protected:
 	~INetwork() {}	// Please don't try to delete through this interface!
 };
 
+class IUDPSocket {
+public:
+	virtual ~IUDPSocket();
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
+	virtual void send(StringRef packet) = 0;
+
+	virtual void sendTo(NetworkAddress const& addr, StringRef packet) = 0;
+
+	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
+	// Puts the address of the sender into outAddr
+	virtual int readFrom(NetworkAddress* outAddr, uint8_t* begin, uint8_t* end) = 0;
+
+	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
+	virtual int read(uint8_t* begin, uint8_t* end);
+
+	//  Precondition: read() has been called and last returned 0
+	// returns when read() can read at least one byte (or may throw an error if the connection dies)
+	virtual Future<Void> onReadable() = 0;
+	virtual UID getDebugID() const = 0;
+};
+
 class INetworkConnections {
 public:
 	// Methods for making and accepting network connections.  Logically this is part of the INetwork abstraction
