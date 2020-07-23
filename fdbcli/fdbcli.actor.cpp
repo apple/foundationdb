@@ -3254,11 +3254,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						wait( waitForAll(addInterfs) );
 						if(address_interface.size() == 0) {
-							printf("\nNo addresses can be killed.\n");
+							printf("\nNo addresses can be suspended.\n");
 						} else if(address_interface.size() == 1) {
-							printf("\nThe following address can be killed:\n");
+							printf("\nThe following address can be suspended:\n");
 						} else {
-							printf("\nThe following %zu addresses can be killed:\n", address_interface.size());
+							printf("\nThe following %zu addresses can be suspended:\n", address_interface.size());
 						}
 						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
