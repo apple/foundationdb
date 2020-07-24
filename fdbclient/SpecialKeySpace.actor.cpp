@@ -861,9 +861,7 @@ Future<Standalone<RangeResultRef>> FailedServersRangeImpl::getRange(ReadYourWrit
 }
 
 void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	// TODO : check key / value valid
-	Value val(value);
-	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(val)));
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 }
 
 void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
