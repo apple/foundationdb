@@ -260,6 +260,7 @@ else()
       -Wno-unused-local-typedef
       -Wno-unused-parameter
       -Wno-unused-value
+      -Wno-self-assign
       )
     if (USE_CCACHE)
       add_compile_options(
