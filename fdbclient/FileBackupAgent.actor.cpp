@@ -3015,8 +3015,10 @@ namespace fileBackup {
 			state int64_t remainingInBatch = Params.remainingInBatch().get(task);
 			state bool addingToExistingBatch = remainingInBatch > 0;
 			state Version restoreVersion;
+			state Future<Optional<bool>> incrementalBackupOnly = restore.incrementalBackupOnly().get(tr);
 
 			wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr))
+						&& success(incrementalBackupOnly)
 						&& checkTaskVersion(tr->getDatabase(), task, name, version));
 
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
@@ -3166,6 +3168,9 @@ namespace fileBackup {
 						break;
 
 					if(f.isRange) {
+						if (incrementalBackupOnly.get().present() && incrementalBackupOnly.get().get()) {
+							continue;
+						}
 						addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr, taskBucket, task,
 							f, j, std::min<int64_t>(f.blockSize, f.fileSize - j),
 							TaskCompletionKey::joinWith(allPartsDone)));
@@ -3466,13 +3471,11 @@ namespace fileBackup {
 			// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 			// Order does not matter, they will be put in order when written to the restoreFileMap below.
 			state std::vector<RestoreConfig::RestoreFile> files;
-			state Future<Optional<bool>> incrementalBackupOnly = restore.incrementalBackupOnly().get(tr);
 
-			if (!incrementalBackupOnly.get().present() || !incrementalBackupOnly.get().get()) {
-				for(const RangeFile &f : restorable.get().ranges) {
-					files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
-				}
+			for(const RangeFile &f : restorable.get().ranges) {
+				files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
 			}
+
 			for(const LogFile &f : restorable.get().logs) {
 				files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
 			}
