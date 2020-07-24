@@ -125,7 +125,7 @@ public:
 	enum class MODULE {
 		CLUSTERFILEPATH,
 		CONNECTIONSTRING,
-		FAILURE, // A single key space contains a json string which describes the last failure in special-key-space
+		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
 		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
@@ -184,7 +184,7 @@ private:
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
 	KeyRangeMap<SpecialKeyRangeRWImpl*> writeImpls;
-	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff\xf) in prod and (, \xff) in test
+	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff) in prod and (, \xff) in test
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 	static std::unordered_map<std::string, KeyRange>

@@ -896,9 +896,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	cacheListMonitor = monitorCacheList(this);
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(
-			SpecialKeySpace::MODULE::FAILURE,
+			SpecialKeySpace::MODULE::ERRORMSG,
 			std::make_unique<SingleSpecialKeyImpl>(
-				SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::FAILURE).begin,
+				SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin,
 				[](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 					if (ryw->getSpecialKeySpaceErrorMsg().present())
 						return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());

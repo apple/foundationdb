@@ -1044,8 +1044,9 @@ public:
 	ACTOR static Future<Void> commit( ReadYourWritesTransaction *ryw ) {
 		try {
 			ryw->commitStarted = true;
-			// TODO : special-key-space delayed check, I guess we should first set the commit start flag
-			wait(ryw->getDatabase()->specialKeySpace->commit(ryw));
+			
+			if (ryw->options.specialKeySpaceChangeConfiguration)
+				wait(ryw->getDatabase()->specialKeySpace->commit(ryw));
 			
 			Future<Void> ready = ryw->reading;
 			wait( ryw->resetPromise.getFuture() || ready );
