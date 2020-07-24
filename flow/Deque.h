@@ -108,6 +108,7 @@ public:
 				return false;
 		return true;
 	}
+	bool operator!=(const Deque& r) const { return !(*this == r); }
 
 	~Deque() {
 		cleanup();

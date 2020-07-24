@@ -20,7 +20,9 @@
 
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Schemas.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
@@ -175,7 +177,61 @@ struct ThrottlingWorkload : KVWorkload {
 				if (deterministicRandom()->randomInt(0, 1000) == 0) TraceEvent("TransactionCommittedx1000");
 				++self->transactionsCommitted;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
 				// ignore failing transactions
+			}
+		}
+	}
+
+	ACTOR static Future<Void> specialKeysActor(Database cx, ThrottlingWorkload* self) {
+		state ReadYourWritesTransaction tr(cx);
+		state json_spirit::mValue aggregateSchema =
+		    readJSONStrictly(JSONSchemas::aggregateHealthSchema.toString()).get_obj();
+		state json_spirit::mValue storageSchema =
+		    readJSONStrictly(JSONSchemas::storageHealthSchema.toString()).get_obj();
+		state json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
+		loop {
+			try {
+				Standalone<RangeResultRef> result = wait(
+				    tr.getRange(prefixRange(LiteralStringRef("\xff\xff/metrics/health/")), CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!result.more);
+				for (const auto& [k, v] : result) {
+					ASSERT(k.startsWith(LiteralStringRef("\xff\xff/metrics/health/")));
+					auto valueObj = readJSONStrictly(v.toString()).get_obj();
+					if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/")) == LiteralStringRef("aggregate")) {
+						TEST(true); // Test aggregate health metrics schema
+						std::string errorStr;
+						if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true))
+							TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
+							    .detail("ErrorStr", errorStr.c_str())
+							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+					} else if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/"))
+					               .startsWith(LiteralStringRef("storage/"))) {
+						TEST(true); // Test storage health metrics schema
+						UID::fromString(k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/storage/"))
+						                    .toString()); // Will throw if it's not a valid uid
+						std::string errorStr;
+						if (!schemaMatch(storageSchema, valueObj, errorStr, SevError, true))
+							TraceEvent(SevError, "StorageHealthSchemaValidationFailed")
+							    .detail("ErrorStr", errorStr.c_str())
+							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+					} else if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/"))
+					               .startsWith(LiteralStringRef("log/"))) {
+						TEST(true); // Test log health metrics schema
+						UID::fromString(k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/log/"))
+						                    .toString()); // Will throw if it's not a valid uid
+						std::string errorStr;
+						if (!schemaMatch(logSchema, valueObj, errorStr, SevError, true))
+							TraceEvent(SevError, "LogHealthSchemaValidationFailed")
+							    .detail("ErrorStr", errorStr.c_str())
+							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+					} else {
+						ASSERT(false); // Unrecognized key
+					}
+				}
+				wait(delayJittered(5));
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
 		}
 	}
@@ -198,6 +254,7 @@ struct ThrottlingWorkload : KVWorkload {
 		for (actorId = 0; actorId < self->actorsPerClient; ++actorId) {
 			clientActors.push_back(timeout(clientActor(cx, self), self->testDuration, Void()));
 		}
+		clientActors.push_back(timeout(specialKeysActor(cx, self), self->testDuration, Void()));
 		wait(hmChecker);
 		return Void();
 	}

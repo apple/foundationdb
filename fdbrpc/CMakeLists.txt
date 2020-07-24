@@ -8,7 +8,6 @@ set(FDBRPC_SRCS
   AsyncFileCached.actor.cpp
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
-  batcher.actor.h
   FailureMonitor.actor.cpp
   FlowTransport.actor.cpp
   genericactors.actor.h
@@ -23,6 +22,8 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
+  Stats.actor.cpp
+  Stats.h
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h

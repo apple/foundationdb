@@ -427,14 +427,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(auto& it : self->tLogs) {
 				for(auto &t : it->logServers) {
 					if( t->get().present() ) {
-						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+						failed.push_back(waitFailureClient(t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+						                                   -SERVER_KNOBS->TLOG_TIMEOUT /
+						                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						                                   /*trace=*/true));
 					} else {
 						changes.push_back(t->onChange());
 					}
 				}
 				for(auto &t : it->logRouters) {
 					if( t->get().present() ) {
-						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+						failed.push_back(waitFailureClient(t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+						                                   -SERVER_KNOBS->TLOG_TIMEOUT /
+						                                       SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						                                   /*trace=*/true));
 					} else {
 						changes.push_back(t->onChange());
 					}
@@ -443,7 +449,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if (worker->get().present()) {
 						backupFailed.push_back(waitFailureClient(
 						    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
-						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+						    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						    /*trace=*/true));
 					} else {
 						changes.push_back(worker->onChange());
 					}
@@ -455,7 +462,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for(auto& it : old.tLogs) {
 						for(auto &t : it->logRouters) {
 							if( t->get().present() ) {
-								failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+								failed.push_back(waitFailureClient(
+								    t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+								    -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+								    /*trace=*/true));
 							} else {
 								changes.push_back(t->onChange());
 							}
@@ -466,7 +476,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						if (worker->get().present()) {
 							backupFailed.push_back(waitFailureClient(
 							    worker->get().interf().waitFailure, SERVER_KNOBS->BACKUP_TIMEOUT,
-							    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+							    -SERVER_KNOBS->BACKUP_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							    /*trace=*/true));
 						} else {
 							changes.push_back(worker->onChange());
 						}
@@ -1962,7 +1973,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
-						failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+						failed.push_back(waitFailureClient(
+						    logRouterInitializationReplies[nextReplies][i].get().waitFailure,
+						    SERVER_KNOBS->TLOG_TIMEOUT,
+						    -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+						    /*trace=*/true));
 					}
 					nextReplies++;
 				}
@@ -1980,7 +1995,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
 						if(!forRemote) {
-							failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+							failed.push_back(waitFailureClient(
+							    logRouterInitializationReplies[nextReplies][i].get().waitFailure,
+							    SERVER_KNOBS->TLOG_TIMEOUT,
+							    -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+							    /*trace=*/true));
 						}
 					}
 					nextReplies++;

@@ -22,6 +22,7 @@ struct VersionedMapHarness {
 		const K& operator->() const { return it.key(); }
 
 		bool operator==(result const& k) const { return it == k.it; }
+		bool operator!=(result const& k) const { return !(*this == k); }
 	};
 
 	map s;
