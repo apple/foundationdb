@@ -492,14 +492,6 @@ public:
 	}
 
 	vector<WorkerDetails> getWorkersForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, int amount, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, Optional<std::vector<WorkerFitnessInfo>> minWorkers = Optional<std::vector<WorkerFitnessInfo>>(), bool checkStable = false ) {
-//		if (role == ProcessClass::Proxy) {
-//			TraceEvent("InsideGetWorkers")
-//			    .detail("Dc", dcId.present() ? dcId.get().toString() : "")
-//				.detail("Amount", amount)
-//			    .detail("IdUsed", id_used.size())
-//			    .detail("MinWorkers", minWorkers.get().size())
-//				.detail("CheckStable", checkStable);
-//		}
 		std::map<std::pair<ProcessClass::Fitness,int>, std::pair<vector<WorkerDetails>,vector<WorkerDetails>>> fitness_workers;
 		vector<WorkerDetails> results;
 		if(minWorkers.present()) {
@@ -738,7 +730,6 @@ public:
 
 		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
 		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_two_proxies );
-//		TraceEvent("InsideFirstFindWorkers").detail("Size", proxies.size());
 		ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 		int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
 		for(int i = 0; i < resolvers.size(); i++)
@@ -888,7 +879,6 @@ public:
 						  getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used )};
 					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
 					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, used, first_two_proxies );
-//					TraceEvent("InsideSecondFindWorkers").detail("Size", proxies.size());
 					ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 
 					RoleFitnessPair fitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
@@ -1237,9 +1227,7 @@ public:
 			{ getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true ),
 			  getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true ) };
 		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
-//		TraceEvent("BetterMasterExistsNewProxyFitness");
 		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(), db.config, id_used, first_two_proxies, true );
-//		TraceEvent("ProxiesSize").detail("Size", proxies.size());
 		ASSERT(proxies.size() >= 2 && proxies.size() <= db.config.getDesiredProxies());
 
 		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
