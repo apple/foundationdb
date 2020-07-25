@@ -538,6 +538,7 @@ struct RatekeeperData {
 
 	std::map<UID, ProxyInfo> proxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
+	Smoother smoothMeanShardSize;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
@@ -564,6 +565,7 @@ struct RatekeeperData {
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	    smoothMeanShardSize(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
 	    throttledTagChangeId(0),
 	    normalLimits(TransactionPriority::DEFAULT, "", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
@@ -840,6 +842,24 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
+ACTOR Future<Void> monitorDDMetricsChanges(RatekeeperData *self, Reference<AsyncVar<ServerDBInfo>> db) {
+	state bool isFirstRep = true;
+	loop {
+		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY));
+		if(!db->get().distributor.present()) continue;
+
+		ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(
+		    db->get().distributor.get().dataDistributorMetrics.getReply( GetDataDistributorMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true) ) ) );
+
+		if(reply.isError()) continue;
+		if(isFirstRep) {
+			self->smoothMeanShardSize.reset(reply.get().meanShardSize);
+			isFirstRep = false;
+		}
+		else self->smoothMeanShardSize.setTotal(reply.get().meanShardSize);
+	};
+}
+
 void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
 	if(ss.busiestTag.present() && ss.busiestTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && ss.busiestTagRate > SERVER_KNOBS->MIN_TAG_COST) {
 		TEST(true); // Transaction tag auto-throttled
@@ -994,8 +1014,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		break;
 	}
 
+	// Calculate limited durability lag
 	int64_t limitingDurabilityLag = 0;
-
 	std::set<Optional<Standalone<StringRef>>> ignoredDurabilityLagMachines;
 	for (auto ss = storageDurabilityLagReverseIndex.begin(); ss != storageDurabilityLagReverseIndex.end(); ++ss) {
 		if (ignoredDurabilityLagMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
@@ -1244,6 +1264,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	self.addActor.send( traceRole(Role::RATEKEEPER, rkInterf.id()) );
 
 	self.addActor.send(monitorThrottlingChanges(&self));
+	self.addActor.send(monitorDDMetricsChanges(&self, dbInfo));
+	self.addActor.send(self.expiredTagThrottleCleanup);
 
 	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id()).detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));

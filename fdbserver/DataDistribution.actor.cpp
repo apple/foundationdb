@@ -5009,7 +5009,15 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					req.reply.sendError(result.getError());
 				} else {
 					GetDataDistributorMetricsReply rep;
-					rep.storageMetricsList = result.get();
+					if(!req.meanOnly) {
+						rep.storageMetricsList = result.get();
+					}
+					else {
+						auto& metricVec = result.get();
+						double mean = 0.0;
+						for (auto it = metricVec.cbegin(); it != metricVec.cend(); ++it) mean += it->shardBytes;
+						rep.meanShardSize = mean / metricVec.size();
+					}
 					req.reply.send(rep);
 				}
 			}

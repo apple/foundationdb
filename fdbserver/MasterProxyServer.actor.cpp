@@ -262,12 +262,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
-			TransactionTagMap<uint64_t> tagCounts;
-			for(auto itr : *throttledTags) {
-				for(auto priorityThrottles : itr.second) {
-					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
-				}
-			}
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
 			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
 			                       *transactionTagCommitCostEst, detailed)));
