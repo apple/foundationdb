@@ -195,10 +195,6 @@ struct ThrottlingWorkload : KVWorkload {
 	virtual std::string description() { return ThrottlingWorkload::NAME; }
 	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
 	virtual Future<bool> check(Database const& cx) {
-		if (transactionsCommitted == 0) {
-			TraceEvent(SevError, "NoTransactionsCommitted");
-			return false;
-		}
 		return correctSpecialKeys;
 	}
 
