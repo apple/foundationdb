@@ -1,5 +1,5 @@
 testTitle=StorefrontTest
-runSetup=false
+runSetup=true
 
     testName=Storefront
     actorsPerClient=50

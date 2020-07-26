@@ -914,7 +914,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 }
 
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
-	TraceEvent("SSGetValue").detail("Key", req.key.toString()).detail("V", req.version);
+//	TraceEvent("SSGetValue").detail("Key", req.key.toString()).detail("V", req.version);
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
 

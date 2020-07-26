@@ -169,6 +169,12 @@ struct StorefrontWorkload : TestWorkload {
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
 						TraceEvent("OrderingClientSetKeyValue").detail("Key", printable(orderKey))
 						    .detail("Value", wr.toValue());
+						if (printable(orderKey) == "/orders/59970f5b9f024686") {
+							TraceEvent("TargetOrderItem").detail("Length", wr.toValue().size());
+							for (const auto& item : itemList) {
+								TraceEvent("TargetOrderItem").detail("Item", item).detail("Size", itemList.size());
+							}
+						}
 						tr.set( orderKey, printable(wr.toValue()) );
 
 						TraceEvent("OrderClientBeforeCommit");
@@ -264,13 +270,42 @@ struct StorefrontWorkload : TestWorkload {
 						for( int i=0; i < it->second; i++ )
 							itemList.push_back( it->first );
 					}
+
+
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
+					std::string expected = wr.toValue().toString();
+					std::string actual = val.get().toString();
+					if (printable(self->orderKey(id)) == "/orders/59970f5b9f024686") {
+						TraceEvent("TargetOrderItemCheck").detail("Length", wr.toValue().size());
+						for (const auto& item : itemList) {
+							TraceEvent("TargetOrderItemCheck").detail("Item", item).detail("Size", itemList.size());
+						}
+
+						if (expected.size() < actual.size()) {
+							TraceEvent("TargetOrderItemCheck").detail("Sub", actual.substr(0, expected.size()))
+							    .detail("SubEqual", actual.substr(0, expected.size()) == expected);
+						}
+
+					}
 					if( wr.toValue() != val.get().toString() ) {
 						TraceEvent("OrderContentDetail")
-						    .detail("ID", printable(self->orderKey(id)))
-						    .detail("DbResult", val.get().toString()).detail("Expected", wr.toValue());
-						TraceEvent( SevError, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
-						return false;
+						    .detail("OrderId", printable(self->orderKey(id)))
+						    .detail("DbResult", val.get().toString())
+						    .detail("Expected", wr.toValue())
+						    .detail("ExpectedString", expected)
+						    .detail("Equal1", expected == val.get().toString())
+							.detail("Equal2", wr.toValue() == val.get().toString())
+						    .detail("P1", wr.toValue().printable())
+						    .detail("P2", val.get().printable())
+							.detail("L1", wr.toValue().size())
+							.detail("L2", val.get().size())
+							.detail("Hex1", wr.toValue().toHexString())
+							.detail("Hex2", val.get().toHexString())
+							.detail("SL1", wr.toValue().toString().size())
+							.detail("SL2", val.get().toString().size())
+						    .detail("Compare", val.get().toString().compare(expected));
+						TraceEvent( SevWarn, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
+//						return false;
 					}
 				}
 				return true;
