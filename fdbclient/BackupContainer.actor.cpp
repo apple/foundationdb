@@ -841,9 +841,17 @@ public:
 
 		state std::vector<LogFile> logs;
 		state std::vector<LogFile> plogs;
+		TraceEvent("BackupContainerListFiles").detail("URL", bc->getURL());
+
 		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
 		     store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+
+		TraceEvent("BackupContainerListFiles")
+		    .detail("URL", bc->getURL())
+		    .detail("LogFiles", logs.size())
+		    .detail("PLogsFiles", plogs.size())
+		    .detail("Snapshots", desc.snapshots.size());
 
 		if (plogs.size() > 0) {
 			desc.partitioned = true;
