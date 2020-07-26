@@ -20,28 +20,29 @@
 
 #include "benchmark/benchmark.h"
 
+#include "fdbbench/GlobalData.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/Arena.h"
 #include "flow/FastAlloc.h"
 
-constexpr const uint8_t data[1024] = {};
+static constexpr bool EMPLACE_BACK = true;
+static constexpr bool PUSH_BACK = false;
 
 // Benchmarks the population of a VectorRef<MutationRef>
 template <bool emplace>
 static void bench_populate(benchmark::State& state) {
-	int items = state.range(0);
+	size_t items = state.range(0);
 	size_t size = state.range(1);
-	KeyRef key(data, size);
-	KeyRef value(data + size, size);
+	auto kv = getKV(size, size);
 	while (state.KeepRunning()) {
 		Standalone<VectorRef<MutationRef>> mutations;
 		mutations.reserve(mutations.arena(), items);
 		for (int i = 0; i < items; ++i) {
 			if constexpr (emplace) {
-				mutations.emplace_back(mutations.arena(), MutationRef::Type::SetValue, key, value);
+				mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::SetValue, kv.key, kv.value);
 			} else {
-				mutations.push_back(mutations.arena(), MutationRef(MutationRef::Type::SetValue, key, value));
+				mutations.push_back_deep(mutations.arena(), MutationRef(MutationRef::Type::SetValue, kv.key, kv.value));
 			}
 		}
 		benchmark::DoNotOptimize(mutations);
@@ -49,13 +50,5 @@ static void bench_populate(benchmark::State& state) {
 	state.SetItemsProcessed(items * static_cast<long>(state.iterations()));
 }
 
-static void populate_emplace(benchmark::State& state) {
-	bench_populate<true>(state);
-}
-
-static void populate_push(benchmark::State& state) {
-	bench_populate<false>(state);
-}
-
-BENCHMARK(populate_emplace)->Ranges({ { 1, 1 << 20 }, { 1, 512 } })->ReportAggregatesOnly(true);
-BENCHMARK(populate_push)->Ranges({ { 1, 1 << 20 }, { 1, 512 } })->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_populate, EMPLACE_BACK)->Ranges({ { 1, 1 << 20 }, { 1, 512 } })->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_populate, PUSH_BACK)->Ranges({ { 1, 1 << 20 }, { 1, 512 } })->ReportAggregatesOnly(true);
