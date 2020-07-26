@@ -730,6 +730,7 @@ public:
 
 		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
 		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_two_proxies );
+		TraceEvent("GetWorkersForProxy").detail("Loc", 2).detail("Proxy", proxies.size()).detail("ConfigSize", req.configuration.getDesiredProxies());
 		ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 		int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
 		for(int i = 0; i < resolvers.size(); i++)
@@ -879,6 +880,7 @@ public:
 						  getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used )};
 					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
 					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, used, first_two_proxies );
+					TraceEvent("GetWorkersForProxy").detail("Loc", 1).detail("Proxy", proxies.size()).detail("ConfigSize", req.configuration.getDesiredProxies());
 					ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 
 					RoleFitnessPair fitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
@@ -889,6 +891,7 @@ public:
 						for(int i = 0; i < resolvers.size(); i++)
 							result.resolvers.push_back(resolvers[i].interf);
 
+						TraceEvent("GetWorkersForProxy").detail("Loc", 3).detail("Proxy", proxies.size()).detail("ConfigSize", req.configuration.getDesiredProxies());
 						ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 						deterministicRandom()->randomShuffle(proxies);
 						int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
@@ -1228,6 +1231,7 @@ public:
 			  getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true ) };
 		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
 		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(), db.config, id_used, first_two_proxies, true );
+		TraceEvent("GetWorkersForProxy").detail("Loc", 4).detail("Proxy", proxies.size()).detail("ConfigSize", db.config.getDesiredProxies());
 		ASSERT(proxies.size() >= 2 && proxies.size() <= db.config.getDesiredProxies());
 
 		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));

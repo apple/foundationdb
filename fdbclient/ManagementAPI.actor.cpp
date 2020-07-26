@@ -724,7 +724,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		resolverCount = result.old_resolvers;
 	}
 
-	result.desired_proxies = std::min( 12, processCount / 15 );
+	result.desired_proxies = std::max(std::min( 12, processCount / 15 ), 2);
 	int proxyCount;
 	if (!statusObjConfig.get("proxies", result.old_proxies)) {
 		result.old_proxies = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;

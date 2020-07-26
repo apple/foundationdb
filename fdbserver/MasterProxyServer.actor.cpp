@@ -1331,6 +1331,7 @@ ACTOR Future<Void> commitBatch(
 		self->metadataVersion = metadataVersionAfter;
 		self->committedVersion.set(commitVersion);
 	}
+//	TraceEvent("ProxyCommit").detail("V", commitVersion);
 
 	if (forceRecovery) {
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "ProxyShutdown");

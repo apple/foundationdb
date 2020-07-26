@@ -395,7 +395,10 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	int type;
 
 	if (ck == LiteralStringRef("initialized")) initialized = true;
-	else if (ck == LiteralStringRef("proxies")) parse(&proxyCount, value);
+	else if (ck == LiteralStringRef("proxies")) {
+		parse(&proxyCount, value);
+		ASSERT(proxyCount >= 2 || proxyCount == -1);
+	}
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) {
@@ -429,7 +432,10 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	}
 	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
-	else if (ck == LiteralStringRef("auto_proxies")) parse(&autoProxyCount, value);
+	else if (ck == LiteralStringRef("auto_proxies")) {
+		parse(&autoProxyCount, value);
+		ASSERT(autoProxyCount >= 2 || autoProxyCount == -1);
+	}
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
