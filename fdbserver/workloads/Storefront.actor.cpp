@@ -56,12 +56,12 @@ struct StorefrontWorkload : TestWorkload {
 	virtual std::string description() { return "StorefrontWorkload"; }
 
 	virtual Future<Void> setup( Database const& cx ) {
-//		TraceEvent("StoreFrontSetup");
+		TraceEvent("StoreFrontSetup");
 		return bulkSetup( cx, this, itemCount, Promise<double>() );
 	}
 
 	virtual Future<Void> start( Database const& cx ) {
-//		TraceEvent("StoreFrontStart");
+		TraceEvent("StoreFrontStart");
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				orderingClient( cx->clone(), this, actorCount / transactionsPerSecond ) );
@@ -112,7 +112,7 @@ struct StorefrontWorkload : TestWorkload {
 
 	ACTOR Future<Void> itemUpdater( Transaction* tr, StorefrontWorkload* self, int item, int quantity ) {
 		state Key iKey = self->itemKey( item );
-//		TraceEvent("ItemUpdaterGetKey").detail("Key", printable(iKey));
+		TraceEvent("ItemUpdaterGetKey").detail("Key", printable(iKey));
 		Optional<Value> val = wait( tr->get( iKey ) );
 		if (!val.present()) {
 			TraceEvent(SevError, "StorefrontItemMissing").detail("Key", printable(iKey)).detail("Item", item)
@@ -120,8 +120,8 @@ struct StorefrontWorkload : TestWorkload {
 			ASSERT( val.present() );
 		}
 		int currentCount = valueToInt( val.get() );
-//		TraceEvent("ItemUpdaterGetValue").detail("Value", val.present() ? val.get().toString() : "absent");
-//		TraceEvent("ItemUpdaterSetKeyValue").detail("Key", printable(iKey)).detail("Value", currentCount + quantity);
+		TraceEvent("ItemUpdaterGetValue").detail("Value", val.present() ? val.get().toString() : "absent");
+		TraceEvent("ItemUpdaterSetKeyValue").detail("Key", printable(iKey)).detail("Value", currentCount + quantity);
 		tr->set( iKey, self->itemValue( currentCount + quantity ) );
 		return Void();
 	}
@@ -139,10 +139,10 @@ struct StorefrontWorkload : TestWorkload {
 				state Transaction tr(cx);
 				loop {
 					try {
-//						TraceEvent("OrderingClientGetKey").detail("Key", printable(orderKey));
+						TraceEvent("OrderingClientGetKey").detail("Key", printable(orderKey));
 						Optional<Value> order = wait( tr.get( orderKey ) );
-//						TraceEvent("OrderingClientGetKeyValue").detail("Key", printable(orderKey))
-//						    .detail("Value", order.present() ? printable(order.get()) : "absent");
+						TraceEvent("OrderingClientGetKeyValue").detail("Key", printable(orderKey))
+						    .detail("Value", order.present() ? printable(order.get()) : "absent");
 						if( order.present() ) {
 							++self->spuriousCommitFailures;
 							break; // the order was already committed
@@ -167,11 +167,11 @@ struct StorefrontWorkload : TestWorkload {
 
 						// set value for the order
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
-//						TraceEvent("OrderingClientSetKeyValue").detail("Key", printable(orderKey))
-//						    .detail("Value", wr.toValue());
+						TraceEvent("OrderingClientSetKeyValue").detail("Key", printable(orderKey))
+						    .detail("Value", wr.toValue());
 						tr.set( orderKey, printable(wr.toValue()) );
 
-//						TraceEvent("OrderClientCommit");
+						TraceEvent("OrderClientBeforeCommit");
 						wait( tr.commit() );
 						self->orders[id] = items; // save this in a local list to test durability
 						break;
@@ -196,7 +196,7 @@ struct StorefrontWorkload : TestWorkload {
 		state KeySelectorRef begin = firstGreaterThan(keyRange.begin);
 		state KeySelectorRef end = lastLessThan(keyRange.end);
 		while( fetched == 10000 ) {
-//			TraceEvent("OrderAccumulatorGetRange").detail("Begin", begin.toString()).detail("End", end.toString());
+			TraceEvent("OrderAccumulatorGetRange").detail("Begin", begin.toString()).detail("End", end.toString());
 			Standalone<RangeResultRef> values = wait( tr.getRange( begin, end, 10000 ) );
 			int orderIdx;
 			for(orderIdx=0; orderIdx<values.size(); orderIdx++) {
@@ -221,7 +221,7 @@ struct StorefrontWorkload : TestWorkload {
 					KeyRangeRef( Key(format("/orders/%x", c)), Key(format("/orders/%x", c+1)) ) ) );
 
 		Transaction tr(cx);
-//		TraceEvent("TableBalancerGetRange");
+		TraceEvent("TableBalancerGetRange");
 		state Future<Standalone<RangeResultRef>> values = tr.getRange( 
 				KeyRangeRef( self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount+1 );
 
@@ -251,9 +251,9 @@ struct StorefrontWorkload : TestWorkload {
 			try {
 				for(; idx < ids.size(); idx++ ) {
 					state orderID id = ids[idx];
-//					TraceEvent("OrderCheckerGetKey").detail("Key", printable(self->orderKey(id)));
+					TraceEvent("OrderCheckerGetKey").detail("Key", printable(self->orderKey(id)));
 					Optional<Value> val = wait( tr.get( self->orderKey( id ) ) );
-//					TraceEvent("OrderCheckerGetValue").detail("Key", printable(self->orderKey(id))).detail("Value", val.present() ? val.get().toString() : "absent");
+					TraceEvent("OrderCheckerGetValue").detail("Key", printable(self->orderKey(id))).detail("Value", val.present() ? val.get().toString() : "absent");
 					if( !val.present() ) {
 						TraceEvent( SevError, "TestFailure").detail("Reason", "OrderNotPresent" ).detail("OrderID", id);
 						return false;
@@ -266,6 +266,9 @@ struct StorefrontWorkload : TestWorkload {
 					}
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
 					if( wr.toValue() != val.get().toString() ) {
+						TraceEvent("OrderContentDetail")
+						    .detail("ID", printable(self->orderKey(id)))
+						    .detail("DbResult", val.get().toString()).detail("Expected", wr.toValue());
 						TraceEvent( SevError, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
 						return false;
 					}

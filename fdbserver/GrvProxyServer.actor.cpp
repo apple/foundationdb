@@ -472,7 +472,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		}
 
 		request.reply.send(reply);
-//		TraceEvent("ReadVersion").detail("V", reply.version);
+		TraceEvent("ReadVersion").detail("V", reply.version);
 		++stats->txnRequestOut;
 	}
 
