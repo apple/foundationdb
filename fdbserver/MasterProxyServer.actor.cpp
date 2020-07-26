@@ -1463,6 +1463,178 @@ ACTOR Future<Void> postResolution(Context* self) {
 	return Void();
 }
 
+ACTOR Future<Void> transactionLogging(Context* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+
+	try {
+		choose {
+			when(Version ver = wait(self->loggingComplete)) {
+				pProxyCommitData->minKnownCommittedVersion = std::max(pProxyCommitData->minKnownCommittedVersion, ver);
+			}
+			when(wait(pProxyCommitData->committedVersion.whenAtLeast( self->commitVersion + 1 ))) {}
+		}
+	} catch(Error &e) {
+		if(e.code() == error_code_broken_promise) {
+			throw master_tlog_failed();
+		}
+		throw;
+	}
+
+	pProxyCommitData->lastCommitLatency = now() - self->commitStartTime;
+	pProxyCommitData->lastCommitTime = std::max(pProxyCommitData->lastCommitTime.get(), self->commitStartTime);
+
+	wait(yield(TaskPriority::ProxyCommitYield2));
+
+	if( pProxyCommitData->popRemoteTxs && self->msg.popTo > ( pProxyCommitData->txsPopVersions.size() ? pProxyCommitData->txsPopVersions.back().second : pProxyCommitData->lastTxsPop ) ) {
+		if(pProxyCommitData->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
+			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
+			pProxyCommitData->txsPopVersions.pop_front();
+		}
+
+		pProxyCommitData->txsPopVersions.emplace_back(self->commitVersion, self->msg.popTo);
+	}
+	pProxyCommitData->logSystem->popTxs(self->msg.popTo);
+
+	return Void();
+}
+
+ACTOR Future<Void> reply(Context* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+
+	const Optional<UID>& debugID = self->debugID;
+
+	if ( self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
+		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
+
+	//TraceEvent("ProxyPushed", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
+	if (debugID.present())
+		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterLogPush");
+
+	for (auto &p : self->storeCommits) {
+		ASSERT(!p.second.isReady());
+		p.first.get().acknowledge.send(Void());
+		ASSERT(p.second.isReady());
+	}
+
+	// After logging finishes, we report the commit version to master so that every other proxy can get the most
+	// up-to-date live committed version. We also maintain the invariant that master's committed version >= self->committedVersion
+	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
+	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
+	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion);   // A later version was reported committed first
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && self->commitVersion > pProxyCommitData->committedVersion.get()) {
+		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
+			ReportRawCommittedVersionRequest(
+				self->commitVersion,
+				self->lockedAfter,
+				self->metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+	}
+	if( self->commitVersion > pProxyCommitData->committedVersion.get() ) {
+		pProxyCommitData->locked = self->lockedAfter;
+		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
+		pProxyCommitData->committedVersion.set(self->commitVersion);
+	}
+
+	if (self->forceRecovery) {
+		TraceEvent(SevWarn, "RestartingTxnSubsystem", pProxyCommitData->dbgid).detail("Stage", "ProxyShutdown");
+		throw worker_removed();
+	}
+
+	// Send replies to clients
+	double endTime = g_network->timer();
+	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
+
+	std::fill(self->nextTr.begin(), self->nextTr.end(), 0);
+	for (int t = 0; t < self->trs.size(); t++) {
+		auto& tr = self->trs[t];
+		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
+			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
+			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
+
+			// aggregate commit cost estimation if committed
+			ASSERT(tr.commitCostEstimation.present() == tr.tagSet.present());
+			if (tr.tagSet.present()) {
+				TransactionCommitCostEstimation& costEstimation = tr.commitCostEstimation.get();
+				for (auto& tag : tr.tagSet.get()) {
+					pProxyCommitData->transactionTagCommitCostEst[tag] += costEstimation;
+				}
+			}
+		}
+		else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
+			tr.reply.sendError(transaction_too_old());
+		}
+		else {
+			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
+			// through CommitID
+			if (tr.transaction.report_conflicting_keys) {
+				Standalone<VectorRef<int>> conflictingKRIndices;
+				for (int resolverInd : self->transactionResolverMap[t]) {
+					auto const& cKRs =
+					    self->resolution[resolverInd]
+					        .conflictingKeyRangeMap[self->nextTr[resolverInd]]; // nextTr[resolverInd] -> index of this trs[t]
+					                                                      // on the resolver
+					for (auto const& rCRIndex : cKRs)
+						// read_conflict_range can change when sent to resolvers, mapping the index from resolver-side
+						// to original index in commitTransactionRef
+						conflictingKRIndices.push_back(conflictingKRIndices.arena(),
+						                               self->txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]);
+				}
+				// At least one keyRange index should be returned
+				ASSERT(conflictingKRIndices.size());
+				tr.reply.send(CommitID(invalidVersion, t, Optional<Value>(),
+				                           Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
+			} else {
+				tr.reply.sendError(not_committed());
+			}
+		}
+
+		// Update corresponding transaction indices on each resolver
+		for (int resolverInd : self->transactionResolverMap[t]) self->nextTr[resolverInd]++;
+
+		// TODO: filter if pipelined with large commit
+		double duration = endTime - tr.requestTime();
+		pProxyCommitData->stats.commitLatencySample.addMeasurement(duration);
+		if(pProxyCommitData->latencyBandConfig.present()) {
+			bool filter = self->maxTransactionBytes > pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
+			pProxyCommitData->stats.commitLatencyBands.addMeasurement(endTime - tr.requestTime(), filter);
+		}
+	}
+
+	++pProxyCommitData->stats.commitBatchOut;
+	pProxyCommitData->stats.txnCommitOut += self->trs.size();
+	pProxyCommitData->stats.txnConflicts += self->trs.size() - self->commitCount;
+	pProxyCommitData->stats.txnCommitOutSuccess += self->commitCount;
+
+	if(now() - pProxyCommitData->lastCoalesceTime > SERVER_KNOBS->RESOLVER_COALESCE_TIME) {
+		pProxyCommitData->lastCoalesceTime = now();
+		int lastSize = pProxyCommitData->keyResolvers.size();
+		auto rs = pProxyCommitData->keyResolvers.ranges();
+		Version oldestVersion = self->prevVersion - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+		for(auto r = rs.begin(); r != rs.end(); ++r) {
+			while(r->value().size() > 1 && r->value()[1].first < oldestVersion)
+				r->value().pop_front();
+			if(r->value().size() && r->value().front().first < oldestVersion)
+				r->value().front().first = 0;
+		}
+		pProxyCommitData->keyResolvers.coalesce(allKeys);
+		if(pProxyCommitData->keyResolvers.size() != lastSize)
+			TraceEvent("KeyResolverSize", pProxyCommitData->dbgid).detail("Size", pProxyCommitData->keyResolvers.size());
+	}
+
+	// Dynamic batching for commits
+	double target_latency = (now() - self->startTime) * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
+	pProxyCommitData->commitBatchInterval = std::max(
+	    SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,
+	    std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX,
+	             target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
+	                 pProxyCommitData->commitBatchInterval * (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
+
+	pProxyCommitData->commitBatchesMemBytesCount -= self->currentBatchMemBytesCount;
+	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
+	wait(self->releaseFuture);
+
+	return Void();
+}
+
 }	// namespace CommitBatch
 
 // Commit one batch of transactions trs
@@ -1489,159 +1661,11 @@ ACTOR Future<Void> commitBatch(
 	wait(CommitBatch::postResolution(&context));
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
-
-	try {
-		choose {
-			when(Version ver = wait(context.loggingComplete)) {
-				context.pProxyCommitData->minKnownCommittedVersion = std::max(context.pProxyCommitData->minKnownCommittedVersion, ver);
-			}
-			when(wait(context.pProxyCommitData->committedVersion.whenAtLeast( context.commitVersion+1 ))) {}
-		}
-	} catch(Error &e) {
-		if(e.code() == error_code_broken_promise) {
-			throw master_tlog_failed();
-		}
-		throw;
-	}
-
-	context.pProxyCommitData->lastCommitLatency = now() - context.commitStartTime;
-	context.pProxyCommitData->lastCommitTime = std::max(context.pProxyCommitData->lastCommitTime.get(), context.commitStartTime);
-
-	wait(yield(TaskPriority::ProxyCommitYield2));
-
-	if( context.pProxyCommitData->popRemoteTxs && context.msg.popTo > ( context.pProxyCommitData->txsPopVersions.size() ? context.pProxyCommitData->txsPopVersions.back().second : context.pProxyCommitData->lastTxsPop ) ) {
-		if(context.pProxyCommitData->txsPopVersions.size() >= SERVER_KNOBS->MAX_TXS_POP_VERSION_HISTORY) {
-			TraceEvent(SevWarnAlways, "DiscardingTxsPopHistory").suppressFor(1.0);
-			context.pProxyCommitData->txsPopVersions.pop_front();
-		}
-
-		context.pProxyCommitData->txsPopVersions.emplace_back(context.commitVersion, context.msg.popTo);
-	}
-	context.pProxyCommitData->logSystem->popTxs(context.msg.popTo);
+	wait(CommitBatch::transactionLogging(&context));
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
-	if ( context.prevVersion && context.commitVersion - context.prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
-		debug_advanceMinCommittedVersion(UID(), context.commitVersion);
+	wait(CommitBatch::reply(&context));
 
-	//TraceEvent("ProxyPushed", context.pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
-	if (context.debugID.present())
-		g_traceBatch.addEvent("CommitDebug", context.debugID.get().first(), "MasterProxyServer.commitBatch.AfterLogPush");
-
-	for (auto &p : context.storeCommits) {
-		ASSERT(!p.second.isReady());
-		p.first.get().acknowledge.send(Void());
-		ASSERT(p.second.isReady());
-	}
-
-	// After logging finishes, we report the commit version to master so that every other proxy can get the most
-	// up-to-date live committed version. We also maintain the invariant that master's committed version >= self->committedVersion
-	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
-	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
-	TEST(context.pProxyCommitData->committedVersion.get() > context.commitVersion);   // A later version was reported committed first
-	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && context.commitVersion > context.pProxyCommitData->committedVersion.get()) {
-		wait(context.pProxyCommitData->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(context.commitVersion, context.lockedAfter, context.metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
-	}
-	if( context.commitVersion > context.pProxyCommitData->committedVersion.get() ) {
-		context.pProxyCommitData->locked = context.lockedAfter;
-		context.pProxyCommitData->metadataVersion = context.metadataVersionAfter;
-		context.pProxyCommitData->committedVersion.set(context.commitVersion);
-	}
-
-	if (context.forceRecovery) {
-		TraceEvent(SevWarn, "RestartingTxnSubsystem", context.pProxyCommitData->dbgid).detail("Stage", "ProxyShutdown");
-		throw worker_removed();
-	}
-
-	// Send replies to clients
-	double endTime = g_network->timer();
-	// Reset all to zero, used to track the correct index of each commitTransacitonRef on each resolver
-	std::fill(context.nextTr.begin(), context.nextTr.end(), 0);
-	for (int t = 0; t < context.trs.size(); t++) {
-		if (context.committed[t] == ConflictBatch::TransactionCommitted && (!context.locked || context.trs[t].isLockAware())) {
-			ASSERT_WE_THINK(context.commitVersion != invalidVersion);
-			context.trs[t].reply.send(CommitID(context.commitVersion, t, context.metadataVersionAfter));
-
-			// aggregate commit cost estimation if committed
-			ASSERT(context.trs[t].commitCostEstimation.present() == context.trs[t].tagSet.present());
-			if (context.trs[t].tagSet.present()) {
-				TransactionCommitCostEstimation& costEstimation = context.trs[t].commitCostEstimation.get();
-				for (auto& tag : context.trs[t].tagSet.get()) {
-					self->transactionTagCommitCostEst[tag] += costEstimation;
-				}
-			}
-		}
-		else if (context.committed[t] == ConflictBatch::TransactionTooOld) {
-			context.trs[t].reply.sendError(transaction_too_old());
-		}
-		else {
-			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
-			// through CommitID
-			if (context.trs[t].transaction.report_conflicting_keys) {
-				Standalone<VectorRef<int>> conflictingKRIndices;
-				for (int resolverInd : context.transactionResolverMap[t]) {
-					auto const& cKRs =
-					    context.resolution[resolverInd]
-					        .conflictingKeyRangeMap[context.nextTr[resolverInd]]; // nextTr[resolverInd] -> index of this trs[t]
-					                                                      // on the resolver
-					for (auto const& rCRIndex : cKRs)
-						// read_conflict_range can change when sent to resolvers, mapping the index from resolver-side
-						// to original index in commitTransactionRef
-						conflictingKRIndices.push_back(conflictingKRIndices.arena(),
-						                               context.txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]);
-				}
-				// At least one keyRange index should be returned
-				ASSERT(conflictingKRIndices.size());
-				context.trs[t].reply.send(CommitID(invalidVersion, t, Optional<Value>(),
-				                           Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
-			} else {
-				context.trs[t].reply.sendError(not_committed());
-			}
-		}
-
-		// Update corresponding transaction indices on each resolver
-		for (int resolverInd : context.transactionResolverMap[t]) context.nextTr[resolverInd]++;
-
-		// TODO: filter if pipelined with large commit
-		double duration = endTime - context.trs[t].requestTime();
-		context.pProxyCommitData->stats.commitLatencySample.addMeasurement(duration);
-		if(context.pProxyCommitData->latencyBandConfig.present()) {
-			bool filter = context.maxTransactionBytes > context.pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
-			context.pProxyCommitData->stats.commitLatencyBands.addMeasurement(endTime - context.trs[t].requestTime(), filter);
-		}
-	}
-
-	++context.pProxyCommitData->stats.commitBatchOut;
-	context.pProxyCommitData->stats.txnCommitOut += context.trs.size();
-	context.pProxyCommitData->stats.txnConflicts += context.trs.size() - context.commitCount;
-	context.pProxyCommitData->stats.txnCommitOutSuccess += context.commitCount;
-
-	if(now() - context.pProxyCommitData->lastCoalesceTime > SERVER_KNOBS->RESOLVER_COALESCE_TIME) {
-		context.pProxyCommitData->lastCoalesceTime = now();
-		int lastSize = context.pProxyCommitData->keyResolvers.size();
-		auto rs = context.pProxyCommitData->keyResolvers.ranges();
-		Version oldestVersion = context.prevVersion - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-		for(auto r = rs.begin(); r != rs.end(); ++r) {
-			while(r->value().size() > 1 && r->value()[1].first < oldestVersion)
-				r->value().pop_front();
-			if(r->value().size() && r->value().front().first < oldestVersion)
-				r->value().front().first = 0;
-		}
-		context.pProxyCommitData->keyResolvers.coalesce(allKeys);
-		if(context.pProxyCommitData->keyResolvers.size() != lastSize)
-			TraceEvent("KeyResolverSize", context.pProxyCommitData->dbgid).detail("Size", context.pProxyCommitData->keyResolvers.size());
-	}
-
-	// Dynamic batching for commits
-	double target_latency = (now() - context.startTime) * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
-	context.pProxyCommitData->commitBatchInterval = std::max(
-	    SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,
-	    std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX,
-	             target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
-	                 context.pProxyCommitData->commitBatchInterval * (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-
-	context.pProxyCommitData->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
-	ASSERT_ABORT(context.pProxyCommitData->commitBatchesMemBytesCount >= 0);
-	wait(context.releaseFuture);
 	return Void();
 }
 
