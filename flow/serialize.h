@@ -669,12 +669,16 @@ struct SendBuffer {
 	uint8_t const* data;
 	SendBuffer* next;
 	int bytes_written, bytes_sent;
+	int bytes_unsent() const {
+		return bytes_written - bytes_sent;
+	}
 };
 
 struct PacketBuffer : SendBuffer {
 private:
 	int reference_count;
 	uint32_t size_;
+	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
 	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
 
 public:
@@ -691,9 +695,9 @@ private:
 
 public:
 	static PacketBuffer* create(size_t size = 0) {
-		size = std::max(size, 4096 - PACKET_BUFFER_OVERHEAD);
-		if (size == 4096 - PACKET_BUFFER_OVERHEAD) {
-			return new (FastAllocator<4096>::allocate()) PacketBuffer{ size };
+		size = std::max(size, PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD);
+		if (size == PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD) {
+			return new (FastAllocator<PACKET_BUFFER_MIN_SIZE>::allocate()) PacketBuffer{ size };
 		}
 		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
 		return new (mem) PacketBuffer{ size };
@@ -702,8 +706,8 @@ public:
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
-			if (size_ == 4096 - PACKET_BUFFER_OVERHEAD) {
-				FastAllocator<4096>::release(this);
+			if (size_ == PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD) {
+				FastAllocator<PACKET_BUFFER_MIN_SIZE>::release(this);
 			} else {
 				delete[] this;
 			}
