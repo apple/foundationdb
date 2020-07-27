@@ -48,9 +48,13 @@ inline bool canReplyWith(Error e) {
 	};
 }
 
-const int VERSION_OVERHEAD = 64 + sizeof(Version) + sizeof(Standalone<VersionUpdateRef>) + //mutationLog, 64b overhead for map
-	2 * (64 + sizeof(Version) + sizeof(Reference<VersionedMap<KeyRef,
-									   ValueOrClearToRef>::PTreeT>)); //versioned map [ x2 for createNewVersion(version+1) ], 64b overhead for map
+const int VERSION_OVERHEAD =
+    64 + sizeof(Version) + sizeof(Standalone<VerUpdateRef>) + // mutationLog, 64b overhead for map
+    2 * (64 + sizeof(Version) +
+         sizeof(
+             Reference<VersionedMap<KeyRef,
+                                    ValueOrClearToRef>::PTreeT>)); // versioned map [ x2 for createNewVersion(version+1)
+                                                                   // ], 64b overhead for map
 static int mvccStorageBytes( MutationRef const& m ) { return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 + (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2; }
 
 struct StorageCacheData {
@@ -60,7 +64,7 @@ private:
 	VersionedData versionedData;
 	// in-memory mutationLog that the versionedData contains references to
 	// TODO change it to a deque, already contains mutations in version order
-	std::map<Version, Standalone<VersionUpdateRef>> mutationLog; // versions (durableVersion, version]
+	std::map<Version, Standalone<VerUpdateRef>> mutationLog; // versions (durableVersion, version]
 
 public:
 	UID thisServerID; // unique id
@@ -147,12 +151,12 @@ public:
 	}
 
 	Arena lastArena;
-	std::map<Version, Standalone<VersionUpdateRef>> const & getMutationLog() { return mutationLog; }
-	std::map<Version, Standalone<VersionUpdateRef>>& getMutableMutationLog() { return mutationLog; }
+	std::map<Version, Standalone<VerUpdateRef>> const& getMutationLog() { return mutationLog; }
+	std::map<Version, Standalone<VerUpdateRef>>& getMutableMutationLog() { return mutationLog; }
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
 
-	Standalone<VersionUpdateRef>& addVersionToMutationLog(Version v) {
+	Standalone<VerUpdateRef>& addVersionToMutationLog(Version v) {
 		// return existing version...
 		auto m = mutationLog.find(v);
 		if (m != mutationLog.end())
@@ -167,13 +171,12 @@ public:
 		return u;
 	}
 
-	MutationRef addMutationToMutationLog(Standalone<VersionUpdateRef> &mLV, MutationRef const& m){
+	MutationRef addMutationToMutationLog(Standalone<VerUpdateRef>& mLV, MutationRef const& m) {
 		//TODO find out more
 		//byteSampleApplyMutation(m, mLV.version);
 		counters.bytesInput += mvccStorageBytes(m);
-		return mLV.mutations.push_back_deep( mLV.arena(), m );
+		return mLV.push_back_deep(mLV.arena(), m);
 	}
-
 };
 
 ///////////////////////////////////// Queries /////////////////////////////////
