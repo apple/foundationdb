@@ -2295,7 +2295,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		if(warn.isValid())
 			warn.cancel();
 
-		state std::set<IPAddress> notExcludedServers =
+		state std::set<NetworkAddress> notExcludedServers =
 		    wait(makeInterruptable(checkForExcludingServers(db, addresses, waitForAllExcluded)));
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
@@ -2312,7 +2312,8 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 				absentExclusions.insert(addr);
 		}
 
-		for (const auto& addr : addresses) {
+		for (auto addr : addresses) {
+			NetworkAddress _addr(addr.ip, addr.port);
 			if (absentExclusions.find(addr) != absentExclusions.end()) {
 				if(addr.port == 0)
 					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
@@ -2322,7 +2323,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
 					       "before removing them from the cluster!\n",
 					       addr.toString().c_str());
-			} else if (notExcludedServers.find(addr.ip) != notExcludedServers.end()) {
+			} else if (notExcludedServers.find(_addr) != notExcludedServers.end()) {
 				if (addr.port == 0)
 					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
 					       "machine from the cluster\n",

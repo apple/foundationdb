@@ -1548,10 +1548,10 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
-ACTOR Future<std::set<IPAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
-                                                           bool waitForAllExcluded) {
+ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
+                                                                bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
-	state std::set<IPAddress> inProgressExclusion;
+	state std::set<NetworkAddress> inProgressExclusion;
 
 	if (!excl.size()) return inProgressExclusion;
 
@@ -1575,11 +1575,11 @@ ACTOR Future<std::set<IPAddress>> checkForExcludingServers(Database cx, vector<A
 				auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
 				if ( addressExcluded(exclusions, addresses.address) ) {
 					ok = false;
-					inProgressExclusion.insert(addresses.address.ip);
+					inProgressExclusion.insert(addresses.address);
 				}
 				if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
 					ok = false;
-					inProgressExclusion.insert(addresses.secondaryAddress.get().ip);
+					inProgressExclusion.insert(addresses.secondaryAddress.get());
 				}
 			}
 
@@ -1590,13 +1590,13 @@ ACTOR Future<std::set<IPAddress>> checkForExcludingServers(Database cx, vector<A
 				for( auto const& log : logs.first ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						inProgressExclusion.insert(log.second.ip);
+						inProgressExclusion.insert(log.second);
 					}
 				}
 				for( auto const& log : logs.second ) {
 					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
 						ok = false;
-						inProgressExclusion.insert(log.second.ip);
+						inProgressExclusion.insert(log.second);
 					}
 				}
 			}
