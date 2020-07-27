@@ -2136,8 +2136,8 @@ void ReadYourWritesTransaction::resetRyow() {
 	versionStampKeys = VectorRef<KeyRef>();
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
 	nativeWriteRanges = Standalone<VectorRef<KeyRangeRef>>();
-	specialKeySpaceWriteMap.rawErase(specialKeys); // TODO : check rawErase
-	specialKeySpaceErrorMsg.reset(); // TODO : shoule we clear it every time?
+	specialKeySpaceWriteMap.rawErase(specialKeys); // TODO : add a reset() for KeyRangeMap
+	specialKeySpaceErrorMsg.reset(); // Shoule we clear it every time?
 	watchMap.clear();
 	reading = AndFuture();
 	approximateSize = 0;
