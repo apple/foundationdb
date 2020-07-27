@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+6.2.24
+======
+
+Features
+--------
+
+* Added the ``suspend`` command to ``fdbcli`` which kills a process and prevents it from rejoining the cluster for a specified duration. `(PR #3550) <https://github.com/apple/foundationdb/pull/3550>`_
+
 6.2.23
 ======
 

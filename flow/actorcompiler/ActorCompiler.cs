@@ -713,7 +713,7 @@ namespace actorcompiler
                 }
 
                 var iter = getIteratorName(cx);
-                state.Add(new StateVar { SourceLine = stmt.FirstSourceLine, name = iter, type = "decltype(std::begin(fake<" + container.type + ">()))", initializer = null });
+                state.Add(new StateVar { SourceLine = stmt.FirstSourceLine, name = iter, type = "decltype(std::begin(std::declval<" + container.type + ">()))", initializer = null });
                 var equivalent = new ForStatement {
                     initExpression = iter + " = std::begin(" + stmt.rangeExpression + ")",
                     condExpression = iter + " != std::end(" + stmt.rangeExpression + ")",

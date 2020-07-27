@@ -135,9 +135,6 @@ do { \
 #include <functional>
 #endif
 
-// fake<T>() is for use in decltype expressions only - there is no implementation
-template <class T> T fake();
-
 // g++ requires that non-dependent names have to be looked up at
 // template definition, which makes circular dependencies a royal
 // pain. (For whatever it's worth, g++ appears to be adhering to spec
