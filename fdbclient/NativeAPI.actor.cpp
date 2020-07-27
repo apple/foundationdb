@@ -696,8 +696,9 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
 
-void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeReadImpl> impl, bool rw) {
-	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get(), rw);
+void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
+                                                    std::unique_ptr<SpecialKeyRangeReadImpl> impl) {
+	specialKeySpace->registerKeyRange(module, type, impl->getKeyRange(), impl.get());
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 
@@ -895,44 +896,51 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 	if (apiVersionAtLeast(700)) {
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<SingleSpecialKeyImpl>(
+		                                  SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin,
+		                                  [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			                                  if (ryw->getSpecialKeySpaceErrorMsg().present())
+				                                  return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
+			                                  else
+				                                  return Optional<Value>();
+		                                  }));
 		registerSpecialKeySpaceModule(
-			SpecialKeySpace::MODULE::ERRORMSG,
-			std::make_unique<SingleSpecialKeyImpl>(
-				SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin,
-				[](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-					if (ryw->getSpecialKeySpaceErrorMsg().present())
-						return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
-					else
-						return Optional<Value>();
-				}
-		));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
-		std::make_unique<ManagementCommandsOptionsImpl>(KeyRangeRef(
-			LiteralStringRef("options/"), LiteralStringRef("options0")
-		).withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)), true);
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
-		std::make_unique<ExcludeServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("exclude")), true);
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
-		std::make_unique<FailedServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("failed")), true);
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
-		std::make_unique<ExclusionInProgressRangeImpl>(KeyRangeRef(
-			LiteralStringRef("inProgressExclusion/"), LiteralStringRef("inProgressExclusion0")
-		).withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ManagementCommandsOptionsImpl>(
+		        KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ExcludeServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("exclude")));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<FailedServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("failed")));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<ExclusionInProgressRangeImpl>(
+		        KeyRangeRef(LiteralStringRef("inProgressExclusion/"), LiteralStringRef("inProgressExclusion0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS, SpecialKeySpace::IMPLTYPE::READONLY,
 		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::METRICS,
+		    SpecialKeySpace::MODULE::METRICS, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<HealthMetricsRangeImpl>(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/"),
 		                                                         LiteralStringRef("\xff\xff/metrics/health0"))));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
-		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::STATUSJSON,
+		    SpecialKeySpace::MODULE::WORKERINTERFACE, SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		        LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::STATUSJSON, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
 		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                                           if (ryw->getDatabase().getPtr() &&
@@ -943,7 +951,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 			                                           }
 		                                           }));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::CLUSTERFILEPATH,
+		    SpecialKeySpace::MODULE::CLUSTERFILEPATH, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
 		        LiteralStringRef("\xff\xff/cluster_file_path"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
@@ -959,7 +967,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        }));
 
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
+		    SpecialKeySpace::MODULE::CONNECTIONSTRING, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
 		        LiteralStringRef("\xff\xff/connection_string"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {

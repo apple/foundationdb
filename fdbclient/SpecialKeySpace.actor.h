@@ -135,6 +135,11 @@ public:
 		WORKERINTERFACE,
 	};
 
+	enum class IMPLTYPE {
+		READONLY, // The underlying special key range can only be called with get and getRange
+		READWRITE // The underlying special key range can be called with get, getRange, set, clear
+	};
+
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
 
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
@@ -150,9 +155,9 @@ public:
 
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
 
-	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl,
-	                      bool rw = false);
-		
+	void registerKeyRange(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type, const KeyRangeRef& kr,
+	                      SpecialKeyRangeReadImpl* impl);
+
 	Key decode(const KeyRef& key);
 	KeyRange decode(const KeyRangeRef& kr);
 

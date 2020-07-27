@@ -383,8 +383,8 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	return impl->clear(ryw, key);
 }
 
-void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr,
-                                       SpecialKeyRangeReadImpl* impl, bool rw) {
+void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
+                                       const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl) {
 	// module boundary check
 	if (module == SpecialKeySpace::MODULE::TESTONLY)
 		ASSERT(normalKeys.contains(kr));
@@ -399,7 +399,7 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, const Key
 	}
 	readImpls.insert(kr, impl);
 	// if rw, it means the module can do both read and write
-	if (rw) {
+	if (type == SpecialKeySpace::IMPLTYPE::READWRITE) {
 		// since write impls are always subset of read impls,
 		// no need to check overlapped registration
 		auto rwImpl = dynamic_cast<SpecialKeyRangeRWImpl*>(impl);
@@ -560,8 +560,7 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 	for (const auto& option : SpecialKeySpace::getManamentApiOptionsSet()) {
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
-		if (range.contains(key))
-			ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
+		if (range.contains(key)) ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }
 
