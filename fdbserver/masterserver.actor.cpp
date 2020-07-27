@@ -1619,8 +1619,19 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, ServerCoordinators coordinators, LifetimeToken lifetime, bool forceRecovery )
+ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, ServerCoordinators coordinators, LifetimeToken lifetime, bool forceRecovery )
 {
+	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
+	while(!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
+		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
+		if(ccTimeout.isReady()) {
+			TraceEvent("MasterTerminated", mi.id()).detail("Reason", "Timeout")
+			  .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
+			  .detail("DBInfoInterface", db->get().clusterInterface.id());
+			return Void();
+		}
+	}
+	
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery ) );
