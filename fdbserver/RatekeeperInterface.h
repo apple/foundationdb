@@ -84,6 +84,9 @@ struct TransactionCommitCostEstimation {
 	uint64_t bytesAtomicWrite = 0;
 	uint64_t bytesClearEst = 0;
 
+	double existTime;
+	TransactionCommitCostEstimation(): existTime(now()) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear, numClearShards);
