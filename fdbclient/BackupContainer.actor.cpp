@@ -1214,7 +1214,7 @@ public:
 		}
 
 		// for each range in tags, check all tags from 1 are continouous
-		for (const auto [beginEnd, count] : tags) {
+		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
 				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
@@ -1317,7 +1317,7 @@ public:
 
 		// for each range in tags, check all partitions from 1 are continouous
 		Version lastEnd = begin;
-		for (const auto [beginEnd, count] : tags) {
+		for (const auto& [beginEnd, count] : tags) {
 			Version tagEnd = beginEnd.second; // This range's minimum continous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
