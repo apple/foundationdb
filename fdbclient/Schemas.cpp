@@ -925,8 +925,8 @@ const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
 
 const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
 {
-   "Retriable": false,
-   "Command": "exclude",
-   "Message": "The reason of the error"
+   "retriable": false,
+   "command": "exclude",
+   "message": "The reason of the error"
 }
 )""");

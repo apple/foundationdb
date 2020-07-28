@@ -55,9 +55,9 @@ class ManagementAPIError {
 public:
 	static std::string toJsonString(bool retriable, std::string command, std::string msg) {
 		json_spirit::mObject errorObj;
-		errorObj["Retriable"] = retriable;
-		errorObj["Command"] = command;
-		errorObj["Message"] = msg;
+		errorObj["retriable"] = retriable;
+		errorObj["command"] = command;
+		errorObj["message"] = msg;
 		return json_spirit::write_string(json_spirit::mValue(errorObj), json_spirit::Output_options::raw_utf8);
 	}
 
