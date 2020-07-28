@@ -557,12 +557,7 @@ void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const Ke
 }
 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	// Since we only have limit number of options, a brute force loop here is enough
-	for (const auto& option : SpecialKeySpace::getManagementApiOptionsSet()) {
-		auto key = getKeyRange().begin.withSuffix(option);
-		// ignore all invalid keys
-		if (range.contains(key)) ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
-	}
+	ryw->getSpecialKeySpaceWriteMap().rawErase(range);
 }
 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
