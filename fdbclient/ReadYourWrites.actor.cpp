@@ -1765,16 +1765,19 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 	}
 
 	if (specialKeys.contains(key)) {
-		if (key == LiteralStringRef("\xff\xff/reboot_worker")){
-			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest() );
-			return;
-		}
-		if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")){
-			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
-			return;
-		}
 		if (getDatabase()->apiVersionAtLeast(700)) {
 			return getDatabase()->specialKeySpace->set(this, key, value);
+		} else {
+			if (key == LiteralStringRef("\xff\xff/reboot_worker")) {
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
+				    .reboot.send(RebootRequest());
+				return;
+			}
+			if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")) {
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
+				    .reboot.send(RebootRequest(false, true));
+				return;
+			}
 		}
 	}
 
