@@ -230,7 +230,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							tr->setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 						if (self->specialKeysRelaxed) tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 						if (self->specialKeysWritesEnabled)
-							tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+							tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 
 						int end = std::min(self->nodes, i+keysPerBatch );
 						tr->clear( KeyRangeRef( self->getKeyForIndex(i), self->getKeyForIndex(end) ) );
@@ -292,7 +292,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			}
 			if (self->specialKeysWritesEnabled) {
-				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			}
 			tr->addWriteConflictRange( self->conflictRange );
 

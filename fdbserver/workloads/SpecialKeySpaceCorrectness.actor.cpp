@@ -363,7 +363,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// The special key is not in a range that can be called with set
 		try {
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
 			ASSERT(false);
 		} catch (Error& e) {
@@ -373,7 +373,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// A clear cross two ranges are forbidden
 		try {
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tx->clear(KeyRangeRef(SpecialKeySpace::getManamentApiCommandRange("exclude").begin,
 			                      SpecialKeySpace::getManamentApiCommandRange("failed").end));
 			ASSERT(false);
@@ -384,7 +384,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// Management api error, and error message shema check
 		try {
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tx->set(LiteralStringRef("Invalid_Network_Address")
 			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
 			        ValueRef());

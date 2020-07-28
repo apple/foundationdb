@@ -2041,8 +2041,8 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 			validateOptionValue(value, false);
 			options.specialKeySpaceRelaxed = true;
 			break;
-		case FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION:
-			validateOptionValue(value, false);
+	    case FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES:
+		    validateOptionValue(value, false);
 			options.specialKeySpaceChangeConfiguration = true;
 			// By default, it allows to read system keys
 			// More options will be implicitly enabled if needed when doing set or clear

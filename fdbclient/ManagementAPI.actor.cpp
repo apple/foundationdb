@@ -1281,7 +1281,7 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try{
-				ryw.setOption( FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "exclude", "force"), ValueRef());
 				for(auto& s : servers) {
 					Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
@@ -1315,7 +1315,7 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
-				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_CHANGE_CONFIGURATION);
+				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				for (auto& s : servers) {
 					if (!s.isValid()) {
 						if (failed) {
