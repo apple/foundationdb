@@ -585,6 +585,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
+// g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
@@ -1022,9 +1023,9 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("                 Prefix to add to the restored keys\n");
 	printf("  -n, --dryrun   Perform a trial run with no changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
-		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
-		   "                 unspecified, defaults to the current directory. Has\n"
-		   "                 no effect unless --log is specified.\n");
+	       "  --logdir PATH  Specifies the output directory for trace files. If\n"
+	       "                 unspecified, defaults to the current directory. Has\n"
+	       "                 no effect unless --log is specified.\n");
 	printf("  --loggroup LOG_GROUP\n"
 	       "                 Sets the LogGroup field with the specified value for all\n"
 	       "                 events in the trace output (defaults to `default').\n");
@@ -1059,43 +1060,10 @@ static void printRestoreUsage(bool devhelp ) {
 }
 
 static void printFastRestoreUsage(bool devhelp) {
-	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s (start | status | abort | wait) [OPTIONS]\n\n", exeRestore.toString().c_str());
-	// printf("  FOLDERS        Paths to folders containing the backup files.\n");
-	printf("Options for all commands:\n\n");
-	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is first the value of the\n"
-	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-	       "                 then `%s'.\n",
-	       platform::getDefaultClusterFilePath().c_str());
-	printf("  -t TAGNAME     The restore tag to act on.  Default is 'default'\n");
-	printf("    --tagname TAGNAME\n\n");
-	printf(" Options for start:\n\n");
-	printf("  -r URL         The Backup URL for the restore to read from.\n");
-	printBackupContainerInfo();
-	printf("  -w             Wait for the restore to complete before exiting.  Prints progress updates.\n");
-	printf("    --waitfordone\n");
-	printf("  -k KEYS        List of key ranges from the backup to restore\n");
-	printf("  --remove_prefix PREFIX   prefix to remove from the restored keys\n");
-	printf("  --add_prefix PREFIX      prefix to add to the restored keys\n");
-	printf("  -n, --dry-run  Perform a trial run with no changes made.\n");
-	printf("  -v DBVERSION   The version at which the database will be restored.\n");
-	printf("  -h, --help     Display this help and exit.\n");
-	printf("NOTE: Fast restore is still under development. The options may not be fully supported.\n");
-
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
-
-	printf("\n"
-	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
-	printf("\n");
-	puts(BlobCredentialInfo);
-
+	printf(" NOTE: Fast restore aims to support the same fdbrestore option list.\n");
+	printf("       But fast restore is still under development. The options may not be fully supported.\n");
+	printf(" Supported options are: --dest_cluster_file, -r, --waitfordone, --logdir\n");
+	printRestoreUsage(devhelp);
 	return;
 }
 
@@ -2209,6 +2177,11 @@ ACTOR Future<Void> runFastRestoreTool(Database db, std::string tagName, std::str
 
 		printf("[INFO] runFastRestoreTool: restore_ranges:%d first range:%s\n", ranges.size(),
 		       ranges.front().toString().c_str());
+		TraceEvent ev("FastRestoreTool");
+		ev.detail("RestoreRanges", ranges.size());
+		for (int i = 0; i < ranges.size(); ++i) {
+			ev.detail(format("Range%d", i), ranges[i]);
+		}
 
 		if (performRestore) {
 			if (dbVersion == invalidVersion) {
@@ -3760,7 +3733,7 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case EXE_FASTRESTORE_TOOL:
-			// TODO: We have not implmented the code commented out in this case
+			// TODO: We have not implemented the code commented out in this case
 			if (!initCluster()) return FDB_EXIT_ERROR;
 			switch (restoreType) {
 			case RESTORE_START:
