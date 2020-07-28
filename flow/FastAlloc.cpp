@@ -27,6 +27,7 @@
 #include "flow/crc32c.h"
 #include "flow/flow.h"
 
+#include <atomic>
 #include <cstdint>
 #include <unordered_map>
 
@@ -221,9 +222,9 @@ struct FastAllocator<Size>::GlobalData {
 	CRITICAL_SECTION mutex;
 	std::vector<void*> magazines;   // These magazines are always exactly magazine_size ("full")
 	std::vector<std::pair<int, void*>> partial_magazines;  // Magazines that are not "full" and their counts.  Only created by releaseThreadMagazines().
-	long long totalMemory;
+	std::atomic<long long> totalMemory;
 	long long partialMagazineUnallocatedMemory;
-	long long activeThreads;
+	std::atomic<long long> activeThreads;
 	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) {
 		InitializeCriticalSection(&mutex);
 	}
@@ -231,10 +232,7 @@ struct FastAllocator<Size>::GlobalData {
 
 template <int Size>
 long long FastAllocator<Size>::getTotalMemory() {
-	EnterCriticalSection(&globalData()->mutex);
-	long long total = globalData()->totalMemory;
-	LeaveCriticalSection(&globalData()->mutex);
-	return total;
+	return globalData()->totalMemory.load();
 }
 
 // This does not include memory held by various threads that's available for allocation
@@ -249,10 +247,7 @@ long long FastAllocator<Size>::getApproximateMemoryUnused() {
 
 template <int Size>
 long long FastAllocator<Size>::getActiveThreads() {
-	EnterCriticalSection(&globalData()->mutex);
-	long long count = globalData()->activeThreads;
-	LeaveCriticalSection(&globalData()->mutex);
-	return count;
+	return globalData()->activeThreads.load();
 }
 
 #if FAST_ALLOCATOR_DEBUG
@@ -421,9 +416,7 @@ void FastAllocator<Size>::initThread() {
 		threadInitFunction();
 	}
 
-	EnterCriticalSection(&globalData()->mutex);
-	++globalData()->activeThreads;
-	LeaveCriticalSection(&globalData()->mutex);
+	globalData()->activeThreads.fetch_add(1);
 
 	threadData.freelist = nullptr;
 	threadData.alternate = nullptr;
@@ -452,7 +445,7 @@ void FastAllocator<Size>::getMagazine() {
 		threadData.count = p.first;
 		return;
 	}
-	globalData()->totalMemory += magazine_size*Size;
+	globalData()->totalMemory.fetch_add(magazine_size * Size);
 	LeaveCriticalSection(&globalData()->mutex);
 
 	// Allocate a new page of data from the system allocator
@@ -520,7 +513,7 @@ void FastAllocator<Size>::releaseThreadMagazines() {
 				globalData()->magazines.push_back(thr.alternate);
 			}
 		}
-		--globalData()->activeThreads;
+		globalData()->activeThreads.fetch_add(-1);
 		LeaveCriticalSection(&globalData()->mutex);
 
 		thr.count = 0;
