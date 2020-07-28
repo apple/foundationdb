@@ -2098,7 +2098,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
-	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap); // TODO: Check why copy constructor is deleted 
+	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
@@ -2136,8 +2136,9 @@ void ReadYourWritesTransaction::resetRyow() {
 	versionStampKeys = VectorRef<KeyRef>();
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
 	nativeWriteRanges = Standalone<VectorRef<KeyRangeRef>>();
-	specialKeySpaceWriteMap.rawErase(specialKeys); // TODO : add a reset() for KeyRangeMap
-	specialKeySpaceErrorMsg.reset(); // Shoule we clear it every time?
+	specialKeySpaceWriteMap =
+	    KeyRangeMap<std::pair<bool, Optional<Value>>>(std::make_pair(false, Optional<Value>()), specialKeys.end);
+	specialKeySpaceErrorMsg.reset();
 	watchMap.clear();
 	reading = AndFuture();
 	approximateSize = 0;
