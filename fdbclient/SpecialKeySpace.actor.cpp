@@ -536,7 +536,7 @@ Future<Standalone<RangeResultRef>> ManagementCommandsOptionsImpl::getRange(ReadY
                                                                            KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
 	// Since we only have limit number of options, a brute force loop here is enough
-	for (const auto& option : SpecialKeySpace::getManamentApiOptionsSet()) {
+	for (const auto& option : SpecialKeySpace::getManagementApiOptionsSet()) {
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
 		auto r = ryw->getSpecialKeySpaceWriteMap()[key];
@@ -549,7 +549,8 @@ Future<Standalone<RangeResultRef>> ManagementCommandsOptionsImpl::getRange(ReadY
 void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManamentApiOptionsSet().find(option) != SpecialKeySpace::getManamentApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
+	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
 		TraceEvent(SevDebug, "ManagementApiOption").detail("Option", option).detail("Key", key);
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
@@ -557,7 +558,7 @@ void ManagementCommandsOptionsImpl::set(ReadYourWritesTransaction* ryw, const Ke
 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
 	// Since we only have limit number of options, a brute force loop here is enough
-	for (const auto& option : SpecialKeySpace::getManamentApiOptionsSet()) {
+	for (const auto& option : SpecialKeySpace::getManagementApiOptionsSet()) {
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
 		if (range.contains(key)) ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
@@ -567,7 +568,8 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	std::string option = key.removePrefix(getKeyRange().begin).toString();
 	// ignore all invalid keys
-	if (SpecialKeySpace::getManamentApiOptionsSet().find(option) != SpecialKeySpace::getManamentApiOptionsSet().end()) {
+	if (SpecialKeySpace::getManagementApiOptionsSet().find(option) !=
+	    SpecialKeySpace::getManagementApiOptionsSet().end()) {
 		ryw->getSpecialKeySpaceWriteMap().rawErase(singleKeyRange(key));
 	}
 }

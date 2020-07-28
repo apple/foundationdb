@@ -173,7 +173,7 @@ public:
 		return managementApiCommandToRange.at(command).begin;
 	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
-	static const std::unordered_set<std::string>& getManamentApiOptionsSet() { return options; }
+	static const std::unordered_set<std::string>& getManagementApiOptionsSet() { return options; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
