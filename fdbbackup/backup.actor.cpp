@@ -3307,7 +3307,7 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case EXE_FASTRESTORE_TOOL:
-				fprintf(stderr, "ERROR: FDB Fast Restore Agent does not support argument value `%s'\n",
+				fprintf(stderr, "ERROR: FDB Fast Restore Tool does not support argument value `%s'\n",
 				        args->File(argLoop));
 				printHelpTeaser(argv[0]);
 				return FDB_EXIT_ERROR;
@@ -3733,12 +3733,40 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case EXE_FASTRESTORE_TOOL:
+			// Support --dest_cluster_file option as fdbrestore does
+			if (dryRun) {
+				if (restoreType != RESTORE_START) {
+					fprintf(stderr, "Restore dry run only works for 'start' command\n");
+					return FDB_EXIT_ERROR;
+				}
+
+				// Must explicitly call trace file options handling if not calling Database::createDatabase()
+				initTraceFile();
+			} else {
+				if (restoreClusterFileDest.empty()) {
+					fprintf(stderr, "Restore destination cluster file must be specified explicitly.\n");
+					return FDB_EXIT_ERROR;
+				}
+
+				if (!fileExists(restoreClusterFileDest)) {
+					fprintf(stderr, "Restore destination cluster file '%s' does not exist.\n",
+					        restoreClusterFileDest.c_str());
+					return FDB_EXIT_ERROR;
+				}
+
+				try {
+					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+				} catch (Error& e) {
+					fprintf(stderr, "Restore destination cluster file '%s' invalid: %s\n",
+					        restoreClusterFileDest.c_str(), e.what());
+					return FDB_EXIT_ERROR;
+				}
+			}
 			// TODO: We have not implemented the code commented out in this case
-			if (!initCluster()) return FDB_EXIT_ERROR;
 			switch (restoreType) {
 			case RESTORE_START:
 				f = stopAfter(runFastRestoreTool(db, tagName, restoreContainer, backupKeys, restoreVersion, !dryRun,
-				                                  !quietDisplay, waitForDone));
+				                                 !quietDisplay, waitForDone));
 				break;
 			case RESTORE_WAIT:
 				printf("[TODO][ERROR] FastRestore does not support RESTORE_WAIT yet!\n");
@@ -3749,8 +3777,9 @@ int main(int argc, char* argv[]) {
 				printf("[TODO][ERROR] FastRestore does not support RESTORE_ABORT yet!\n");
 				throw restore_error();
 				//					f = stopAfter( map(ba.abortRestore(db, KeyRef(tagName)),
-				//[tagName](FileBackupAgent::ERestoreState s) -> Void { 						printf("Tag: %s  State: %s\n", tagName.c_str(),
-				//FileBackupAgent::restoreStateText(s).toString().c_str()); 						return Void();
+				//[tagName](FileBackupAgent::ERestoreState s) -> Void { 						printf("Tag: %s  State: %s\n",
+				//tagName.c_str(),
+				// FileBackupAgent::restoreStateText(s).toString().c_str()); 						return Void();
 				//					}) );
 				break;
 			case RESTORE_STATUS:
