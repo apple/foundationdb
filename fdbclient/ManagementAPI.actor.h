@@ -162,7 +162,9 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr);
 // unless any of them are explicitly included with includeServers()
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> servers,
                                                                 bool waitForAllExcluded);
-ACTOR Future<bool> checkForExcludingServersTxActor(Transaction* tr, std::set<AddressExclusion>* exclusions, std::set<NetworkAddress>* inProgressExclusion);																
+ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
+                                                   std::set<AddressExclusion>* exclusions,
+                                                   std::set<NetworkAddress>* inProgressExclusion);
 
 // Gets a list of all workers in the cluster (excluding testers)
 ACTOR Future<vector<ProcessData>> getWorkers( Database  cx );

@@ -1611,7 +1611,9 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
-ACTOR Future<bool> checkForExcludingServersTxActor(Transaction* tr, std::set<AddressExclusion>* exclusions, std::set<NetworkAddress>* inProgressExclusion) {
+ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
+                                                   std::set<AddressExclusion>* exclusions,
+                                                   std::set<NetworkAddress>* inProgressExclusion) {
 	// TODO : replace using ExclusionInProgressRangeImpl in special key space
 	ASSERT(inProgressExclusion->size() == 0); //  Make sure every time it is cleared beforehand
 	if (!exclusions->size()) return true;
@@ -1666,7 +1668,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 	state std::set<NetworkAddress> inProgressExclusion;
 
 	loop {
-		state Transaction tr(cx);
+		state ReadYourWritesTransaction tr(cx);
 		inProgressExclusion.clear();
 		try {
 			bool ok = wait(checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion));
