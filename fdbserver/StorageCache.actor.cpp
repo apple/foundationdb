@@ -764,7 +764,6 @@ public:
 	Version currentVersion;
 private:
 	KeyRef cacheStartKey;
-	bool nowAssigned;
 	bool processedCacheStartKey;
 
 	// Applies private mutations, as the name suggests. It's basically establishes the key-ranges

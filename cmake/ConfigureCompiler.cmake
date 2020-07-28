@@ -237,6 +237,7 @@ else()
         -Wno-unknown-attributes)
     endif()
     add_compile_options(
+      -Wall -Wextra
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
       -Wno-comment
       -Wno-dangling-else
