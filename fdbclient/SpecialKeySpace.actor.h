@@ -166,10 +166,10 @@ public:
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
 	static KeyRangeRef getModuleRange(SpecialKeySpace::MODULE module) { return moduleToBoundary.at(module); }
-	static KeyRangeRef getManamentApiCommandRange(std::string command) {
+	static KeyRangeRef getManamentApiCommandRange(const std::string& command) {
 		return managementApiCommandToRange.at(command);
 	}
-	static KeyRef getManagementApiCommandPrefix(std::string command) {
+	static KeyRef getManagementApiCommandPrefix(const std::string& command) {
 		return managementApiCommandToRange.at(command).begin;
 	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
