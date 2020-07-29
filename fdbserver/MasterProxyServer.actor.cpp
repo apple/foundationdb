@@ -1110,40 +1110,19 @@ ACTOR Future<Void> getResolution(Context* self) {
 	return Void();
 }
 
-ACTOR Future<Void> postResolution(Context* self) {
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	state std::vector<CommitTransactionRequest>& trs = self->trs;
-	state const int64_t localBatchNumber = self->localBatchNumber;
-	state const Optional<UID>& debugID = self->debugID;
+void assertResolutionStateMutationsSizeConsistent(
+		const std::vector<ResolveTransactionBatchReply>& resolution) {
 
-	TEST(pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
-	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
-	wait(yield(TaskPriority::ProxyCommitYield1));
-
-	self->computeStart = g_network->now();
-
-	pProxyCommitData->stats.txnCommitResolved += trs.size();
-
-	if (debugID.present()) {
-		g_traceBatch.addEvent(
-			"CommitDebug", debugID.get().first(),
-			"MasterProxyServer.commitBatch.ProcessingMutations"
-		);
+	for (int r = 1; r < resolution.size(); r++) {
+		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
+		for(int s = 0; s < resolution[r].stateMutations.size(); s++) {
+			ASSERT(resolution[r].stateMutations[s].size() == resolution[0].stateMutations[s].size());
+		}
 	}
+}
 
-	self->isMyFirstBatch = !pProxyCommitData->version;
-	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
-
-	//TraceEvent("ResolutionResult", pProxyCommitData->dbgid).detail("Sequence", sequence).detail("Version", commitVersion).detail("StateMutationProxies", resolution[0].stateMutations.size()).detail("WaitForResolution", now()-t1).detail("R0Committed", resolution[0].committed.size())
-	//	.detail("Transactions", trs.size());
-
-	for(int r=1; r < self->resolution.size(); r++) {
-		ASSERT( self->resolution[r].stateMutations.size() == self->resolution[0].stateMutations.size() );
-		for(int s = 0; s < self->resolution[r].stateMutations.size(); s++)
-			ASSERT( self->resolution[r].stateMutations[s].size() == self->resolution[0].stateMutations[s].size() );
-	}
-
-	// Compute and apply "metadata" effects of each other proxy's most recent batch
+// Compute and apply "metadata" effects of each other proxy's most recent batch
+void applyMetadataEffect(Context* self) {
 	bool initialState = self->isMyFirstBatch;
 	self->firstStateMutations = self->isMyFirstBatch;
 	for (int versionIndex = 0; versionIndex < self->resolution[0].stateMutations.size(); versionIndex++) {
@@ -1164,20 +1143,16 @@ ACTOR Future<Void> postResolution(Context* self) {
 				self->firstStateMutations = false;
 				self->forceRecovery = false;
 			}
-			//TraceEvent("MetadataTransaction", pProxyCommitData->dbgid).detail("Committed", committed).detail("Mutations", resolution[0].stateMutations[versionIndex][transactionIndex].second.size()).detail("R1Mutations", resolution.back().stateMutations[versionIndex][transactionIndex].second.size());
 		}
-		//TraceEvent("MetadataBatch", pProxyCommitData->dbgid).detail("Transactions", resolution[0].stateMutations[versionIndex].size());
 
 		// These changes to txnStateStore will be committed by the other proxy, so we simply discard the commit message
-		auto fcm = pProxyCommitData->logAdapter->getCommitMessage();
-		self->storeCommits.emplace_back(fcm, pProxyCommitData->txnStateStore->commit());
-		//discardCommit( dbgid, fcm, txnStateStore->commit() );
+		auto fcm = self->pProxyCommitData->logAdapter->getCommitMessage();
+		self->storeCommits.emplace_back(fcm, self->pProxyCommitData->txnStateStore->commit());
 
 		if (initialState) {
-			//TraceEvent("ResyncLog", dbgid);
 			initialState = false;
 			self->forceRecovery = false;
-			pProxyCommitData->txnStateStore->resyncLog();
+			self->pProxyCommitData->txnStateStore->resyncLog();
 
 			for (auto &p : self->storeCommits) {
 				ASSERT(!p.second.isReady());
@@ -1187,16 +1162,20 @@ ACTOR Future<Void> postResolution(Context* self) {
 			self->storeCommits.clear();
 		}
 	}
+}
 
-	// Determine which transactions actually committed (conservatively) by combining results from the resolvers
+/// Determine which transactions actually committed (conservatively) by combining results from the resolvers
+void determineCommittedTransactions(Context* self) {
+	auto pProxyCommitData = self->pProxyCommitData;
+	const auto& trs = self->trs;
+
 	ASSERT(self->transactionResolverMap.size() == self->committed.size());
 	// For each commitTransactionRef, it is only sent to resolvers specified in transactionResolverMap
 	// Thus, we use this nextTr to track the correct transaction index on each resolver.
 	self->nextTr.resize(self->resolution.size());
 	for (int t = 0; t < trs.size(); t++) {
 		uint8_t commit = ConflictBatch::TransactionCommitted;
-		for (int r : self->transactionResolverMap[t])
-		{
+		for (int r : self->transactionResolverMap[t]) {
 			commit = std::min(self->resolution[r].committed[self->nextTr[r]++], commit);
 		}
 		self->committed[t] = commit;
@@ -1226,15 +1205,15 @@ ACTOR Future<Void> postResolution(Context* self) {
 			}
 		}
 	}
+}
 
-	if(self->forceRecovery) {
-		wait( Future<Void>(Never()) );
-	}
+// This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes to storage servers' responsibilities)
+ACTOR Future<Void> applyMetadataToCommittedTransactions(Context* self) {
+	auto pProxyCommitData = self->pProxyCommitData;
+	const auto& trs = self->trs;
 
-	// This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes to storage servers' responsibilities)
 	int t;
-	for (t = 0; t < trs.size() && !self->forceRecovery; t++)
-	{
+	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(*pProxyCommitData, self->arena, pProxyCommitData->logSystem,
@@ -1248,7 +1227,7 @@ ACTOR Future<Void> postResolution(Context* self) {
 		}
 	}
 	if (self->forceRecovery) {
-		for (; t< trs.size(); t++)
+		for (; t < trs.size(); t++)
 			self->committed[t] = ConflictBatch::TransactionConflict;
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", pProxyCommitData->dbgid).detail("Stage", "AwaitCommit");
 	}
@@ -1269,114 +1248,168 @@ ACTOR Future<Void> postResolution(Context* self) {
 		ASSERT(false);   // ChangeCoordinatorsRequest should always throw
 	}
 
-	// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers' tags
+	return Void();
+}
+
+/// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers' tags
+ACTOR Future<Void> assignMutationsToStorageServers(Context* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state std::vector<CommitTransactionRequest>& trs = self->trs;
+
 	for (; self->transactionNum < trs.size(); self->transactionNum++) {
-		if (self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted && (!self->locked || trs[self->transactionNum].isLockAware())) {
-			state int mutationNum = 0;
-			state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
-			for (; mutationNum < pMutations->size(); mutationNum++) {
-				if(self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-					self->yieldBytes = 0;
-					if(g_network->check_yield(TaskPriority::ProxyCommitYield1)) {
-						self->computeDuration += g_network->timer() - self->computeStart;
-						wait(delay(0, TaskPriority::ProxyCommitYield1));
-						self->computeStart = g_network->timer();
-					}
+		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted && (!self->locked || trs[self->transactionNum].isLockAware()))) {
+			continue;
+		}
+
+		state int mutationNum = 0;
+		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
+		for (; mutationNum < pMutations->size(); mutationNum++) {
+			if(self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				self->yieldBytes = 0;
+				if(g_network->check_yield(TaskPriority::ProxyCommitYield1)) {
+					self->computeDuration += g_network->timer() - self->computeStart;
+					wait(delay(0, TaskPriority::ProxyCommitYield1));
+					self->computeStart = g_network->timer();
+				}
+			}
+
+			auto& m = (*pMutations)[mutationNum];
+			self->mutationCount++;
+			self->mutationBytes += m.expectedSize();
+			self->yieldBytes += m.expectedSize();
+			// Determine the set of tags (responsible storage servers) for the mutation, splitting it
+			// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
+
+			if (isSingleKeyMutation((MutationRef::Type) m.type)) {
+				auto& tags = pProxyCommitData->tagsForKey(m.param1);
+
+				if(pProxyCommitData->singleKeyMutationEvent->enabled) {
+					KeyRangeRef shard = pProxyCommitData->keyInfo.rangeContaining(m.param1).range();
+					pProxyCommitData->singleKeyMutationEvent->tag1 = (int64_t)tags[0].id;
+					pProxyCommitData->singleKeyMutationEvent->tag2 = (int64_t)tags[1].id;
+					pProxyCommitData->singleKeyMutationEvent->tag3 = (int64_t)tags[2].id;
+					pProxyCommitData->singleKeyMutationEvent->shardBegin = shard.begin;
+					pProxyCommitData->singleKeyMutationEvent->shardEnd = shard.end;
+					pProxyCommitData->singleKeyMutationEvent->log();
 				}
 
-				auto& m = (*pMutations)[mutationNum];
-				self->mutationCount++;
-				self->mutationBytes += m.expectedSize();
-				self->yieldBytes += m.expectedSize();
-				// Determine the set of tags (responsible storage servers) for the mutation, splitting it
-				// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
-
-				if (isSingleKeyMutation((MutationRef::Type) m.type)) {
-					auto& tags = pProxyCommitData->tagsForKey(m.param1);
-
-					if(pProxyCommitData->singleKeyMutationEvent->enabled) {
-						KeyRangeRef shard = pProxyCommitData->keyInfo.rangeContaining(m.param1).range();
-						pProxyCommitData->singleKeyMutationEvent->tag1 = (int64_t)tags[0].id;
-						pProxyCommitData->singleKeyMutationEvent->tag2 = (int64_t)tags[1].id;
-						pProxyCommitData->singleKeyMutationEvent->tag3 = (int64_t)tags[2].id;
-						pProxyCommitData->singleKeyMutationEvent->shardBegin = shard.begin;
-						pProxyCommitData->singleKeyMutationEvent->shardEnd = shard.end;
-						pProxyCommitData->singleKeyMutationEvent->log();
-					}
-
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", tags).detail("Mutation", m);
-
-					self->toCommit.addTags(tags);
-					if(pProxyCommitData->cacheInfo[m.param1]) {
-						self->toCommit.addTag(cacheTag);
-					}
-					self->toCommit.addTypedMessage(m);
+				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", tags).detail("Mutation", m);
+				self->toCommit.addTags(tags);
+				if(pProxyCommitData->cacheInfo[m.param1]) {
+					self->toCommit.addTag(cacheTag);
 				}
-				else if (m.type == MutationRef::ClearRange) {
-					KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-					auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
-					auto firstRange = ranges.begin();
-					++firstRange;
-					if (firstRange == ranges.end()) {
-						// Fast path
-						DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", ranges.begin().value().tags).detail("Mutation", m);
+				self->toCommit.addTypedMessage(m);
+			}
+			else if (m.type == MutationRef::ClearRange) {
+				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
+				auto firstRange = ranges.begin();
+				++firstRange;
+				if (firstRange == ranges.end()) {
+					// Fast path
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", ranges.begin().value().tags).detail("Mutation", m);
 
-						ranges.begin().value().populateTags();
-						self->toCommit.addTags(ranges.begin().value().tags);
+					ranges.begin().value().populateTags();
+					self->toCommit.addTags(ranges.begin().value().tags);
+				}
+				else {
+					TEST(true); //A clear range extends past a shard boundary
+					std::set<Tag> allSources;
+					for (auto r : ranges) {
+						r.value().populateTags();
+						allSources.insert(r.value().tags.begin(), r.value().tags.end());
 					}
-					else {
-						TEST(true); //A clear range extends past a shard boundary
-						std::set<Tag> allSources;
-						for (auto r : ranges) {
-							r.value().populateTags();
-							allSources.insert(r.value().tags.begin(), r.value().tags.end());
-						}
-						DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", allSources).detail("Mutation", m);
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", allSources).detail("Mutation", m);
 
-						self->toCommit.addTags(allSources);
-					}
-					if(pProxyCommitData->needsCacheTag(clearRange)) {
-						self->toCommit.addTag(cacheTag);
-					}
-					self->toCommit.addTypedMessage(m);
-				} else {
-					UNREACHABLE();
+					self->toCommit.addTags(allSources);
 				}
 
-				// Check on backing up key, if backup ranges are defined and a normal key
-				if (pProxyCommitData->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey)) {
-					if (m.type != MutationRef::Type::ClearRange) {
-						// Add the mutation to the relevant backup tag
-						for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
-							self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, m);
-						}
-					}
-					else {
-						KeyRangeRef mutationRange(m.param1, m.param2);
-						KeyRangeRef intersectionRange;
+				if(pProxyCommitData->needsCacheTag(clearRange)) {
+					self->toCommit.addTag(cacheTag);
+				}
+				self->toCommit.addTypedMessage(m);
+			} else {
+				UNREACHABLE();
+			}
 
-						// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
-						for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange))
-						{
-							// Get the backup sub range
-							const auto&		backupSubrange = backupRange.range();
+			// Check on backing up key, if backup ranges are defined and a normal key
+			if (!(pProxyCommitData->vecBackupKeys.size() > 1 && (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
+				continue;
+			}
 
-							// Determine the intersecting range
-							intersectionRange = mutationRange & backupSubrange;
+			if (m.type != MutationRef::Type::ClearRange) {
+				// Add the mutation to the relevant backup tag
+				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
+					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, m);
+				}
+			}
+			else {
+				KeyRangeRef mutationRange(m.param1, m.param2);
+				KeyRangeRef intersectionRange;
 
-							// Create the custom mutation for the specific backup tag
-							MutationRef		backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+				// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
+				for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange))
+				{
+					// Get the backup sub range
+					const auto&		backupSubrange = backupRange.range();
 
-							// Add the mutation to the relevant backup tag
-							for (auto backupName : backupRange.value()) {
-								self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, backupMutation);
-							}
-						}
+					// Determine the intersecting range
+					intersectionRange = mutationRange & backupSubrange;
+
+					// Create the custom mutation for the specific backup tag
+					MutationRef		backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+
+					// Add the mutation to the relevant backup tag
+					for (auto backupName : backupRange.value()) {
+						self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, backupMutation);
 					}
 				}
 			}
 		}
 	}
+
+	return Void();
+}
+
+ACTOR Future<Void> postResolution(Context* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state std::vector<CommitTransactionRequest>& trs = self->trs;
+	state const int64_t localBatchNumber = self->localBatchNumber;
+	state const Optional<UID>& debugID = self->debugID;
+
+	TEST(pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
+	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
+	wait(yield(TaskPriority::ProxyCommitYield1));
+
+	self->computeStart = g_network->now();
+
+	pProxyCommitData->stats.txnCommitResolved += trs.size();
+
+	if (debugID.present()) {
+		g_traceBatch.addEvent(
+			"CommitDebug", debugID.get().first(),
+			"MasterProxyServer.commitBatch.ProcessingMutations"
+		);
+	}
+
+	self->isMyFirstBatch = !pProxyCommitData->version;
+	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
+
+	assertResolutionStateMutationsSizeConsistent(self->resolution);
+
+	applyMetadataEffect(self);
+
+	determineCommittedTransactions(self);
+
+	if(self->forceRecovery) {
+		wait( Future<Void>(Never()) );
+	}
+
+	// First pass
+	wait(applyMetadataToCommittedTransactions(self));
+
+	// Second pass
+	wait(assignMutationsToStorageServers(self));
 
 	// Serialize and backup the mutations as a single mutation
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
