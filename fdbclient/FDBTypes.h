@@ -411,43 +411,6 @@ struct KeyValueRef {
 };
 
 template<>
-struct string_serialized_traits<KeyValueRef> : std::true_type {
-	int32_t getSize(const KeyValueRef& item) const {
-		return 2*sizeof(uint32_t) + item.key.size() + item.value.size();
-	}
-
-	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
-		auto begin = out;
-		uint32_t sz = item.key.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
-		out += sizeof(sz);
-		memcpy(out, item.key.begin(), sz);
-		out += sz;
-		sz = item.value.size();
-		*reinterpret_cast<decltype(sz)*>(out) = sz;
-		out += sizeof(sz);
-		memcpy(out, item.value.begin(), sz);
-		out += sz;
-		return out - begin;
-	}
-
-	template <class Context>
-	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
-		auto begin = data;
-		uint32_t sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.key = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
-		memcpy(&sz, data, sizeof(sz));
-		data += sizeof(sz);
-		t.value = StringRef(context.tryReadZeroCopy(data, sz), sz);
-		data += sz;
-		return data - begin;
-	}
-};
-
-template<>
 struct Traceable<KeyValueRef> : std::true_type {
 	static std::string toString(const KeyValueRef& value) {
 		return Traceable<KeyRef>::toString(value.key) + format(":%d", value.value.size());
