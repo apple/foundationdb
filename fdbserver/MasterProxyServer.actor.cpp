@@ -812,7 +812,7 @@ ACTOR Future<Void> commitBatch(
 	int currentBatchMemBytesCount)
 {
 	//WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as possible
-	state std::vector<CommitTransactionRequest> trs(std::move(*(const_cast<std::vector<CommitTransactionRequest>*>(pTrs))));
+	state std::vector<CommitTransactionRequest> trs(std::move(*pTrs));
 	state int64_t localBatchNumber = ++self->localCommitBatchesStarted;
 	state LogPushData toCommit(self->logSystem);
 	state double t1 = now();
