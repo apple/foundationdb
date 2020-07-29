@@ -722,19 +722,16 @@ public:
 			}
 		}
 
-		std::vector<WorkerFitnessInfo> first_resolver =
-		    { getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used ) };
 		std::vector<WorkerFitnessInfo> first_two_proxies =
-		    { getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, id_used ),
+			{ getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, id_used ),
 			  getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, id_used ) };
+		std::vector<WorkerFitnessInfo> first_resolver =
+			{ getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used ) };
 
-		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
 		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_two_proxies );
 		TraceEvent("GetWorkersForProxy").detail("Loc", 2).detail("Proxy", proxies.size()).detail("ConfigSize", req.configuration.getDesiredProxies());
 		ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
 		int grvProxiesCount = std::max(1, (int) (CLIENT_KNOBS->GRV_PROXIES_RATIO * proxies.size()));
-		for(int i = 0; i < resolvers.size(); i++)
-			result.resolvers.push_back(resolvers[i].interf);
 		deterministicRandom()->randomShuffle(proxies);
 		for(int i = 0; i < proxies.size(); i++) {
 			if (i < grvProxiesCount) {
@@ -743,6 +740,10 @@ public:
 				result.masterProxies.push_back(proxies[i].interf);
 			}
 		}
+
+		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
+		for(int i = 0; i < resolvers.size(); i++)
+			result.resolvers.push_back(resolvers[i].interf);
 
 		if(req.maxOldLogRouters > 0) {
 			if(tlogs.size() == 1) {
@@ -873,15 +874,16 @@ public:
 				try {
 					//SOMEDAY: recruitment in other DCs besides the clusterControllerDcID will not account for the processes used by the master and cluster controller properly.
 					auto used = id_used;
-					std::vector<WorkerFitnessInfo> first_resolver =
-					    { getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used ) };
 					std::vector<WorkerFitnessInfo> first_two_proxies =
-					    { getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used ),
+						{ getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used ),
 						  getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used )};
-					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
+					std::vector<WorkerFitnessInfo> first_resolver =
+						{ getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used ) };
+
 					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, used, first_two_proxies );
 					TraceEvent("GetWorkersForProxy").detail("Loc", 1).detail("Proxy", proxies.size()).detail("ConfigSize", req.configuration.getDesiredProxies());
 					ASSERT(proxies.size() >= 2 && proxies.size() <= req.configuration.getDesiredProxies());
+					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
 
 					RoleFitnessPair fitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
 
@@ -939,8 +941,11 @@ public:
 			desiredDcIds.set(vector<Optional<Key>>());
 			TraceEvent("FindWorkersForConfig").detail("Replication", req.configuration.tLogReplicationFactor)
 				.detail("DesiredLogs", req.configuration.getDesiredLogs()).detail("ActualLogs", result.tLogs.size())
-				.detail("DesiredProxies", req.configuration.getDesiredProxies()).detail("ActualProxies", result.masterProxies.size())
-				.detail("DesiredResolvers", req.configuration.getDesiredResolvers()).detail("ActualResolvers", result.resolvers.size());
+				.detail("DesiredProxies", req.configuration.getDesiredProxies())
+			    .detail("ActualProxies", result.masterProxies.size())
+				.detail("ActualGrvProxies", result.grvProxies.size())
+				.detail("DesiredResolvers", req.configuration.getDesiredResolvers())
+			    .detail("ActualResolvers", result.resolvers.size());
 
 			if( !goodRecruitmentTime.isReady() &&
 				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
@@ -1225,14 +1230,15 @@ public:
 		// Check proxy/resolver fitness
 		RoleFitnessPair oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy), RoleFitness(resolverClasses, ProcessClass::Resolver));
 
-		std::vector<WorkerFitnessInfo> first_resolver = {getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true )};
 		std::vector<WorkerFitnessInfo> first_two_proxies =
 			{ getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true ),
 			  getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true ) };
-		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
+		std::vector<WorkerFitnessInfo> first_resolver = {getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true )};
+
 		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(), db.config, id_used, first_two_proxies, true );
 		TraceEvent("GetWorkersForProxy").detail("Loc", 4).detail("Proxy", proxies.size()).detail("ConfigSize", db.config.getDesiredProxies());
 		ASSERT(proxies.size() >= 2 && proxies.size() <= db.config.getDesiredProxies());
+		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
 
 		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
 		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
@@ -1838,6 +1844,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 	TEST(true); //ClusterController RecruitTLogsRequest
 	loop {
 		try {
+			TraceEvent("ClusterRecruitRequest").detail("Req", req.configuration.toString());
 			auto rep = self->findWorkersForConfiguration( req );
 			req.reply.send( rep );
 			return Void();
@@ -1949,9 +1956,22 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 	// Construct the client information
 	if (db->clientInfo->get().masterProxies != req.masterProxies || db->clientInfo->get().grvProxies != req.grvProxies) {
+		TraceEvent("ClientInfoConstruct")
+		    .detail("M", db->clientInfo->get().masterProxies != req.masterProxies)
+			.detail("P", db->clientInfo->get().grvProxies != req.grvProxies);
 		isChanged = true;
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
+
+		TraceEvent("ClientInfoConstruct1")
+		    .detail("OwnM", clientInfo.masterProxies.size())
+			.detail("OwnMProv", clientInfo.masterProxies.size() ? clientInfo.masterProxies[0].provisional : -1)
+			.detail("OwnP", clientInfo.grvProxies.size())
+			.detail("OwnPProv", clientInfo.grvProxies.size() ? clientInfo.grvProxies[0].provisional : -1)
+			.detail("ReqM", req.masterProxies.size())
+			.detail("ReqMProv", req.masterProxies.size() ? req.masterProxies[0].provisional : -1)
+			.detail("ReqP", req.grvProxies.size())
+			.detail("ReqPProv", req.grvProxies.size() ? req.grvProxies[0].provisional : -1);
 		clientInfo.masterProxies = req.masterProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;

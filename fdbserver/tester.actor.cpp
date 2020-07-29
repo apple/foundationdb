@@ -435,9 +435,12 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 					if( e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
 				}
 			}
+			TraceEvent("TestSetupSendResult1");
 			sendResult( setupReq, setupResult );
+			TraceEvent("TestSetupSendResult2");
 		}
 		when( ReplyPromise<Void> req = waitNext( workIface.start.getFuture() ) ) {
+			TraceEvent("TestStartLoc1");
 			startReq = req;
 			if (!startResult.present()) {
 				try {
@@ -674,10 +677,12 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	if( spec.phases & TestWorkload::SETUP ) {
 		state std::vector< Future<ErrorOr<Void>> > setups;
 		printf("setting up test (%s)...\n", printable(spec.title).c_str());
-		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title);
+		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title)
+		    .detail("Size", workloads.size());
 		for(int i= 0; i < workloads.size(); i++)
 			setups.push_back( workloads[i].setup.template getReplyUnlessFailedFor<Void>( waitForFailureTime, 0) );
 		wait( waitForAll( setups ) );
+		TraceEvent("TestSetupLoc1");
 		throwIfError(setups, "SetupFailedForWorkload" + printable(spec.title));
 		TraceEvent("TestSetupComplete").detail("WorkloadTitle", spec.title);
 	}

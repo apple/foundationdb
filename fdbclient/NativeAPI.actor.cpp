@@ -1518,14 +1518,18 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxie
 
 Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxies) {
 	if (grvProxiesLastChange != clientInfo->get().id) {
+		TraceEvent("GetGrvProxiesLoc1");
 		grvProxiesLastChange = clientInfo->get().id;
 		grvProxies.clear();
 		if( clientInfo->get().grvProxies.size() ) {
+			TraceEvent("GetGrvProxiesLoc2");
 			grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
 			grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 		}
 	}
 	if(grvProxyProvisional && !useProvisionalProxies) {
+		// Come inside here
+		TraceEvent("GetGrvProxiesLoc3");
 		return Reference<GrvProxyInfo>();
 	}
 	return grvProxies;
@@ -3335,6 +3339,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			req.commitCostEstimation = TransactionCommitCostEstimation();
 			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
 		}
+//		TraceEvent("GotReadVersion")
+//		    .detail("V", req.transaction.read_snapshot);
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -3345,24 +3351,31 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 
 		req.debugID = commitID;
+//		TraceEvent("ClientTxnCommitLoc0").detail("V", req.transaction.read_snapshot);
 		state Future<CommitID> reply;
 		if (options.commitOnFirstProxy) {
+//			TraceEvent("ClientTxnCommitLoc1");
 			if(cx->clientInfo->get().firstProxy.present()) {
 				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
+//				TraceEvent("ClientTxnCommitLoc11");
 			} else {
 				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().masterProxies;
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+//				TraceEvent("ClientTxnCommitLoc12").detail("Size", proxies.size());
 			}
 		} else {
+//			TraceEvent("ClientTxnCommitLoc2").detail("UseProvisional", info.useProvisionalProxies);
 			reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 		}
 
 		choose {
 			when ( wait( cx->onProxiesChanged() ) ) {
+//				TraceEvent("ClientTxnCommitLoc4");
 				reply.cancel();
 				throw request_maybe_delivered();
 			}
 			when (CommitID ci = wait( reply )) {
+//				TraceEvent("ClientTxnCommitLoc3");
 				Version v = ci.version;
 				if (v != invalidVersion) {
 					if (CLIENT_BUGGIFY) {
@@ -3781,9 +3794,15 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 		loop {
 			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
+			TraceEvent("ClientGRVLoc0")
+			    .detail("Provisonal", flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)
+			    .detail("GrvProxies", cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES).isValid());
 			choose {
-				when ( wait( cx->onProxiesChanged() ) ) {}
+				when ( wait( cx->onProxiesChanged() ) ) {
+					TraceEvent("ProxiesChanged");
+				}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+					TraceEvent("ClientGRVLoc1").detail("Provisonal", flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES);
 					if(tags.size() != 0) {
 						auto &priorityThrottledTags = cx->throttledTags[priority];
 						for(auto& tag : tags) {
@@ -3888,7 +3907,9 @@ ACTOR Future<Version> extractReadVersion(SpanID parentSpan, DatabaseContext* cx,
                                          bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
                                          TagSet tags) {
 	// parentSpan here is only used to keep the parent alive until the request completes
+	TraceEvent("ClientExtractReadVersionLoc0");
 	GetReadVersionReply rep = wait(f);
+	TraceEvent("ClientExtractReadVersionLoc1").detail("V", rep.version).detail("Locked", rep.locked);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)

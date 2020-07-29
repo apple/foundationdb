@@ -642,6 +642,10 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 		while(!timeout.isReady() && !(batch.size() == SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX || batchBytes >= desiredBytes)) {
 			choose{
 				when(CommitTransactionRequest req = waitNext(in)) {
+//					TraceEvent("CommitTxnLoc1");
+//					for (auto& mutation : req.transaction.mutations) {
+//						TraceEvent("TryCommitReq").detail("V", req.transaction.read_snapshot).detail("Mutation", mutation.toString());
+//					}
 					//WARNING: this code is run at a high priority, so it needs to do as little work as possible
 					commitData->stats.addRequest();
 					int bytes = getBytes(req);
@@ -884,7 +888,7 @@ ACTOR Future<Void> commitBatch(
 			r->value().emplace_back(versionReply.resolverChangesVersion,it.dest);
 	}
 
-	//TraceEvent("ProxyGotVer", self->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
+	TraceEvent("ProxyGotVer", self->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GotCommitVersion");
@@ -924,6 +928,7 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterResolution");
 
+	TraceEvent("CommitTxnDebug1");
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
 	wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber-1));
@@ -1198,6 +1203,8 @@ ACTOR Future<Void> commitBatch(
 	self->stats.mutations += mutationCount;
 	self->stats.mutationBytes += mutationBytes;
 
+//	TraceEvent("CommitTxnDebug2");
+
 	// Storage servers mustn't make durable versions which are not fully committed (because then they are impossible to roll back)
 	// We prevent this by limiting the number of versions which are semi-committed but not fully committed to be less than the MVCC window
 	if(self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
@@ -1208,14 +1215,27 @@ ACTOR Future<Void> commitBatch(
 			TEST(true);  // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
 			waitVersionSpan = Span(deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, {span.context});
+			TraceEvent("NeedToGetReadVersion1")
+			    .detail("CommittedVersion", self->committedVersion.get())
+				.detail("CommitVersion", commitVersion)
+				.detail("ActualDiff", commitVersion - self->committedVersion.get())
+			    .detail("RequiredDiff", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
 			choose{
 				when(wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
 					wait(yield());
 					break; 
 				}
 				when(wait(self->cx->onProxiesChanged())) {}
-				when(GetReadVersionReply v = wait(basicLoadBalance(self->cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion,
-				                                                   GetReadVersionRequest(waitVersionSpan.context, 0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY), TaskPriority::GetLiveCommittedVersion))) {
+				when(GetRawCommittedVersionReply v = wait(self->master.getLiveCommittedVersion.getReply(
+				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID), TaskPriority::GetLiveCommittedVersionReply))) {
+					TraceEvent("NeedToGetReadVersion3")
+						.detail("CommittedVersion", self->committedVersion.get())
+						.detail("CommitVersion", commitVersion)
+						.detail("ActualDiff", commitVersion - self->committedVersion.get())
+						.detail("AfterDiff", commitVersion - v.version)
+						.detail("RequiredDiff", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+						.detail("Override", v.version > self->committedVersion.get());
+
 					if(v.version > self->committedVersion.get()) {
 						self->locked = v.locked;
 						self->metadataVersion = v.metadataVersion;
@@ -1224,12 +1244,53 @@ ACTOR Future<Void> commitBatch(
 
 					if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
 						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
+
 				}
+//				when(GetReadVersionReply v = wait(basicLoadBalance(self->cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion,
+//				                                                   GetReadVersionRequest(waitVersionSpan.context, 0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY), TaskPriority::GetLiveCommittedVersion))) {
+//					TraceEvent("NeedToGetReadVersion3")
+//						.detail("CommittedVersion", self->committedVersion.get())
+//						.detail("CommitVersion", commitVersion)
+//						.detail("ActualDiff", commitVersion - self->committedVersion.get())
+//						.detail("AfterDiff", commitVersion - v.version)
+//						.detail("RequiredDiff", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+//						.detail("Override", v.version > self->committedVersion.get());
+//
+//					if(v.version > self->committedVersion.get()) {
+//						self->locked = v.locked;
+//						self->metadataVersion = v.metadataVersion;
+//						self->committedVersion.set(v.version);
+//					}
+//
+//					if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+//						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
+//				}
+//				when(wait(delay(0.1))) {
+//					GetReadVersionReply v = wait(basicLoadBalance(self->cx->getGrvProxies(true), &GrvProxyInterface::getConsistentReadVersion,
+//																  GetReadVersionRequest(waitVersionSpan.context, 0, TransactionPriority::IMMEDIATE, GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY), TaskPriority::GetLiveCommittedVersion));
+//					TraceEvent("NeedToGetReadVersion2")
+//						.detail("CommittedVersion", self->committedVersion.get())
+//						.detail("CommitVersion", commitVersion)
+//						.detail("ActualDiff", commitVersion - self->committedVersion.get())
+//					    .detail("AfterDiff", commitVersion - v.version)
+//						.detail("RequiredDiff", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+//					    .detail("Override", v.version > self->committedVersion.get());
+//
+//					if(v.version > self->committedVersion.get()) {
+//						self->locked = v.locked;
+//						self->metadataVersion = v.metadataVersion;
+//						self->committedVersion.set(v.version);
+//					}
+//
+//					if (self->committedVersion.get() < commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+//						wait(delay(SERVER_KNOBS->PROXY_SPIN_DELAY));
+//				}
 			}
 		}
 		waitVersionSpan = Span{};
 		computeStart = g_network->timer();
 	}
+//	TraceEvent("CommitTxnDebug3");
 
 	state LogSystemDiskQueueAdapter::CommitMessage msg = storeCommits.back().first.get();
 
@@ -1274,6 +1335,7 @@ ACTOR Future<Void> commitBatch(
 		}
 	}
 
+//	TraceEvent("CommitTxnDebug4");
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
 
 	try {
@@ -1303,6 +1365,7 @@ ACTOR Future<Void> commitBatch(
 		self->txsPopVersions.emplace_back(commitVersion, msg.popTo);
 	}
 	self->logSystem->popTxs(msg.popTo);
+//	TraceEvent("CommitTxnDebug5");
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
@@ -1323,7 +1386,14 @@ ACTOR Future<Void> commitBatch(
 	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
 	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
 	TEST(self->committedVersion.get() > commitVersion);   // A later version was reported committed first
-	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER) {
+	TraceEvent("MPBeforeReportOutside")
+		.detail("CV", commitVersion)
+	    .detail("Committed", self->committedVersion.get())
+		.detail("Locked", lockedAfter);
+	if (SERVER_KNOBS->ASK_READ_VERSION_FROM_MASTER && commitVersion >= self->committedVersion.get()) {
+		TraceEvent("MPBeforeReportInside")
+		    .detail("CV", commitVersion)
+		    .detail("Locked", lockedAfter);
 		wait(self->master.reportLiveCommittedVersion.getReply(ReportRawCommittedVersionRequest(commitVersion, lockedAfter, metadataVersionAfter, self->minKnownCommittedVersion), TaskPriority::ProxyMasterVersionReply));
 	}
 	if( commitVersion > self->committedVersion.get() ) {
@@ -1331,6 +1401,7 @@ ACTOR Future<Void> commitBatch(
 		self->metadataVersion = metadataVersionAfter;
 		self->committedVersion.set(commitVersion);
 	}
+
 //	TraceEvent("ProxyCommit").detail("V", commitVersion).detail("Previous", prevVersion);
 
 	if (forceRecovery) {
@@ -1444,6 +1515,7 @@ ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID
 ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, ProxyCommitData* commitData, uint32_t flags, vector<MasterProxyInterface> *otherProxies, Optional<UID> debugID,
                                                           int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
 {
+	ASSERT(false);
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 	// (1) The version returned is the committedVersion of some proxy at some point before the request returns, so it is committed.
 	// (2) No proxy on our list reported committed a higher version before this request was received, because then its committedVersion would have been higher,
@@ -1792,6 +1864,7 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 
 	loop {
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
+		TraceEvent("MpGetSSRejoin").detail("Req", req.id.toString());
 		if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
 			GetStorageServerRejoinInfoReply rep;
 			rep.version = commitData->version;
@@ -1846,8 +1919,10 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 				}
 				rep.newTag = Tag(maxTagLocality+1,0);
 			}
+			TraceEvent("MpGetSSRejoinSendReply").detail("Req", req.id.toString());
 			req.reply.send(rep);
 		} else {
+			TraceEvent("MpGetSSRejoinSendError").detail("Req", req.id.toString());
 			req.reply.sendError(worker_removed());
 		}
 	}
@@ -2127,7 +2202,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
-	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
+//	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 
 	// wait for txnStateStore recovery
@@ -2180,6 +2255,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		}
 		when(GetRawCommittedVersionRequest req = waitNext(proxy.getRawCommittedVersion.getFuture())) {
 			//TraceEvent("ProxyGetRCV", proxy.id());
+			ASSERT(false);
 			Span span("MP:getRawCommittedReadVersion"_loc, { req.spanContext });
 			if (req.debugID.present())
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion");

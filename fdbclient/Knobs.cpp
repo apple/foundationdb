@@ -168,8 +168,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 
 	// Configuration
-	init( DEFAULT_AUTO_PROXIES,                      3 );
-	init( GRV_PROXIES_RATIO,                       0.4 );
+	init( DEFAULT_AUTO_PROXIES,                      4 );
+	init( GRV_PROXIES_RATIO,                      0.25 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
 

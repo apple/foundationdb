@@ -397,8 +397,14 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	if (ck == LiteralStringRef("initialized")) initialized = true;
 	else if (ck == LiteralStringRef("proxies")) {
 		parse(&proxyCount, value);
-		ASSERT(proxyCount >= 2 || proxyCount == -1);
+		if (proxyCount <= 2 && proxyCount != -1) {
+			TraceEvent(SevWarn, "ForceUpgradeProxiesCount")
+			    .detail("OldProxies", proxyCount)
+			    .detail("NewProxies", 2);
+			proxyCount = 2;
+		}
 	}
+
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) {
@@ -434,7 +440,12 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
 	else if (ck == LiteralStringRef("auto_proxies")) {
 		parse(&autoProxyCount, value);
-		ASSERT(autoProxyCount >= 2 || autoProxyCount == -1);
+		if (autoProxyCount <= 2 && autoProxyCount != -1) {
+			TraceEvent(SevWarn, "ForceUpgradeAutoProxiesCount")
+				.detail("OldAutoProxies", autoProxyCount)
+				.detail("NewAutoProxies", 2);
+			autoProxyCount = 2;
+		}
 	}
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);

@@ -117,13 +117,17 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	ACTOR Future<Void> _setup(Database cx, ConsistencyCheckWorkload *self)
 	{
+		TraceEvent("ConsistencyCheckBeginSetup");
 		//If performing quiescent checks, wait for the database to go quiet
 		if(self->firstClient && self->performQuiescentChecks)
 		{
+			TraceEvent("ConsistencyCheckBeginSetupPerformQuiescentChecks1");
 			if(g_network->isSimulated()) {
+				// block here
 				wait( timeKeeperSetDisable(cx) );
 			}
 
+			TraceEvent("ConsistencyCheckBeginSetupPerformQuiescentChecks2");
 			try {
 				wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0),
 				                  self->quiescentWaitTimeout)); // FIXME: should be zero?
@@ -133,9 +137,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 				self->testFailure("Unable to achieve a quiet database");
 				self->performQuiescentChecks = false;
 			}
+			TraceEvent("ConsistencyCheckBeginSetupPerformQuiescentChecks3");
 		}
 
+		TraceEvent("BeforeWaitForMonitorConsistencyCheckSettingsActor");
+
 		self->monitorConsistencyCheckSettingsActor = self->monitorConsistencyCheckSettings(cx, self);
+		TraceEvent("AfterWaitForMonitorConsistencyCheckSettingsActor");
 		return Void();
 	}
 
