@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'RYWDisableTest'
+
+    [[test.workload]]
+    testName = 'RYWDisable'

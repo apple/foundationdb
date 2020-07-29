@@ -19,7 +19,7 @@
  */
 
 // This file declare and define the interface for RestoreWorker and restore roles
-// which are RestoreMaster, RestoreLoader, and RestoreApplier
+// which are RestoreController, RestoreLoader, and RestoreApplier
 
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
@@ -30,10 +30,10 @@
 
 #include <sstream>
 #include <string>
-#include "flow/Stats.h"
 #include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -71,7 +71,7 @@ struct RestoreSysInfo {
 };
 
 struct RestoreWorkerInterface {
-	constexpr static FileIdentifier file_identifier = 99601798;
+	constexpr static FileIdentifier file_identifier = 15715718;
 	UID interfID;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
@@ -101,7 +101,7 @@ struct RestoreWorkerInterface {
 };
 
 struct RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 62531339;
+	constexpr static FileIdentifier file_identifier = 12199691;
 	UID nodeID;
 	RestoreRole role;
 
@@ -124,7 +124,7 @@ struct RestoreRoleInterface {
 };
 
 struct RestoreLoaderInterface : RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 84244651;
+	constexpr static FileIdentifier file_identifier = 358571;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSysInfoRequest> updateRestoreSysInfo;
@@ -165,7 +165,7 @@ struct RestoreLoaderInterface : RestoreRoleInterface {
 };
 
 struct RestoreApplierInterface : RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 54253048;
+	constexpr static FileIdentifier file_identifier = 3921400;
 
 	RequestStream<RestoreSimpleRequest> heartbeat;
 	RequestStream<RestoreSendVersionedMutationsRequest> sendMutationVector;
@@ -208,6 +208,8 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 // By combining all RestoreAssets across all verstion batches, restore should process all mutations in
 // backup range and log files up to the target restore version.
 struct RestoreAsset {
+	UID uid;
+
 	Version beginVersion, endVersion; // Only use mutation in [begin, end) versions;
 	KeyRange range; // Only use mutations in range
 
@@ -218,36 +220,44 @@ struct RestoreAsset {
 	int64_t offset;
 	int64_t len;
 
-	UID uid;
+	Key addPrefix;
+	Key removePrefix;
 
 	RestoreAsset() = default;
 
+	// Q: Can we simply use uid for == and use different comparison rule for less than operator.
+	// The ordering of RestoreAsset may change, will that affect correctness or performance?
 	bool operator==(const RestoreAsset& r) const {
 		return beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range &&
 		       fileIndex == r.fileIndex && partitionId == r.partitionId && filename == r.filename &&
-		       offset == r.offset && len == r.len;
+		       offset == r.offset && len == r.len && addPrefix == r.addPrefix && removePrefix == r.removePrefix;
 	}
 	bool operator!=(const RestoreAsset& r) const {
 		return !(*this == r);
 	}
 	bool operator<(const RestoreAsset& r) const {
-		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end) <
-		       std::make_tuple(r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion, r.range.begin,
-		                       r.range.end);
+		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end,
+		                       addPrefix, removePrefix) < std::make_tuple(r.fileIndex, r.filename, r.offset, r.len,
+		                                                                  r.beginVersion, r.endVersion, r.range.begin,
+		                                                                  r.range.end, r.addPrefix, r.removePrefix);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, beginVersion, endVersion, range, filename, fileIndex, partitionId, offset, len, uid);
+		serializer(ar, uid, beginVersion, endVersion, range, filename, fileIndex, partitionId, offset, len, addPrefix,
+		           removePrefix);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
 		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
-		   << " partitionId:" << partitionId << " offset:" << offset << " len:" << len;
+		   << " partitionId:" << partitionId << " offset:" << offset << " len:" << len
+		   << " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
 		return ss.str();
 	}
+
+	bool hasPrefix() const { return addPrefix.size() > 0 || removePrefix.size() > 0; }
 
 	// RestoreAsset and VersionBatch both use endVersion as exclusive in version range
 	bool isInVersionRange(Version commitVersion) const {
@@ -256,17 +266,30 @@ struct RestoreAsset {
 
 	// Is mutation's begin and end keys are in RestoreAsset's range
 	bool isInKeyRange(MutationRef mutation) const {
-		if (isRangeMutation(mutation)) {
-			// Range mutation's right side is exclusive
-			return mutation.param1 >= range.begin && mutation.param2 <= range.end;
+		if (hasPrefix()) {
+			Key begin = range.begin; // Avoid creating new keys if we do not have addPrefix or removePrefix
+			Key end = range.end;
+			begin = begin.removePrefix(removePrefix).withPrefix(addPrefix);
+			end = end.removePrefix(removePrefix).withPrefix(addPrefix);
+			if (isRangeMutation(mutation)) {
+				// Range mutation's right side is exclusive
+				return mutation.param1 >= begin && mutation.param2 <= end;
+			} else {
+				return mutation.param1 >= begin && mutation.param1 < end;
+			}
 		} else {
-			return mutation.param1 >= range.begin && mutation.param1 < range.end;
+			if (isRangeMutation(mutation)) {
+				// Range mutation's right side is exclusive
+				return mutation.param1 >= range.begin && mutation.param2 <= range.end;
+			} else {
+				return mutation.param1 >= range.begin && mutation.param1 < range.end;
+			}
 		}
 	}
 };
 
 struct LoadingParam {
-	constexpr static FileIdentifier file_identifier = 17023837;
+	constexpr static FileIdentifier file_identifier = 246621;
 
 	bool isRangeFile;
 	Key url;
@@ -303,7 +326,7 @@ struct LoadingParam {
 };
 
 struct RestoreRecruitRoleReply : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 30310092;
+	constexpr static FileIdentifier file_identifier = 13532876;
 
 	UID id;
 	RestoreRole role;
@@ -336,7 +359,7 @@ struct RestoreRecruitRoleReply : TimedRequest {
 };
 
 struct RestoreRecruitRoleRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 87022360;
+	constexpr static FileIdentifier file_identifier = 3136280;
 
 	RestoreRole role;
 	int nodeIndex; // Each role is a node
@@ -362,7 +385,7 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 
 // Static info. across version batches
 struct RestoreSysInfoRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 75960741;
+	constexpr static FileIdentifier file_identifier = 8851877;
 
 	RestoreSysInfo sysInfo;
 	Standalone<VectorRef<std::pair<KeyRangeRef, Version>>> rangeVersions;
@@ -388,7 +411,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 };
 
 struct RestoreLoadFileReply : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 34077902;
+	constexpr static FileIdentifier file_identifier = 523470;
 
 	LoadingParam param;
 	MutationsVec samples; // sampled mutations
@@ -413,7 +436,7 @@ struct RestoreLoadFileReply : TimedRequest {
 
 // Sample_Range_File and Assign_Loader_Range_File, Assign_Loader_Log_File
 struct RestoreLoadFileRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 26557364;
+	constexpr static FileIdentifier file_identifier = 9780148;
 
 	int batchIndex;
 	LoadingParam param;
@@ -436,7 +459,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 };
 
 struct RestoreSendMutationsToAppliersRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 68827305;
+	constexpr static FileIdentifier file_identifier = 1718441;
 
 	int batchIndex; // version batch index
 	std::map<Key, UID> rangeToApplier;
@@ -462,7 +485,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 };
 
 struct RestoreSendVersionedMutationsRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 69764565;
+	constexpr static FileIdentifier file_identifier = 2655701;
 
 	int batchIndex; // version batch index
 	RestoreAsset asset; // Unique identifier for the current restore asset
@@ -493,7 +516,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 };
 
 struct RestoreVersionBatchRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 97223537;
+	constexpr static FileIdentifier file_identifier = 13337457;
 
 	int batchIndex;
 
@@ -537,9 +560,8 @@ struct RestoreFinishRequest : TimedRequest {
 };
 
 struct RestoreRequest {
-	constexpr static FileIdentifier file_identifier = 49589770;
+	constexpr static FileIdentifier file_identifier = 16035338;
 
-	// Database cx;
 	int index;
 	Key tagName;
 	Key url;
@@ -547,24 +569,31 @@ struct RestoreRequest {
 	KeyRange range;
 	UID randomUid;
 
+	// Every key in backup will first removePrefix and then addPrefix;
+	// Simulation testing does not cover when both addPrefix and removePrefix exist yet.
+	Key addPrefix;
+	Key removePrefix;
+
 	ReplyPromise<struct RestoreCommonReply> reply;
 
 	RestoreRequest() = default;
 	explicit RestoreRequest(const int index, const Key& tagName, const Key& url, Version targetVersion,
-	                        const KeyRange& range, const UID& randomUid)
-	  : index(index), tagName(tagName), url(url), targetVersion(targetVersion), range(range), randomUid(randomUid) {}
+	                        const KeyRange& range, const UID& randomUid, Key& addPrefix, Key removePrefix)
+	  : index(index), tagName(tagName), url(url), targetVersion(targetVersion), range(range), randomUid(randomUid),
+	    addPrefix(addPrefix), removePrefix(removePrefix) {}
 
 	//To change this serialization, ProtocolVersion::RestoreRequestValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, index, tagName, url, targetVersion, range, randomUid, reply);
+		serializer(ar, index, tagName, url, targetVersion, range, randomUid, addPrefix, removePrefix, reply);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "index:" << std::to_string(index) << " tagName:" << tagName.contents().toString()
 		   << " url:" << url.contents().toString() << " targetVersion:" << std::to_string(targetVersion)
-		   << " range:" << range.toString() << " randomUid:" << randomUid.toString();
+		   << " range:" << range.toString() << " randomUid:" << randomUid.toString()
+		   << " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
 		return ss.str();
 	}
 };

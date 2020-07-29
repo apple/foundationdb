@@ -167,11 +167,11 @@ ACTOR Future<Void> echoClient() {
 	EchoRequest echoRequest;
 	echoRequest.message = "Hello World";
 	std::string echoMessage = wait(server.echo.getReply(echoRequest));
-	std::cout << format("Sent {} to echo, received %s\n", "Hello World", echoMessage.c_str());
+	std::cout << format("Sent %s to echo, received %s\n", "Hello World", echoMessage.c_str());
 	ReverseRequest reverseRequest;
 	reverseRequest.message = "Hello World";
 	std::string reverseString = wait(server.reverse.getReply(reverseRequest));
-	std::cout << format("Sent {} to reverse, received {}\n", "Hello World", reverseString.c_str());
+	std::cout << format("Sent %s to reverse, received %s\n", "Hello World", reverseString.c_str());
 	return Void();
 }
 
@@ -271,11 +271,11 @@ ACTOR Future<Void> kvStoreServer() {
 }
 
 ACTOR Future<SimpleKeyValueStoreInteface> connect() {
-	std::cout << format("%ull: Connect...\n", uint64_t(g_network->now()));
+	std::cout << format("%llu: Connect...\n", uint64_t(g_network->now()));
 	SimpleKeyValueStoreInteface c;
 	c.connect = RequestStream<GetKVInterface>(Endpoint({ serverAddress }, UID(-1, ++tokenCounter)));
 	SimpleKeyValueStoreInteface result = wait(c.connect.getReply(GetKVInterface()));
-	std::cout << format("%ull: done..\n", uint64_t(g_network->now()));
+	std::cout << format("%llu: done..\n", uint64_t(g_network->now()));
 	return result;
 }
 
@@ -328,7 +328,7 @@ ACTOR Future<Void> kvClient(SimpleKeyValueStoreInteface server, std::shared_ptr<
 ACTOR Future<Void> throughputMeasurement(std::shared_ptr<uint64_t> operations) {
 	loop {
 		wait(delay(1.0));
-		std::cout << format("%ull op/s\n", *operations);
+		std::cout << format("%llu op/s\n", *operations);
 		*operations = 0;
 	}
 }
@@ -394,16 +394,16 @@ ACTOR Future<Void> fdbStatusStresser() {
 	}
 }
 
-std::unordered_map<std::string, std::function<Future<Void>()>> actors = { { "timer", &simpleTimer },
-	                                                                      { "promiseDemo", &promiseDemo },
-	                                                                      { "triggerDemo", &triggerDemo },
-	                                                                      { "echoServer", &echoServer },
-	                                                                      { "echoClient", &echoClient },
-	                                                                      { "kvStoreServer", &kvStoreServer },
-	                                                                      { "kvSimpleClient", &kvSimpleClient },
-	                                                                      { "multipleClients", &multipleClients },
-	                                                                      { "fdbClient", &fdbClient },
-	                                                                      { "fdbStatusStresser", &fdbStatusStresser } };
+std::unordered_map<std::string, std::function<Future<Void>()>> actors = { { "timer", &simpleTimer }, // ./tutorial timer
+	                                                                      { "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
+	                                                                      { "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
+	                                                                      { "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
+	                                                                      { "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
+	                                                                      { "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
+	                                                                      { "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
+	                                                                      { "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
+	                                                                      { "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
+	                                                                      { "fdbStatusStresser", &fdbStatusStresser } }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
 
 int main(int argc, char* argv[]) {
 	bool isServer = false;
@@ -441,6 +441,7 @@ int main(int argc, char* argv[]) {
 	}
 	platformInit();
 	g_network = newNet2(TLSConfig(), false, true);
+	FlowTransport::createInstance(!isServer, 0);
 	NetworkAddress publicAddress = NetworkAddress::parse("0.0.0.0:0");
 	if (isServer) {
 		publicAddress = NetworkAddress::parse("0.0.0.0:" + port);

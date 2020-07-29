@@ -206,6 +206,7 @@ struct DatabaseConfiguration {
 		const_cast<DatabaseConfiguration*>(&rhs)->makeConfigurationImmutable();
 		return rawConfiguration == rhs.rawConfiguration;
 	}
+	bool operator!=(DatabaseConfiguration const& rhs) const { return !(*this == rhs); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 	#include "fdbclient/NativeAPI.actor.g.h"
@@ -131,6 +133,7 @@ struct TransactionOptions {
 	bool firstInBatch : 1;
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
+	bool expensiveClearCostEstimation : 1;
 
 	TransactionPriority priority;
 
@@ -152,13 +155,15 @@ class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
+	SpanID spanID;
 	bool useProvisionalProxies;
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
+	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -174,7 +179,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
-			ASSERT(!identifier.empty())
+			ASSERT(!identifier.empty());
 			event.logEvent(identifier, maxFieldLength);
 		}
 
@@ -283,7 +288,9 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
+	Transaction()
+	  : info(TaskPriority::DefaultEndpoint, deterministicRandom()->randomUniqueID()),
+	    span(info.spanID, "Transaction"_loc) {}
 	void operator=(Transaction&& r) noexcept;
 
 	void reset();
@@ -309,6 +316,7 @@ public:
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 	TransactionOptions options;
+	Span span;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
 
@@ -334,7 +342,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit);
 

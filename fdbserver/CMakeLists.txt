@@ -70,8 +70,8 @@ set(FDBSERVER_SRCS
   RestoreUtil.actor.cpp
   RestoreRoleCommon.actor.h
   RestoreRoleCommon.actor.cpp
-  RestoreMaster.actor.h
-  RestoreMaster.actor.cpp
+  RestoreController.actor.h
+  RestoreController.actor.cpp
   RestoreApplier.actor.h
   RestoreApplier.actor.cpp
   RestoreLoader.actor.h
@@ -148,6 +148,7 @@ set(FDBSERVER_SRCS
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
+  workloads/HealthMetricsApi.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
@@ -171,6 +172,7 @@ set(FDBSERVER_SRCS
   workloads/RandomClogging.actor.cpp
   workloads/RandomMoveKeys.actor.cpp
   workloads/RandomSelector.actor.cpp
+  workloads/ReadAfterWrite.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
@@ -207,7 +209,9 @@ set(FDBSERVER_SRCS
   workloads/WorkerErrors.actor.cpp
   workloads/workloads.actor.h
   workloads/WriteBandwidth.actor.cpp
-  workloads/WriteDuringRead.actor.cpp)
+  workloads/WriteDuringRead.actor.cpp
+  workloads/WriteTagThrottling.actor.cpp
+)
 
 add_library(fdb_sqlite STATIC
   sqlite/btree.h
@@ -248,6 +252,9 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
+
+add_dependencies(fdbserver toml11)
+target_include_directories(fdbserver PRIVATE ${TOML11_INCLUDE_DIR})
 
 if (GPERFTOOLS_FOUND)
   add_compile_definitions(USE_GPERFTOOLS)

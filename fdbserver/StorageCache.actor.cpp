@@ -297,7 +297,7 @@ public:
 	}
 
 	Arena lastArena;
-	std::map<Version, Standalone<VersionUpdateRef>> const & getMutationLog() { return mutationLog; }
+	std::map<Version, Standalone<VersionUpdateRef>> const& getMutationLog() const { return mutationLog; }
 	std::map<Version, Standalone<VersionUpdateRef>>& getMutableMutationLog() { return mutationLog; }
 	VersionedData const& data() const { return versionedData; }
 	VersionedData& mutableData() { return versionedData; }
@@ -447,7 +447,6 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageCacheData* data, Version ve
 
 ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
-
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
@@ -457,12 +456,13 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-
 		//TODO what's this?
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 
-		if( req.debugID.present() )
+		if( req.debugID.present() ) {
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
+			//FIXME
+		}
 
 		state Optional<Value> v;
 		state Version version = wait( waitForVersion( data, req.version ) );
@@ -1077,7 +1077,7 @@ void coalesceCacheRanges(StorageCacheData *data, KeyRangeRef keys) {
 
 	bool lastReadable = false;
 	bool lastNotAssigned = false;
-	KeyRangeMap<Reference<CacheRangeInfo>>::Iterator lastRange;
+	KeyRangeMap<Reference<CacheRangeInfo>>::iterator lastRange;
 
 	for( ; iter != iterEnd; ++iter) {
 		if( lastReadable && iter->value()->isReadable() ) {

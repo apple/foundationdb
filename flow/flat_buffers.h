@@ -1216,6 +1216,7 @@ namespace detail {
 template <class T>
 struct YesFileIdentifier {
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+	constexpr static bool composition_depth = CompositionDepthFor<T>::value;
 };
 struct NoFileIdentifier {};
 }; // namespace detail

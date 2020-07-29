@@ -1,0 +1,8 @@
+buggify = false
+
+[[test]]
+testTitle = 'RandomReadWriteTest'
+connectionFailuresDisableDuration = 100000
+
+    [[test.workload]]
+    testName = 'ConflictRange'

@@ -32,6 +32,8 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
 
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
@@ -66,10 +68,6 @@ struct VersionedMessage {
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
 	}
 };
-
-static bool sameArena(const Arena& a, const Arena& b) {
-	return a.impl.getPtr() == b.impl.getPtr();
-}
 
 struct BackupData {
 	const UID myId;
@@ -338,11 +336,10 @@ struct BackupData {
 		for (int i = 0; i < num; i++) {
 			const Arena& a = messages[i].arena;
 			const Arena& b = messages[i + 1].arena;
-			if (!sameArena(a, b)) {
+			if (!a.sameArena(b)) {
 				bytes += messages[i].bytes;
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
-				    .detail("Release", messages[i].bytes)
-				    .detail("Arena", (void*)a.impl.getPtr());
+				    .detail("Release", messages[i].bytes);
 			}
 		}
 		lock->release(bytes);
@@ -429,8 +426,9 @@ struct BackupData {
 	}
 
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
+		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(1, TransactionPriority::DEFAULT,
+			GetReadVersionRequest request(span.context, 1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onMasterProxiesChanged())) {}
@@ -561,7 +559,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
 		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
-		wait(getBackupProgress(self->cx, self->myId, progress));
+		wait(getBackupProgress(self->cx, self->myId, progress, /*logging=*/false));
 		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		state std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
@@ -901,10 +899,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			if (!sameArena(prev, r->arena())) {
+			if (!prev.sameArena(r->arena())) {
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 				    .detail("Take", r->arena().getSize())
-				    .detail("Arena", (void*)r->arena().impl.getPtr())
 				    .detail("Current", self->lock->activePermits());
 
 				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
@@ -1087,7 +1084,11 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
 			self.stop();
-			wait(done);
+			try {
+				wait(done);
+			} catch (Error& e) {
+				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
+			}
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
