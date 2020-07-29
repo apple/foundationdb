@@ -135,3 +135,6 @@ constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B063010001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
+
+// Downgrades are only supported for one minor version
+constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B071000000LL);

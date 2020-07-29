@@ -151,6 +151,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/ConflictRangeRYOWCheck.txt)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.txt)
   add_fdb_test(TEST_FILES rare/CycleWithKills.txt)
+  add_fdb_test(TEST_FILES rare/Downgrade.txt)
   add_fdb_test(TEST_FILES rare/FuzzTest.txt)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.txt)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.txt)
@@ -189,6 +190,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
                restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
+               restarting/to_6.3.5/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.txt)
