@@ -3782,9 +3782,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
 		loop {
 			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
 			choose {
-				when ( wait( cx->onProxiesChanged() ) ) {
-					TraceEvent("ProxiesChanged");
-				}
+				when ( wait( cx->onProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if(tags.size() != 0) {
 						auto &priorityThrottledTags = cx->throttledTags[priority];
