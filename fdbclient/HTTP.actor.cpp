@@ -352,9 +352,6 @@ namespace HTTP {
 			send_start = timer();
 
 			loop {
-				wait(conn->onWritable());
-				wait( delay( 0, TaskPriority::WriteSocket ) );
-
 				// If we already got a response, before finishing sending the request, then close the connection,
 				// set the Connection header to "close" as a hint to the caller that this connection can't be used
 				// again, and break out of the send loop.
@@ -375,6 +372,9 @@ namespace HTTP {
 				pContent->sent(len);
 				if(pContent->empty())
 					break;
+
+				wait(conn->onWritable());
+				wait(yield(TaskPriority::WriteSocket));
 			}
 
 			wait(responseReading);

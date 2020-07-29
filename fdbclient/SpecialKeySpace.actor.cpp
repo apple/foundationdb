@@ -338,13 +338,10 @@ Future<Standalone<RangeResultRef>> ConflictingKeysImpl::getRange(ReadYourWritesT
 		if (beginIter->begin() != kr.begin) ++beginIter;
 		auto endIter = krMapPtr->rangeContaining(kr.end);
 		for (auto it = beginIter; it != endIter; ++it) {
-			// it->begin() is stored in the CoalescedKeyRangeMap in TransactionInfo
-			// it->value() is always constants in SystemData.cpp
-			// Thus, push_back() can be used
-			result.push_back(result.arena(), KeyValueRef(it->begin(), it->value()));
+			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
 		if (endIter->begin() != kr.end)
-			result.push_back(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
+			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
 }
