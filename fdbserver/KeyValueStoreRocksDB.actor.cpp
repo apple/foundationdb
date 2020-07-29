@@ -237,7 +237,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	DB db = nullptr;
 	std::string path;
 	UID id;
-	size_t diskBytesUsed = 0;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
 	unsigned nReaders = 16;
@@ -349,9 +348,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int64_t free;
 		int64_t total;
 
+		uint64_t sstBytes = 0;
+		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize, &sstBytes));
+		uint64_t memtableBytes = 0;
+		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kSizeAllMemTables, &memtableBytes));
 		g_network->getDiskBytes(path, free, total);
 
-		return StorageBytes(free, total, diskBytesUsed, free);
+		return StorageBytes(free, total, sstBytes + memtableBytes, free);
 	}
 };
 
