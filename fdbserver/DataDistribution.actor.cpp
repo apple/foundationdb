@@ -3353,7 +3353,6 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 	vector<std::pair<StorageServerInterface, ProcessClass>> results;
 	for( int i = 0; i < serverList.get().size(); i++ ) {
 		auto ssi = decodeServerListValue( serverList.get()[i].value );
-		TraceEvent("GetServerList").detail("Id", ssi.id().toString());
 		results.push_back( std::make_pair(ssi, id_data[ssi.locality.processId()].processClass) );
 	}
 
@@ -4489,16 +4488,12 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
 		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
-		TraceEvent("MonitorBatchLimitedTime").detail("Size", grvProxies->size());
 
 		choose {
-			when (wait(db->onChange())) {
-//				grvProxies.setPtrUnsafe(new GrvProxyInfo(db->get().client.grvProxies));
-			}
+			when (wait(db->onChange())) {}
 			when (GetHealthMetricsReply reply = wait(grvProxies->size() ?
 					basicLoadBalance(grvProxies, &GrvProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
 					: Never())) {
-				TraceEvent("MonitorBatchLimitedTimeGotReply");
 				if (reply.healthMetrics.batchLimited) {
 					*lastLimited = now();
 				}

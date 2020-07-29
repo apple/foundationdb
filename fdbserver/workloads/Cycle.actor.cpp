@@ -128,12 +128,12 @@ struct CycleWorkload : TestWorkload {
 						tr.set( self->key(r), self->value(r3) );
 						tr.set( self->key(r2), self->value(r4) );
 						tr.set( self->key(r3), self->value(r2) );
-//						 TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-//						 TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-//						 TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait( tr.commit() );
-//						 TraceEvent("CycleCommit");
+						// TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
 						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;

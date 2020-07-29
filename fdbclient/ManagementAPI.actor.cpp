@@ -1678,18 +1678,13 @@ ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
 	loop {
 		state Transaction tr(cx);
 		try {
-			tr.debugTransaction(UID(123, 456));
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.set(timeKeeperDisableKey, StringRef());
-			TraceEvent("TimekeeperCommit").detail("Key", timeKeeperDisableKey.toString());
 			wait(tr.commit());
-			TraceEvent("TimekeeperCommitDone").detail("Key", timeKeeperDisableKey.toString());
 			return Void();
 		} catch (Error &e) {
-			TraceEvent("TimekeeperCommitError").detail("Key", timeKeeperDisableKey.toString());
 			wait(tr.onError(e));
-			TraceEvent("TimekeeperCommitErrorDone").detail("Key", timeKeeperDisableKey.toString());
 		}
 	}
 }

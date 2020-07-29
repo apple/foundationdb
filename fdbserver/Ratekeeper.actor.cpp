@@ -615,9 +615,6 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 				myQueueInfo->value.busiestTag = reply.get().busiestTag;
 				myQueueInfo->value.busiestTagFractionalBusyness = reply.get().busiestTagFractionalBusyness;
 				myQueueInfo->value.busiestTagRate = reply.get().busiestTagRate;
-//				TraceEvent("RkStorageServerTrack")
-//				    .detail("Id", ssi.id().toString())
-//					.detail("Locality", ssi.locality.toString());
 			} else {
 				if(myQueueInfo->value.valid) {
 					TraceEvent("RkStorageServerDidNotRespond", self->id)
@@ -630,11 +627,9 @@ ACTOR Future<Void> trackStorageServerQueueInfo( RatekeeperData* self, StorageSer
 		}
 	} catch (...) {
 		// including cancellation
-		TraceEvent("RatekeeperEraseSS").detail("KeyId", myQueueInfo->key.toString());
 		self->storageQueueInfo.erase( myQueueInfo );
 		throw;
 	}
-//	TraceEvent("AfterTrack").detail("Size", self->storageQueueInfo.);
 }
 
 ACTOR Future<Void> trackTLogQueueInfo( RatekeeperData* self, TLogInterface tli ) {
@@ -697,7 +692,6 @@ ACTOR Future<Void> trackEachStorageServer(
 {
 	state Map<UID, Future<Void>> actors;
 	state Promise<Void> err;
-	state int count = 0;
 	loop choose {
 		when (state std::pair< UID, Optional<StorageServerInterface> > change = waitNext(serverChanges) ) {
 			wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
@@ -705,12 +699,8 @@ ACTOR Future<Void> trackEachStorageServer(
 				auto& a = actors[ change.first ];
 				a = Future<Void>();
 				a = splitError( trackStorageServerQueueInfo(self, change.second.get()), err );
-				count++;
-			} else {
+			} else
 				actors.erase( change.first );
-				count--;
-			}
-			TraceEvent("StorageServerActors").detail("Size", count);
 		}
 		when (wait(err.getFuture())) {}
 	}
@@ -894,21 +884,10 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	std::map<UID, limitReason_t> ssReasons;
 
-	TraceEvent("RkLoc1").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
-	int sqCount = 0;
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for(auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
-		sqCount++;
 		auto& ss = i->value;
-//		TraceEvent("StorageQueueInfoNonEmpty")
-//			.detail("SS", i->key.toString())
-//			.detail("SSValid", ss.valid)
-//			.detail("SSRemoteDC", self->remoteDC.present() && ss.locality.dcId() == self->remoteDC);
 		if (!ss.valid || (self->remoteDC.present() && ss.locality.dcId() == self->remoteDC)) continue;
-
-//		TraceEvent("StorageQueueInfoNonEmptyValid")
-//		    .detail("SS", i->key.toString())
-//		    .detail("Locality", ss.locality.toString());
 		++sscount;
 
 		limitReason_t ssLimitReason = limitReason_t::unlimited;
@@ -971,10 +950,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		// Don't let any storage server use up its target bytes faster than its MVCC window!
 		double maxBytesPerSecond = (targetBytes - springBytes) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)/SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0);
 		double limitTps = std::min(actualTps * maxBytesPerSecond / std::max(1.0e-8, inputRate), maxBytesPerSecond * SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE);
-		if (ssLimitReason == limitReason_t::unlimited) {
+		if (ssLimitReason == limitReason_t::unlimited)
 			ssLimitReason = limitReason_t::storage_server_write_bandwidth_mvcc;
-//			TraceEvent("ChangeReasonDebug");
-		}
 
 		if (targetRateRatio > 0 && inputRate > 0) {
 			ASSERT(inputRate != 0);
@@ -989,36 +966,24 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			}
 		}
 
-//		TraceEvent("StorageTpsLimitReverseIndexInsert")
-//		    .detail("Tps", limitTps)
-//		    .detail("SS", ss.id.toString())
-//			.detail("SSLocality", ss.locality.toString());
 		storageTpsLimitReverseIndex.insert(std::make_pair(limitTps, &ss));
 
 		if (limitTps < limits->tpsLimit && (ssLimitReason == limitReason_t::storage_server_min_free_space || ssLimitReason == limitReason_t::storage_server_min_free_space_ratio)) {
 			reasonID = ss.id;
 			limits->tpsLimit = limitTps;
 			limitReason = ssLimitReason;
-			TraceEvent("RkLoc2").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 		}
 
 		ssReasons[ss.id] = ssLimitReason;
 	}
-	TraceEvent("FinishProcessSS")
-	    .detail("SQSize", sqCount)
-	    .detail("ProcessedSize", storageTpsLimitReverseIndex.size());
 
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
-	TraceEvent("StorageTpsLimitReverseIndexSize").detail("S", storageTpsLimitReverseIndex.size());
 	for (auto ss = storageTpsLimitReverseIndex.begin(); ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit; ++ss) {
-		TraceEvent("ReverseIndexLoc1");
 		if (ignoredMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
 			ignoredMachines.insert(ss->second->locality.zoneId());
-			TraceEvent("ReverseIndexLoc2");
 			continue;
 		}
 		if (ignoredMachines.count(ss->second->locality.zoneId()) > 0) {
-			TraceEvent("ReverseIndexLoc3");
 			continue;
 		}
 
@@ -1026,7 +991,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		limits->tpsLimit = ss->first;
 		reasonID = storageTpsLimitReverseIndex.begin()->second->id; // Although we aren't controlling based on the worst SS, we still report it as the limiting process
 		limitReason = ssReasons[reasonID];
-		TraceEvent("RkLoc3").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 		break;
 	}
 
@@ -1057,7 +1021,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			if(limits->durabilityLagLimit < limits->tpsLimit) {
 				limits->tpsLimit = limits->durabilityLagLimit;
 				limitReason = limitReason_t::storage_server_durability_lag;
-				TraceEvent("RkLoc4").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 			}
 		} else if(limits->durabilityLagLimit != std::numeric_limits<double>::infinity() && limitingDurabilityLag > limits->durabilityLagTargetVersions - SERVER_KNOBS->DURABILITY_LAG_UNLIMITED_THRESHOLD) {
 			limits->durabilityLagLimit = SERVER_KNOBS->DURABILITY_LAG_INCREASE_RATE*limits->durabilityLagLimit;
@@ -1143,7 +1106,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
 			limits->tpsLimit = 0.0;
-			TraceEvent("RkLoc5").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 		}
 
 		double targetRateRatio = std::min( ( b + springBytes ) / (double)springBytes, 2.0 );
@@ -1165,7 +1127,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 				limits->tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = tlogLimitReason;
-				TraceEvent("RkLoc6").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 			}
 		}
 		if (inputRate > 0) {
@@ -1176,7 +1137,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 				limits->tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = limitReason_t::log_server_mvcc_write_bandwidth;
-				TraceEvent("RkLoc7").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 			}
 		}
 	}
@@ -1184,11 +1144,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	self->healthMetrics.worstTLogQueue = worstStorageQueueTLog;
 
 	limits->tpsLimit = std::max(limits->tpsLimit, 0.0);
-	TraceEvent("RkLoc8").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 
 	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		limits->tpsLimit = std::max(limits->tpsLimit, 100.0);
-		TraceEvent("RkLoc9").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 	}
 
 	int64_t totalDiskUsageBytes = 0;
@@ -1208,17 +1166,15 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		limitReason = limitReason_t::storage_server_list_fetch_failed;
 		reasonID = UID();
 		TraceEvent(SevWarnAlways, "RkSSListFetchTimeout", self->id).suppressFor(1.0);
-		TraceEvent("RkLoc10").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 	}
 	else if(limits->tpsLimit == std::numeric_limits<double>::infinity()) {
 		limits->tpsLimit = SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT;
-		TraceEvent("RkLoc11").detail("Limit", limits->tpsLimit).detail("Reason", limitReason);
 	}
 
 	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
 	limits->reasonMetric = limitReason;
 
-	if (deterministicRandom()->random01() < 1) {
+	if (deterministicRandom()->random01() < 0.1) {
 		std::string name = "RkUpdate" + limits->context;
 		TraceEvent(name.c_str(), self->id)
 			.detail("TPSLimit", limits->tpsLimit)
@@ -1320,20 +1276,10 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
 			}
 			when (GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture())) {
-				TraceEvent("DebugGetRateInfoRequest")
-				    .detail("Total", req.totalReleasedTransactions)
-					.detail("BatchTotal", req.batchReleasedTransactions)
-				    .detail("Detailed", req.detailed)
-				    .detail("TagSize", req.throttledTagCounts.size())
-				    .detail("Requestor", req.requesterID.toString())
-				    .detail("ProxyInfoSize", self.proxyInfo.size());
 				GetRateInfoReply reply;
 
 				auto& p = self.proxyInfo[ req.requesterID ];
-				TraceEvent("RKMPU", req.requesterID)
-				    .detail("TRT", req.totalReleasedTransactions)
-				    .detail("Last", p.totalTransactions)
-				    .detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
+				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
 				if (p.totalTransactions > 0) {
 					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.totalTransactions );
 
@@ -1368,11 +1314,6 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
 				reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;
 				reply.healthMetrics.batchLimited = lastLimited;
-
-				TraceEvent("RatekepperReply")
-					.detail("L1", self.normalLimits.tpsLimit)
-					.detail("L2", self.batchLimits.tpsLimit)
-					.detail("BatchLimited", lastLimited);
 
 				req.reply.send( reply );
 			}

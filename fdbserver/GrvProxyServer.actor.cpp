@@ -95,14 +95,6 @@ struct GrvTransactionRateInfo {
 	}
 
 	bool canStart(int64_t numAlreadyStarted, int64_t count) {
-//		TraceEvent("CanStart")
-//		    .detail("P1", numAlreadyStarted)
-//			.detail("P2", count)
-//			.detail("P3", limit)
-//			.detail("P4", budget)
-//			.detail("P5", limit + budget)
-//			.detail("P6", SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START)
-//			.detail("P7", numAlreadyStarted + count <= std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START));
 		return numAlreadyStarted + count <= std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 	}
 
@@ -253,9 +245,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			when ( GetRateInfoReply rep = wait(reply) ) {
 				reply = Never();
 
-			    TraceEvent("GrvGetRate")
-			        .detail("Rate", rep.transactionRate)
-					.detail("BatchRate", rep.batchTransactionRate);
 				transactionRateInfo->setRate(rep.transactionRate);
 				batchTransactionRateInfo->setRate(rep.batchTransactionRate);
 				//TraceEvent("GrvProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
@@ -298,11 +287,6 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 	loop choose{
 			when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 				//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-//				TraceEvent("GRVReq")
-//			        .detail("Peer", req.reply.getEndpoint().getPrimaryAddress().toString())
-//			        .detail("Priority", req.priority)
-//			        .detail("DebugId", req.debugID.present() ? req.debugID.get().toString() : "absent");
-
 			    stats->addRequest();
 				if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
 					++stats->txnRequestErrors;
@@ -331,26 +315,22 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 						stats->txnSystemPriorityStartIn += req.transactionCount;
 						systemQueue->push_back(req);
 						systemQueue->span.addParent(req.spanContext);
-						if (req.debugID.present()) TraceEvent("DebugLoc1");
 					} else if (req.priority >= TransactionPriority::DEFAULT) {
 						stats->txnDefaultPriorityStartIn += req.transactionCount;
 						defaultQueue->push_back(req);
 						defaultQueue->span.addParent(req.spanContext);
-						if (req.debugID.present()) TraceEvent("DebugLoc2");
 					} else {
 						// Return error for batch_priority GRV requests
 						int64_t proxiesCount = std::max((int)db->get().client.grvProxies.size(), 1);
 						if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
 							req.reply.sendError(batch_transaction_throttled());
 							stats->txnThrottled += req.transactionCount;
-							if (req.debugID.present()) TraceEvent("DebugLoc4");
 							continue;
 						}
 
 						stats->txnBatchPriorityStartIn += req.transactionCount;
 						batchQueue->push_back(req);
 						batchQueue->span.addParent(req.spanContext);
-						if (req.debugID.present()) TraceEvent("DebugLoc3");
 					}
 				}
 			}
@@ -410,22 +390,17 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Grv
 	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
-		if (debugID.present()) TraceEvent("InsideGLIVE1").detail("DebugId", debugID.get());
 		wait(updateLastCommit(grvProxyData, debugID));
 	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 &&
 	           now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > grvProxyData->lastCommitTime.get()) {
-		if (debugID.present()) TraceEvent("InsideGLIVE1").detail("DebugId", debugID.get());
 		wait(grvProxyData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
 	}
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.confirmEpochLive");
 	}
-//	TraceEvent("InsideGLIVE3");
 
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
-
-//	TraceEvent("InsideGLIVE4");
 	grvProxyData->minKnownCommittedVersion = std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 
 	GetReadVersionReply rep;
@@ -497,8 +472,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		}
 
 		request.reply.send(reply);
-
-//		TraceEvent("ReadVersion").detail("V", reply.version).detail("Locked", reply.locked);
 		++stats->txnRequestOut;
 	}
 
@@ -568,13 +541,10 @@ ACTOR static Future<Void> getReadVersionServer(
 		while (requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
 			SpannedDeque<GetReadVersionRequest>* transactionQueue;
 			if(!systemQueue.empty()) {
-//				TraceEvent("GetLiveReqDebug1");
 				transactionQueue = &systemQueue;
 			} else if(!defaultQueue.empty()) {
-//				TraceEvent("GetLiveReqDebug2");
 				transactionQueue = &defaultQueue;
 			} else if(!batchQueue.empty()) {
-//				TraceEvent("GetLiveReqDebug3");
 				transactionQueue = &batchQueue;
 			} else {
 				break;
@@ -585,22 +555,15 @@ ACTOR static Future<Void> getReadVersionServer(
 			int tc = req.transactionCount;
 
 			if(req.priority < TransactionPriority::DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-//				TraceEvent("BreakLoc1")
-//					.detail("DebugId", req.debugID.present() ? req.debugID.get().toString() : "absent");
 				break;
 			}
 			else if(req.priority < TransactionPriority::IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-//				TraceEvent("BreakLoc2")
-//					.detail("DebugId", req.debugID.present() ? req.debugID.get().toString() : "absent");
 				break;
 			}
 
 			if (req.debugID.present()) {
-//				TraceEvent("GetLiveReqDebug")
-//				    .detail("DebugId", req.debugID.get().toString());
-//				if (!debugID.present()) debugID = nondeterministicRandom()->randomUniqueID();
-//				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
-					debugID = req.debugID;
+				if (!debugID.present()) debugID = nondeterministicRandom()->randomUniqueID();
+				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 			}
 
 			transactionsStarted[req.flags&1] += tc;
@@ -648,13 +611,6 @@ ACTOR static Future<Void> getReadVersionServer(
 
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
-				if (debugID.present()) {
-//					TraceEvent("BeforeGetLive").detail("I", i)
-//						.detail("Size", start[i].size())
-//						.detail("K1", transactionsStarted[i])
-//						.detail("K2", defaultPriTransactionsStarted[i])
-//						.detail("K3", batchPriTransactionsStarted[i]);
-				}
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(
 				    span.context, grvProxyData, i, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &grvProxyData->stats,

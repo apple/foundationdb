@@ -914,8 +914,6 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 }
 
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
-
-//	TraceEvent("SSGetValue").detail("Key", req.key.toString()).detail("V", req.version);
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
 
@@ -1707,7 +1705,6 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 }
 
 void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const& req ) {
-	TraceEvent("SSGetQueueMetrics").detail("Id", self->thisServerID.toString());
 	StorageQueuingMetricsReply reply;
 	reply.localTime = now();
 	reply.instanceID = self->instanceID;
@@ -3974,11 +3971,9 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
 		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.masterProxies) );
-		TraceEvent("BeforeGetRejoinInfo").detail("Size", proxies->size());
 		choose {
 			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
-				TraceEvent("GetSSRejoinInfo").detail("Id", self->thisServerID.toString());
 				try {
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -4010,9 +4005,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 					}
 
 					choose {
-						// block here
 						when ( wait( tr.commit() ) ) {
-							TraceEvent("AfterSSCommit");
 							self->history = rep.history;
 
 							if(rep.newTag.present()) {

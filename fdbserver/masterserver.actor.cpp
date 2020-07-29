@@ -536,13 +536,11 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 		    .detail("Logs", describe(logSystemConfig.tLogs));
 
 		if (!self->cstateUpdated.isSet()) {
-			TraceEvent("SendMasterRegistrationWithProvisional");
 			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->provisionalMasterProxies,
 			                            self->provisionalGrvProxies, self->resolvers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 		} else {
-			TraceEvent("SendMasterRegistrationWithProvisional");
 			updateLogsKey = updateLogsValue(self, cx);
 			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->masterProxies, self->grvProxies, self->resolvers,
 			                            self->cstate.myDBState.recoveryCount, vector<UID>()));
@@ -578,7 +576,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				rep.version = parent->lastEpochEnd;
 				rep.locked = locked;
 				rep.metadataVersion = metadataVersion;
-				TraceEvent("ProvisionalReadVersion").detail("V", rep.version);
 				req.reply.send( rep );
 			} else
 				req.reply.send(Never());  // We can't perform causally consistent reads without recovering
@@ -1071,22 +1068,11 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 				reply.locked = self->databaseLocked;
 				reply.metadataVersion = self->proxyMetadataVersion;
 				reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
-				TraceEvent("MSServeGet")
-				    .detail("V", reply.version)
-				    .detail("Locked", reply.locked);
 				req.reply.send(reply);
 			}
 			when(ReportRawCommittedVersionRequest req = waitNext(self->myInterface.reportLiveCommittedVersion.getFuture())) {
 				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, req.minKnownCommittedVersion);
-//				TraceEvent("MSServeReportOutside")
-//					.detail("V", req.version)
-//				    .detail("Committed", self->liveCommittedVersion)
-//					.detail("Locked", req.locked);
 				if (req.version > self->liveCommittedVersion) {
-//					TraceEvent("MSServeReportInside")
-//						.detail("V", req.version)
-//						.detail("Committed", self->liveCommittedVersion)
-//						.detail("Locked", req.locked);
 					self->liveCommittedVersion = req.version;
 					self->databaseLocked = req.locked;
 					self->proxyMetadataVersion = req.metadataVersion;

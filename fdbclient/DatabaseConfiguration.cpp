@@ -404,7 +404,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 			proxyCount = 2;
 		}
 	}
-
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) {
