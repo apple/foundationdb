@@ -1987,7 +1987,6 @@ bool schemaMatch( json_spirit::mValue const& schemaValue, json_spirit::mValue co
 
 				if(sv.type() == json_spirit::obj_type && sv.get_obj().count("$enum")) {
 					auto& enum_values = sv.get_obj().at("$enum").get_array();
-					TraceEvent();
 
 					bool any_match = false;
 					for(auto& enum_item : enum_values)

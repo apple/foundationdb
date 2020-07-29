@@ -1385,8 +1385,6 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getRawCommittedVersion);
 				DUMPTOKEN(recruited.txnState);
 
-				TraceEvent("ReceiveMasterProxyRecruitment");
-
 				//printf("Recruited as masterProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
 						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
@@ -1405,8 +1403,6 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getConsistentReadVersion);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getHealthMetrics);
-
-				TraceEvent("ReceiveGrvProxyRecruitment");
 
 				//printf("Recruited as grvProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::GRV_PROXY, recruited.id(),
