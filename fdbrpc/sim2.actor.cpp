@@ -1217,21 +1217,40 @@ public:
 			if (tooManyDead) {
 				newKt = Reboot;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("TLogPolicy", tLogPolicy->info()).detail("Reason", "tLogPolicy validates against dead processes.");
+				TraceEvent("KillChanged")
+				    .detail("KillType", kt)
+				    .detail("NewKillType", newKt)
+				    .detail("TLogPolicy", tLogPolicy->info())
+				    .detail("Reason", "Too many dead processes that cannot satisfy tLogPolicy.");
 			}
 			// Reboot and Delete if remaining machines do NOT fulfill policies
 			else if ((kt < RebootAndDelete) && notEnoughLeft) {
 				newKt = RebootAndDelete;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("TLogPolicy", tLogPolicy->info()).detail("Reason", "tLogPolicy does not validates against remaining processes.");
+				TraceEvent("KillChanged")
+				    .detail("KillType", kt)
+				    .detail("NewKillType", newKt)
+				    .detail("TLogPolicy", tLogPolicy->info())
+				    .detail("Reason", "Not enough tLog left to satisfy tLogPolicy.");
 			}
 			else if ((kt < RebootAndDelete) && (nQuorum > uniqueMachines.size())) {
 				newKt = RebootAndDelete;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("StoragePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
+				TraceEvent("KillChanged")
+				    .detail("KillType", kt)
+				    .detail("NewKillType", newKt)
+				    .detail("StoragePolicy", storagePolicy->info())
+				    .detail("Quorum", nQuorum)
+				    .detail("Machines", uniqueMachines.size())
+				    .detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
 			}
 			else {
-				TraceEvent("CanSurviveKills").detail("KillType", kt).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size());
+				TraceEvent("CanSurviveKills")
+				    .detail("KillType", kt)
+				    .detail("TLogPolicy", tLogPolicy->info())
+				    .detail("StoragePolicy", storagePolicy->info())
+				    .detail("Quorum", nQuorum)
+				    .detail("Machines", uniqueMachines.size());
 			}
 		}
 		if (newKillType) *newKillType = newKt;
