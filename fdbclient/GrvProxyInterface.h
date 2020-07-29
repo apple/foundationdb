@@ -4,7 +4,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef FOUNDATIONDB_GRVPROXYINTERFACE_H
-#define FOUNDATIONDB_GRVPROXYINTERFACE_H
+#ifndef FDBCLIENT_GRVPROXYINTERFACE_H
+#define FDBCLIENT_GRVPROXYINTERFACE_H
 #pragma once
 
 // GrvProxy is proxy primarily specializing on serving GetReadVersion. It also serves health metrics since it communicates
@@ -61,4 +61,4 @@ struct GrvProxyInterface {
 };
 
 
-#endif // FOUNDATIONDB_GRVPROXYINTERFACE_H
+#endif // FDBCLIENT_GRVPROXYINTERFACE_H
