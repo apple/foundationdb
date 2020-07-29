@@ -50,7 +50,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
 		healthMetricsCheckInterval = getOption(options, LiteralStringRef("healthMetricsCheckInterval"), 1.0);
 		sendDetailedHealthMetrics = getOption(options, LiteralStringRef("sendDetailedHealthMetrics"), true);
-		maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 10.0);
+		maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 60.0);
 	}
 
 	virtual std::string description() { return HealthMetricsApiWorkload::NAME; }
@@ -147,20 +147,20 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			for (const auto& ss : healthMetrics.storageStats) {
 				auto storageStats = ss.second;
 				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
-				traceStorageQueue.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.storageQueue);
+				traceStorageQueue.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.storageQueue);
 				self->detailedWorstStorageDurabilityLag =
 				    std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
-				traceStorageDurabilityLag.detail(format("Storage/%s", ss.first.toString().c_str()),
+				traceStorageDurabilityLag.detail(format("Storage-%s", ss.first.toString().c_str()),
 				                                 storageStats.storageDurabilityLag);
 				self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, storageStats.cpuUsage);
-				traceCpuUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.cpuUsage);
+				traceCpuUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.cpuUsage);
 				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
-				traceDiskUsage.detail(format("Storage/%s", ss.first.toString().c_str()), storageStats.diskUsage);
+				traceDiskUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.diskUsage);
 			}
 			TraceEvent traceTLogQueue("TLogQueue");
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
-				traceTLogQueue.detail(format("TLog/%s", ss.first.toString().c_str()), ss.second);
+				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
 			}
 		};
 	}

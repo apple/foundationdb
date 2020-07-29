@@ -1205,7 +1205,7 @@ public: // Modification
 	void append_deep(Arena& arena, It first, int count) {
 		ASSERT(count >= 0);
 		while (count > 0 && m_size < InlineMembers) {
-			new (&(arr[m_size++])) T(*(first++));
+			new (&(arr[m_size++])) T(arena, *(first++));
 			--count;
 		}
 		data.append_deep(arena, first, count);
