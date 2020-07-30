@@ -68,8 +68,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	}
 };
 
-typedef ModelInterface<MasterProxyInterface> ProxyInfo;
-typedef ModelInterface<GrvProxyInterface> GrvProxyInfo;
+using ProxyInfo = ModelInterface<MasterProxyInterface>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
 private:

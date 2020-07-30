@@ -1463,13 +1463,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		// Check proxy
 		ProcessClass::Fitness bestProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
-		for (auto masterProxy : db.client.masterProxies) {
+		for (const auto& masterProxy : db.client.masterProxies) {
 			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestProxyFitness) {
 				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestProxyFitness", bestProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}
-		for (auto grvProxy : db.client.grvProxies) {
+		for (const auto& grvProxy : db.client.grvProxies) {
 			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) || nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestProxyFitness) {
 				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestProxyFitness", bestProxyFitness).detail("ExistingGrvProxyFitness", nonExcludedWorkerProcessMap.count(grvProxy.address()) ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;

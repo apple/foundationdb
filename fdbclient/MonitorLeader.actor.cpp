@@ -689,7 +689,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastMasterProxyUIDs, s
 			masterProxyUIDs.push_back(masterProxy.id());
 		}
 		if(masterProxyUIDs != lastMasterProxyUIDs) {
-			lastMasterProxyUIDs = masterProxyUIDs;
+			lastMasterProxyUIDs.swap(masterProxyUIDs);
 			lastMasterProxies = ni.masterProxies;
 			deterministicRandom()->randomShuffle(lastMasterProxies);
 			lastMasterProxies.resize(CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS);
@@ -706,7 +706,7 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastMasterProxyUIDs, s
 			grvProxyUIDs.push_back(grvProxy.id());
 		}
 		if(grvProxyUIDs != lastGrvProxyUIDs) {
-			lastGrvProxyUIDs = grvProxyUIDs;
+			lastGrvProxyUIDs.swap(grvProxyUIDs);
 			lastGrvProxies = ni.grvProxies;
 			deterministicRandom()->randomShuffle(lastGrvProxies);
 			lastGrvProxies.resize(CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS);

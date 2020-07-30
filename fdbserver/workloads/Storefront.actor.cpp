@@ -159,7 +159,7 @@ struct StorefrontWorkload : TestWorkload {
 
 						// set value for the order
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
-						tr.set( orderKey, printable(wr.toValue()) );
+						tr.set(orderKey, wr.toValue());
 
 						wait( tr.commit() );
 						self->orders[id] = items; // save this in a local list to test durability
@@ -251,7 +251,9 @@ struct StorefrontWorkload : TestWorkload {
 					}
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
 					if( wr.toValue() != val.get().toString() ) {
-						TraceEvent( SevWarn, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
+						TraceEvent(SevError, "TestFailure")
+						    .detail("Reason", "OrderContentsMismatch")
+						    .detail("OrderID", id);
 						return false;
 					}
 				}

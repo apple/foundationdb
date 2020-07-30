@@ -674,6 +674,7 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 	if( spec.phases & TestWorkload::SETUP ) {
 		state std::vector< Future<ErrorOr<Void>> > setups;
 		printf("setting up test (%s)...\n", printable(spec.title).c_str());
+		TraceEvent("TestSetupStart").detail("WorkloadTitle", spec.title);
 		for(int i= 0; i < workloads.size(); i++)
 			setups.push_back( workloads[i].setup.template getReplyUnlessFailedFor<Void>( waitForFailureTime, 0) );
 		wait( waitForAll( setups ) );

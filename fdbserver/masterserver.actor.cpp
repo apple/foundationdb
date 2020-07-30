@@ -437,7 +437,9 @@ Future<Void> waitProxyFailure( vector<MasterProxyInterface> const& proxies ) {
 Future<Void> waitGrvProxyFailure( vector<GrvProxyInterface> const& grvProxies ) {
 	vector<Future<Void>> failed;
 	for(int i=0; i<grvProxies.size(); i++)
-		failed.push_back( waitFailureClient( grvProxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+		failed.push_back(
+		    waitFailureClient(grvProxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+		                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
 	ASSERT( failed.size() >= 1 );
 	return tagError<Void>(quorum( failed, 1 ), grv_proxy_failed());
 }
@@ -493,15 +495,10 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 	}
 }
 
-Future<Void> sendMasterRegistration(
-    MasterData* self,
-    LogSystemConfig const& logSystemConfig,
-	vector<MasterProxyInterface> proxies,
-	vector<GrvProxyInterface> grvProxies,
-	vector<ResolverInterface> resolvers,
-	DBRecoveryCount recoveryCount,
-	vector<UID> priorCommittedLogServers ) {
-
+Future<Void> sendMasterRegistration(MasterData* self, LogSystemConfig const& logSystemConfig,
+                                    vector<MasterProxyInterface> proxies, vector<GrvProxyInterface> grvProxies,
+                                    vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount,
+                                    vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
