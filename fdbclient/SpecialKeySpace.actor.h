@@ -53,7 +53,7 @@ protected:
 
 class ManagementAPIError {
 public:
-	static std::string toJsonString(bool retriable, std::string command, std::string msg) {
+	static std::string toJsonString(bool retriable, const std::string& command, const std::string& msg) {
 		json_spirit::mObject errorObj;
 		errorObj["retriable"] = retriable;
 		errorObj["command"] = command;
