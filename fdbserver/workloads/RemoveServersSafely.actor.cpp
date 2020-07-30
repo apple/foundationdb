@@ -301,7 +301,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return killableProcesses;
 	}
 
-	// toKill1 and toKill2 are a random subset of all processes. If simply kill all processes in toKill1 or toKill2,
+	// toKill1 and toKill2 are two random subsets of all processes. If simply kill all processes in toKill1 or toKill2,
 	// we may kill too many processes to make the cluster unavailable and stuck.
 	ACTOR static Future<Void> workloadMain( RemoveServersSafelyWorkload* self, Database cx, double waitSeconds,
 			std::set<AddressExclusion> toKill1, std::set<AddressExclusion> toKill2 ) {
