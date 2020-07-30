@@ -38,7 +38,6 @@ public:
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
-	std::string getKillTypeString(KillType killType) { return ""; }
 
 	enum BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
