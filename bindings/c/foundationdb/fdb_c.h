@@ -98,6 +98,8 @@ extern "C" {
         const uint8_t* value;
         int value_length;
     } FDBKeyValue;
+
+    DLLEXPORT fdb_bool_t fdb_future_reboot_worker( FDBFuture* f, FDBDatabase* db, uint8_t const* value, int value_length, fdb_bool_t check);
 #else
     typedef struct keyvalue {
         const void* key;

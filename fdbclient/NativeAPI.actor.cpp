@@ -4487,3 +4487,51 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 
 	return (ddCheck && coordinatorCheck);
 }
+
+ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
+	wait(connectLock->take());
+	state FlowLock::Releaser releaser(*connectLock);
+	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
+	choose {
+		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
+			StringRef ip_port =
+			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
+			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls")) ? full_ip_port2.removeSuffix(LiteralStringRef(":tls")) : full_ip_port2;
+				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+			}
+		}
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {} // TODO : change timeout time here
+	}
+	return Void();
+}
+
+ACTOR Future<bool> rebootWorkerActor(Database cx, const ValueRef& addr, bool check) {
+	// fetch the addresses of all workers
+	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
+	state Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	ASSERT(!kvs.more);
+	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	std::vector<Future<Void>> addInterfs;
+	for( auto it : kvs ) {
+		addInterfs.push_back(addInterface(&address_interface, connectLock, it));
+	}
+	wait( waitForAll(addInterfs) );
+	if (!address_interface.count(addr))
+		return false;
+	if (check)
+		BinaryReader::fromStringRef<ClientWorkerInterface>(addr, IncludeVersion()).reboot.send( RebootRequest(false, true));
+	else
+		BinaryReader::fromStringRef<ClientWorkerInterface>(addr, IncludeVersion()).reboot.send( RebootRequest());
+	return true;
+}
+
+Future<bool> rebootWorker(Database cx, const ValueRef& addr, bool check) {
+	return rebootWorkerActor(cx, addr, check);
+}
