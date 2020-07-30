@@ -99,7 +99,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	return Void();
 }
 
-// The actor may be invovked multiple times and executed async.
+// The actor may be invoked multiple times and executed async.
 // No race condition as long as we do not wait or yield when operate the shared
 // data. Multiple such actors can run on different fileIDs.
 // Different files may contain mutations of the same commit versions, but with
@@ -239,13 +239,13 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	state UID randomID = deterministicRandom()->randomUniqueID();
 
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
-	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
-	    .detail("RandomUID", randomID)
-	    .detail("BatchIndex", batchIndex)
-	    .detail("GetKeys", incompleteStagingKeys.size())
-	    .detail("DelayTime", delayTime);
 
 	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) { // Get dummy value to short-circut DB
+		TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStartNotUseDB", applierID)
+		    .detail("RandomUID", randomID)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("GetKeys", incompleteStagingKeys.size())
+		    .detail("DelayTime", delayTime);
 		int i = 0;
 		for (auto& key : incompleteStagingKeys) {
 			MutationRef m(MutationRef::SetValue, key.first, LiteralStringRef("0"));
@@ -255,6 +255,12 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		}
 		return Void();
 	}
+
+	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
+	    .detail("RandomUID", randomID)
+	    .detail("BatchIndex", batchIndex)
+	    .detail("GetKeys", incompleteStagingKeys.size())
+	    .detail("DelayTime", delayTime);
 
 	loop {
 		try {
