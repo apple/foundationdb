@@ -246,6 +246,7 @@ public:
 	// KeyValueStoreRocksDB
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
+	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;

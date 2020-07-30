@@ -311,6 +311,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
 	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
+	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

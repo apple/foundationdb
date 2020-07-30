@@ -92,7 +92,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(CommitAction& a) {
 			rocksdb::WriteOptions options;
-			options.sync = true;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
