@@ -93,7 +93,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PEEK_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PEEK_RESET_INTERVAL = 20.0;
 	init( PEEK_MAX_LATENCY,                                      0.5 ); if ( randomize && BUGGIFY ) PEEK_MAX_LATENCY = 0.0;
 	init( PEEK_COUNT_SMALL_MESSAGES,                           false ); if ( randomize && BUGGIFY ) PEEK_COUNT_SMALL_MESSAGES = true;
-	init( PEEK_STATS_INTERVAL,                                  10.0 ); 
+	init( PEEK_STATS_INTERVAL,                                  10.0 );
 	init( PEEK_STATS_SLOW_AMOUNT,                                  0 );
 	init( PEEK_STATS_SLOW_RATIO,                                 0.5 );
 
@@ -236,7 +236,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( DD_VALIDATE_LOCALITY,                                 true ); if( randomize && BUGGIFY ) DD_VALIDATE_LOCALITY = false;
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
 	init( DD_ENABLE_VERBOSE_TRACING,                           false ); if( randomize && BUGGIFY ) DD_ENABLE_VERBOSE_TRACING = true;
-	init( DD_SS_FAILURE_VERSIONLAG,                        250000000 ); 
+	init( DD_SS_FAILURE_VERSIONLAG,                        250000000 );
 	init( DD_SS_ALLOWED_VERSIONLAG,                        200000000 ); if( randomize && BUGGIFY ) { DD_SS_FAILURE_VERSIONLAG = deterministicRandom()->randomInt(15000000, 500000000); DD_SS_ALLOWED_VERSIONLAG = 0.75 * DD_SS_FAILURE_VERSIONLAG; }
 	init( DD_SS_STUCK_TIME_LIMIT,                              300.0 ); if( randomize && BUGGIFY ) { DD_SS_STUCK_TIME_LIMIT = 200.0 + deterministicRandom()->random01() * 100.0; }
 
@@ -307,6 +307,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// KeyValueStoreMemory
 	init( REPLACE_CONTENTS_BYTES,                                1e5 );
+
+	// KeyValueStoreRocksDB
+	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
+	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -573,7 +577,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS,         10 );
 	init( TRACE_LOG_PING_TIMEOUT_SECONDS,                        5.0 );
 	init( MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             10.0 );
-	init( MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             30.0 ); 
+	init( MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS,             30.0 );
 	init( DBINFO_FAILED_DELAY,                                   1.0 );
 
 	// Test harness
@@ -646,7 +650,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REDWOOD_REMAP_CLEANUP_WINDOW,                           50 );
 	init( REDWOOD_REMAP_CLEANUP_LAG,                             0.1 );
 	init( REDWOOD_LOGGING_INTERVAL,                              5.0 );
-	
+
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );

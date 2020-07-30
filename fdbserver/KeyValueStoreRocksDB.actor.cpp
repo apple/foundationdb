@@ -24,12 +24,18 @@ StringRef toStringRef(rocksdb::Slice s) {
 
 rocksdb::Options getOptions() {
 	rocksdb::Options options;
+	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
+	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
+		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
+	}
+	options.level_compaction_dynamic_level_bytes = true;
+	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	return options;
 }
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
-	return {};
+	return { getOptions() };
 }
 
 struct RocksDBKeyValueStore : IKeyValueStore {

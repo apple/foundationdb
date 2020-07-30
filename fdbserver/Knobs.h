@@ -243,6 +243,10 @@ public:
 	// KeyValueStoreMemory
 	int64_t REPLACE_CONTENTS_BYTES;
 
+	// KeyValueStoreRocksDB
+	int ROCKSDB_BACKGROUND_PARALLELISM;
+	int64_t ROCKSDB_MEMTABLE_BYTES;
+
 	// Leader election
 	int MAX_NOTIFICATIONS;
 	int MIN_NOTIFICATIONS;
@@ -578,7 +582,7 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW;  // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of the window size
 	double REDWOOD_LOGGING_INTERVAL;
-	
+
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
