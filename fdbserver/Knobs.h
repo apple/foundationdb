@@ -567,6 +567,7 @@ public:
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
 	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
+	bool FASTRESTORE_NOT_WRITE_DB; // do not write result to DB. Only for dev testing
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
