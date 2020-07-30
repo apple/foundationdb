@@ -51,4 +51,10 @@ class RangeResult {
 		}
 		this.more = more;
 	}
+
+	public RangeResultSummary getSummary() {
+		final int keyCount = values.size();
+		final byte[] lastKey = keyCount > 0 ? values.get(keyCount -1).getKey() : null;
+		return new RangeResultSummary(lastKey, keyCount, more);
+	}
 }

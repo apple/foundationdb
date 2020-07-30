@@ -44,26 +44,14 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 		return new RangeResultInfo(this);
 	}
 
-	public RangeResultSummary getSummary() {
-		try {
-			pointerReadLock.lock();
-			return FutureResults_getSummary(getPtr());
-		}
-		finally {
-			pointerReadLock.unlock();
-		}
-	}
-
 	public RangeResult getResults() {
 		try {
 			pointerReadLock.lock();
 			return FutureResults_get(getPtr());
-		}
-		finally {
+		} finally {
 			pointerReadLock.unlock();
 		}
 	}
 
-	private native RangeResultSummary FutureResults_getSummary(long ptr) throws FDBException;
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
 }
