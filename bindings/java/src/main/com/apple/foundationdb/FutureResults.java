@@ -45,25 +45,30 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	public RangeResultSummary getSummary() {
-		try {
-			pointerReadLock.lock();
-			return FutureResults_getSummary(getPtr());
+		if (result == null) {
+			getResults();
 		}
-		finally {
-			pointerReadLock.unlock();
-		}
+
+		final int keyCount = result.values.size();
+		final byte[] lastKey = keyCount > 0 ? result.values.get(keyCount -1).getKey() : null;
+		return new RangeResultSummary(lastKey, keyCount, result.more);
 	}
 
 	public RangeResult getResults() {
-		try {
-			pointerReadLock.lock();
-			return FutureResults_get(getPtr());
+		if (result == null) {
+			try {
+				pointerReadLock.lock();
+				result = FutureResults_get(getPtr());
+			}
+			finally {
+				pointerReadLock.unlock();
+			}
 		}
-		finally {
-			pointerReadLock.unlock();
-		}
+		return result;
 	}
 
-	private native RangeResultSummary FutureResults_getSummary(long ptr) throws FDBException;
+	// Cache the future result.
+	private RangeResult result;
+
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
 }
