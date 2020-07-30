@@ -438,7 +438,7 @@ void testIteratorIncrement() {
 			i += 2;
 		}
 	}
-	{
+	if (size > 0) {
 		int i = xs.size() - 1;
 		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
 			ASSERT(*iter == StringRef(std::to_string(i)));
@@ -454,7 +454,7 @@ void testIteratorIncrement() {
 			i += 2;
 		}
 	}
-	{
+	if (size > 0) {
 		int i = xs.size() - 1;
 		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
 			ASSERT(*iter == StringRef(std::to_string(i)));
