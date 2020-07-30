@@ -434,32 +434,32 @@ void testIteratorIncrement() {
 		int i = 0;
 		for (auto iter = xs.begin(); iter < xs.end();) {
 			ASSERT(*iter == StringRef(std::to_string(i)));
-			iter += 2;
-			i += 2;
+			iter += 1;
+			i += 1;
 		}
 	}
 	if (size > 0) {
 		int i = xs.size() - 1;
 		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
 			ASSERT(*iter == StringRef(std::to_string(i)));
-			iter -= 2;
-			i -= 2;
+			iter -= 1;
+			i -= 1;
 		}
 	}
 	{
 		int i = 0;
 		for (auto iter = xs.begin(); iter < xs.end();) {
 			ASSERT(*iter == StringRef(std::to_string(i)));
-			iter = iter + 2;
-			i += 2;
+			iter = iter + 1;
+			i += 1;
 		}
 	}
 	if (size > 0) {
 		int i = xs.size() - 1;
 		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
 			ASSERT(*iter == StringRef(std::to_string(i)));
-			iter = iter - 2;
-			i -= 2;
+			iter = iter - 1;
+			i -= 1;
 		}
 	}
 }
