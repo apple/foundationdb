@@ -187,6 +187,13 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Ranges", ranges.size())
 	    .detail("DelayTime", delayTime);
+	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) {
+		TraceEvent("FastRestoreApplierClearRangeMutationsNotWriteDB", applierID)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("Ranges", ranges.size());
+		return Void();
+	}
+
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
