@@ -4447,6 +4447,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators");
+	if (cx->getConnectionFile()->hasUnresolvedHostnames()) {
+		wait(cx->getConnectionFile()->resolveHostnames());
+	}
 	state ClientCoordinators coordinatorList(cx->getConnectionFile());
 	state vector<Future<Optional<LeaderInfo>>> leaderServers;
 	for (int i = 0; i < coordinatorList.clientLeaderServers.size(); i++) {

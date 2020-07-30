@@ -128,6 +128,8 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
+  PROTOCOL_VERSION_FEATURE(0x0FDB00B063010001LL, NetworkAddressHostnameFlag);
+
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

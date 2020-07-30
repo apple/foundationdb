@@ -24,6 +24,7 @@
 
 #include <array>
 #include <string>
+#include <regex>
 #include <stdint.h>
 #include <variant>
 #include "boost/asio.hpp"
@@ -125,6 +126,28 @@ class Void;
 
 template<class T> class Optional;
 
+struct Hostname {
+	std::string host;
+	std::string service; // decimal port number
+	bool useTLS;
+
+	Hostname(std::string host, std::string service, bool useTLS) : host(host), service(service), useTLS(useTLS) {}
+
+	// Allow hostnames in forms like following:
+	//    host.name:1234
+	//    host-name:1234
+	//    host-name_part1.host-name_part2:1234:tls
+	static bool isHostname(std::string& s) {
+		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
+		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
+		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
+	}
+
+	static Hostname parse(std::string const& str);
+
+	std::string toString() const { return host + ":" + service + (useTLS ? ":tls" : ""); }
+};
+
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
@@ -202,12 +225,13 @@ struct NetworkAddress {
 	IPAddress ip;
 	uint16_t port;
 	uint16_t flags;
+	bool fromHostname; // deliberately not included in compare operators
 
 	enum { FLAG_PRIVATE = 1, FLAG_TLS = 2 };
 
-	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE) {}
+	NetworkAddress() : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE), fromHostname(false) {}
 	NetworkAddress(const IPAddress& address, uint16_t port, bool isPublic, bool isTLS)
-	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)) {}
+	  : ip(address), port(port), flags((isPublic ? 0 : FLAG_PRIVATE) | (isTLS ? FLAG_TLS : 0)), fromHostname(false) {}
 	NetworkAddress(uint32_t ip, uint16_t port, bool isPublic, bool isTLS)
 	  : NetworkAddress(IPAddress(ip), port, isPublic, isTLS) {}
 
@@ -251,7 +275,7 @@ struct NetworkAddress {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (is_fb_function<Ar>) {
-			serializer(ar, ip, port, flags);
+			serializer(ar, ip, port, flags, fromHostname);
 		} else {
 			if (ar.isDeserializing && !ar.protocolVersion().hasIPv6()) {
 				uint32_t ipV4;
@@ -259,6 +283,9 @@ struct NetworkAddress {
 				ip = IPAddress(ipV4);
 			} else {
 				serializer(ar, ip, port, flags);
+			}
+			if (ar.protocolVersion().hasNetworkAddressHostnameFlag()) {
+				serializer(ar, fromHostname);
 			}
 		}
 	}

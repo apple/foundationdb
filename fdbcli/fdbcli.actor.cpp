@@ -2017,7 +2017,6 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 }
 
 // FIXME: Factor address parsing from coordinators, include, exclude
-
 ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
@@ -2884,6 +2883,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
 		ccf = Reference<ClusterConnectionFile>( new ClusterConnectionFile( resolvedClusterFile.first ) );
+		if (ccf->hasUnresolvedHostnames()) {
+			wait(ccf->resolveHostnames());
+		}
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
@@ -3130,10 +3132,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "coordinators")) {
+					// TODO: since cluster file supports hostname, it might be worthy to make change coordinators
+					// support hostname too
 					auto cs = ClusterConnectionFile(db->getConnectionFile()->getFilename()).getConnectionString();
 					if (tokens.size() < 2) {
 						printf("Cluster description: %s\n", cs.clusterKeyName().toString().c_str());
-						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(), describe(cs.coordinators()).c_str());
+						printf("Cluster coordinators (%zu): %s\n", (cs.coordinators().size() + cs.hostnames().size()),
+						       cs.toString().c_str());
 						printf("Type `help coordinators' to learn how to change this information.\n");
 					} else {
 						bool err = wait( coordinators( db, tokens, cs.coordinators()[0].isTLS() ) );

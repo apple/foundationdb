@@ -45,15 +45,28 @@ public:
 	ClusterConnectionString( std::string const& connectionString );
 	ClusterConnectionString( vector<NetworkAddress>, Key );
 	vector<NetworkAddress> const& coordinators() const { return coord; }
+	vector<NetworkAddress>& mutableCoordinators() { return coord; }
+	std::vector<Hostname> const& hostnames() const { return hosts; }
+	std::vector<Hostname>& mutableHostnames() { return hosts; }
+	std::unordered_map<NetworkAddress, Hostname>& mutableResolveResults() { return _resolveResults; }
+	std::unordered_map<NetworkAddress, Hostname> const& resolveResults() const { return _resolveResults; };
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const { return keyDesc; }  // Returns the "name" or "description" part of the clusterKey (the part before the ':')
 	std::string toString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
-private:
-	void parseKey( std::string const& key );
+	Future<Void> resolveHostnames();
+	void resetToUnresolved();
 
+	bool hasUnresolvedHostnames;
+
+private:
+	void parseConnString();
+	void parseKey( std::string const& key );
+	std::vector<Hostname> hosts;
+	std::unordered_map<NetworkAddress, Hostname> _resolveResults;
 	vector<NetworkAddress> coord;
 	Key key, keyDesc;
+	std::string _connectionString;
 };
 
 class ClusterConnectionFile : NonCopyable, public ReferenceCounted<ClusterConnectionFile> {
@@ -80,6 +93,7 @@ public:
 	static std::string getErrorString( std::pair<std::string, bool> const& resolvedFile, Error const& e );
 
 	ClusterConnectionString const& getConnectionString() const;
+	ClusterConnectionString& getMutableConnectionString() const;
 	bool writeFile();
 	void setConnectionString( ClusterConnectionString const& );
 	std::string const& getFilename() const { ASSERT( filename.size() ); return filename; }
@@ -87,6 +101,9 @@ public:
 	bool fileContentsUpToDate() const;
 	bool fileContentsUpToDate(ClusterConnectionString &fileConnectionString) const;
 	void notifyConnected();
+	Future<Void> resolveHostnames();
+	bool hasUnresolvedHostnames();
+
 private:
 	ClusterConnectionString cs;
 	std::string filename;
@@ -98,7 +115,11 @@ struct LeaderInfo {
 	UID changeID;
 	static const uint64_t mask = ~(127ll << 57);
 	Value serializedInfo;
-	bool forward;  // If true, serializedInfo is a connection string instead!
+
+	// If true, serializedInfo is a connection string instead!
+	// If true, it also means the receipient need to update their local cluster file
+	//     with the latest list of coordinators
+	bool forward;
 
 	LeaderInfo() : forward(false) {}
 	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
@@ -179,7 +200,7 @@ class ClientCoordinators {
 public:
 	vector< ClientLeaderRegInterface > clientLeaderServers;
 	Key clusterKey;
-	Reference<ClusterConnectionFile> ccf; 
+	Reference<ClusterConnectionFile> ccf;
 
 	explicit ClientCoordinators( Reference<ClusterConnectionFile> ccf );
 	explicit ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators );
