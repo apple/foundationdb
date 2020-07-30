@@ -238,6 +238,17 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	    .detail("GetKeys", incompleteStagingKeys.size())
 	    .detail("DelayTime", delayTime);
 
+	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) { // Get dummy value to short-circut DB
+		int i = 0;
+		for (auto& key : incompleteStagingKeys) {
+			MutationRef m(MutationRef::SetValue, key.first, LiteralStringRef("0"));
+			key.second->second.add(m, LogMessageVersion(1));
+			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
+			i++;
+		}
+		return Void();
+	}
+
 	loop {
 		try {
 			int i = 0;
