@@ -17,7 +17,9 @@ RUN cd / &&\
 
 # Download and install gcc-9.3.0
 RUN cd / &&\
-	curl -L $FDB_ARTIFACTSURL/downloads/docker/foundationdb-dev/gcc-9.3.0.tar.gz | tar -xvz
+	curl -L $FDB_ARTIFACTSURL/downloads/docker/foundationdb-dev/gcc-9.3.0.tar.gz | tar -xvz &&\
+	mv -iv /usr/local/bin/go /usr/local/bin/go.gcc93 &&\
+	mv -iv /usr/local/bin/gofmt /usr/local/bin/gofmt.gcc93
 
 # Download and install distcc 3.3.2 new centos binaries
 RUN cd / &&\
