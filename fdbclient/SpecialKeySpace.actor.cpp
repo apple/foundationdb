@@ -683,7 +683,8 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, bool failed, std::
 				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
 				if (address.toString().find(":tls") != std::string::npos)
 					error += "        Do not include the `:tls' suffix when naming a process\n";
-				msg = ManagementAPIError::toJsonString(false, entry.second.present() ? "exclude" : "include", error);
+				msg = ManagementAPIError::toJsonString(
+				    false, entry.second.present() ? (failed ? "exclude failed" : "exclude") : "include", error);
 				return false;
 			}
 			addresses.push_back(a);
@@ -712,7 +713,7 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			                   "Please check that this exclusion does not bring down an entire storage team.\n"
 			                   "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
 			                   "You may add more storage processes or coordinators to make the operation safe.\n"
-			                   "Call `set(\"\xff\xff/management/failed/<ADDRESS...>\", ...)' to exclude without "
+			                   "Call set(\"0xff0xff/management/failed/<ADDRESS...>\", ...) to exclude without "
 			                   "performing safety checks.\n";
 			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 			return false;
@@ -722,7 +723,7 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 	state std::string errorString =
 	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
 	    "Please try the exclude again in 30 seconds.\n"
-	    "Call `set(\"\xff\xff/management/options/exclude/force\", ...)' first to exclude without checking free "
+	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking free "
 	    "space.\n";
 
 	StatusObjectReader statusObj(status);
@@ -801,7 +802,7 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 	if (ssExcludedCount == ssTotalCount ||
 	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
 		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
-		                   "Call `set(\"\xff\xff/management/options/exclude/force\", ...)' first to exclude without "
+		                   "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
 		                   "checking free space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
