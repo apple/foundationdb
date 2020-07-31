@@ -699,7 +699,9 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 
 	TraceEvent("FastRestoreControllerPhaseCollectBackupFilesStart")
 	    .detail("TargetVersion", request.targetVersion)
-	    .detail("BackupDesc", desc.toString());
+	    .detail("BackupDesc", desc.toString())
+	    .detail("UseRangeFile", SERVER_KNOBS->FASTRESTORE_USE_RANGE_FILE)
+	    .detail("UseLogFile", SERVER_KNOBS->FASTRESTORE_USE_LOG_FILE);
 	if (g_network->isSimulated()) {
 		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
 	}
@@ -720,29 +722,37 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	double rangeSize = 0;
 	double logSize = 0;
 	*minRangeVersion = MAX_VERSION;
-	for (const RangeFile& f : restorable.get().ranges) {
-		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("RangeFile", f.toString());
-		if (f.fileSize <= 0) {
-			continue;
+	if (SERVER_KNOBS->FASTRESTORE_USE_RANGE_FILE) {
+		for (const RangeFile& f : restorable.get().ranges) {
+			TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
+			    .detail("RangeFile", f.toString());
+			if (f.fileSize <= 0) {
+				continue;
+			}
+			RestoreFileFR file(f);
+			TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
+			    .detail("RangeFileFR", file.toString());
+			uniqueRangeFiles.insert(file);
+			rangeSize += file.fileSize;
+			*minRangeVersion = std::min(*minRangeVersion, file.version);
 		}
-		RestoreFileFR file(f);
-		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
-		    .detail("RangeFileFR", file.toString());
-		uniqueRangeFiles.insert(file);
-		rangeSize += file.fileSize;
-		*minRangeVersion = std::min(*minRangeVersion, file.version);
 	}
-	for (const LogFile& f : restorable.get().logs) {
-		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFile", f.toString());
-		if (f.fileSize <= 0) {
-			continue;
+
+	if (SERVER_KNOBS->FASTRESTORE_USE_LOG_FILE) {
+		for (const LogFile& f : restorable.get().logs) {
+			TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFile", f.toString());
+			if (f.fileSize <= 0) {
+				continue;
+			}
+			RestoreFileFR file(f);
+			TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
+			    .detail("LogFileFR", file.toString());
+			logFiles->push_back(file);
+			uniqueLogFiles.insert(file);
+			logSize += file.fileSize;
 		}
-		RestoreFileFR file(f);
-		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
-		logFiles->push_back(file);
-		uniqueLogFiles.insert(file);
-		logSize += file.fileSize;
 	}
+
 	// Assign unique range files and log files to output
 	rangeFiles->assign(uniqueRangeFiles.begin(), uniqueRangeFiles.end());
 	logFiles->assign(uniqueLogFiles.begin(), uniqueLogFiles.end());
@@ -752,7 +762,9 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	    .detail("RangeFiles", rangeFiles->size())
 	    .detail("LogFiles", logFiles->size())
 	    .detail("RangeFileBytes", rangeSize)
-	    .detail("LogFileBytes", logSize);
+	    .detail("LogFileBytes", logSize)
+	    .detail("UseRangeFile", SERVER_KNOBS->FASTRESTORE_USE_RANGE_FILE)
+	    .detail("UseLogFile", SERVER_KNOBS->FASTRESTORE_USE_LOG_FILE);
 	return request.targetVersion;
 }
 
@@ -847,7 +859,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	}
 	wait(sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, loadersInterf, requestsToLoaders));
 
-	TraceEvent("FastRestoreControllerPhaseInitVersionBatchForLoadersDone").detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreControllerPhaseInitVersionBatchForAppliersDone").detail("BatchIndex", batchIndex);
 	return Void();
 }
 
