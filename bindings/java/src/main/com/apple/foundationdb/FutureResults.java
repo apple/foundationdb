@@ -20,55 +20,31 @@
 
 package com.apple.foundationdb;
 
-import java.util.concurrent.Executor;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
-class FutureResults extends NativeFuture<RangeResultInfo> {
-	FutureResults(long cPtr, Executor executor) {
-		super(cPtr);
-		registerMarshalCallback(executor);
+class FutureResults {
+	FutureResults(CompletableFuture<RangeResult> f) {
+		future = f;
 	}
 
-	@Override
-	protected void postMarshal() {
-		// We can't close because this class actually marshals on-demand
+	public CompletableFuture<RangeResult> getFuture() {
+		return future;
 	}
 
-	@Override
-	protected RangeResultInfo getIfDone_internal(long cPtr) throws FDBException {
-		FDBException err = Future_getError(cPtr);
+	public void cancel(boolean b) {
+		// TODO (Vishesh): How to tell JNI to cancel and dispose internal C FDBFuture?
+		future.cancel(b);
+	};
 
-		if(err != null && !err.isSuccess()) {
-			throw err;
-		}
-
-		return new RangeResultInfo(this);
+	public RangeResultSummary getSummary() throws InterruptedException, ExecutionException {
+		return getResults().getSummary();
 	}
 
-	public RangeResultSummary getSummary() {
-		if (result == null) {
-			getResults();
-		}
-
-		final int keyCount = result.values.size();
-		final byte[] lastKey = keyCount > 0 ? result.values.get(keyCount -1).getKey() : null;
-		return new RangeResultSummary(lastKey, keyCount, result.more);
+	public RangeResult getResults() throws InterruptedException, ExecutionException {
+		assert(future.isDone()); /* Impossible */
+		return future.get();
 	}
 
-	public RangeResult getResults() {
-		if (result == null) {
-			try {
-				pointerReadLock.lock();
-				result = FutureResults_get(getPtr());
-			}
-			finally {
-				pointerReadLock.unlock();
-			}
-		}
-		return result;
-	}
-
-	// Cache the future result.
-	private RangeResult result;
-
-	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
+	final private CompletableFuture<RangeResult> future;
 }

@@ -363,19 +363,21 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			KeySelector begin, KeySelector end,
 			int rowLimit, int targetBytes, int streamingMode,
 			int iteration, boolean isSnapshot, boolean reverse) {
-		pointerReadLock.lock();
-		try {
 			/*System.out.println(String.format(
 					" -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 				begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 				iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureResults(Transaction_getRange(
-					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
-					streamingMode, iteration, isSnapshot, reverse), executor);
-		} finally {
-			pointerReadLock.unlock();
-		}
+		CompletableFuture<RangeResult> future = CompletableFuture.supplyAsync(() -> {
+				try {
+					pointerReadLock.lock();
+					return Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
+												end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
+												streamingMode, iteration, isSnapshot, reverse);
+				} finally  {
+					pointerReadLock.unlock();
+				}
+			}, executor);
+		return new FutureResults(future);
 	}
 
 	@Override
@@ -662,7 +664,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native long Transaction_get(long cPtr, byte[] key, boolean isSnapshot);
 	private native  long Transaction_getKey(long cPtr, byte[] key, boolean orEqual,
 			int offset, boolean isSnapshot);
-	private native long Transaction_getRange(long cPtr,
+	private native RangeResult Transaction_getRange(long cPtr,
 			byte[] keyBegin, boolean orEqualBegin, int offsetBegin,
 			byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 			int rowLimit, int targetBytes, int streamingMode, int iteration,

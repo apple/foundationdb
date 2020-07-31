@@ -40,7 +40,6 @@ static jclass range_result_summary_class;
 static jclass range_result_class;
 static jclass string_class;
 static jmethodID range_result_init;
-static jmethodID range_result_summary_init;
 
 void detachIfExternalThread(void *ignore) {
 	if(is_external && g_thread_jenv != nullptr) {
@@ -306,14 +305,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureString
 }
 
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1get(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return JNI_NULL;
-	}
- 
-	FDBFuture *f = (FDBFuture *)future;
-
+jobject getRangeQueryResults(JNIEnv *jenv, FDBFuture* f) {
 	const FDBKeyValue *kvs;
 	int count;
 	fdb_bool_t more;
@@ -570,7 +562,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRange
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRange
   (JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBeginBytes, jboolean orEqualBegin, jint offsetBegin,
 		jbyteArray keyEndBytes, jboolean orEqualEnd, jint offsetEnd, jint rowLimit, jint targetBytes, 
 		jint streamingMode, jint iteration, jboolean snapshot, jboolean reverse) {
@@ -601,7 +593,18 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 			targetBytes, (FDBStreamingMode)streamingMode, iteration, snapshot, reverse);
 	jenv->ReleaseByteArrayElements( keyBeginBytes, (jbyte *)barrBegin, JNI_ABORT );
 	jenv->ReleaseByteArrayElements( keyEndBytes, (jbyte *)barrEnd, JNI_ABORT );
-	return (jlong)f;
+
+	if (fdb_future_block_until_ready(f) != 0 ) {
+		if( !jenv->ExceptionOccurred() )
+			throwRuntimeEx( jenv, "Error executing get_range() query" );
+		fdb_future_destroy(f);
+		return 0;
+	}
+
+	jobject result = getRangeQueryResults(jenv, f);
+	// TODO (Vishesh) : Does it needs to be disposed for error/cancel?
+	fdb_future_destroy(f);
+	return result;
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getEstimatedRangeSizeBytes(JNIEnv *jenv, jobject, jlong tPtr, 
@@ -1008,10 +1011,6 @@ jint JNI_OnLoad(JavaVM *vm, void *reserved) {
 		jclass local_range_result_class = env->FindClass("com/apple/foundationdb/RangeResult");
 		range_result_init = env->GetMethodID(local_range_result_class, "<init>", "([B[IZ)V");
 		range_result_class = (jclass) (env)->NewGlobalRef(local_range_result_class);
-
-		jclass local_range_result_summary_class = env->FindClass("com/apple/foundationdb/RangeResultSummary");
-		range_result_summary_init = env->GetMethodID(local_range_result_summary_class, "<init>", "([BIZ)V");
-		range_result_summary_class = (jclass) (env)->NewGlobalRef(local_range_result_summary_class);
 
 		jclass local_string_class = env->FindClass("java/lang/String");
 		string_class = (jclass) (env)->NewGlobalRef(local_string_class);

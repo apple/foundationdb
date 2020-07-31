@@ -84,8 +84,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			FutureResults range = tr.getRange_internal(
 					this.begin, this.end, this.rowLimit, 0, StreamingMode.EXACT.code(),
 					1, this.snapshot, this.reverse);
-			return range.thenApply(result -> result.get().values)
-					.whenComplete((result, e) -> range.close());
+			return range.getFuture().thenApply(result -> result.values);
 		}
 
 		// If the streaming mode is not EXACT, simply collect the results of an iteration into a list
@@ -140,7 +139,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			return !chunk.more || (rowsLimited && rowsRemaining < 1);
 		}
 
-		class FetchComplete implements BiConsumer<RangeResultInfo, Throwable> {
+		class FetchComplete implements BiConsumer<RangeResult, Throwable> {
 			final FutureResults fetchingChunk;
 			final CompletableFuture<Boolean> promise;
 
@@ -150,55 +149,48 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			}
 
 			@Override
-			public void accept(RangeResultInfo data, Throwable error) {
-				try {
-					final RangeResultSummary summary;
-
-					if(error != null) {
-						promise.completeExceptionally(error);
-						if(error instanceof Error) {
-							throw (Error) error;
-						}
-
-						return;
+			public void accept(RangeResult data, Throwable error) {
+				if(error != null) {
+					promise.completeExceptionally(error);
+					if(error instanceof Error) {
+						throw (Error) error;
 					}
 
-					summary = data.getSummary();
-					if(summary.lastKey == null) {
-						promise.complete(Boolean.FALSE);
-						return;
-					}
-
-					synchronized(AsyncRangeIterator.this) {
-						fetchOutstanding = false;
-
-						// adjust the total number of rows we should ever fetch
-						rowsRemaining -= summary.keyCount;
-
-						// set up the next fetch
-						if(reverse) {
-							end = KeySelector.firstGreaterOrEqual(summary.lastKey);
-						}
-						else {
-							begin = KeySelector.firstGreaterThan(summary.lastKey);
-						}
-
-						// If this is the first fetch or the main chunk is exhausted
-						if(chunk == null || index == chunk.values.size()) {
-							nextChunk = null;
-							chunk = data.get();
-							index = 0;
-						}
-						else {
-							nextChunk = data.get();
-						}
-					}
-
-					promise.complete(Boolean.TRUE);
+					return;
 				}
-				finally {
-					fetchingChunk.close();
+
+				final RangeResultSummary summary = data.getSummary();
+				if(summary.lastKey == null) {
+					promise.complete(Boolean.FALSE);
+					return;
 				}
+
+				synchronized(AsyncRangeIterator.this) {
+					fetchOutstanding = false;
+
+					// adjust the total number of rows we should ever fetch
+					rowsRemaining -= summary.keyCount;
+
+					// set up the next fetch
+					if(reverse) {
+						end = KeySelector.firstGreaterOrEqual(summary.lastKey);
+					}
+					else {
+						begin = KeySelector.firstGreaterThan(summary.lastKey);
+					}
+
+					// If this is the first fetch or the main chunk is exhausted
+					if(chunk == null || index == chunk.values.size()) {
+						nextChunk = null;
+						chunk = data;
+						index = 0;
+					}
+					else {
+						nextChunk = data;
+					}
+				}
+
+				promise.complete(Boolean.TRUE);
 			}
 		}
 
@@ -219,7 +211,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 					++iteration, snapshot, reverse);
 
 			nextFuture = new CompletableFuture<>();
-			fetchingChunk.whenComplete(new FetchComplete(fetchingChunk, nextFuture));
+			fetchingChunk.getFuture().whenComplete(new FetchComplete(fetchingChunk, nextFuture));
 		}
 
 		@Override
