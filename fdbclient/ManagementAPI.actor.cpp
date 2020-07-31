@@ -1317,7 +1317,6 @@ ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers,
 
 ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-<<<<<<< HEAD
 	if (cx->apiVersionAtLeast(700)) {
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
@@ -1330,29 +1329,6 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 						} else {
 							ryw.clear(excludedServersKeys.withPrefix(normalKeys.end));
 						}
-=======
-	loop {
-		try {
-			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
-
-			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
-			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
-			if (failed) {
-				tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
-				tr.set(failedServersVersionKey, versionKey);
-			} else {
-				tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
-				tr.set(excludedServersVersionKey, versionKey);
-			}
-
-			for(auto& s : servers ) {
-				if (!s.isValid()) { // Include all excluded servers if input servers are invalid
-					if (failed) {
-						tr.clear(failedServersKeys);
->>>>>>> upstream/master
 					} else {
 						Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
 										  : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
