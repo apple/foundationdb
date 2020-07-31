@@ -689,6 +689,7 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			bool _safe = wait(checkSafeExclusions(db, *addresses));
 			safe = _safe;
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
 			TraceEvent("CheckSafeExclusionsError").error(e);
 			safe = false;
 		}
