@@ -63,6 +63,7 @@ struct MapHarness {
 		const K& operator->() const { return it->first; }
 
 		bool operator==(result const& k) const { return it == k.it; }
+		bool operator!=(result const& k) const { return it != k.it; }
 	};
 
 	map s;

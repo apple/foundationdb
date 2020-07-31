@@ -45,8 +45,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	// KVWorkload::actorCount
 	int goodActorPerClient, badActorPerClient;
 	int numWritePerTr, numReadPerTr, numClearPerTr;
-	int keyCount, hotKeyCount;
-	int sampleSize;
+	int keyCount;
 	double badOpRate;
 	double testDuration, throttleDuration;
 	double tpsRate;
@@ -55,7 +54,11 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	// internal states
 	double trInterval;
 	TransactionTag badReadTag, badWriteTag, goodTag;
+	bool fastSuccess = false;
 	static constexpr const char* NAME = "WriteTagThrottling";
+	static constexpr int MIN_TAGS_PER_TRANSACTION = 2;
+	static constexpr int MIN_MANUAL_THROTTLED_TRANSACTION_TAGS = 3;
+	static constexpr int MIN_TRANSACTION_TAG_LENGTH = 2;
 
 	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), badActorCommitLatency(SAMPLE_SIZE), badActorReadLatency(SAMPLE_SIZE),
@@ -77,23 +80,27 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		                     std::max(3000, actorCount * 3)); // enough keys to avoid too many conflicts
 		trInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("trPerSecond"), 1000);
 
-		badReadTag = TransactionTag(std::string("badReadTag"));
-		badWriteTag = TransactionTag(std::string("badWriteTag"));
-		goodTag = TransactionTag(std::string("goodTag"));
+		badReadTag = TransactionTag(std::string("bR"));
+		badWriteTag = TransactionTag(std::string("bW"));
+		goodTag = TransactionTag(std::string("gT"));
 	}
 
 	virtual std::string description() { return WriteTagThrottlingWorkload::NAME; }
 
 	// choose a tag
+	// NOTE: this workload make sense if and only if all following tags are attached to db successfully.
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
 		state TransactionPriority priority = deterministicRandom()->randomChoice(allTransactionPriorities);
 		state TagSet tagSet1;
 		state TagSet tagSet2;
 		state TagSet tagSet3;
+		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
+		       CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH >= MIN_TRANSACTION_TAG_LENGTH);
 		tagSet1.addTag(self->badWriteTag);
 		tagSet2.addTag(self->badReadTag);
 		tagSet3.addTag(self->goodTag);
 
+		ASSERT(SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS >= MIN_MANUAL_THROTTLED_TRANSACTION_TAGS);
 		wait(ThrottleApi::throttleTags(cx, tagSet1, self->tpsRate, self->throttleDuration, TagThrottleType::MANUAL,
 		                               priority));
 		wait(ThrottleApi::throttleTags(cx, tagSet2, self->tpsRate, self->throttleDuration, TagThrottleType::MANUAL,
@@ -103,7 +110,15 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 
 		return Void();
 	}
-	Future<Void> setup(const Database& cx) override { return clientId ? Void() : _setup(cx, this); }
+	Future<Void> setup(const Database& cx) override {
+		if (CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION < MIN_TAGS_PER_TRANSACTION ||
+		    CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < MIN_TRANSACTION_TAG_LENGTH ||
+		    SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS < MIN_MANUAL_THROTTLED_TRANSACTION_TAGS) {
+			fastSuccess = true;
+			return Void();
+		}
+		return clientId ? Void() : _setup(cx, this);
+	}
 	ACTOR static Future<Void> _start(Database cx, WriteTagThrottlingWorkload* self) {
 		vector<Future<Void>> clientActors;
 		int actorId;
@@ -116,8 +131,12 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		wait(timeout(waitForAll(clientActors), self->testDuration, Void()));
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
+	virtual Future<Void> start(Database const& cx) {
+		if(fastSuccess) return Void();
+		return _start(cx, this);
+	}
 	virtual Future<bool> check(Database const& cx) {
+		if(fastSuccess) return true;
 		if (badActorTrNum == 0 && goodActorTrNum == 0) {
 			TraceEvent(SevError, "NoTransactionsCommitted");
 			return false;
@@ -127,13 +146,14 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				TraceEvent(SevWarn, "NoThrottleTriggered");
 			}
 			if (badActorThrottleRetries < goodActorThrottleRetries) {
-				TraceEvent(SevError, "IncorrectThrottle");
+				TraceEvent(SevError, "IncorrectThrottle")
+				    .detail("BadActorThrottleRetries", badActorThrottleRetries)
+				    .detail("GoodActorThrottleRetries", goodActorThrottleRetries);
 				return false;
 			}
 			// TODO check whether write throttled tag is correct after enabling that feature
 			// NOTE also do eyeball check of Retries.throttle and Avg Latency
 		}
-
 		return true;
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) {
@@ -212,6 +232,8 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				state int i;
 				// give tag to client
 				if (self->writeThrottle) {
+					ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION);
+					tr.options.tags.clear();
 					if (isBadActor) {
 						tr.options.tags.addTag(self->badWriteTag);
 						tr.options.tags.addTag(self->badReadTag);
@@ -219,6 +241,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 						tr.options.tags.addTag(self->goodTag);
 					}
 				}
+
 				trStart = now();
 				while (true) {
 					try {

@@ -19,7 +19,7 @@
  */
 
 // This file defines the commonly used data structure and functions
-// that are used by both RestoreWorker and RestoreRoles(Master, Loader, and Applier)
+// that are used by both RestoreWorker and RestoreRoles(Controller, Loader, and Applier)
 
 #ifndef FDBSERVER_RESTOREUTIL_H
 #define FDBSERVER_RESTOREUTIL_H
@@ -62,7 +62,7 @@ using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
 using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
 
-enum class RestoreRole { Invalid = 0, Master = 1, Loader, Applier };
+enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);
 extern const std::vector<std::string> RestoreRoleStr;
@@ -73,7 +73,7 @@ std::string getHexString(StringRef input);
 bool debugFRMutation(const char* context, Version version, MutationRef const& mutation);
 
 struct RestoreCommonReply {
-	constexpr static FileIdentifier file_identifier = 56140435;
+	constexpr static FileIdentifier file_identifier = 5808787;
 	UID id; // unique ID of the server who sends the reply
 	bool isDuplicated;
 
@@ -93,7 +93,7 @@ struct RestoreCommonReply {
 };
 
 struct RestoreSimpleRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 83557801;
+	constexpr static FileIdentifier file_identifier = 16448937;
 
 	ReplyPromise<RestoreCommonReply> reply;
 

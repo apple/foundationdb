@@ -136,9 +136,13 @@ public:
 			if( servers == r.servers ) return primary < r.primary;
 			return servers < r.servers;
 		}
+		bool operator>(const Team& r) const { return r < *this; }
+		bool operator<=(const Team& r) const { return !(*this > r); }
+		bool operator>=(const Team& r) const { return !(*this < r); }
 		bool operator == ( const Team& r ) const {
 			return servers == r.servers && primary == r.primary;
 		}
+		bool operator!=(const Team& r) const { return !(*this == r); }
 	};
 
 	// This tracks the data distribution on the data distribution server so that teamTrackers can

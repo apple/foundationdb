@@ -1269,7 +1269,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				while (vCurrent && vCurrent.key() < range.end && !vCurrent->isClearTo() && vCount < limit &&
 					   vSize < *pLimitBytes) {
 					// Store the versionedData results in resultCache
-					resultCache.push_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					resultCache.emplace_back(result.arena, vCurrent.key(), vCurrent->getValue());
 					vSize += sizeof(KeyValueRef) + resultCache.cback().expectedSize();
 					++vCount;
 					++vCurrent;
@@ -1340,7 +1340,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				while (vCurrent && vCurrent.key() >= range.begin && !vCurrent->isClearTo() && vCount < -limit &&
 					   vSize < *pLimitBytes) {
 					// Store the versionedData results in resultCache
-					resultCache.push_back(result.arena, KeyValueRef(vCurrent.key(), vCurrent->getValue()));
+					resultCache.emplace_back(result.arena, vCurrent.key(), vCurrent->getValue());
 					vSize += sizeof(KeyValueRef) + resultCache.cback().expectedSize();
 					++vCount;
 					--vCurrent;

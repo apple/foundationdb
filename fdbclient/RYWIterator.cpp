@@ -95,6 +95,9 @@ RYWIterator& RYWIterator::operator--() {
 }
 
 bool RYWIterator::operator == ( const RYWIterator& r ) const { return cache == r.cache && writes == r.writes; }
+bool RYWIterator::operator!=(const RYWIterator& r) const {
+	return !(*this == r);
+}
 
 void RYWIterator::skip( KeyRef key ) {     // Changes *this to the segment containing key (so that beginKey()<=key && key < endKey())
 	cache.skip(key);

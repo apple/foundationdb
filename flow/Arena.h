@@ -212,7 +212,7 @@ inline void save( Archive& ar, const Arena& p ) {
 //    assertion failures are preferable. This is the main reason we
 //    don't intend to use std::optional directly.
 template <class T>
-class Optional : public ComposedIdentifier<T, 0x10> {
+class Optional : public ComposedIdentifier<T, 4> {
 public:
 	Optional() = default;
 
@@ -783,7 +783,7 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 };
 
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
-class VectorRef : public ComposedIdentifier<T, 0x8>, public VectorRefPreserializer<T, SerStrategy> {
+class VectorRef : public ComposedIdentifier<T, 3>, public VectorRefPreserializer<T, SerStrategy> {
 	using VPS = VectorRefPreserializer<T, SerStrategy>;
 	friend class VectorRef<T, SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
 	                                                                     : VecSerStrategy::FlatBuffers>;
@@ -826,6 +826,15 @@ public:
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
 			VPS::add(*ptr);
+		}
+	}
+
+	template <class It>
+	VectorRef(Arena& arena, It first, It last) {
+		if constexpr (flow_ref<T>::value) {
+			append_deep(arena, first, std::distance(first, last));
+		} else {
+			append(arena, first, std::distance(first, last));
 		}
 	}
 
@@ -877,6 +886,10 @@ public:
 			if ((*this)[i] != rhs[i]) return false;
 		return true;
 	}
+	template <VecSerStrategy S>
+	bool operator!=(VectorRef<T, S> const& rhs) const {
+		return !(*this == rhs);
+	}
 
 	// Warning: Do not mutate a VectorRef that has previously been copy constructed or assigned,
 	// since copies will share data
@@ -906,6 +919,16 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
+
+	template<class... Us>
+	T &emplace_back(Arena& p, Us&& ... args) {
+		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		auto ptr = new (&data[m_size]) T(std::forward<Us>(args)...);
+		VPS::add(*ptr);
+		m_size++;
+		return *ptr;
+	}
+
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
@@ -913,7 +936,19 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
-	void append(Arena& p, const T* begin, int count) {
+
+	// invokes the "Deep copy constructor" T(Arena&, U&&) moving T entirely into arena
+	template<class... Us>
+	T &emplace_back_deep(Arena& p, Us&& ... args) {
+		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		auto ptr = new (&data[m_size]) T(p, std::forward<Us>(args)...);
+		VPS::add(*ptr);
+		m_size++;
+		return *ptr;
+	}
+
+	template <class It>
+	void append(Arena& p, It begin, int count) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
 		VPS::invalidate();
 		if (count > 0) {
@@ -998,6 +1033,8 @@ protected:
 // won't need allocations in these cases.
 template <class T, int InlineMembers = 1>
 class SmallVectorRef {
+	static_assert(InlineMembers >= 0);
+
 public:
 	// types
 	template <bool isConst>
@@ -1008,28 +1045,52 @@ public:
 		int idx = 0;
 
 	public:
-		using Category = std::random_access_iterator_tag;
+		using iterator_category = std::random_access_iterator_tag;
 		using value_type = std::conditional_t<isConst, const T, T>;
 		using difference_type = int;
 		using pointer = value_type*;
 		using reference = value_type&;
 		friend class SmallVectorRef<T, InlineMembers>;
-		template <bool I>
-		friend bool operator<(const iterator_impl<I>&, const iterator_impl<I>&);
-		template <bool I>
-		friend bool operator>(const iterator_impl<I>&, const iterator_impl<I>&);
-		template <bool I>
-		friend bool operator<=(const iterator_impl<I>&, const iterator_impl<I>&);
-		template <bool I>
-		friend bool operator>=(const iterator_impl<I>&, const iterator_impl<I>&);
-		template <bool I>
-		friend self_t operator+(const iterator_impl<I>&, difference_type);
-		template <bool I>
-		friend self_t operator+(difference_type, const self_t&);
-		template <bool I>
-		friend self_t operator-(const iterator_impl<I>&, difference_type);
-		template <bool I>
-		friend difference_type operator-(iterator_impl<I>, self_t);
+		friend bool operator<(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx < rhs.idx;
+		}
+		friend bool operator>(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx > rhs.idx;
+		}
+		friend bool operator<=(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx <= rhs.idx;
+		}
+		friend bool operator>=(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx >= rhs.idx;
+		}
+		friend self_t operator+(const self_t& lhs, difference_type diff) {
+			auto res = lhs;
+			res.idx += diff;
+			return res;
+		}
+		friend self_t operator+(difference_type diff, const self_t& lhs) {
+			auto res = lhs;
+			res.idx += diff;
+			return res;
+		}
+		friend self_t operator-(const self_t& lhs, difference_type diff) {
+			auto res = lhs;
+			res.idx -= diff;
+			return res;
+		}
+		friend self_t operator-(difference_type diff, const self_t& lhs) {
+			auto res = lhs;
+			res.idx -= diff;
+			return res;
+		}
+		friend difference_type operator-(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx - rhs.idx;
+		}
 
 		self_t& operator++() {
 			++idx;
@@ -1064,7 +1125,7 @@ public:
 			if (i < InlineMembers) {
 				return vec->arr[i];
 			} else {
-				return vec->data[i];
+				return vec->data[i - InlineMembers];
 			}
 		}
 		reference get() const { return get(idx); }
@@ -1090,41 +1151,25 @@ public: // Construction
 
 	template <class T2 = T, int IM = InlineMembers>
 	SmallVectorRef(Arena& arena, const SmallVectorRef<T, IM>& toCopy,
-				   typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
-		: m_size(toCopy.m_size) {
-		if (toCopy.size() > InlineMembers) {
-			data.resize(arena, toCopy.size() - InlineMembers);
-		}
-		std::copy(toCopy.cbegin(), toCopy.cend(), begin());
+	               typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
+	  : m_size(0) {
+		append(arena, toCopy.begin(), toCopy.size());
 	}
 
 	template <class T2 = T, int IM = InlineMembers>
 	SmallVectorRef(Arena& arena, const SmallVectorRef<T2, IM>& toCopy,
 	               typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
-	  : m_size(toCopy.m_size) {
-		for (int i = 0; i < toCopy.size(); ++i) {
-			if (i < arr.size()) {
-				new (&arr[i]) T(arena, toCopy[i]);
-			} else {
-				data.push_back_deep(arena, toCopy[i]);
-			}
-		}
+	  : m_size(0) {
+		append_deep(arena, toCopy.begin(), toCopy.size());
 	}
 
 	template <class It>
-	SmallVectorRef(Arena& arena, It first, It last)
-	  : m_size(0) {
-		while (first != last && m_size < InlineMembers) {
-			new (&arr[m_size++]) T(*(first++));
+	SmallVectorRef(Arena& arena, It first, It last) : m_size(0) {
+		if constexpr (flow_ref<T>::value) {
+			append_deep(arena, first, std::distance(first, last));
+		} else {
+			append(arena, first, std::distance(first, last));
 		}
-		while (first != last) {
-			data.push_back(arena, *(first++));
-		}
-	}
-
-	SmallVectorRef(SmallVectorRef<T, InlineMembers>&& o)
-		: m_size(o.m_size), arr(std::move(o.arr)), data(std::move(o.data)) {
-		o.m_size = 0;
 	}
 
 public: // information
@@ -1167,37 +1212,25 @@ public: // Modification
 	void pop_back() {--m_size; }
 
 	template <class It>
-	void append(Arena& arena, It first, It last) {
-		if (first == last) {
-			return;
-		}
-		auto d = std::distance(first, last);
-		if (m_size + d > InlineMembers) {
-			data.reserve(arena, m_size + d - InlineMembers);
-		}
-		while (first != last && m_size < InlineMembers) {
+	void append(Arena& arena, It first, int count) {
+		ASSERT(count >= 0);
+		while (count > 0 && m_size < InlineMembers) {
 			new (&(arr[m_size++])) T(*(first++));
+			--count;
 		}
-		while (first != last) {
-			data.push_back(arena, *(first++));
-		}
+		data.append(arena, first, count);
+		m_size += count;
 	}
 
 	template <class It>
-	void append_deep(Arena& arena, It first, It last) {
-		if (first == last) {
-			return;
-		}
-		auto d = std::distance(first, last);
-		if (m_size + d > InlineMembers) {
-			data.reserve(arena, m_size + d - InlineMembers);
-		}
-		while (first != last && m_size < InlineMembers) {
+	void append_deep(Arena& arena, It first, int count) {
+		ASSERT(count >= 0);
+		while (count > 0 && m_size < InlineMembers) {
 			new (&(arr[m_size++])) T(arena, *(first++));
+			--count;
 		}
-		while (first != last) {
-			data.push_back_deep(arena, *(first++));
-		}
+		data.append_deep(arena, first, count);
+		m_size += count;
 	}
 
 public: // iterator access
@@ -1250,66 +1283,6 @@ private:
 	std::array<T, InlineMembers> arr;
 	VectorRef<T> data;
 };
-
-template <class T, int InlineMembers, bool isConst>
-bool operator<(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
-               const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
-	return lhs.idx < rhs.idx;
-}
-
-template <class T, int InlineMembers, bool isConst>
-bool operator>(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
-               const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
-	return lhs.idx > rhs.idx;
-}
-
-template <class T, int InlineMembers, bool isConst>
-bool operator<=(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
-                const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
-	return lhs.idx <= rhs.idx;
-}
-
-template <class T, int InlineMembers, bool isConst>
-bool operator>=(const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& lhs,
-                const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& rhs) {
-	return lhs.idx >= rhs.idx;
-}
-
-template <class T, int InlineMembers, bool isConst>
-typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator+(
-    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter,
-    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff) {
-	auto res = iter;
-	res.idx += diff;
-	return res;
-}
-
-template <class T, int InlineMembers, bool isConst>
-typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator+(
-    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff,
-    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter) {
-	auto res = iter;
-	res.idx += diff;
-	return res;
-}
-
-template <class T, int InlineMembers, bool isConst>
-typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator-(
-    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter,
-    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff) {
-	auto res = iter;
-	res.idx -= diff;
-	return res;
-}
-
-template <class T, int InlineMembers, bool isConst>
-typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst> operator-(
-    typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>::difference_type diff,
-    const typename SmallVectorRef<T, InlineMembers>::template iterator_impl<isConst>& iter) {
-	auto res = iter;
-	res.idx -= diff;
-	return res;
-}
 
 template <class T>
 struct Traceable<VectorRef<T>> {

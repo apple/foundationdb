@@ -33,17 +33,17 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum limitReason_t {
-	unlimited,  // TODO: rename to workload?
-	storage_server_write_queue_size,
+	unlimited, // TODO: rename to workload?
+	storage_server_write_queue_size, // 1
 	storage_server_write_bandwidth_mvcc,
 	storage_server_readable_behind,
 	log_server_mvcc_write_bandwidth,
-	log_server_write_queue,
-	storage_server_min_free_space,  // a storage server's normal limits are being reduced by low free space
-	storage_server_min_free_space_ratio,  // a storage server's normal limits are being reduced by a low free space ratio
+	log_server_write_queue, // 5
+	storage_server_min_free_space, // a storage server's normal limits are being reduced by low free space
+	storage_server_min_free_space_ratio, // a storage server's normal limits are being reduced by a low free space ratio
 	log_server_min_free_space,
 	log_server_min_free_space_ratio,
-	storage_server_durability_lag,
+	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
 	limitReason_t_end
 };
@@ -1150,12 +1150,16 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	}
 
 	int64_t totalDiskUsageBytes = 0;
-	for(auto & t : self->tlogQueueInfo)
-		if (t.value.valid)
+	for (auto& t : self->tlogQueueInfo) {
+		if (t.value.valid) {
 			totalDiskUsageBytes += t.value.lastReply.storageBytes.used;
-	for(auto & s : self->storageQueueInfo)
-		if (s.value.valid)
+		}
+	}
+	for (auto& s : self->storageQueueInfo) {
+		if (s.value.valid) {
 			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
+		}
+	}
 
 	if (now() - self->lastSSListFetchedTimestamp > SERVER_KNOBS->STORAGE_SERVER_LIST_FETCH_TIMEOUT) {
 		limits->tpsLimit = 0.0;
@@ -1248,8 +1252,9 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
 
 	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
-	for( int i = 0; i < tlogInterfs.size(); i++ )
+	for (int i = 0; i < tlogInterfs.size(); i++) {
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
+	}
 
 	self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 
@@ -1281,6 +1286,10 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 					for(auto tag : req.throttledTagCounts) {
 						self.throttledTags.addRequests(tag.first, tag.second);
 					}
+					// TODO process commitCostEstimation
+					//	for (const auto &[tagName, cost] : req.throttledTagCommitCostEst) {
+					//
+					//	}
 				}
 				if(p.batchTransactions > 0) {
 					self.smoothBatchReleasedTransactions.addDelta( req.batchReleasedTransactions - p.batchTransactions );
