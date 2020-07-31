@@ -34,6 +34,7 @@
 #include "fdbserver/RestoreApplier.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self);
@@ -191,6 +192,7 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 		TraceEvent("FastRestoreApplierClearRangeMutationsNotWriteDB", applierID)
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Ranges", ranges.size());
+		ASSERT(!g_network->isSimulated());
 		return Void();
 	}
 
@@ -246,6 +248,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		    .detail("BatchIndex", batchIndex)
 		    .detail("GetKeys", incompleteStagingKeys.size())
 		    .detail("DelayTime", delayTime);
+		ASSERT(!g_network->isSimulated());
 		int i = 0;
 		for (auto& key : incompleteStagingKeys) {
 			MutationRef m(MutationRef::SetValue, key.first, LiteralStringRef("0"));
@@ -443,6 +446,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
                                                 ApplierBatchData::Counters* cc) {
 	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) {
 		TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchSkipped", applierID).detail("Begin", begin->first);
+		ASSERT(!g_network->isSimulated());
 		return Void();
 	}
 	wait(applyStagingKeysBatchLock->take(TaskPriority::RestoreApplierWriteDB)); // Q: Do we really need the lock?
