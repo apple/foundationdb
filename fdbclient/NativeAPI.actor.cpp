@@ -2913,7 +2913,7 @@ void Transaction::set( const KeyRef& key, const ValueRef& value, bool addConflic
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, value );
-	t.mutations.push_back( req.arena, MutationRef( MutationRef::SetValue, r.begin, v ) );
+	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
 
 	if( addConflictRange ) {
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2939,7 +2939,7 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, operand );
 
-	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
+	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2965,7 +2965,7 @@ void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
 	auto r = KeyRangeRef( req.arena, KeyRangeRef(begin, end) );
 	if (r.empty()) return;
 
-	t.mutations.push_back( req.arena, MutationRef( MutationRef::ClearRange, r.begin, r.end ) );
+	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
 
 	if(addConflictRange)
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2983,10 +2983,11 @@ void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
 	uint8_t* data = new ( req.arena ) uint8_t[ key.size()+1 ];
 	memcpy(data, key.begin(), key.size() );
 	data[key.size()] = 0;
-	t.mutations.push_back( req.arena, MutationRef( MutationRef::ClearRange, KeyRef(data,key.size()), KeyRef(data, key.size()+1)) );
+	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, KeyRef(data, key.size()),
+	                         KeyRef(data, key.size() + 1));
 
 	if(addConflictRange)
-		t.write_conflict_ranges.push_back( req.arena, KeyRangeRef( KeyRef(data,key.size()), KeyRef(data, key.size()+1) ) );
+		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
 void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 	ASSERT( !keys.empty() );
@@ -3496,7 +3497,8 @@ Future<Void> Transaction::commitMutations() {
 		bool isCheckingWrites = options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
 		for(int i=0; i<extraConflictRanges.size(); i++)
 			if (extraConflictRanges[i].isReady() && extraConflictRanges[i].get().first < extraConflictRanges[i].get().second )
-				tr.transaction.read_conflict_ranges.push_back( tr.arena, KeyRangeRef(extraConflictRanges[i].get().first, extraConflictRanges[i].get().second) );
+				tr.transaction.read_conflict_ranges.emplace_back(tr.arena, extraConflictRanges[i].get().first,
+				                                                 extraConflictRanges[i].get().second);
 
 		if( !options.causalWriteRisky && !intersects( tr.transaction.write_conflict_ranges, tr.transaction.read_conflict_ranges ).present() )
 			makeSelfConflicting();
