@@ -183,6 +183,10 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 
 	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) {
 		int i = 1;
+		double rangeFiles = 0;
+		double rangeSize = 0;
+		double logFiles = 0;
+		double logSize = 0;
 		for (auto& vb : versionBatches) {
 			TraceEvent("FastRestoreVersionBatches")
 			    .detail("BatchIndex", vb.second.batchIndex)
@@ -196,15 +200,25 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 				TraceEvent(invalidVersion ? SevError : SevInfo, "FastRestoreVersionBatches")
 				    .detail("BatchIndex", i)
 				    .detail("RangeFile", f.toString());
+				rangeSize += f.fileSize;
+				rangeFiles++;
 			}
 			for (auto& f : vb.second.logFiles) {
 				bool outOfRange = (f.beginVersion >= vb.second.endVersion || f.endVersion <= vb.second.beginVersion);
 				TraceEvent(outOfRange ? SevError : SevInfo, "FastRestoreVersionBatches")
 				    .detail("BatchIndex", i)
 				    .detail("LogFile", f.toString());
+				logSize += f.fileSize;
+				logFiles++;
 			}
 			++i;
 		}
+
+		TraceEvent("FastRestoreVersionBatchesSummary")
+		    .detail("LogFiles", logFiles)
+		    .detail("RangeFiles", rangeFiles)
+		    .detail("LogBytes", logSize)
+		    .detail("RangeBytes", rangeSize);
 	}
 
 	// Input: Get the size of data in backup files in version range [prevVersion, nextVersion)
