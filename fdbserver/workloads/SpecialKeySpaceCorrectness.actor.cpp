@@ -392,7 +392,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) throw;
-			ASSERT(e.code() == error_code_special_keys_management_api_failure);
+			ASSERT(e.code() == error_code_special_keys_api_failure);
 			Optional<Value> errorMsg = wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 			ASSERT(errorMsg.present());
 			std::string errorStr;

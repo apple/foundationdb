@@ -266,6 +266,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
 			for (int i = pairs.size() - 1; i >= 0; --i) {
+				ASSERT(iter->range().contains(pairs[i].key));
 				result.push_back(result.arena(), pairs[i]);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it's still
 				// returned. In other words, the total size of the returned value (less the last entry) will be less
@@ -295,6 +296,7 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
 			for (int i = 0; i < pairs.size(); ++i) {
+				ASSERT(iter->range().contains(pairs[i].key));
 				result.push_back(result.arena(), pairs[i]);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it's still
 				// returned. In other words, the total size of the returned value (less the last entry) will be less
@@ -444,7 +446,7 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 			TraceEvent(SevDebug, "SpecialKeySpaceManagemetnAPIError")
 			    .detail("Reason", msg.get())
 			    .detail("Range", (*it)->getKeyRange().toString());
-			throw special_keys_management_api_failure();
+			throw special_keys_api_failure();
 		}
 	}
 	return Void();
@@ -914,7 +916,11 @@ ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWrites
 
 	for (auto const& address : inProgressExclusion) {
 		Key addrKey = prefix.withSuffix(address.toString());
-		if (kr.contains(addrKey)) result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
+		ASSERT(addrKey.startsWith(LiteralStringRef("\xff\xff/conf/")));
+		if (kr.contains(addrKey)) {
+			result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
+			result.arena().dependsOn(addrKey.arena());
+		}
 	}
 	return result;
 }
