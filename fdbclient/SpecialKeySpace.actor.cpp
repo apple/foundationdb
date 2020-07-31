@@ -697,7 +697,9 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 			std::string temp = "ERROR: It is unsafe to exclude the specified servers at this time.\n"
 			                   "Please check that this exclusion does not bring down an entire storage team.\n"
 			                   "Please also ensure that the exclusion will keep a majority of coordinators alive.\n"
-			                   "You may add more storage processes or coordinators to make the operation safe.\n";
+			                   "You may add more storage processes or coordinators to make the operation safe.\n"
+			                   "Call `set(\"\xff\xff/management/failed/<ADDRESS...>\", ...)' to exclude without "
+			                   "performing safety checks.\n";
 			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 			return false;
 		}
@@ -705,7 +707,9 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 	StatusObject status = wait(StatusClient::statusFetcher(db));
 	state std::string errorString =
 	    "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
-	    "Please try the exclude again in 30 seconds.\n";
+	    "Please try the exclude again in 30 seconds.\n"
+	    "Call `set(\"\xff\xff/management/options/exclude/force\", ...)' first to exclude without checking free "
+	    "space.\n";
 
 	StatusObjectReader statusObj(status);
 
@@ -782,7 +786,9 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 
 	if (ssExcludedCount == ssTotalCount ||
 	    (1 - worstFreeSpaceRatio) * ssTotalCount / (ssTotalCount - ssExcludedCount) > 0.9) {
-		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.";
+		std::string temp = "ERROR: This exclude may cause the total free space in the cluster to drop below 10%.\n"
+		                   "Call `set(\"\xff\xff/management/options/exclude/force\", ...)' first to exclude without "
+		                   "checking free space.\n";
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
 		return false;
 	}
