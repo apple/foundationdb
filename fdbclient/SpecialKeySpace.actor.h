@@ -73,8 +73,9 @@ public:
 	virtual Future<Optional<std::string>> commit(
 	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 	// Given the special key to write, return the real key that needs to be modified
-	// By default, we assume the special key is the real key prefixed by \xff
-	virtual Key decode(const KeyRef& key) { return key.removePrefix(normalKeys.end); }
+	virtual Key decode(const KeyRef& key) const = 0;
+	// Given the read key, return the corresponding special key
+	virtual Key encode(const KeyRef& key) const = 0;
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
@@ -237,6 +238,8 @@ public:
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -247,6 +250,8 @@ public:
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -257,6 +262,8 @@ public:
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 

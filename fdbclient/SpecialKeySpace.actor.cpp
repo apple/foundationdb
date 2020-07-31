@@ -35,7 +35,7 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	{ SpecialKeySpace::MODULE::METRICS,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
 	{ SpecialKeySpace::MODULE::MANAGEMENT,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/conf/"), LiteralStringRef("\xff\xff/conf0")) },
+	  KeyRangeRef(LiteralStringRef("\xff\xff/management/"), LiteralStringRef("\xff\xff/management0")) },
 	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) }
 };
 
@@ -571,24 +571,34 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 	}
 }
 
+Key ManagementCommandsOptionsImpl::decode(const KeyRef& key) const {
+	// Should never be used
+	ASSERT(false);
+	return key;
+}
+
+Key ManagementCommandsOptionsImpl::encode(const KeyRef& key) const {
+	// Should never be used
+	ASSERT(false);
+	return key;
+}
+
 Future<Optional<std::string>> ManagementCommandsOptionsImpl::commit(ReadYourWritesTransaction* ryw) {
 	// Nothing to do, keys should be used by other impls' commit callback
 	return Optional<std::string>();
 }
 
 // read from rwModule
-ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef range,
-                                                               KeyRangeRef kr) {
-	KeyRange krWithoutPrefix = ryw->getDatabase()->specialKeySpace->decode(kr);
-	Standalone<RangeResultRef> resultWithoutPrefix = wait(ryw->getRange(krWithoutPrefix, CLIENT_KNOBS->TOO_MANY));
+ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                               const SpecialKeyRangeRWImpl* impl, KeyRangeRef kr) {
+	state KeyRangeRef range = impl->getKeyRange();
+	Standalone<RangeResultRef> resultWithoutPrefix =
+	    wait(ryw->getRange(ryw->getDatabase()->specialKeySpace->decode(kr), CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
 	Standalone<RangeResultRef> result;
 	if (ryw->readYourWritesDisabled()) {
-		for (const KeyValueRef& kv : resultWithoutPrefix) {
-			KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
-			ValueRef rv(result.arena(), kv.value);
-			result.push_back(result.arena(), KeyValueRef(rk, rv));
-		}
+		for (const KeyValueRef& kv : resultWithoutPrefix)
+			result.push_back_deep(result.arena(), KeyValueRef(impl->encode(kv.key), kv.value));
 	} else {
 		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 		    ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
@@ -596,25 +606,20 @@ ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTra
 		int index = 0;
 		while (iter != ranges.end()) {
 			// add all previous entries into result
-			while (index < resultWithoutPrefix.size() &&
-			       resultWithoutPrefix[index].key.withPrefix(normalKeys.end) < iter->begin()) {
-				const KeyValueRef& kv = resultWithoutPrefix[index];
-				KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
-				ValueRef rv(result.arena(), kv.value);
-				result.push_back(result.arena(), KeyValueRef(rk, rv));
+			Key rk = impl->encode(resultWithoutPrefix[index].key);
+			while (index < resultWithoutPrefix.size() && rk < iter->begin()) {
+				result.push_back_deep(result.arena(), KeyValueRef(rk, resultWithoutPrefix[index].value));
 				++index;
 			}
 			std::pair<bool, Optional<Value>> entry = iter->value();
 			if (entry.first) {
 				// add the writen entries if exists
 				if (entry.second.present()) {
-					KeyRef rk(result.arena(), iter->begin());
-					ValueRef rv(result.arena(), entry.second.get());
-					result.push_back(result.arena(), KeyValueRef(rk, rv));
+					result.push_back_deep(result.arena(), KeyValueRef(iter->begin(), entry.second.get()));
 				}
 				// move index to skip all entries in the iter->range
 				while (index < resultWithoutPrefix.size() &&
-				       iter->range().contains(resultWithoutPrefix[index].key.withPrefix(normalKeys.end)))
+				       iter->range().contains(impl->encode(resultWithoutPrefix[index].key)))
 					++index;
 			}
 			++iter;
@@ -622,9 +627,7 @@ ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTra
 		// add all remaining entries into result
 		while (index < resultWithoutPrefix.size()) {
 			const KeyValueRef& kv = resultWithoutPrefix[index];
-			KeyRef rk = kv.key.withPrefix(normalKeys.end, result.arena());
-			ValueRef rv(result.arena(), kv.value);
-			result.push_back(result.arena(), KeyValueRef(rk, rv));
+			result.push_back_deep(result.arena(), KeyValueRef(impl->encode(kv.key), kv.value));
 			++index;
 		}
 	}
@@ -635,7 +638,7 @@ ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRan
 
 Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                      KeyRangeRef kr) const {
-	return rwModuleGetRangeActor(ryw, getKeyRange(), kr);
+	return rwModuleGetRangeActor(ryw, this, kr);
 }
 
 void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
@@ -650,9 +653,20 @@ void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRan
 	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
-bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, KeyRangeRef range,
-                              std::vector<AddressExclusion>& addresses, std::set<AddressExclusion>& exclusions,
-                              Optional<std::string>& msg) {
+Key ExcludeServersRangeImpl::decode(const KeyRef& key) const {
+	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+	    .withPrefix(LiteralStringRef("\xff/conf/"));
+}
+
+Key ExcludeServersRangeImpl::encode(const KeyRef& key) const {
+	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+}
+
+bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, bool failed, std::vector<AddressExclusion>& addresses,
+                              std::set<AddressExclusion>& exclusions, Optional<std::string>& msg) {
+	KeyRangeRef range = failed ? SpecialKeySpace::getManamentApiCommandRange("failed")
+	                           : SpecialKeySpace::getManamentApiCommandRange("exclude");
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	auto iter = ranges.begin();
 	while (iter != ranges.end()) {
@@ -805,7 +819,8 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 	ryw->setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	// for exluded servers
-	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(excludedServersKeys.withPrefix(normalKeys.end));
+	auto ranges =
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManamentApiCommandRange("exclude"));
 	auto iter = ranges.begin();
 	Transaction& tr = ryw->getTransaction();
 	while (iter != ranges.end()) {
@@ -818,7 +833,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 		++iter;
 	}
 	// for failed servers
-	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(failedServersKeys.withPrefix(normalKeys.end));
+	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManamentApiCommandRange("failed"));
 	iter = ranges.begin();
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
@@ -836,10 +851,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	state Optional<std::string> result;
 	state std::vector<AddressExclusion> addresses;
 	state std::set<AddressExclusion> exclusions;
-	if (!parseNetWorkAddrFromKeys(
-	        ryw, failed ? failedServersKeys.withPrefix(normalKeys.end) : excludedServersKeys.withPrefix(normalKeys.end),
-	        addresses, exclusions, result))
-		return result;
+	if (!parseNetWorkAddrFromKeys(ryw, failed, addresses, exclusions, result)) return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed" : "exclude", "force")];
@@ -862,7 +874,7 @@ FailedServersRangeImpl::FailedServersRangeImpl(KeyRangeRef kr) : SpecialKeyRange
 
 Future<Standalone<RangeResultRef>> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                     KeyRangeRef kr) const {
-	return rwModuleGetRangeActor(ryw, getKeyRange(), kr);
+	return rwModuleGetRangeActor(ryw, this, kr);
 }
 
 void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
@@ -875,6 +887,16 @@ void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef&
 
 void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
 	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
+}
+
+Key FailedServersRangeImpl::decode(const KeyRef& key) const {
+	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+	    .withPrefix(LiteralStringRef("\xff/conf/"));
+}
+
+Key FailedServersRangeImpl::encode(const KeyRef& key) const {
+	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 }
 
 Future<Optional<std::string>> FailedServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -923,7 +945,6 @@ ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWrites
 
 	for (auto const& address : inProgressExclusion) {
 		Key addrKey = prefix.withSuffix(address.toString());
-		ASSERT(addrKey.startsWith(LiteralStringRef("\xff\xff/conf/")));
 		if (kr.contains(addrKey)) {
 			result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
 			result.arena().dependsOn(addrKey.arena());
