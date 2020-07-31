@@ -1325,9 +1325,9 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 				for (auto& s : servers) {
 					if (!s.isValid()) {
 						if (failed) {
-							ryw.clear(failedServersKeys.withPrefix(normalKeys.end));
+							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failed"));
 						} else {
-							ryw.clear(excludedServersKeys.withPrefix(normalKeys.end));
+							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("exclude"));
 						}
 					} else {
 						Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
