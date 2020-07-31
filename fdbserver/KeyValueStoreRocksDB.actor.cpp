@@ -4,6 +4,7 @@
 #include <rocksdb/options.h>
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
+#include "flow/Platform.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -201,6 +202,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
+			auto now = timer_monotonic();
 			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
@@ -237,6 +239,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			  result.readThrough = result[result.size()-1].key;
 			}
 			a.result.send(result);
+			auto elapsed = timer_monotonic() - now;
+			if (elapsed > 0.1) {
+				TraceEvent(SevError, "RocksDBSlowRead")
+				    .detail("Time", std::to_string(elapsed))
+				    .detail("Method", "ReadRange");
+			}
 		}
 	};
 
