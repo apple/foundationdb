@@ -1605,6 +1605,7 @@ public:
 private:
 	Version fromVersion;
 	KeyRef cacheStartKey;
+	bool nowAssigned;
 	bool processedCacheStartKey;
 
 	// Applies private mutations, as the name suggests. It basically establishes the key-ranges
