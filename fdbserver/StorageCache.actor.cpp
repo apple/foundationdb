@@ -1034,7 +1034,7 @@ void StorageCacheData::addMutation(KeyRangeRef const& cachedKeyRange, Version ve
 	//mutableData().printTree(version);
 }
 
-void removeDataRange( StorageCacheData *sc, Standalone<VersionUpdateRef> &mLV, KeyRangeMap<Reference<CacheRangeInfo>>& cacheRanges, KeyRangeRef range ) {
+void removeDataRange( StorageCacheData *sc, Standalone<VerUpdateRef> &mLV, KeyRangeMap<Reference<CacheRangeInfo>>& cacheRanges, KeyRangeRef range ) {
 	// modify the latest version of data to remove all sets and trim all clears to exclude range.
 	// Add a clear to mLV (mutationLog[data.getLatestVersion()]) that ensures all keys in range are removed from the disk when this latest version becomes durable
 	// mLV is also modified if necessary to ensure that split clears can be forgotten
