@@ -1317,7 +1317,7 @@ ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers,
 			}
 
 			for(auto& s : servers ) {
-				if (!s.isValid()) {
+				if (!s.isValid()) { // Include all excluded servers if input servers are invalid
 					if (failed) {
 						tr.clear(failedServersKeys);
 					} else {
