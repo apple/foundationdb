@@ -262,8 +262,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			nextRequestTimer = Never();
 			double nowTime = now();
 			bool detailed = nowTime - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-			for(auto& [tagName, cost] : *transactionTagCommitCostEst)
-				cost.existTime = nowTime - cost.existTime;
 
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
 			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
@@ -1861,12 +1859,15 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
-				ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
-				if ( reply.isError() ) {
+				ErrorOr<GetDataDistributorMetricsReply> reply =
+				    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
+				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit, req.avgOnly))));
+				if (reply.isError()) {
 					req.reply.sendError(reply.getError());
 				} else {
 					GetDDMetricsReply newReply;
 					newReply.storageMetricsList = reply.get().storageMetricsList;
+					newReply.avgShardSize = reply.get().avgShardSize;
 					req.reply.send(newReply);
 				}
 			}

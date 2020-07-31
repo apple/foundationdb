@@ -108,8 +108,12 @@ struct ClientDBInfo {
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
 	double transactionTagSampleRate;
+	int transactionTagSampleBytes;
 
-	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1), transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) {}
+	ClientDBInfo()
+	  : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1),
+	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE),
+	    transactionTagSampleBytes(CLIENT_KNOBS->COMMIT_SAMPLE_BYTE) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -119,7 +123,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate,
+		           transactionTagSampleBytes);
 	}
 };
 
@@ -407,12 +412,13 @@ struct GetDDMetricsReply
 {
 	constexpr static FileIdentifier file_identifier = 7277713;
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
+	Optional<double> avgShardSize;
 
 	GetDDMetricsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, storageMetricsList);
+		serializer(ar, storageMetricsList, avgShardSize);
 	}
 };
 
@@ -421,13 +427,14 @@ struct GetDDMetricsRequest {
 	KeyRange keys;
 	int shardLimit;
 	ReplyPromise<struct GetDDMetricsReply> reply;
+	bool avgOnly = false;
 
 	GetDDMetricsRequest() {}
-	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit, bool avgOnly = false) : keys(keys), shardLimit(shardLimit), avgOnly(avgOnly) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, shardLimit, reply);
+		serializer(ar, keys, shardLimit, reply, avgOnly);
   }
 };
 

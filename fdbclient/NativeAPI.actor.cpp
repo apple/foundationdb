@@ -874,6 +874,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
+    avgShardSizeLastUpdated(0), smoothAvgShardSize(CLIENT_KNOBS->DEFAULT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
@@ -894,6 +895,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+
+	smoothAvgShardSize.reset(CLIENT_KNOBS->INIT_MEAN_SHARD_BYTES);
+
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
@@ -970,7 +974,7 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	transactionKeyServerLocationRequests("KeyServerLocationRequests", cc), transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc), transactionsTooOld("TooOld", cc), 
 	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), 
 	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), 
+	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), smoothAvgShardSize(CLIENT_KNOBS->DEFAULT_SMOOTH_AMOUNT),
 	internal(false) {}
 
 
@@ -1065,6 +1069,11 @@ Future<Void> DatabaseContext::onMasterProxiesChanged() {
 
 bool DatabaseContext::sampleReadTags() {
 	return clientInfo->get().transactionTagSampleRate > 0 && deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
+}
+bool DatabaseContext::sampleOnBytes(uint64_t bytes) {
+	if(bytes >= clientInfo->get().transactionTagSampleBytes) return true;
+	ASSERT(clientInfo->get().transactionTagSampleBytes > 0);
+	return deterministicRandom()->random01() < bytes / clientInfo->get().transactionTagSampleBytes;
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
@@ -3281,7 +3290,7 @@ ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* s
 			else {
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
 					self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false, &StorageServerInterface::getShardState, self->info));
-				trCommitCosts.numClearShards += locations.size();
+				trCommitCosts.bytesClearEst += locations.size() * self->getDatabase()->smoothAvgShardSize.smoothTotal();
 			}
 		}
 	}
@@ -3309,6 +3318,10 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		} else {
 			req.commitCostEstimation = TransactionCommitCostEstimation();
 			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
+			if(!cx->sampleOnBytes(req.commitCostEstimation.get().getBytesSum())) {
+				req.tagSet.reset();
+				req.commitCostEstimation.reset();
+			}
 		}
 
 		startTime = now();

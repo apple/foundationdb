@@ -70,13 +70,13 @@ struct HaltDataDistributorRequest {
 struct GetDataDistributorMetricsReply {
 	constexpr static FileIdentifier file_identifier = 1284337;
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
-	double meanShardSize = -1.0;
+	Optional<double> avgShardSize;
 
 	GetDataDistributorMetricsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,storageMetricsList, meanShardSize);
+		serializer(ar,storageMetricsList, avgShardSize);
 	}
 };
 
@@ -85,15 +85,15 @@ struct GetDataDistributorMetricsRequest {
 	KeyRange keys;
 	int shardLimit;
 	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
-	bool meanOnly = false;
+	bool avgOnly = false;
 
 	GetDataDistributorMetricsRequest() {}
 	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit, bool avgOnly = false)
-	  : keys(keys), shardLimit(shardLimit), meanOnly(avgOnly) {}
+	  : keys(keys), shardLimit(shardLimit), avgOnly(avgOnly) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, shardLimit, reply, meanOnly);
+		serializer(ar, keys, shardLimit, reply, avgOnly);
 	}
 };
 

@@ -79,17 +79,16 @@ struct TransactionCommitCostEstimation {
 	int numWrite = 0;
 	int numAtomicWrite = 0;
 	int numClear = 0;
-	int numClearShards = 0;
 	uint64_t bytesWrite = 0;
 	uint64_t bytesAtomicWrite = 0;
 	uint64_t bytesClearEst = 0;
 
-	double existTime;
-	TransactionCommitCostEstimation(): existTime(now()) {}
+	uint64_t getBytesSum() const { return bytesClearEst + bytesAtomicWrite + bytesWrite; }
+	int getOpsSum() const { return numWrite + numAtomicWrite + numClear; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear, numClearShards);
+		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear);
 	}
 
 	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
@@ -98,7 +97,6 @@ struct TransactionCommitCostEstimation {
 		numClear += other.numClear;
 		bytesWrite += other.bytesWrite;
 		bytesAtomicWrite += other.numAtomicWrite;
-		numClearShards += other.numClearShards;
 		bytesClearEst += other.bytesClearEst;
 		return *this;
 	}

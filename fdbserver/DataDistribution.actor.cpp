@@ -5010,14 +5010,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					req.reply.sendError(result.getError());
 				} else {
 					GetDataDistributorMetricsReply rep;
-					if(!req.meanOnly) {
+					if(!req.avgOnly) {
 						rep.storageMetricsList = result.get();
 					}
 					else {
 						auto& metricVec = result.get();
-						double mean = 0.0;
-						for (auto it = metricVec.cbegin(); it != metricVec.cend(); ++it) mean += it->shardBytes;
-						rep.meanShardSize = mean / metricVec.size();
+						double totalSize = 0.0;
+						for (auto it = metricVec.cbegin(); it != metricVec.cend(); ++it) totalSize += it->shardBytes;
+						rep.avgShardSize = totalSize / metricVec.size();
 					}
 					req.reply.send(rep);
 				}

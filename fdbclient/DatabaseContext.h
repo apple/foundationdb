@@ -161,6 +161,7 @@ public:
 	void invalidateCache( const KeyRangeRef& );
 
 	bool sampleReadTags();
+	bool sampleOnBytes(uint64_t bytes);
 
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
@@ -337,6 +338,8 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothAvgShardSize;
+	int avgShardSizeLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 	Future<Void> cacheListMonitor;

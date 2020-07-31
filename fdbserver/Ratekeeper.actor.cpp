@@ -539,7 +539,7 @@ struct RatekeeperData {
 
 	std::map<UID, ProxyInfo> proxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
-	Smoother smoothMeanShardSize;
+
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
@@ -566,7 +566,6 @@ struct RatekeeperData {
 	  : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    smoothMeanShardSize(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
 	    throttledTagChangeId(0),
 	    normalLimits(TransactionPriority::DEFAULT, "", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
@@ -579,7 +578,6 @@ struct RatekeeperData {
 	                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
 	    autoThrottlingEnabled(false) {
 		expiredTagThrottleCleanup = recurring([this](){ ThrottleApi::expire(this->db); }, SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
-		smoothMeanShardSize.reset(SERVER_KNOBS->MIN_SHARD_BYTES);
 	}
 };
 
@@ -844,26 +842,32 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 	}
 }
 
-ACTOR Future<Void> monitorDDMetricsChanges(RatekeeperData *self, Reference<AsyncVar<ServerDBInfo>> db) {
-	state bool isFirstRep = true;
-	loop {
-		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY));
-		if(!db->get().distributor.present()) continue;
-
-		ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(
-		    db->get().distributor.get().dataDistributorMetrics.getReply( GetDataDistributorMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true) ) ) );
-
-		if(reply.isError()) continue;
-		if(reply.get().meanShardSize > 0) {
-			if (isFirstRep) {
-				self->smoothMeanShardSize.reset(reply.get().meanShardSize);
-				isFirstRep = false;
-			} else self->smoothMeanShardSize.setTotal(reply.get().meanShardSize);
-		}
-		if(deterministicRandom()->random01() < 0.01)
-			TraceEvent("RkMeanShardSize").detail("SmoothTotal", self->smoothMeanShardSize.smoothTotal());
-	};
-}
+//ACTOR Future<Void> monitorDDMetricsChanges(RatekeeperData *self, Reference<AsyncVar<ServerDBInfo>> db) {
+//	state bool isFirstRep = true;
+//	loop {
+//		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY));
+//		if(!db->get().distributor.present()) continue;
+//
+//		ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(
+//		    db->get().distributor.get().dataDistributorMetrics.getReply( GetDataDistributorMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true) ) ) );
+//
+//		if(reply.isError()) {
+//			TraceEvent(SevWarn,"RkMonitorDDMetricsChangeError").error(reply.getError());
+//			continue;
+//		}
+//
+//		ASSERT(reply.get().avgShardSize.present());
+//		double meanShardSize = reply.get().avgShardSize.get();
+//		if(meanShardSize > 0) {
+//			if (isFirstRep) {
+//				self->smoothMeanShardSize.reset(meanShardSize);
+//				isFirstRep = false;
+//			} else self->smoothMeanShardSize.setTotal(meanShardSize);
+//		}
+//		if(deterministicRandom()->random01() < 0.01)
+//			TraceEvent("RkMeanShardSizex100").detail("SmoothTotal", self->smoothMeanShardSize.smoothTotal());
+//	};
+//}
 
 void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
 	if(ss.busiestTag.present() && ss.busiestTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && ss.busiestTagRate > SERVER_KNOBS->MIN_TAG_COST) {
@@ -1236,44 +1240,44 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 }
 
 void updateCommitCostEstimation(RatekeeperData* self, TransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
-	if(self->validSS <= 0) return;
-	int opsSum = 0;
-	double bytesSum = 0;
-	std::multimap<std::pair<double, int>, TransactionTag> costTagReverseIndex;
-	for(const auto& [tagName, costEst] : costEstimation) {
-		if(self->throttledTags.tagData.count(tagName) == 0) continue;
-		int ops = costEst.numClear + costEst.numAtomicWrite + costEst.numWrite;
-		opsSum += ops;
-		double bytes = costEst.bytesClearEst + costEst.bytesAtomicWrite + costEst.bytesWrite + costEst.numClearShards * self->smoothMeanShardSize.smoothTotal();
-		bytesSum += bytes;
-		costTagReverseIndex.emplace(std::make_pair(-bytes, -ops), tagName);
-	}
-
-	ASSERT(self->validSS > 0);
-	int throttledNum = std::max(1, (int)(self->throttledTags.tagData.size() * self->numBusySS / self->validSS));
-	// calculate fractionalBusyness
-	for(auto& [byteOps, tagName] : costTagReverseIndex) { // descending order
-		if(throttledNum <= 0) break;
-		if(self->throttledTags.manualThrottledTags.count(tagName) > 0) continue;
-		double fractionalBusyness =  0.5 * -byteOps.first / (bytesSum+1) + 0.5 * -byteOps.second / (opsSum+1);
-		if(self->throttledTags.autoThrottledTags.count(tagName) > 0) { // has been throttled
-			self->throttledTags.autoThrottleTag(self->id, tagName, fractionalBusyness);
-		}
-		else { // new auto-throttled
-			double opsRate = -byteOps.second / (costEstimation.find(tagName)->second.existTime + 1);
-			if(fractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && opsRate > SERVER_KNOBS->MIN_TAG_COST)
-			{
-				Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, tagName, fractionalBusyness);
-				if(clientRate.present()) {
-					TagSet tags;
-					tags.addTag(tagName);
-
-					self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
-				}
-			}
-		}
-		throttledNum --;
-	}
+//	if(self->validSS <= 0) return;
+//	int opsSum = 0;
+//	double bytesSum = 0;
+//	std::multimap<std::pair<double, int>, TransactionTag> costTagReverseIndex;
+//	for(const auto& [tagName, costEst] : costEstimation) {
+//		if(self->throttledTags.tagData.count(tagName) == 0) continue;
+//		int ops = costEst.numClear + costEst.numAtomicWrite + costEst.numWrite;
+//		opsSum += ops;
+//		double bytes = costEst.bytesClearEst + costEst.bytesAtomicWrite + costEst.bytesWrite + costEst.numClearShards * self->smoothMeanShardSize.smoothTotal();
+//		bytesSum += bytes;
+//		costTagReverseIndex.emplace(std::make_pair(-bytes, -ops), tagName);
+//	}
+//
+//	ASSERT(self->validSS > 0);
+//	int throttledNum = std::max(1, (int)(self->throttledTags.tagData.size() * self->numBusySS / self->validSS));
+//	// calculate fractionalBusyness
+//	for(auto& [byteOps, tagName] : costTagReverseIndex) { // descending order
+//		if(throttledNum <= 0) break;
+//		if(self->throttledTags.manualThrottledTags.count(tagName) > 0) continue;
+//		double fractionalBusyness =  0.5 * -byteOps.first / (bytesSum+1) + 0.5 * -byteOps.second / (opsSum+1);
+//		if(self->throttledTags.autoThrottledTags.count(tagName) > 0) { // has been throttled
+//			self->throttledTags.autoThrottleTag(self->id, tagName, fractionalBusyness);
+//		}
+//		else { // new auto-throttled
+//			double opsRate = -byteOps.second / (costEstimation.find(tagName)->second.existTime + 1);
+//			if(fractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && opsRate > SERVER_KNOBS->MIN_TAG_COST)
+//			{
+//				Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, tagName, fractionalBusyness);
+//				if(clientRate.present()) {
+//					TagSet tags;
+//					tags.addTag(tagName);
+//
+//					self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
+//				}
+//			}
+//		}
+//		throttledNum --;
+//	}
 }
 ACTOR Future<Void> configurationMonitor(RatekeeperData *self) {
 	loop {
@@ -1317,8 +1321,6 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	self.addActor.send( traceRole(Role::RATEKEEPER, rkInterf.id()) );
 
 	self.addActor.send(monitorThrottlingChanges(&self));
-	self.addActor.send(monitorDDMetricsChanges(&self, dbInfo));
-	self.addActor.send(self.expiredTagThrottleCleanup);
 
 	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id()).detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_TLOG - SERVER_KNOBS->SPRING_BYTES_TLOG) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
@@ -1374,7 +1376,6 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxyInfo.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
-				// TODO process commitCostEstimation
 				updateCommitCostEstimation(&self, req.throttledTagCommitCostEst);
 
 				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() < p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
