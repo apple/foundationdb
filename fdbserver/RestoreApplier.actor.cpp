@@ -147,6 +147,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			    .detail("Version", versionedMutation.version.toString())
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", versionedMutation.mutation.toString());
+			batchData->receivedBytes += versionedMutation.mutation.totalSize();
 			batchData->counters.receivedBytes += versionedMutation.mutation.totalSize();
 			batchData->counters.receivedWeightedBytes +=
 			    versionedMutation.mutation.weightedTotalSize(); // atomicOp will be amplified
@@ -526,6 +527,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
 			                                         &batchData->counters));
 			batchData->counters.appliedBytes += txnSize;
+			batchData->appliedBytes += txnSize;
 			begin = cur;
 			txnSize = 0;
 			txnBatches++;
@@ -536,6 +538,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
 		                                         &batchData->counters));
 		batchData->counters.appliedBytes += txnSize;
+		batchData->appliedBytes += txnSize;
 		txnBatches++;
 	}
 

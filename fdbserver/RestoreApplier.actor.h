@@ -255,9 +255,9 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	long receiveMutationReqs;
 
-	// Applying phase
-	CoalescedKeyRangeMap<int> calculatedKeyRanges;
-	KeyRangeMap<Future<Void>> fApplyKeyRanges;
+	// Stats
+	double receivedBytes;
+	double appliedBytes;
 
 	// Status counters
 	struct Counters {
