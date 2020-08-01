@@ -24,8 +24,6 @@
 
 using FileIdentifier = uint32_t;
 
-struct Empty {};
-
 template <typename T, typename = int>
 struct HasFileIdentifierMember : std::false_type {};
 

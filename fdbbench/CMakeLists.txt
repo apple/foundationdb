@@ -2,6 +2,7 @@ set(FDBBENCH_SRCS
   fdbbench.cpp
   BenchIterate.cpp
   BenchPopulate.cpp
+  BenchRef.cpp
   GlobalData.h)
 
 project (fdbbench)
