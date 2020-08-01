@@ -1768,14 +1768,15 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 			return getDatabase()->specialKeySpace->set(this, key, value);
 		} else {
 			// These three special keys are deprecated in 7.0 and an alternative C API is added
-			// TODO : rewrite kill in fdbcli and TriggerRecoveryLoopWorkload using C api
+			// TODO : Rewrite related code using C api
 			if (key == LiteralStringRef("\xff\xff/reboot_worker")) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest());
 				return;
 			}
 			if (key == LiteralStringRef("\xff\xff/suspend_worker")){
-				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, false, options.timeoutInSeconds) );
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
+				    .reboot.send(RebootRequest(false, false, options.timeoutInSeconds));
 				return;
 			}
 			if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")) {

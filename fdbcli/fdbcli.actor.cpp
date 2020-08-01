@@ -3450,7 +3450,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								int64_t timeout_ms = seconds*1000;
 								tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t *)&timeout_ms, sizeof(int64_t)));
 								for(int i = 2; i < tokens.size(); i++) {
-									tr->set(LiteralStringRef("\xff\xff/suspend_worker"), address_interface[tokens[i]].first);
+									if (db->apiVersionAtLeast(700))
+										BinaryReader::fromStringRef<ClientWorkerInterface>(
+										    address_interface[tokens[i]].first, IncludeVersion())
+										    .reboot.send(RebootRequest(false, false, timeout_ms));
+									else
+										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
+										        address_interface[tokens[i]].first);
 								}
 								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
 							}
