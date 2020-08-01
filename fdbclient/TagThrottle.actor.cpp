@@ -339,7 +339,7 @@ namespace ThrottleApi {
 		loop {
 			try {
 				Optional<Value> value = wait(tr.get(tagThrottleAutoEnabledKey));
-				if(!value.present() || (enabled && value.get() != LiteralStringRef("1") || (!enabled && value.get() != LiteralStringRef("0")))) {
+				if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) || (!enabled && value.get() != LiteralStringRef("0"))) {
 					tr.set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
 					signalThrottleChange(tr);
 

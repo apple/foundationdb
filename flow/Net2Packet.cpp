@@ -49,7 +49,7 @@ void PacketWriter::serializeBytesAcrossBoundary(const void* data, int bytes) {
 		if (!bytes) break;
 
 		data = (uint8_t*)data + b;
-		nextBuffer();
+		nextBuffer(bytes);
 	}
 }
 
@@ -69,6 +69,8 @@ void PacketWriter::nextBuffer(size_t size) {
 	}
 }
 
+// Adds exactly bytes of unwritten length to the buffer, possibly across packet buffer boundaries,
+// and initializes buf to point to the packet buffer(s) that contain the unwritten space
 void PacketWriter::writeAhead( int bytes, struct SplitBuffer* buf ) {
 	if (bytes <= buffer->bytes_unwritten()) {
 		buf->begin = buffer->data() + buffer->bytes_written;
@@ -79,9 +81,10 @@ void PacketWriter::writeAhead( int bytes, struct SplitBuffer* buf ) {
 		buf->begin = buffer->data() + buffer->bytes_written;
 		buf->first_length = buffer->bytes_unwritten();
 		buffer->bytes_written = buffer->size();
-		nextBuffer();
+		size_t remaining = bytes - buf->first_length;
+		nextBuffer(remaining);
 		buf->next = buffer->data();
-		buffer->bytes_written = bytes - buf->first_length;
+		buffer->bytes_written = remaining;
 	}
 }
 
@@ -172,7 +175,7 @@ PacketBuffer* ReliablePacketList::compact(PacketBuffer* into, PacketBuffer* end)
 			if (c->buffer == end /*&& c->begin>=c->buffer->bytes_written*/)   // quit when we hit the unsent range
 				return into;
 			if (into->bytes_written == into->size()) {
-				into->next = PacketBuffer::create();
+				into->next = PacketBuffer::create(into->size());
 				into = into->nextPacketBuffer();
 			}
 

@@ -424,7 +424,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		if (bcUrl == url && bc.isValid()) {
 			return;
 		}
-		printf("initBackupContainer, url:%s\n", url.toString().c_str());
+		TraceEvent("FastRestoreControllerInitBackupContainer").detail("URL", url);
 		bcUrl = url;
 		bc = IBackupContainer::openContainer(url.toString());
 	}

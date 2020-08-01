@@ -34,6 +34,7 @@
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> clearDB(Database cx);
@@ -582,7 +583,7 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
 	ASSERT(batchData->samplesSize >= 0);
 	// Sanity check: samples should not be used after freed
 	ASSERT((batchData->samplesSize > 0 && !batchData->samples.empty()) ||
-	       batchData->samplesSize == 0 && batchData->samples.empty());
+	       (batchData->samplesSize == 0 && batchData->samples.empty()));
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
 	double cumulativeSize = slotSize;
@@ -716,6 +717,8 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 
 	std::set<RestoreFileFR> uniqueRangeFiles;
 	std::set<RestoreFileFR> uniqueLogFiles;
+	double rangeSize = 0;
+	double logSize = 0;
 	*minRangeVersion = MAX_VERSION;
 	for (const RangeFile& f : restorable.get().ranges) {
 		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("RangeFile", f.toString());
@@ -726,6 +729,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
 		    .detail("RangeFileFR", file.toString());
 		uniqueRangeFiles.insert(file);
+		rangeSize += file.fileSize;
 		*minRangeVersion = std::min(*minRangeVersion, file.version);
 	}
 	for (const LogFile& f : restorable.get().logs) {
@@ -737,6 +741,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFileFR", file.toString());
 		logFiles->push_back(file);
 		uniqueLogFiles.insert(file);
+		logSize += file.fileSize;
 	}
 	// Assign unique range files and log files to output
 	rangeFiles->assign(uniqueRangeFiles.begin(), uniqueRangeFiles.end());
@@ -745,7 +750,9 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 	TraceEvent("FastRestoreControllerPhaseCollectBackupFilesDone")
 	    .detail("BackupDesc", desc.toString())
 	    .detail("RangeFiles", rangeFiles->size())
-	    .detail("LogFiles", logFiles->size());
+	    .detail("LogFiles", logFiles->size())
+	    .detail("RangeFileBytes", rangeSize)
+	    .detail("LogFileBytes", logSize);
 	return request.targetVersion;
 }
 

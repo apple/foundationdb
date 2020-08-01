@@ -1755,13 +1755,19 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {
-	if (key == LiteralStringRef("\xff\xff/reboot_worker")){
-		BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest() );
-		return;
-	}
-	if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")){
-		BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
-		return;
+	if (key.startsWith(systemKeys.end)) {
+		if (key == LiteralStringRef("\xff\xff/reboot_worker")){
+			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest() );
+			return;
+		}
+		if (key == LiteralStringRef("\xff\xff/suspend_worker")){
+			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, false, options.timeoutInSeconds) );
+			return;
+		}
+		if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")){
+			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
+			return;
+		}
 	}
 	if (key == metadataVersionKey) {
 		throw client_invalid_operation();
