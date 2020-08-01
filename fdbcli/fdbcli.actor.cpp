@@ -3409,7 +3409,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "suspend")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3708,13 +3712,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-								tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-																					LiteralStringRef("\xff\xff\xff")),
-															1)));
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						std::map<Key, ClientWorkerInterface> interfaces;
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+							                    : pair.key)
+							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 							interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 						}
 						state Key ip_port = tokens[2];
@@ -3739,7 +3747,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
