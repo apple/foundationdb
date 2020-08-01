@@ -256,8 +256,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	long receiveMutationReqs;
 
 	// Stats
-	double receivedBytes;
-	double appliedBytes;
+	long receivedBytes;
+	long appliedBytes;
 
 	// Status counters
 	struct Counters {
