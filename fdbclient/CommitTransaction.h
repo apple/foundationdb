@@ -80,6 +80,7 @@ struct MutationRef {
 	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
+	bool clearSingleKey = false; // be only needed in client, so no serialization
 
 	MutationRef() {}
 	MutationRef( Type t, StringRef a, StringRef b ) : type(t), param1(a), param2(b) {}

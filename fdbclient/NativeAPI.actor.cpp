@@ -2985,7 +2985,7 @@ void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
 	data[key.size()] = 0;
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, KeyRef(data, key.size()),
 	                         KeyRef(data, key.size() + 1));
-
+	t.mutations.back().clearSingleKey = true;
 	if(addConflictRange)
 		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
@@ -3272,13 +3272,18 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
                                                                          CommitTransactionRef* transaction) {
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
-	for (int i = 0; i < transaction->mutations.size(); ++i) {
+	state int i = 0;
+	for (; i < transaction->mutations.size(); ++i) {
 		auto* it = &transaction->mutations[i];
 		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
 			trCommitCosts.opsCount++;
 			trCommitCosts.writtenBytes += it->expectedSize();
 		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
+			if(it->clearSingleKey) {
+				trCommitCosts.clearIdxBytes.emplace(i, it->expectedSize()); // NOTE: whether we need a weight here?
+				continue;
+			}
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));

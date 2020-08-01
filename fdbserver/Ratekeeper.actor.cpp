@@ -1239,7 +1239,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	}
 }
 
-void updateCommitCostEstimation(RatekeeperData* self, TransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
+void updateCommitCostEstimation(RatekeeperData* self, UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
 //	if(self->validSS <= 0) return;
 //	int opsSum = 0;
 //	double bytesSum = 0;
