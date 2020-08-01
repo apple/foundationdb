@@ -101,7 +101,15 @@ struct TransactionCommitCostEstimation {
 		return *this;
 	}
 };
-
+struct ClientTrCommitCostEstimation {
+	int opsCount = 0;
+	uint64_t writtenBytes = 0;
+	std::map<int, uint64_t> clearIdxBytes;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, opsCount, writtenBytes, clearIdxBytes);
+	}
+};
 struct GetRateInfoReply {
 	constexpr static FileIdentifier file_identifier = 7845006;
 	double transactionRate;
@@ -124,21 +132,21 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 
 	TransactionTagMap<uint64_t> throttledTagCounts;
-	TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst;
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTagCommitCost;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
 	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
 	                   TransactionTagMap<uint64_t> throttledTagCounts,
-	                   TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst, bool detailed)
+	                   UIDTransactionTagMap<TransactionCommitCostEstimation> ssTagCommitCost, bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
-	    throttledTagCommitCostEst(throttledTagCommitCostEst), detailed(detailed) {}
+	    ssTagCommitCost(ssTagCommitCost), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, throttledTagCommitCostEst);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, ssTagCommitCost);
 	}
 };
 

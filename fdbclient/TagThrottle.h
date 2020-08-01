@@ -187,4 +187,6 @@ using TransactionTagMap = std::unordered_map<TransactionTag, Value, std::hash<Tr
 template<class Value>
 using PrioritizedTransactionTagMap = std::map<TransactionPriority, TransactionTagMap<Value>>;
 
+template<class Value>
+using UIDTransactionTagMap = std::unordered_map<UID, TransactionTagMap<Value>>;
 #endif

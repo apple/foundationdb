@@ -237,7 +237,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
                            GetHealthMetricsReply* detailedHealthMetricsReply,
                            TransactionTagMap<uint64_t>* transactionTagCounter,
                            PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags,
-                           TransactionTagMap<TransactionCommitCostEstimation>* transactionTagCommitCostEst) {
+                           UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTagCommitCost) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -265,9 +265,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
 			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
-			                       *transactionTagCommitCostEst, detailed)));
+			                       *ssTagCommitCost, detailed)));
 			transactionTagCounter->clear();
-			transactionTagCommitCostEst->clear();
+			ssTagCommitCost->clear();
 			expectingDetailedReply = detailed;
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
@@ -442,7 +442,8 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
-	TransactionTagMap<TransactionCommitCostEstimation> transactionTagCommitCostEst;
+
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTagCommitCost;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -451,13 +452,7 @@ struct ProxyCommitData {
 		auto& tags = keyInfo[key].tags;
 		if(!tags.size()) {
 			auto& r = keyInfo.rangeContaining(key).value();
-			for(auto info : r.src_info) {
-				r.tags.push_back(info->tag);
-			}
-			for(auto info : r.dest_info) {
-				r.tags.push_back(info->tag);
-			}
-			uniquify(r.tags);
+			r.populateTags();
 			return r.tags;
 		}
 		return tags;
@@ -501,6 +496,26 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
+	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int bytes){
+		if(ssTagCommitCost.count(id) == 0) {
+			ssTagCommitCost[id] = TransactionTagMap<TransactionCommitCostEstimation>();
+		}
+		for(auto& tag: tagSet) {
+			auto& cost = ssTagCommitCost[id][tag];
+			if(m.isAtomicOp()) {
+				cost.numAtomicWrite ++;
+				cost.bytesAtomicWrite += bytes;
+			}
+			else if (m.type == MutationRef::Type::SetValue){
+				cost.numWrite ++;
+				cost.bytesWrite += bytes;
+			}
+			else if (m.type == MutationRef::Type::ClearRange){
+				cost.numClear ++;
+				cost.bytesClearEst += bytes;
+			}
+		}
+	}
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 			logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false),
@@ -1074,6 +1089,7 @@ ACTOR Future<Void> commitBatch(
 
 	for (; transactionNum<trs.size(); transactionNum++) {
 		if (committed[transactionNum] == ConflictBatch::TransactionCommitted && (!locked || trs[transactionNum].isLockAware())) {
+			ASSERT(trs[transactionNum].commitCostEstimation.present() == trs[transactionNum].tagSet.present());
 			state int mutationNum = 0;
 			state VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
 			for (; mutationNum < pMutations->size(); mutationNum++) {
@@ -1087,13 +1103,27 @@ ACTOR Future<Void> commitBatch(
 				}
 
 				auto& m = (*pMutations)[mutationNum];
+				int mutationSize = m.expectedSize();
 				mutationCount++;
-				mutationBytes += m.expectedSize();
-				yieldBytes += m.expectedSize();
+				mutationBytes += mutationSize;
+				yieldBytes += mutationSize;
 				// Determine the set of tags (responsible storage servers) for the mutation, splitting it
 				// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
-
 				if (isSingleKeyMutation((MutationRef::Type) m.type)) {
+					// sample single key mutation based on byte
+					// the expectation of sampling is every COMMIT_SAMPLE_BYTE sample once
+					if (trs[transactionNum].tagSet.present()) {
+						double totalSize = trs[transactionNum].commitCostEstimation.get().writtenBytes;
+						double mul = std::max(1.0, (double)mutationSize / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_BYTE));
+						ASSERT(totalSize > 0);
+						double prob = mul * mutationSize / totalSize;
+						if(deterministicRandom()->random01() < prob) {
+							for(const auto& ssInfo : self->keyInfo[m.param1].src_info) {
+								auto id = ssInfo->interf.id();
+								self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, mutationSize);
+							}
+						}
+					}
 					auto& tags = self->tagsForKey(m.param1);
 
 					if(self->singleKeyMutationEvent->enabled) {
@@ -1125,6 +1155,7 @@ ACTOR Future<Void> commitBatch(
 
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
+						// check whether clear is sampled
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
@@ -1336,13 +1367,13 @@ ACTOR Future<Void> commitBatch(
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t, metadataVersionAfter));
 			// aggregate commit cost estimation if committed
-			ASSERT(trs[t].commitCostEstimation.present() == trs[t].tagSet.present());
-			if (trs[t].tagSet.present()) {
-				TransactionCommitCostEstimation& costEstimation = trs[t].commitCostEstimation.get();
-				for (auto& tag : trs[t].tagSet.get()) {
-					self->transactionTagCommitCostEst[tag] += costEstimation;
-				}
-			}
+//			ASSERT(trs[t].commitCostEstimation.present() == trs[t].tagSet.present());
+//			if (trs[t].tagSet.present()) {
+//				TransactionCommitCostEstimation& costEstimation = trs[t].commitCostEstimation.get();
+//				for (auto& tag : trs[t].tagSet.get()) {
+//					self->ssTagCommitCost[tag] += costEstimation;
+//				}
+//			}
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld) {
 			trs[t].reply.sendError(transaction_too_old());
@@ -1576,7 +1607,7 @@ ACTOR static Future<Void> transactionStarter(
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
-	                      &(commitData->transactionTagCommitCostEst)));
+	                      &(commitData->ssTagCommitCost)));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
 	                                            &transactionTagCounter));

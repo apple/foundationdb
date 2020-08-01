@@ -3268,33 +3268,49 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self,
-                                                                  CommitTransactionRef* transaction) {
-	state MutationRef* it = transaction->mutations.begin();
-	state MutationRef* end = transaction->mutations.end();
-	state TransactionCommitCostEstimation trCommitCosts;
+ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
+                                                                         CommitTransactionRef* transaction) {
+	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
-	for (; it != end; ++it) {
-		if (it->type == MutationRef::Type::SetValue) {
-			trCommitCosts.bytesWrite += it->expectedSize();
-			trCommitCosts.numWrite++;
-		} else if (it->isAtomicOp()) {
-			trCommitCosts.bytesAtomicWrite += it->expectedSize();
-			trCommitCosts.numAtomicWrite++;
+	for (int i = 0; i < transaction->mutations.size(); ++i) {
+		auto* it = &transaction->mutations[i];
+		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
+			trCommitCosts.opsCount++;
+			trCommitCosts.writtenBytes += it->expectedSize();
 		} else if (it->type == MutationRef::Type::ClearRange) {
-			trCommitCosts.numClear++;
+			trCommitCosts.opsCount++;
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));
-				trCommitCosts.bytesClearEst += m.bytes;
-			}
-			else {
-				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-					self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false, &StorageServerInterface::getShardState, self->info));
-				trCommitCosts.bytesClearEst += locations.size() * self->getDatabase()->smoothAvgShardSize.smoothTotal();
+				trCommitCosts.clearIdxBytes.emplace(i, m.bytes);
+				trCommitCosts.writtenBytes += m.bytes;
+			} else {
+				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false,
+				                              &StorageServerInterface::getShardState, self->info));
+				uint64_t bytes = locations.size() * self->getDatabase()->smoothAvgShardSize.smoothTotal();
+				trCommitCosts.clearIdxBytes.emplace(i, bytes);
+				trCommitCosts.writtenBytes += bytes;
 			}
 		}
 	}
+	// sample on written bytes
+	if (!self->getDatabase()->sampleOnBytes(trCommitCosts.writtenBytes))
+		return Optional<ClientTrCommitCostEstimation>();
+	// sample clear op: the expectation of sampling is every COMMIT_SAMPLE_BYTE sample once
+	ASSERT(trCommitCosts.writtenBytes > 0);
+	std::map<int, uint64_t> newClearIdxBytes;
+	for (const auto& [idx, bytes] : trCommitCosts.clearIdxBytes) {
+		if(trCommitCosts.writtenBytes >= CLIENT_KNOBS->COMMIT_SAMPLE_BYTE){
+			double mul = trCommitCosts.writtenBytes / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_BYTE);
+			if(deterministicRandom()->random01() < bytes * mul / trCommitCosts.writtenBytes)
+				newClearIdxBytes.emplace(idx, bytes);
+		}
+		else if(deterministicRandom()->random01() < (double)bytes / trCommitCosts.writtenBytes){
+			newClearIdxBytes.emplace(idx, bytes);
+		}
+	}
+	trCommitCosts.clearIdxBytes = newClearIdxBytes;
 	return trCommitCosts;
 }
 
@@ -3317,12 +3333,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		if (!req.tagSet.present()) {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		} else {
-			req.commitCostEstimation = TransactionCommitCostEstimation();
-			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
-			if(!cx->sampleOnBytes(req.commitCostEstimation.get().getBytesSum())) {
-				req.tagSet.reset();
-				req.commitCostEstimation.reset();
-			}
+			wait(store(req.transaction.read_snapshot, readVersion) &&
+			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
+			if (!req.commitCostEstimation.present()) req.tagSet.reset();
 		}
 
 		startTime = now();
