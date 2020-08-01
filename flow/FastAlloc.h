@@ -216,6 +216,7 @@ public:
 	if (size <= 2048) return FastAllocator<2048>::allocate();
 	if (size <= 4096) return FastAllocator<4096>::allocate();
 	if (size <= 8192) return FastAllocator<8192>::allocate();
+	if (size <= 16384) return FastAllocator<16384>::allocate();
 	return new uint8_t[size];
 }
 
@@ -231,6 +232,7 @@ inline void freeFast(int size, void* ptr) {
 	if (size <= 2048) return FastAllocator<2048>::release(ptr);
 	if (size <= 4096) return FastAllocator<4096>::release(ptr);
 	if (size <= 8192) return FastAllocator<8192>::release(ptr);
+	if (size <= 16384) return FastAllocator<16384>::release(ptr);
 	delete[](uint8_t*)ptr;
 }
 

@@ -266,18 +266,31 @@ else()
         -Wno-unknown-attributes)
     endif()
     add_compile_options(
-      -Wno-unknown-warning-option
-      -Wno-dangling-else
-      -Wno-sign-compare
+      -Wall -Wextra
+      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
       -Wno-comment
-      -Wno-unknown-pragmas
+      -Wno-dangling-else
       -Wno-delete-non-virtual-dtor
+      -Wno-format
+      -Wno-mismatched-tags
+      -Wno-missing-field-initializers
+      -Wno-overloaded-virtual
+      -Wno-reorder
+      -Wno-reorder-ctor
+      -Wno-sign-compare
+      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
-      -Wno-format
       -Wredundant-move
       -Wpessimizing-move
       -Woverloaded-virtual
+      -Wno-unknown-pragmas
+      -Wno-unknown-warning-option
+      -Wno-unused-function
+      -Wno-unused-local-typedef
+      -Wno-unused-parameter
+      -Wno-unused-value
+      -Wno-self-assign
       )
     if (USE_CCACHE)
       add_compile_options(

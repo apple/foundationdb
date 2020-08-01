@@ -1759,7 +1759,6 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {
-
 	if (key == metadataVersionKey) {
 		throw client_invalid_operation();
 	}
@@ -1768,12 +1767,15 @@ void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) 
 		if (getDatabase()->apiVersionAtLeast(700)) {
 			return getDatabase()->specialKeySpace->set(this, key, value);
 		} else {
-			// The two special key are deprecated in 7.0 and add a C function for it
-			// TODO : rewrite kill in fdbcli and TriggerRecoveryLoopWorkload, 
-			// which directly send reboot request as a temporary workaround, using c api
+			// These three special keys are deprecated in 7.0 and an alternative C API is added
+			// TODO : rewrite kill in fdbcli and TriggerRecoveryLoopWorkload using C api
 			if (key == LiteralStringRef("\xff\xff/reboot_worker")) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest());
+				return;
+			}
+			if (key == LiteralStringRef("\xff\xff/suspend_worker")){
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, false, options.timeoutInSeconds) );
 				return;
 			}
 			if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")) {

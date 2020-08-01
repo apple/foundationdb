@@ -101,7 +101,7 @@ void treeBenchmark(T& tree, F generateKey) {
 	keys.resize(std::unique(keys.begin(), keys.end()) - keys.begin());
 
 	auto iter = tree.lower_bound(*keys.begin());
-	timedRun("scan", keys, [&tree, &iter](key const& k) {
+	timedRun("scan", keys, [&iter](key const& k) {
 		ASSERT(k == *iter);
 		++iter;
 	});
