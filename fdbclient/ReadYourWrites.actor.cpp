@@ -1045,6 +1045,9 @@ public:
 		try {
 			ryw->commitStarted = true;
 			
+			if (ryw->options.specialKeySpaceChangeConfiguration)
+				wait(ryw->getDatabase()->specialKeySpace->commit(ryw));
+			
 			Future<Void> ready = ryw->reading;
 			wait( ryw->resetPromise.getFuture() || ready );
 
@@ -1160,7 +1163,8 @@ public:
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
   : cache(&arena), writes(&arena), tr(cx), retries(0), approximateSize(0), creationTime(now()), commitStarted(false),
-    options(tr), deferredError(cx->deferredError), versionStampFuture(tr.getVersionstamp()) {
+    options(tr), deferredError(cx->deferredError), versionStampFuture(tr.getVersionstamp()),
+	specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end) {
 	std::copy(cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(),
 	          std::back_inserter(persistentOptions));
 	applyPersistentOptions();
@@ -1755,22 +1759,32 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {
-	if (key.startsWith(systemKeys.end)) {
-		if (key == LiteralStringRef("\xff\xff/reboot_worker")){
-			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest() );
-			return;
-		}
-		if (key == LiteralStringRef("\xff\xff/suspend_worker")){
-			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, false, options.timeoutInSeconds) );
-			return;
-		}
-		if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")){
-			BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion()).reboot.send( RebootRequest(false, true) );
-			return;
-		}
-	}
 	if (key == metadataVersionKey) {
 		throw client_invalid_operation();
+	}
+
+	if (specialKeys.contains(key)) {
+		if (getDatabase()->apiVersionAtLeast(700)) {
+			return getDatabase()->specialKeySpace->set(this, key, value);
+		} else {
+			// These three special keys are deprecated in 7.0 and an alternative C API is added
+			// TODO : Rewrite related code using C api
+			if (key == LiteralStringRef("\xff\xff/reboot_worker")) {
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
+				    .reboot.send(RebootRequest());
+				return;
+			}
+			if (key == LiteralStringRef("\xff\xff/suspend_worker")){
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
+				    .reboot.send(RebootRequest(false, false, options.timeoutInSeconds));
+				return;
+			}
+			if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")) {
+				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
+				    .reboot.send(RebootRequest(false, true));
+				return;
+			}
+		}
 	}
 
 	bool addWriteConflict = !options.getAndResetWriteConflictDisabled();
@@ -1806,6 +1820,12 @@ void ReadYourWritesTransaction::clear( const KeyRangeRef& range ) {
 
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
+	}
+
+	if (specialKeys.contains(range)) {
+		if (getDatabase()->apiVersionAtLeast(700)) {
+			return getDatabase()->specialKeySpace->clear(this, range);
+		}
 	}
 
 	KeyRef maxKey = getMaxWriteKey();
@@ -1845,6 +1865,12 @@ void ReadYourWritesTransaction::clear( const KeyRef& key ) {
 
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
+	}
+
+	if (specialKeys.contains(key)) {
+		if (getDatabase()->apiVersionAtLeast(700)) {
+			return getDatabase()->specialKeySpace->clear(this, key);
+		}
 	}
 
 	if(key >= getMaxWriteKey())
@@ -2023,6 +2049,14 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 		case FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED:
 			validateOptionValue(value, false);
 			options.specialKeySpaceRelaxed = true;
+			break;
+	    case FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES:
+		    validateOptionValue(value, false);
+			options.specialKeySpaceChangeConfiguration = true;
+			// By default, it allows to read system keys
+			// More options will be implicitly enabled if needed when doing set or clear
+			options.readSystemKeys = true;
+			break;
 		default:
 			break;
 	}
@@ -2054,6 +2088,7 @@ void ReadYourWritesTransaction::operator=(ReadYourWritesTransaction&& r) noexcep
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
+	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
 }
 
 ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept
@@ -2072,6 +2107,7 @@ ReadYourWritesTransaction::ReadYourWritesTransaction(ReadYourWritesTransaction&&
 	nativeReadRanges = std::move(r.nativeReadRanges);
 	nativeWriteRanges = std::move(r.nativeWriteRanges);
 	versionStampKeys = std::move(r.versionStampKeys);
+	specialKeySpaceWriteMap = std::move(r.specialKeySpaceWriteMap);
 }
 
 Future<Void> ReadYourWritesTransaction::onError(Error const& e) {
@@ -2109,6 +2145,9 @@ void ReadYourWritesTransaction::resetRyow() {
 	versionStampKeys = VectorRef<KeyRef>();
 	nativeReadRanges = Standalone<VectorRef<KeyRangeRef>>();
 	nativeWriteRanges = Standalone<VectorRef<KeyRangeRef>>();
+	specialKeySpaceWriteMap =
+	    KeyRangeMap<std::pair<bool, Optional<Value>>>(std::make_pair(false, Optional<Value>()), specialKeys.end);
+	specialKeySpaceErrorMsg.reset();
 	watchMap.clear();
 	reading = AndFuture();
 	approximateSize = 0;

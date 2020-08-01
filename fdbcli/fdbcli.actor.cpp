@@ -2186,6 +2186,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, addresses)));
 					safe = _safe;
 				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) throw;
 					TraceEvent("CheckSafeExclusionsError").error(e);
 					safe = false;
 				}
@@ -3369,7 +3370,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
+							if (db->apiVersionAtLeast(700))
+								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								    .reboot.send(RebootRequest());
+							else
+								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
@@ -3387,7 +3392,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]].first);
+								if (db->apiVersionAtLeast(700))
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest());
+								else
+									tr->set(LiteralStringRef("\xff\xff/reboot_worker"),
+									        address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
@@ -3398,7 +3409,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "suspend")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3439,7 +3454,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								int64_t timeout_ms = seconds*1000;
 								tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t *)&timeout_ms, sizeof(int64_t)));
 								for(int i = 2; i < tokens.size(); i++) {
-									tr->set(LiteralStringRef("\xff\xff/suspend_worker"), address_interface[tokens[i]].first);
+									if (db->apiVersionAtLeast(700))
+										BinaryReader::fromStringRef<ClientWorkerInterface>(
+										    address_interface[tokens[i]].first, IncludeVersion())
+										    .reboot.send(RebootRequest(false, false, timeout_ms));
+									else
+										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
+										        address_interface[tokens[i]].first);
 								}
 								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
 							}
@@ -3691,13 +3712,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-								tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-																					LiteralStringRef("\xff\xff\xff")),
-															1)));
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						std::map<Key, ClientWorkerInterface> interfaces;
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+							                    : pair.key)
+							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 							interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 						}
 						state Key ip_port = tokens[2];
@@ -3722,7 +3747,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3744,7 +3773,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
+							if (db->apiVersionAtLeast(700))
+								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								    .reboot.send(RebootRequest(false, true));
+							else
+								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
@@ -3762,7 +3795,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]].first);
+								if (db->apiVersionAtLeast(700))
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest(false, true));
+								else
+									tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"),
+									        address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
