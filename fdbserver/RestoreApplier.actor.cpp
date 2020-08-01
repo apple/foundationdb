@@ -558,7 +558,10 @@ ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Referen
 	wait(precomputeMutationsResult(batchData, applierID, batchIndex, cx));
 
 	wait(applyStagingKeys(batchData, applierID, batchIndex, cx));
-	TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID).detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID)
+	    .detail("BatchIndex", batchIndex)
+	    .detail("AppliedBytes", batchData->appliedBytes)
+	    .detail("ReceivedBytes", batchData->receivedBytes);
 
 	return Void();
 }
