@@ -270,6 +270,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state Version targetVersion =
 	    wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, &minRangeVersion, cx, request));
 	ASSERT(targetVersion > 0);
+	ASSERT(minRangeVersion != MAX_VERSION); // otherwise, all mutations will be skipped
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
 	std::sort(logFiles.begin(), logFiles.end(), [](RestoreFileFR const& f1, RestoreFileFR const& f2) -> bool {
@@ -736,6 +737,9 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 			rangeSize += file.fileSize;
 			*minRangeVersion = std::min(*minRangeVersion, file.version);
 		}
+	}
+	if (MAX_VERSION == *minRangeVersion) {
+		*minRangeVersion = 0; // If no range file, range version must be 0 so that we apply all mutations
 	}
 
 	if (SERVER_KNOBS->FASTRESTORE_USE_LOG_FILE) {
