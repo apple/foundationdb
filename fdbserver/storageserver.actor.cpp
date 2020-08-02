@@ -498,7 +498,7 @@ public:
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-				if(rate > SERVER_KNOBS->MIN_TAG_PAGES_READ_RATE) {
+				if(rate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
@@ -508,7 +508,7 @@ public:
 					.detail("TagCost", busiestTagCount)
 					.detail("TotalSampledCost", intervalTotalSampledCount)
 					.detail("Reported", previousBusiestTag.present())
-					.trackLatest(id.toString() + "/BusiestReadTag");
+					.trackLatest(id.toString() + "_BusiestReadTag");
 			} 
 
 			intervalCounts.clear();
@@ -3775,7 +3775,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
-	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
+	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send( Void() );
 

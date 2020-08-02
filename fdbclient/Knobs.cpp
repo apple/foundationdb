@@ -230,7 +230,7 @@ void ClientKnobs::initialize(bool randomize) {
 	// transaction tags
 	init( MAX_TAGS_PER_TRANSACTION,                   5 );
 	init( MAX_TRANSACTION_TAG_LENGTH,                16 );
-	init( COMMIT_SAMPLE_BYTE,                    100000 );
+	init( COMMIT_SAMPLE_BYTE,                     16384 ); if( randomize && BUGGIFY ) COMMIT_SAMPLE_BYTE = 4096; // The same as SERVER_KNOBS->OPERATION_COST_BYTE_FACTOR
 	init( READ_TAG_SAMPLE_RATE,                    0.01 ); if( randomize && BUGGIFY ) READ_TAG_SAMPLE_RATE = 1.0; // Communicated to clients from cluster
 	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
 	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
