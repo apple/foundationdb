@@ -30,14 +30,14 @@
 void populate(Standalone<VectorRef<MutationRef>>& mutations, size_t items, size_t size, KeyRef key, ValueRef value) {
 	mutations = Standalone<VectorRef<MutationRef>>{};
 	mutations.reserve(mutations.arena(), items);
-	for (int i = 0; i < size; ++i) {
+	for (int i = 0; i < items; ++i) {
 		mutations.emplace_back_deep(mutations.arena(), MutationRef::Type::SetValue, key, value);
 	}
 }
 
 void populate(MutationList& mutations, size_t items, size_t size, KeyRef key, ValueRef value) {
 	mutations = MutationList{};
-	for (int i = 0; i < size; ++i) {
+	for (int i = 0; i < items; ++i) {
 		mutations.push_back_deep(mutations.arena(), MutationRef(MutationRef::Type::SetValue, key, value));
 	}
 }
