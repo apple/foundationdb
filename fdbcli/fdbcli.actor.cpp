@@ -2315,33 +2315,36 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		for (const auto& exclusion : exclusionVector) {
 			if (absentExclusions.find(exclusion) != absentExclusions.end()) {
-				if (exclusion.port == 0)
+				if (exclusion.port == 0) {
 					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
 					       "correct machines before removing them from the cluster!\n",
 					       exclusion.ip.toString().c_str());
-				else
+				} else {
 					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
 					       "before removing them from the cluster!\n",
 					       exclusion.toString().c_str());
+				}
 			} else if (std::any_of(notExcludedServers.begin(), notExcludedServers.end(),
 			                       [&](const NetworkAddress& a) { return addressExcluded({ exclusion }, a); })) {
-				if (exclusion.port == 0)
+				if (exclusion.port == 0) {
 					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
 					       "machine from the cluster\n",
 					       exclusion.ip.toString().c_str());
-				else
+				} else {
 					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
 					       "cluster\n",
 					       exclusion.toString().c_str());
+				}
 			} else {
-				if (exclusion.port == 0)
+				if (exclusion.port == 0) {
 					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
 					       "from the cluster.\n",
 					       exclusion.ip.toString().c_str());
-				else
+				} else {
 					printf(
 					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
 					    exclusion.toString().c_str());
+				}
 			}
 		}
 
