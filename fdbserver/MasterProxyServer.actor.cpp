@@ -458,7 +458,7 @@ struct ProxyCommitData {
 		return tags;
 	}
 
-	const bool needsCacheTag(KeyRangeRef range) {
+	bool needsCacheTag(KeyRangeRef range) {
 		auto ranges = cacheInfo.intersectingRanges(range);
 		for(auto r : ranges) {
 			if(r.value()) {

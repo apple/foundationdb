@@ -103,8 +103,8 @@ struct StorageQueueInfo {
 
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
-	uint64_t totalWriteBytes;
-	int totalWriteOps;
+	uint64_t totalWriteBytes = 0;
+	int totalWriteOps = 0;
 
 	StorageQueueInfo(UID id, LocalityData locality)
 	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -866,8 +866,9 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		}
 		if(maxRate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
 			it->value.busiestWriteTag = busiestTag;
+			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteBytes", it->value.totalWriteBytes).detail("TotalWriteOps",it->value.totalWriteOps);
 			ASSERT(it->value.totalWriteBytes > 0 && it->value.totalWriteOps > 0);
-			maxBusyness = 0.5 * (maxCost.getBytesSum() / it->value.totalWriteBytes + maxCost.getOpsSum() / it->value.totalWriteOps);
+			maxBusyness = 0.5 * ((double)maxCost.getBytesSum() / it->value.totalWriteBytes + (double)maxCost.getOpsSum() / it->value.totalWriteOps);
 			it->value.busiestWriteTagFractionalBusyness = maxBusyness;
 			it->value.busiestWriteTagRate = maxRate;
 		}

@@ -495,6 +495,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Transaction tr3(cx);
 				loop {
 					try {
+						// Run on the first proxy to ensure data is cleared
+						// when submitting the backup request below.
+						tr3.setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 						for (auto r : self->backupRanges) {
 							if(!r.empty()) {
 								tr3.addReadConflictRange(r);

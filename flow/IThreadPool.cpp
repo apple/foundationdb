@@ -43,11 +43,12 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 			threadUserObject = userObject;
 			try {
 				userObject->init();
-				while (pool->ios.run_one() && !pool->mode);
+				while (pool->ios.run_one() && (pool->mode == Mode::Run));
 			} catch (Error& e) {
 				TraceEvent(SevError, "ThreadPoolError").error(e);
 			}
-			delete userObject; userObject = 0;
+			delete userObject;
+			userObject = nullptr;
 			stopped.set();
 		}
 		static void dispatch( PThreadAction action ) {
@@ -64,6 +65,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	boost::asio::io_service::work dontstop;
 	enum Mode { Run=0, Shutdown=2 };
 	volatile int mode;
+	int stackSize;
 
 	struct ActionWrapper {
 		PThreadAction action;
@@ -76,7 +78,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 		ActionWrapper &operator=(ActionWrapper const&);
 	};
 public:
-	ThreadPool() : dontstop(ios), mode(Run) {}
+	ThreadPool(int stackSize) : dontstop(ios), mode(Run), stackSize(stackSize) {}
 	~ThreadPool() {}
 	Future<Void> stop(Error const& e = success()) {
 		if (mode == Shutdown) return Void();
@@ -95,7 +97,7 @@ public:
 	virtual void delref() { if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop(); }
 	void addThread( IThreadPoolReceiver* userData ) {
 		threads.push_back(new Thread(this, userData));
-		startThread(start, threads.back());
+		startThread(start, threads.back(), stackSize);
 	}
 	void post( PThreadAction action ) {
 		ios.post( ActionWrapper( action ) );
@@ -103,9 +105,9 @@ public:
 };
 
 
-Reference<IThreadPool>	createGenericThreadPool()
+Reference<IThreadPool>	createGenericThreadPool(int stackSize)
 {
-	return Reference<IThreadPool>( new ThreadPool );
+	return Reference<IThreadPool>( new ThreadPool(stackSize) );
 }
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;
