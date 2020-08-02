@@ -27,6 +27,7 @@
 #include "flow/crc32c.h"
 #include "flow/flow.h"
 
+#include <atomic>
 #include <cstdint>
 #include <unordered_map>
 
@@ -87,9 +88,9 @@ void* FastAllocator<Size>::freelist = nullptr;
 typedef void (*ThreadInitFunction)();
 
 ThreadInitFunction threadInitFunction = 0;  // See ThreadCleanup.cpp in the C binding
-void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) { 
+void setFastAllocatorThreadInitFunction(ThreadInitFunction f) {
 	ASSERT( !threadInitFunction );
-	threadInitFunction = f; 
+	threadInitFunction = f;
 }
 
 std::atomic<int64_t> g_hugeArenaMemory(0);
@@ -221,28 +222,32 @@ struct FastAllocator<Size>::GlobalData {
 	CRITICAL_SECTION mutex;
 	std::vector<void*> magazines;   // These magazines are always exactly magazine_size ("full")
 	std::vector<std::pair<int, void*>> partial_magazines;  // Magazines that are not "full" and their counts.  Only created by releaseThreadMagazines().
-	long long totalMemory;
+	std::atomic<long long> totalMemory;
 	long long partialMagazineUnallocatedMemory;
-	long long activeThreads;
-	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) { 
+	std::atomic<long long> activeThreads;
+	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) {
 		InitializeCriticalSection(&mutex);
 	}
 };
 
 template <int Size>
 long long FastAllocator<Size>::getTotalMemory() {
-	return globalData()->totalMemory;
+	return globalData()->totalMemory.load();
 }
 
 // This does not include memory held by various threads that's available for allocation
 template <int Size>
 long long FastAllocator<Size>::getApproximateMemoryUnused() {
-	return globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
+	EnterCriticalSection(&globalData()->mutex);
+	long long unused =
+	    globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
+	LeaveCriticalSection(&globalData()->mutex);
+	return unused;
 }
 
 template <int Size>
 long long FastAllocator<Size>::getActiveThreads() {
-	return globalData()->activeThreads;
+	return globalData()->activeThreads.load();
 }
 
 #if FAST_ALLOCATOR_DEBUG
@@ -411,9 +416,7 @@ void FastAllocator<Size>::initThread() {
 		threadInitFunction();
 	}
 
-	EnterCriticalSection(&globalData()->mutex);
-	++globalData()->activeThreads;
-	LeaveCriticalSection(&globalData()->mutex);
+	globalData()->activeThreads.fetch_add(1);
 
 	threadData.freelist = nullptr;
 	threadData.alternate = nullptr;
@@ -442,7 +445,7 @@ void FastAllocator<Size>::getMagazine() {
 		threadData.count = p.first;
 		return;
 	}
-	globalData()->totalMemory += magazine_size*Size;
+	globalData()->totalMemory.fetch_add(magazine_size * Size);
 	LeaveCriticalSection(&globalData()->mutex);
 
 	// Allocate a new page of data from the system allocator
@@ -454,8 +457,9 @@ void FastAllocator<Size>::getMagazine() {
 #if FAST_ALLOCATOR_DEBUG
 #ifdef WIN32
 	static int alt = 0; alt++;
-	block = (void**)VirtualAllocEx( GetCurrentProcess(), 
-									(void*)( ((getSizeCode(Size)<<11) + alt) * magazine_size*Size), magazine_size*Size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE );
+	block =
+	    (void**)VirtualAllocEx(GetCurrentProcess(), (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size),
+	                           magazine_size * Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #else
 	static int alt = 0; alt++;
 	void* desiredBlock = (void*)( ((getSizeCode(Size)<<11) + alt) * magazine_size*Size);
@@ -479,7 +483,7 @@ void FastAllocator<Size>::getMagazine() {
 		block[i*PSize+1] = block[i*PSize] = &block[(i+1)*PSize];
 		check( &block[i*PSize], false );
 	}
-		
+
 	block[(magazine_size-1)*PSize+1] = block[(magazine_size-1)*PSize] = nullptr;
 	check( &block[(magazine_size-1)*PSize], false );
 	threadData.freelist = block;
@@ -509,7 +513,7 @@ void FastAllocator<Size>::releaseThreadMagazines() {
 				globalData()->magazines.push_back(thr.alternate);
 			}
 		}
-		--globalData()->activeThreads;
+		globalData()->activeThreads.fetch_add(-1);
 		LeaveCriticalSection(&globalData()->mutex);
 
 		thr.count = 0;
