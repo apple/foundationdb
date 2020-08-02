@@ -19,5 +19,35 @@
  */
 
 #include "benchmark/benchmark.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/ThreadHelper.actor.h"
+#include <thread>
 
-BENCHMARK_MAIN();
+ACTOR template <class T>
+Future<T> stopNetworkAfter(Future<T> what) {
+	try {
+		T t = wait(what);
+		g_network->stop();
+		return t;
+	} catch (...) {
+		g_network->stop();
+		throw;
+	}
+}
+
+int main(int argc, char** argv) {
+	benchmark::Initialize(&argc, argv);
+	if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
+		return 1;
+	}
+	setupNetwork();
+	Promise<Void> benchmarksDone;
+	std::thread benchmarkThread([&]() {
+		benchmark::RunSpecifiedBenchmarks();
+		onMainThreadVoid([&]() { benchmarksDone.send(Void()); }, nullptr);
+	});
+	auto f = stopNetworkAfter(benchmarksDone.getFuture());
+	runNetwork();
+	benchmarkThread.join();
+}

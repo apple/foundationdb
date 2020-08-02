@@ -1,5 +1,5 @@
 /*
- * GlobalData.h
+ * GlobalData.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,14 +18,25 @@
  * limitations under the License.
  */
 
-#ifndef __FDBBENCH_GLOBALDATA_H__
-#define __FDBBENCH_GLOBALDATA_H__
-
-#pragma once
-
 #include "fdbclient/FDBTypes.h"
 
-KeyValueRef getKV(size_t keySize, size_t valueSize);
-KeyRef getKey(size_t keySize);
+static constexpr size_t globalDataSize = 1 << 16;
+static const uint8_t* globalData = nullptr;
 
-#endif
+static inline void initGlobalData() {
+	if (!globalData) {
+		globalData = static_cast<const uint8_t*>(allocateFast(globalDataSize));
+	}
+}
+
+KeyValueRef getKV(size_t keySize, size_t valueSize) {
+	initGlobalData();
+	ASSERT(keySize + valueSize <= globalDataSize);
+	return KeyValueRef(KeyRef(globalData, keySize), ValueRef(globalData + keySize, valueSize));
+}
+
+KeyRef getKey(size_t keySize) {
+	initGlobalData();
+	ASSERT(keySize);
+	return KeyRef(globalData, keySize);
+}
