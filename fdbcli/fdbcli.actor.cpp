@@ -3457,7 +3457,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									if (db->apiVersionAtLeast(700))
 										BinaryReader::fromStringRef<ClientWorkerInterface>(
 										    address_interface[tokens[i]].first, IncludeVersion())
-										    .reboot.send(RebootRequest(false, false, timeout_ms));
+										    .reboot.send(RebootRequest(false, false, seconds));
 									else
 										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
 										        address_interface[tokens[i]].first);
