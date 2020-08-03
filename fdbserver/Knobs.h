@@ -567,6 +567,9 @@ public:
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
 	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
+	bool FASTRESTORE_NOT_WRITE_DB; // do not write result to DB. Only for dev testing
+	bool FASTRESTORE_USE_RANGE_FILE; // use range file in backup
+	bool FASTRESTORE_USE_LOG_FILE; // use log file in backup
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
@@ -578,7 +581,7 @@ public:
 	int64_t REDWOOD_REMAP_CLEANUP_WINDOW;  // Remap remover lag interval in which to coalesce page writes
 	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of the window size
 	double REDWOOD_LOGGING_INTERVAL;
-	
+
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
