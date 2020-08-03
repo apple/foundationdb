@@ -2,6 +2,7 @@ set(FLOWBENCH_SRCS
   flowbench.actor.cpp
   BenchIterate.cpp
   BenchPopulate.cpp
+  BenchRandom.cpp
   BenchRef.cpp
   BenchStream.actor.cpp
   GlobalData.h
