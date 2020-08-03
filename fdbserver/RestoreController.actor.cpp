@@ -74,7 +74,10 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex);
 
 ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
-	state Reference<RestoreControllerData> self = Reference<RestoreControllerData>(new RestoreControllerData());
+	ASSERT(controllerWorker.isValid());
+	ASSERT(controllerWorker->controllerInterf.present());
+	state Reference<RestoreControllerData> self =
+	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.id()));
 	state ActorCollectionNoErrors actors;
 
 	try {
@@ -107,6 +110,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 	    .detail("NumLoaders", SERVER_KNOBS->FASTRESTORE_NUM_LOADERS)
 	    .detail("NumAppliers", SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 	ASSERT(controllerData->loadersInterf.empty() && controllerData->appliersInterf.empty());
+	ASSERT(controllerWorker->controllerInterf.present());
 
 	ASSERT(controllerData.isValid());
 	ASSERT(SERVER_KNOBS->FASTRESTORE_NUM_LOADERS > 0 && SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS > 0);
@@ -129,7 +133,8 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 		}
 
 		TraceEvent("FastRestoreController", controllerData->id()).detail("WorkerNode", workerInterf.first);
-		requests.emplace_back(workerInterf.first, RestoreRecruitRoleRequest(role, nodeIndex));
+		requests.emplace_back(workerInterf.first,
+		                      RestoreRecruitRoleRequest(controllerWorker->controllerInterf.get(), role, nodeIndex));
 		nodeIndex++;
 	}
 

@@ -150,9 +150,9 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 
-	RestoreControllerData() {
+	RestoreControllerData(UID interfId) {
 		role = RestoreRole::Controller;
-		nodeID = UID();
+		nodeID = interfId;
 		runningVersionBatches.set(0);
 	}
 

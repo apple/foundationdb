@@ -88,6 +88,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 
 	if (req.role == RestoreRole::Loader) {
 		ASSERT(!self->loaderInterf.present());
+		self->controllerInterf = req.ci;
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
@@ -106,6 +107,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT(!self->applierInterf.present());
+		self->controllerInterf = req.ci;
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface& recruited = self->applierInterf.get();
@@ -202,6 +204,10 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 	// TODO: Needs to keep this monitor's future. May use actorCollection
 	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
 
+	RestoreControllerInterface controllerInterface;
+	DUMPTOKEN(controllerInterface.samples);
+
+	self->controllerInterf = controllerInterface;
 	wait(startRestoreController(self, cx) || workersFailureMonitor);
 
 	return Void();

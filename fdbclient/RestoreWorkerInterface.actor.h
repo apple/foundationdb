@@ -203,6 +203,31 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	std::string toString() { return nodeID.toString(); }
 };
 
+struct RestoreControllerInterface : RestoreRoleInterface {
+	constexpr static FileIdentifier file_identifier = 54253047;
+
+	RequestStream<RestoreSimpleRequest> samples;
+
+	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
+
+	RestoreControllerInterface() {
+		role = RestoreRole::Controller;
+		nodeID = deterministicRandom()->randomUniqueID();
+	}
+
+	NetworkAddress address() const { return samples.getEndpoint().addresses.address; }
+
+	void initEndpoints() { samples.getEndpoint(TaskPriority::LoadBalancedEndpoint); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, *(RestoreRoleInterface*)this, samples);
+	}
+
+	std::string toString() { return nodeID.toString(); }
+}
+
 // RestoreAsset uniquely identifies the work unit done by restore roles;
 // It is used to ensure exact-once processing on restore loader and applier;
 // By combining all RestoreAssets across all verstion batches, restore should process all mutations in
@@ -361,22 +386,25 @@ struct RestoreRecruitRoleReply : TimedRequest {
 struct RestoreRecruitRoleRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 87022360;
 
+	RestoreControllerInterface ci;
 	RestoreRole role;
 	int nodeIndex; // Each role is a node
 
 	ReplyPromise<RestoreRecruitRoleReply> reply;
 
 	RestoreRecruitRoleRequest() : role(RestoreRole::Invalid) {}
-	explicit RestoreRecruitRoleRequest(RestoreRole role, int nodeIndex) : role(role), nodeIndex(nodeIndex) {}
+	explicit RestoreRecruitRoleRequest(RestoreControllerInterface ci, RestoreRole role, int nodeIndex)
+	  : ci(ci), role(role), nodeIndex(nodeIndex) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, role, nodeIndex, reply);
+		serializer(ar, ci, role, nodeIndex, reply);
 	}
 
 	std::string printable() {
 		std::stringstream ss;
-		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex;
+		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex
+		   << " RestoreController:" << ci.id();
 		return ss.str();
 	}
 
