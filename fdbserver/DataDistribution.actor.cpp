@@ -5012,9 +5012,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					}
 					else {
 						auto& metricVec = result.get();
-						double totalSize = 0.0;
-						for (auto it = metricVec.cbegin(); it != metricVec.cend(); ++it) totalSize += it->shardBytes;
-						rep.avgShardSize = totalSize / metricVec.size();
+						if(metricVec.empty()) rep.avgShardSize = 0;
+						else {
+							double totalSize = 0.0;
+							for (auto it = metricVec.cbegin(); it != metricVec.cend(); ++it) totalSize += it->shardBytes;
+							rep.avgShardSize = totalSize / metricVec.size();
+						}
 					}
 					req.reply.send(rep);
 				}

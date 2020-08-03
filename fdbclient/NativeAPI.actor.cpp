@@ -4377,31 +4377,35 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 
 ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
 	state bool isFirstRep = true;
-	state ErrorOr<GetDDMetricsReply> rep;
-	loop {
-		double elapsed = now() - cx->avgShardSizeLastUpdated;
-		if (elapsed < CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS)
-			wait(delay(CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS - elapsed));
-
-		wait(store(rep,errorOr(basicLoadBalance(
-		                    cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
-		                    GetDDMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true)))));
-		if(rep.isError()) {
-			TraceEvent(SevWarn,"NAPIMonitorDDMetricsChangeError").error(rep.getError());
-			break; // Handle error
+	state Future<Void> nextTime = Void();
+	state Future<ErrorOr<GetDDMetricsReply>> nextReply = Never();
+	loop choose {
+		when(wait(nextTime)) {
+			nextReply = errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
+			                             GetDDMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true)));
+			nextTime = Never();
 		}
-		ASSERT(rep.get().avgShardSize.present());
-		double avgShardSize = rep.get().avgShardSize.get();
-		if(avgShardSize > 0) {
-			if (isFirstRep) {
-				cx->smoothAvgShardSize.reset(avgShardSize);
-				isFirstRep = false;
-			} else cx->smoothAvgShardSize.setTotal(avgShardSize);
-
-			cx->avgShardSizeLastUpdated = now();
+		when(ErrorOr<GetDDMetricsReply> rep = wait(nextReply)) {
+			nextReply = Never();
+	        if(rep.isError()) {
+				TraceEvent(SevWarn,"NAPIMonitorDDMetricsChangeError").error(rep.getError());
+		        nextTime = delay(CLIENT_KNOBS->DEFAULT_BACKOFF);
+			}
+			else {
+				ASSERT(rep.get().avgShardSize.present());
+				double avgShardSize = rep.get().avgShardSize.get();
+				if(avgShardSize > 0) {
+					if (isFirstRep) {
+						cx->smoothAvgShardSize.reset(avgShardSize);
+						isFirstRep = false;
+					} else cx->smoothAvgShardSize.setTotal(avgShardSize);
+					cx->avgShardSizeLastUpdated = now();
+				}
+		        nextTime = delay(CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS);
+				if(deterministicRandom()->random01() < 0.01)
+					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothAvgShardSize.smoothTotal());
+			}
 		}
-		if(deterministicRandom()->random01() < 0.01)
-			TraceEvent("NAPIMeanShardSizex100").detail("SmoothTotal", cx->smoothAvgShardSize.smoothTotal());
 	};
 }
 
