@@ -143,4 +143,4 @@ constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B070010001LL);
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 // Downgrades are only supported for one minor version
-constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B071000000LL);
+constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B072000000LL);
