@@ -3322,12 +3322,12 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 			}
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
-				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));
+				StorageMetrics m = wait(self->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
 				trCommitCosts.clearIdxBytes.emplace(i, m.bytes);
 				trCommitCosts.writtenBytes += m.bytes;
 			} else {
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
-				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false,
+				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, CLIENT_KNOBS->TOO_MANY, false,
 				                              &StorageServerInterface::getShardState, self->info));
 				uint64_t bytes = locations.size() * self->getDatabase()->smoothAvgShardSize.smoothTotal();
 				trCommitCosts.clearIdxBytes.emplace(i, bytes);
@@ -4380,9 +4380,10 @@ ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
 	state Future<Void> nextTime = Void();
 	state Future<ErrorOr<GetDDMetricsReply>> nextReply = Never();
 	loop choose {
+		when(wait(cx->onMasterProxiesChanged())) {}
 		when(wait(nextTime)) {
 			nextReply = errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
-			                             GetDDMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true)));
+			                             GetDDMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
 			nextTime = Never();
 		}
 		when(ErrorOr<GetDDMetricsReply> rep = wait(nextReply)) {
@@ -4402,7 +4403,7 @@ ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
 					cx->avgShardSizeLastUpdated = now();
 				}
 		        nextTime = delay(CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS);
-				if(deterministicRandom()->random01() < 0.01)
+		        if(deterministicRandom()->random01() < 0.01)
 					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothAvgShardSize.smoothTotal());
 			}
 		}

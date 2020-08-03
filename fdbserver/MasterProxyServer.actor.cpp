@@ -1173,7 +1173,7 @@ ACTOR Future<Void> commitBatch(
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 							// check whether clear is sampled
 							if(checkSample && trCost->get().clearIdxBytes.count(mutationNum) > 0){
-								for(const auto& ssInfo : ranges.begin().value().src_info) {
+								for(const auto& ssInfo : r.value().src_info) {
 									auto id = ssInfo->interf.id();
 									self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxBytes[mutationNum]);
 								}

@@ -551,7 +551,7 @@ struct RatekeeperData {
 
 	double lastWarning;
 	double lastSSListFetchedTimestamp;
-	double lastBusiestCommitTagPick = 0;
+	double lastBusiestCommitTagPick;
 
 	RkTagThrottleCollection throttledTags;
 	uint64_t throttledTagChangeId;
@@ -571,7 +571,7 @@ struct RatekeeperData {
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-	    throttledTagChangeId(0),
+	    throttledTagChangeId(0), lastBusiestCommitTagPick(now()),
 	    normalLimits(TransactionPriority::DEFAULT, "", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
 	                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
 	                 SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
@@ -868,7 +868,8 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 			it->value.busiestWriteTag = busiestTag;
 			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteBytes", it->value.totalWriteBytes).detail("TotalWriteOps",it->value.totalWriteOps);
 			ASSERT(it->value.totalWriteBytes > 0 && it->value.totalWriteOps > 0);
-			maxBusyness = 0.5 * ((double)maxCost.getBytesSum() / it->value.totalWriteBytes + (double)maxCost.getOpsSum() / it->value.totalWriteOps);
+			maxBusyness = (SERVER_KNOBS->OPERATION_COST_BYTE_FACTOR * maxCost.getOpsSum() + maxCost.getBytesSum()) /
+			              (SERVER_KNOBS->OPERATION_COST_BYTE_FACTOR * it->value.totalWriteOps + it->value.totalWriteBytes);
 			it->value.busiestWriteTagFractionalBusyness = maxBusyness;
 			it->value.busiestWriteTagRate = maxRate;
 		}
@@ -1312,7 +1313,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	self.addActor.send( traceRole(Role::RATEKEEPER, rkInterf.id()) );
 
 	self.addActor.send(monitorThrottlingChanges(&self));
-	RatekeeperData* selfPtr = &self;
+	RatekeeperData* selfPtr = &self; // let flow compiler capture self
 	self.addActor.send(recurring([selfPtr](){refreshStorageServerCommitCost(selfPtr);}, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	TraceEvent("RkTLogQueueSizeParameters", rkInterf.id()).detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG).detail("Spring", SERVER_KNOBS->SPRING_BYTES_TLOG)
