@@ -243,7 +243,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (elapsed > 0.1) {
 				TraceEvent(SevError, "RocksDBSlowRead")
 				    .detail("Time", std::to_string(elapsed))
-				    .detail("Method", "ReadRange");
+				    .detail("Method", "ReadRange")
+				    .detail("Start", a.keys.begin.printable())
+				    .detail("End", a.keys.end.printable())
+				    .detail("RowLimit", a.rowLimit)
+				    .detail("ByteLimit", a.byteLimit);
 			}
 		}
 	};
