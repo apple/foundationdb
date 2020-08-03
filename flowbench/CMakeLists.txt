@@ -5,6 +5,7 @@ set(FLOWBENCH_SRCS
   BenchRandom.cpp
   BenchRef.cpp
   BenchStream.actor.cpp
+  BenchTimer.cpp
   GlobalData.h
   GlobalData.cpp)
 
