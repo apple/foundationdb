@@ -1,5 +1,5 @@
-set(FDBBENCH_SRCS
-  fdbbench.actor.cpp
+set(FLOWBENCH_SRCS
+  flowbench.actor.cpp
   BenchIterate.cpp
   BenchPopulate.cpp
   BenchRef.cpp
@@ -7,7 +7,7 @@ set(FDBBENCH_SRCS
   GlobalData.h
   GlobalData.cpp)
 
-project (fdbbench)
+project (flowbench)
 # include the configurations from benchmark.cmake
 configure_file(benchmark.cmake googlebenchmark-download/CMakeLists.txt)
 # executing the configuration step
@@ -36,5 +36,5 @@ add_subdirectory(
   EXCLUDE_FROM_ALL
 )
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
-add_flow_target(EXECUTABLE NAME fdbbench SRCS ${FDBBENCH_SRCS})
-target_link_libraries(fdbbench benchmark pthread flow fdbclient)
+add_flow_target(EXECUTABLE NAME flowbench SRCS ${FLOWBENCH_SRCS})
+target_link_libraries(flowbench benchmark pthread flow fdbclient)

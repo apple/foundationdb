@@ -177,9 +177,9 @@ else()
   include(CPack)
 endif()
 
-set(BUILD_BENCHMARK OFF CACHE BOOL "Build microbenchmark program (builds google microbenchmark dependency)")
-if(BUILD_BENCHMARK)
-  add_subdirectory(fdbbench)
+set(BUILD_FLOWBENCH OFF CACHE BOOL "Build microbenchmark program (builds google microbenchmark dependency)")
+if(BUILD_FLOWBENCH)
+  add_subdirectory(flowbench)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")

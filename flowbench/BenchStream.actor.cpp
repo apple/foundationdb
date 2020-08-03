@@ -20,12 +20,12 @@
 
 #include "benchmark/benchmark.h"
 
-#include "fdbbench/GlobalData.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/network.h"
+#include "flowbench/GlobalData.h"
 
 #include <thread>
 
