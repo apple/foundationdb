@@ -345,6 +345,7 @@ private:
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit);
+ACTOR Future<Void> monitorDDMetricsChanges(Database cx);
 
 std::string unprintable( const std::string& );
 

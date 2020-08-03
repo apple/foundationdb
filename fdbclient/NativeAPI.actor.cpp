@@ -3303,6 +3303,9 @@ void Transaction::setupWatches() {
 
 ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
                                                                          CommitTransactionRef* transaction) {
+	if(!self->getDatabase()->avgShardSizeUpdater.present()){ // lazy start: only client who needs tag pay this overload
+		self->getDatabase()->avgShardSizeUpdater = monitorDDMetricsChanges(self->getDatabase());
+	}
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
 	state int i = 0;
@@ -4370,6 +4373,36 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
+}
+
+ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
+	state bool isFirstRep = true;
+	state ErrorOr<GetDDMetricsReply> rep;
+	loop {
+		double elapsed = now() - cx->avgShardSizeLastUpdated;
+		if (elapsed < CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS)
+			wait(delay(CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS - elapsed));
+
+		wait(store(rep,errorOr(basicLoadBalance(
+		                    cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
+		                    GetDDMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true)))));
+		if(rep.isError()) {
+			TraceEvent(SevWarn,"NAPIMonitorDDMetricsChangeError").error(rep.getError());
+			break; // Handle error
+		}
+		ASSERT(rep.get().avgShardSize.present());
+		double avgShardSize = rep.get().avgShardSize.get();
+		if(avgShardSize > 0) {
+			if (isFirstRep) {
+				cx->smoothAvgShardSize.reset(avgShardSize);
+				isFirstRep = false;
+			} else cx->smoothAvgShardSize.setTotal(avgShardSize);
+
+			cx->avgShardSizeLastUpdated = now();
+		}
+		if(deterministicRandom()->random01() < 0.01)
+			TraceEvent("NAPIMeanShardSizex100").detail("SmoothTotal", cx->smoothAvgShardSize.smoothTotal());
+	};
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRange const& keys) {

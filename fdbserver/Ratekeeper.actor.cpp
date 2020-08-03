@@ -890,32 +890,6 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 	self->lastBusiestCommitTagPick = now();
 	return Void();
 }
-//ACTOR Future<Void> monitorDDMetricsChanges(RatekeeperData *self, Reference<AsyncVar<ServerDBInfo>> db) {
-//	state bool isFirstRep = true;
-//	loop {
-//		wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY));
-//		if(!db->get().distributor.present()) continue;
-//
-//		ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(
-//		    db->get().distributor.get().dataDistributorMetrics.getReply( GetDataDistributorMetricsRequest(normalKeys, std::numeric_limits<int>::max(), true) ) ) );
-//
-//		if(reply.isError()) {
-//			TraceEvent(SevWarn,"RkMonitorDDMetricsChangeError").error(reply.getError());
-//			continue;
-//		}
-//
-//		ASSERT(reply.get().avgShardSize.present());
-//		double meanShardSize = reply.get().avgShardSize.get();
-//		if(meanShardSize > 0) {
-//			if (isFirstRep) {
-//				self->smoothMeanShardSize.reset(meanShardSize);
-//				isFirstRep = false;
-//			} else self->smoothMeanShardSize.setTotal(meanShardSize);
-//		}
-//		if(deterministicRandom()->random01() < 0.01)
-//			TraceEvent("RkMeanShardSizex100").detail("SmoothTotal", self->smoothMeanShardSize.smoothTotal());
-//	};
-//}
 
 void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
 	if(ss.busiestReadTag.present() && ss.busiestReadTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && ss.busiestReadTagRate > SERVER_KNOBS->MIN_TAG_COST) {

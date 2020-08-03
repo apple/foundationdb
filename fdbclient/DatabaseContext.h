@@ -340,6 +340,7 @@ public:
 	double detailedHealthMetricsLastUpdated;
 	Smoother smoothAvgShardSize;
 	int avgShardSizeLastUpdated;
+	Optional<Future<Void>> avgShardSizeUpdater;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
