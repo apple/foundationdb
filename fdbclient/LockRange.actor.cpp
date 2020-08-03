@@ -41,7 +41,9 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLoc
 	}
 
 	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::LockRange);
-	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
+	if (checkDBLock) {
+		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
+	}
 	tr->addWriteConflictRange(range);
 	return Void();
 }
@@ -103,7 +105,9 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 	}
 
 	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::UnlockRange);
-	tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
+	if (checkDBLock) {
+		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
+	}
 	tr->addWriteConflictRange(range);
 	return Void();
 }
