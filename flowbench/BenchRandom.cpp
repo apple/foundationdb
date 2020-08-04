@@ -27,6 +27,7 @@ static void bench_random(benchmark::State& state) {
 		double r = deterministicRandom()->random01();
 		benchmark::DoNotOptimize(r);
 	}
+	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
 BENCHMARK(bench_random)->ReportAggregatesOnly(true);

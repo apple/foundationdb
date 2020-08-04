@@ -27,7 +27,7 @@ static void bench_timer(benchmark::State& state) {
 		double time = timer();
 		benchmark::DoNotOptimize(time);
 	}
-	state.SetItemsProcessed(items * static_cast<long>(state.iterations()));
+	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
 static void bench_timer_monotonic(benchmark::State& state) {
@@ -35,7 +35,7 @@ static void bench_timer_monotonic(benchmark::State& state) {
 		double time = timer_monotonic();
 		benchmark::DoNotOptimize(time);
 	}
-	state.SetItemsProcessed(items * static_cast<long>(state.iterations()));
+	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
 BENCHMARK(bench_timer)->ReportAggregatesOnly(true);
