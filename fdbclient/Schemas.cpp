@@ -922,3 +922,11 @@ const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
   "worst_log_queue": 156
 }
 )""");
+
+const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
+{
+   "retriable": false,
+   "command": "exclude",
+   "message": "The reason of the error"
+}
+)""");

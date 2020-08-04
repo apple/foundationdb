@@ -353,7 +353,7 @@ struct NetworkMetrics {
 	}
 };
 
-struct BoundedFlowLock;
+struct FlowLock;
 
 struct NetworkInfo {
 	NetworkMetrics metrics;
@@ -362,7 +362,7 @@ struct NetworkInfo {
 	double lastAlternativesFailureSkipDelay = 0;
 
 	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
-	BoundedFlowLock* handshakeLock;
+	FlowLock *handshakeLock;
 
 	NetworkInfo();
 };
@@ -510,8 +510,9 @@ public:
 	virtual void initMetrics() {}
 	// Metrics must be initialized after FlowTransport::createInstance has been called
 
-	virtual void initTLS() {}
 	// TLS must be initialized before using the network
+	enum ETLSInitState { NONE = 0, CONFIG = 1, CONNECT = 2, LISTEN = 3};
+	virtual void initTLS(ETLSInitState targetState = CONFIG) {}
 
 	virtual const TLSConfig& getTLSConfig() const = 0;
 	// Return the TLS Configuration

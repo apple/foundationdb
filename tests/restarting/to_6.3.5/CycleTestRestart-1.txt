@@ -1,0 +1,30 @@
+testTitle=Clogged
+    clearAfterTest=false
+    testName=Cycle
+    transactionsPerSecond=500.0
+    nodeCount=2500
+    testDuration=10.0
+    expectedRate=0
+
+    testName=RandomClogging
+    testDuration=10.0
+
+    testName=Rollback
+    meanDelay=10.0
+    testDuration=10.0
+
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=10.0
+
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=10.0
+
+    testName=SaveAndKill
+    restartInfoLocation=simfdb/restartInfo.ini
+    testDuration=10.0

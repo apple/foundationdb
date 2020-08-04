@@ -18,16 +18,18 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
-class SKSCTestImpl : public SpecialKeyRangeBaseImpl {
+class SKSCTestImpl : public SpecialKeyRangeReadImpl {
 public:
-	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+	explicit SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
 		ASSERT(range.contains(kr));
 		auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
@@ -94,7 +96,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
 			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
 			// Although there are already ranges registered, the testing range will replace them
-			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY, self->keys.back(),
+			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
+			                                      SpecialKeySpace::IMPLTYPE::READONLY, self->keys.back(),
 			                                      self->impls.back().get());
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
@@ -108,7 +111,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		testRywLifetime(cx);
-		wait(timeout(self->testModuleRangeReadErrors(cx, self) && self->getRangeCallActor(cx, self) &&
+		wait(timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
 		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
 		             self->testDuration, Void()));
 		return Void();
@@ -235,7 +238,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return GetRangeLimits(rowLimits, byteLimits);
 	}
 
-	ACTOR Future<Void> testModuleRangeReadErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
 		// begin key outside module range
@@ -348,6 +351,56 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 		} catch (Error& e) {
 			throw;
+		}
+		// Errors introduced by SpecialKeyRangeRWImpl
+		// Writes are disabled by default
+		try {
+			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_write_disabled);
+			tx->reset();
+		}
+		// The special key is not in a range that can be called with set
+		try {
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->set(LiteralStringRef("\xff\xff/I_am_not_a_range_can_be_written"), ValueRef());
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_no_write_module_found);
+			tx->reset();
+		}
+		// A clear cross two ranges are forbidden
+		try {
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->clear(KeyRangeRef(SpecialKeySpace::getManamentApiCommandRange("exclude").begin,
+			                      SpecialKeySpace::getManamentApiCommandRange("failed").end));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_cross_module_clear);
+			tx->reset();
+		}
+		// Management api error, and error message shema check
+		try {
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->set(LiteralStringRef("Invalid_Network_Address")
+			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
+			        ValueRef());
+			wait(tx->commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_api_failure);
+			Optional<Value> errorMsg = wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+			ASSERT(errorMsg.present());
+			std::string errorStr;
+			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+			// special_key_space_management_api_error_msg schema validation
+			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+			tx->reset();
 		}
 
 		return Void();
