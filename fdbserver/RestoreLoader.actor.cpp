@@ -41,7 +41,7 @@ void splitMutation(const KeyRangeMap<UID>& krMap, MutationRef m, Arena& mvector_
 void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
                               std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* mutationMap,
-                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc,
+                              std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
                               const RestoreAsset& asset);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
@@ -60,9 +60,10 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Version version, RestoreAsset asset);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx) {
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
+                                     RestoreControllerInterface ci) {
 	state Reference<RestoreLoaderData> self =
-	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex));
+	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex, ci));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
 
@@ -177,8 +178,8 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
     KeyRangeMap<Version>* pRangeVersions, NotifiedVersion* processedFileOffset,
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-    std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
-    RestoreAsset asset) {
+    std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
+    Reference<IBackupContainer> bc, RestoreAsset asset) {
 	state Standalone<StringRef> buf = makeString(asset.len);
 	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
@@ -262,9 +263,12 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			    .detail("CommitVersion", msgVersion.toString())
 			    .detail("ParsedMutation", mutation.toString());
 			it->second.push_back_deep(it->second.arena(), mutation);
+			cc->loadedLogBytes += mutation.totalSize();
 			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
-				samplesIter->second.push_back_deep(samplesIter->second.arena(), mutation);
+				cc->sampledLogBytes += mutation.totalSize();
+				samplesIter->second.push_back_deep(samplesIter->second.arena(),
+				                                   SampledMutation(mutation.param1, mutation.totalSize()));
 			}
 		}
 
@@ -294,7 +298,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 	state NotifiedVersion processedFileOffset(0);
 	state std::vector<Future<Void>> fileParserFutures;
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = batchData->kvOpsPerLP.end();
-	state std::map<LoadingParam, MutationsVec>::iterator samplesIter = batchData->sampleMutations.end();
+	state std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter = batchData->sampleMutations.end();
 
 	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
 	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID).detail("LoadingParam", param.toString());
@@ -306,7 +310,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 	bool inserted;
 	std::tie(kvOpsPerLPIter, inserted) = batchData->kvOpsPerLP.emplace(param, VersionedMutationsMap());
 	ASSERT(inserted);
-	std::tie(samplesIter, inserted) = batchData->sampleMutations.emplace(param, MutationsVec());
+	std::tie(samplesIter, inserted) = batchData->sampleMutations.emplace(param, SampledMutationsVec());
 	ASSERT(inserted);
 
 	for (int64_t j = param.asset.offset; j < param.asset.len; j += param.blockSize) {
@@ -380,7 +384,31 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	ASSERT(it != batchData->processedFileParams.end());
 	wait(it->second); // wait on the processing of the req.param.
 
-	req.reply.send(RestoreLoadFileReply(req.param, batchData->sampleMutations[req.param], isDuplicated));
+	// Send sampled mutations back to controller:  batchData->sampleMutations[req.param]
+	std::vector<Future<Void>> fSendSamples;
+	SampledMutationsVec& samples = batchData->sampleMutations[req.param];
+	SampledMutationsVec sampleBatch =
+	    SampledMutationsVec(); // sampleBatch is a Standalone pointer to the created object
+	double sampleBatchSize = 0;
+	for (int i = 0; i < samples.size(); ++i) {
+		sampleBatchSize += samples[i].totalSize();
+		sampleBatch.push_back_deep(samples[i]); // TODO: may not need deep copy
+		if (sampleBatchSize >= SERVER_KNOBS->FASTRESTORE_SAMPLE_MSG_BYTES) {
+			fSendSamples.push_back(self->ci.samples.getReply(
+			    RestoreSamplesRequest(deterministicRandom()->randomUniqueID(), req.batchIndex, sampleBatch)));
+			sampleBatchSize = 0;
+			sampleBatch = SampledMutationsVec();
+		}
+	}
+	if (sampleBatchSize > 0) {
+		fSendSamples.push_back(self->ci.samples.getReply(
+		    RestoreSamplesRequest(deterministicRandom()->randomUniqueID(), req.batchIndex, sampleBatch)));
+		sampleBatchSize = 0;
+	}
+	wait(waitForAll(fSendSamples));
+
+	// Ack restore controller the param is processed
+	req.reply.send(RestoreLoadFileReply(req.param, isDuplicated));
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
@@ -730,10 +758,10 @@ bool concatenateBackupMutationForLogFile(SerializedMutationListMap* pMutationMap
 void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
                               std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
                               SerializedMutationListMap* pmutationMap,
-                              std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc,
+                              std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
                               const RestoreAsset& asset) {
 	VersionedMutationsMap& kvOps = kvOpsIter->second;
-	MutationsVec& samples = samplesIter->second;
+	SampledMutationsVec& samples = samplesIter->second;
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
 	TraceEvent(SevFRMutationInfo, "FastRestoreLoaderParseSerializedLogMutation")
@@ -816,7 +844,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
 				cc->sampledLogBytes += mutation.totalSize();
-				samples.push_back_deep(samples.arena(), mutation);
+				samples.push_back_deep(samples.arena(), SampledMutation(mutation.param1, mutation.totalSize()));
 			}
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
 			ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
@@ -832,10 +860,10 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 // asset: RestoreAsset about which backup data should be parsed
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-    std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
-    Version version, RestoreAsset asset) {
+    std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
+    Reference<IBackupContainer> bc, Version version, RestoreAsset asset) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
-	state MutationsVec& sampleMutations = samplesIter->second;
+	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
 	TraceEvent(SevFRDebugInfo, "FastRestoreDecodedRangeFile")
 	    .detail("Filename", asset.filename)
@@ -915,7 +943,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 		if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
 			cc->sampledRangeBytes += m.totalSize();
-			sampleMutations.push_back_deep(sampleMutations.arena(), m);
+			sampleMutations.push_back_deep(sampleMutations.arena(), SampledMutation(m.param1, m.totalSize()));
 		}
 	}
 

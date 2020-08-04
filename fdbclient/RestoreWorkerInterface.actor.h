@@ -226,7 +226,7 @@ struct RestoreControllerInterface : RestoreRoleInterface {
 	}
 
 	std::string toString() { return nodeID.toString(); }
-}
+};
 
 // RestoreAsset uniquely identifies the work unit done by restore roles;
 // It is used to ensure exact-once processing on restore loader and applier;
@@ -404,7 +404,7 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 	std::string printable() {
 		std::stringstream ss;
 		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex
-		   << " RestoreController:" << ci.id();
+		   << " RestoreController:" << ci.id().toString();
 		return ss.str();
 	}
 
@@ -438,26 +438,45 @@ struct RestoreSysInfoRequest : TimedRequest {
 	}
 };
 
-struct RestoreLoadFileReply : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 34077902;
+struct RestoreSamplesRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 34077901;
+	UID id; // deduplicate data
+	int batchIndex;
+	SampledMutationsVec samples; // sampled mutations
 
-	LoadingParam param;
-	MutationsVec samples; // sampled mutations
-	bool isDuplicated; // true if loader thinks the request is a duplicated one
-
-	RestoreLoadFileReply() = default;
-	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples, bool isDuplicated)
-	  : param(param), samples(samples), isDuplicated(isDuplicated) {}
+	RestoreSamplesRequest() = default;
+	explicit RestoreSamplesRequest(UID id, int batchIndex, SampledMutationsVec samples)
+	  : id(id), batchIndex(batchIndex), samples(samples) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, samples, isDuplicated);
+		serializer(ar, id, batchIndex, samples);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size()
-		   << " isDuplicated:" << isDuplicated;
+		ss << "ID:" << id.toString() << " BatchIndex:" << batchIndex << " samples:" << samples.size();
+		return ss.str();
+	}
+};
+
+struct RestoreLoadFileReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 34077902;
+
+	LoadingParam param;
+	bool isDuplicated; // true if loader thinks the request is a duplicated one
+
+	RestoreLoadFileReply() = default;
+	explicit RestoreLoadFileReply(LoadingParam param, bool isDuplicated) : param(param), isDuplicated(isDuplicated) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, param, isDuplicated);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "LoadingParam:" << param.toString() << " isDuplicated:" << isDuplicated;
 		return ss.str();
 	}
 };

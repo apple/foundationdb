@@ -73,6 +73,36 @@ ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> se
 void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex);
 
+ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControllerInterface ci) {
+	loop {
+		try {
+			RestoreSamplesRequest req = waitnext(ci.samples.getFuture());
+			if (req.batchIndex > self->batch.size()) {
+				TraceEvent(SevError, "FastRestoreControllerSampleBackupsInvalidBatchIndex")
+				    .detail("BatchIndex", req.batchIndex)
+				    .detail("InitializedBatches", self->batch.size());
+				continue;
+			}
+			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
+			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
+				continue;
+			}
+			batch->sampleMsgs.insert(req.id);
+			for (auto& m : req.samples) {
+				batch->samples.addMetric(m.key, m.size);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "FastRestoreControllerError", self->id())
+			    .detail("RequestType", "RestoreSamplesRequest")
+			    .error(e, true);
+			actors.clear(false);
+			break;
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
 	ASSERT(controllerWorker.isValid());
 	ASSERT(controllerWorker->controllerInterf.present());
@@ -88,6 +118,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		actors.add(checkRolesLiveness(self));
 		actors.add(updateProcessMetrics(self));
 		actors.add(traceProcessMetrics(self, "RestoreController"));
+		actors.add(sampleBackups(self, controllerWorker->controllerInterf.get()));
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
@@ -458,12 +489,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batc
 			TraceEvent(SevError, "FastRestoreControllerPhaseLoadFilesReply")
 			    .detail("RestoreAsset", reply.param.asset.toString())
 			    .detail("UnexpectedReply", reply.toString());
-		}
-		// Update sampled data
-		for (int i = 0; i < reply.samples.size(); ++i) {
-			MutationRef mutation = reply.samples[i];
-			batchData->samples.addMetric(mutation.param1, mutation.weightedTotalSize());
-			batchData->samplesSize += mutation.weightedTotalSize();
 		}
 	}
 

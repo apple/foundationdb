@@ -101,7 +101,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		DUMPTOKEN(recruited.finishVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
-		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
+		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx, req.ci));
 		TraceEvent("FastRestoreWorker").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
@@ -204,10 +204,10 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 	// TODO: Needs to keep this monitor's future. May use actorCollection
 	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
 
-	RestoreControllerInterface controllerInterface;
-	DUMPTOKEN(controllerInterface.samples);
+	RestoreControllerInterface recruited;
+	DUMPTOKEN(recruited.samples);
 
-	self->controllerInterf = controllerInterface;
+	self->controllerInterf = recruited;
 	wait(startRestoreController(self, cx) || workersFailureMonitor);
 
 	return Void();

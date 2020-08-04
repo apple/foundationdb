@@ -58,9 +58,20 @@ struct VersionedMutation {
 	}
 };
 
+struct SampledMutation {
+	KeyRef key;
+	long size;
+
+	explicit SampledMutation(KeyRef key, long size) : key(key), size(size) {}
+	SampledMutation() = default;
+
+	int totalSize() { return key.size() + sizeof(size); }
+};
+
 using MutationsVec = Standalone<VectorRef<MutationRef>>;
 using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
 using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
+using SampledMutationsVec = Standalone<VectorRef<SampledMutation>>;
 
 enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
 BINARY_SERIALIZABLE(RestoreRole);
