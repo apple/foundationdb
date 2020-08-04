@@ -828,11 +828,8 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 namespace CommitBatch {
 
 struct Context {
-	typedef std::vector<
-		std::pair<
-			Future<LogSystemDiskQueueAdapter::CommitMessage>, Future<Void>
-		>> StoreCommit_t;
-	
+	using StoreCommit_t = std::vector<std::pair<Future<LogSystemDiskQueueAdapter::CommitMessage>, Future<Void>>>;
+
 	ProxyCommitData* const pProxyCommitData;
 	std::vector<CommitTransactionRequest> trs;
 	int currentBatchMemBytesCount;
@@ -848,7 +845,7 @@ struct Context {
 
 	int batchOperations = 0;
 
-    Span span = Span("MP:commitBatch"_loc);
+	Span span = Span("MP:commitBatch"_loc);
 
 	int64_t batchBytes = 0;
 
@@ -913,7 +910,7 @@ struct Context {
 		const std::vector<CommitTransactionRequest>*,
 		const int);
 
-	void setupDebugTrack();
+	void setupTraceBatch();
 
 private:
 	void evaluateBatchSize();
@@ -952,9 +949,8 @@ Context::Context(
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 }
 
-void Context::setupDebugTrack()  {
-	for (int t = 0; t < trs.size(); ++t) {
-        auto& tr = trs[t];
+void Context::setupTraceBatch() {
+	for (const auto& tr : trs) {
 		if (tr.debugID.present()) {
 			if (!debugID.present()) {
 				debugID = nondeterministicRandom()->randomUniqueID();
@@ -979,8 +975,8 @@ void Context::setupDebugTrack()  {
 }
 
 void Context::evaluateBatchSize()  {
-	for (auto& tr: trs) {
-		auto& mutations = tr.transaction.mutations;
+	for (const auto& tr : trs) {
+		const auto& mutations = tr.transaction.mutations;
 		batchOperations += mutations.size();
 		batchBytes += mutations.expectedSize();
 	}
@@ -1010,12 +1006,8 @@ ACTOR Future<Void> preresolutionProcessing(Context* self) {
 		);
 	}
 
-	GetCommitVersionRequest req(
-        self->span.context,
-		pProxyCommitData->commitVersionRequestNumber++,
-		pProxyCommitData->mostRecentProcessedRequestNumber,
-		pProxyCommitData->dbgid
-	);
+	GetCommitVersionRequest req(self->span.context, pProxyCommitData->commitVersionRequestNumber++,
+	                            pProxyCommitData->mostRecentProcessedRequestNumber, pProxyCommitData->dbgid);
 	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
 		pProxyCommitData->master.getCommitVersion.getReply(
 			req, TaskPriority::ProxyMasterVersionReply
@@ -1049,6 +1041,8 @@ ACTOR Future<Void> preresolutionProcessing(Context* self) {
 }
 
 ACTOR Future<Void> getResolution(Context* self) {
+	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
+	// resolution processing but is still using CPU
 	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 
@@ -1063,10 +1057,8 @@ ACTOR Future<Void> getResolution(Context* self) {
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
 		requests.addTransaction(trs[t].transaction, t);
-		conflictRangeCount += (
-			trs[t].transaction.read_conflict_ranges.size() +
-			trs[t].transaction.write_conflict_ranges.size()
-		);
+		conflictRangeCount +=
+		    trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
 		//TraceEvent("MPTransactionDump", self->dbgid).detail("Snapshot", trs[t].transaction.read_snapshot);
 		//for(auto& m : trs[t].transaction.mutations)
 		self->maxTransactionBytes = std::max<int64_t>(
@@ -1626,11 +1618,11 @@ ACTOR Future<Void> reply(Context* self) {
 		for (int resolverInd : self->transactionResolverMap[t]) self->nextTr[resolverInd]++;
 
 		// TODO: filter if pipelined with large commit
-		double duration = endTime - tr.requestTime();
+		const double duration = endTime - tr.requestTime();
 		pProxyCommitData->stats.commitLatencySample.addMeasurement(duration);
 		if(pProxyCommitData->latencyBandConfig.present()) {
 			bool filter = self->maxTransactionBytes > pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(std::numeric_limits<int>::max());
-			pProxyCommitData->stats.commitLatencyBands.addMeasurement(endTime - tr.requestTime(), filter);
+			pProxyCommitData->stats.commitLatencyBands.addMeasurement(duration, filter);
 		}
 	}
 
