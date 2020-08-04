@@ -860,17 +860,25 @@ public:
 		auto workerEnabled = backupWorkerEnabled().get(tr);
 		auto plogEnabled = partitionedLogEnabled().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) && success(workerVersion), [=](Void) -> Optional<Version> {
-			// The latest log greater than the oldest snapshot is the restorable version
-			Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
-			                                       plogEnabled.get().present() && plogEnabled.get().get()
-			                                   ? workerVersion.get()
-			                                   : lastLog.get();
-			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
-				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
-			}
-			return {};
-		});
+		auto incrementalBackup = incrementalBackupOnly().get(tr);
+		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) &&
+		               success(workerVersion) && success(incrementalBackup),
+		           [=](Void) -> Optional<Version> {
+			           // The latest log greater than the oldest snapshot is the restorable version
+			           Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
+			                                                  plogEnabled.get().present() && plogEnabled.get().get()
+			                                              ? workerVersion.get()
+			                                              : lastLog.get();
+			           if (logVersion.present() && firstSnapshot.get().present() &&
+			               logVersion.get() > firstSnapshot.get().get()) {
+				           return std::max(logVersion.get() - 1, firstSnapshot.get().get());
+			           }
+			           if (logVersion.present() && incrementalBackup.isReady() && incrementalBackup.get().present() &&
+			               incrementalBackup.get().get()) {
+				           return logVersion.get() - 1;
+			           }
+			           return {};
+		           });
 	}
 
 	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {

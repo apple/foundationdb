@@ -1356,7 +1356,23 @@ public:
 		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 	}
 
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
+	                                                                    Version targetVersion, bool logsOnly) {
+		if (logsOnly) {
+			state RestorableFileSet restorableSet;
+			state std::vector<LogFile> logFiles;
+			wait(store(logFiles, bc->listLogFiles(0, targetVersion, false)));
+			if (!logFiles.empty()) {
+				Version end = logFiles.begin()->endVersion;
+				computeRestoreEndVersion(logFiles, &restorableSet.logs, &end, targetVersion);
+				if (end >= targetVersion) {
+					restorableSet.continuousBeginVersion = logFiles.begin()->beginVersion;
+					restorableSet.continuousEndVersion = end;
+					return Optional<RestorableFileSet>(restorableSet);
+				}
+			}
+			return Optional<RestorableFileSet>();
+		}
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -1440,8 +1456,8 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, bool logsOnly) final {
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, logsOnly);
 	}
 
 private:

@@ -2195,12 +2195,14 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 
 			BackupDescription desc = wait(bc->describeBackup());
 
-			if(!desc.maxRestorableVersion.present()) {
+			if (incrementalBackupOnly && desc.contiguousLogEnd.present()) {
+				targetVersion = desc.contiguousLogEnd.get();
+			} else if (desc.maxRestorableVersion.present()) {
+				targetVersion = desc.maxRestorableVersion.get();
+			} else {
 				fprintf(stderr, "The specified backup is not restorable to any version.\n");
 				throw restore_error();
 			}
-
-			targetVersion = desc.maxRestorableVersion.get();
 
 			if(verbose)
 				printf("Using target restore version %" PRId64 "\n", targetVersion);
