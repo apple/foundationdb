@@ -4382,7 +4382,7 @@ ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
 	state Future<Void> nextTime = Void();
 	state Future<ErrorOr<GetDDMetricsReply>> nextReply = Never();
 	loop choose {
-		when(wait(cx->onMasterProxiesChanged())) {}
+		when(wait(cx->onMasterProxiesChanged())) { nextTime=Void(); }
 		when(wait(nextTime)) {
 			nextReply = errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
 			                             GetDDMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
@@ -4390,9 +4390,9 @@ ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
 		}
 		when(ErrorOr<GetDDMetricsReply> rep = wait(nextReply)) {
 			nextReply = Never();
-	        if(rep.isError()) {
+			if(rep.isError()) {
 				TraceEvent(SevWarn,"NAPIMonitorDDMetricsChangeError").error(rep.getError());
-		        nextTime = delay(CLIENT_KNOBS->DEFAULT_BACKOFF);
+				nextTime = Never();
 			}
 			else {
 				ASSERT(rep.get().avgShardSize.present());

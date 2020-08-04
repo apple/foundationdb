@@ -260,8 +260,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( wait( nextRequestTimer ) ) {
 			nextRequestTimer = Never();
-			double nowTime = now();
-			bool detailed = nowTime - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
+			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
 			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
