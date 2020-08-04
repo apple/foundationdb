@@ -3329,7 +3329,9 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, CLIENT_KNOBS->TOO_MANY, false,
 				                              &StorageServerInterface::getShardState, self->info));
-				uint64_t bytes = locations.size() * self->getDatabase()->smoothAvgShardSize.smoothTotal();
+				if (locations.empty()) continue;
+				uint64_t bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS +
+				                 (locations.size() - 1) * self->getDatabase()->smoothAvgShardSize.smoothTotal();
 				trCommitCosts.clearIdxBytes.emplace(i, bytes);
 				trCommitCosts.writtenBytes += bytes;
 			}

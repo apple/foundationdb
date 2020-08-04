@@ -217,7 +217,8 @@ public:
 	// transaction tags
 	int MAX_TRANSACTION_TAG_LENGTH;
 	int MAX_TAGS_PER_TRANSACTION;
-	int COMMIT_SAMPLE_BYTE;
+	int COMMIT_SAMPLE_BYTE; // The expectation of sampling is every COMMIT_SAMPLE_BYTE sample once
+	int INCOMPLETE_SHARD_PLUS; // The size of (possible) incomplete shard when estimate clear range
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;
