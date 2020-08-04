@@ -893,13 +893,25 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 }
 
 void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
-	if(ss.busiestReadTag.present() && ss.busiestReadTagFractionalBusyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && ss.busiestReadTagRate > SERVER_KNOBS->MIN_TAG_COST) {
+	double busyness = 0, rate = 0;
+	Optional<TransactionTag> busiestTag;
+	if(ss.busiestWriteTag.present()) {
+		busiestTag = ss.busiestWriteTag.get();
+		busyness = ss.busiestWriteTagFractionalBusyness;
+		rate = ss.busiestWriteTagRate;
+	}
+	if(ss.busiestReadTag.present() && ss.busiestReadTagRate > rate) {
+		busiestTag = ss.busiestReadTag.get();
+		busyness = ss.busiestReadTagFractionalBusyness;
+		rate = ss.busiestReadTagRate;
+	}
+	if(busiestTag.present() && busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 		TEST(true); // Transaction tag auto-throttled
 
-		Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, ss.busiestReadTag.get(), ss.busiestReadTagFractionalBusyness);
+		Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, busiestTag.get(), busyness);
 		if(clientRate.present()) {
 			TagSet tags;
-			tags.addTag(ss.busiestReadTag.get());
+			tags.addTag(busiestTag.get());
 
 			self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
 		}
@@ -924,7 +936,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limitReason_t limitReason = limitReason_t::unlimited;
 
 	int sscount = 0;
-	int writeSaturatedSSCount = 0;
 	int64_t worstFreeSpaceStorageServer = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
@@ -974,9 +985,6 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
 		if(limits->priority == TransactionPriority::DEFAULT){
-			// write saturation
-			if(storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES && storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)
-				writeSaturatedSSCount ++;
 			// read saturation
 			if(storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
 				tryAutoThrottleTag(self, ss);
