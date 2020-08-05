@@ -562,6 +562,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			    CLIENT_KNOBS->TOO_MANY));
 			ASSERT(res.size() == SpecialKeySpace::getManagementApiOptionsSet().size());
 			for (int i = 0; i < res.size() - 1; ++i) ASSERT(res[i].key < res[i + 1].key);
+			tx->reset();
 		}
 		return Void();
 	}
