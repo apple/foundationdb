@@ -112,7 +112,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		testRywLifetime(cx);
 		wait(timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
-		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
+		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self) &&
+		                 self->managementApiCorrectnessActor(cx, self),
 		             self->testDuration, Void()));
 		return Void();
 	}
@@ -393,7 +394,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) throw;
 			ASSERT(e.code() == error_code_special_keys_api_failure);
-			Optional<Value> errorMsg = wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+			Optional<Value> errorMsg =
+			    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 			ASSERT(errorMsg.present());
 			std::string errorStr;
 			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
@@ -537,6 +539,29 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				++self->wrongResults;
 			}
 			if (had_error) break;
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+		// All management api related tests
+		Database cx = cx_->clone();
+		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		// test ordered option keys
+		{
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			for (const std::string& option : SpecialKeySpace::getManagementApiOptionsSet()) {
+				tx->set(LiteralStringRef("options/")
+				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
+				            .withSuffix(option),
+				        ValueRef());
+			}
+			Standalone<RangeResultRef> res = wait(tx->getRange(
+			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
+			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
+			    CLIENT_KNOBS->TOO_MANY));
+			ASSERT(res.size() == SpecialKeySpace::getManagementApiOptionsSet().size());
+			for (int i = 0; i < res.size() - 1; ++i) ASSERT(res[i].key < res[i + 1].key);
 		}
 		return Void();
 	}
