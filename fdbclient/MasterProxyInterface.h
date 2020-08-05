@@ -412,13 +412,13 @@ struct GetDDMetricsReply
 {
 	constexpr static FileIdentifier file_identifier = 7277713;
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
-	Optional<double> avgShardSize;
+	Optional<double> midShardSize;
 
 	GetDDMetricsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, storageMetricsList, avgShardSize);
+		serializer(ar, storageMetricsList, midShardSize);
 	}
 };
 
@@ -427,14 +427,14 @@ struct GetDDMetricsRequest {
 	KeyRange keys;
 	int shardLimit;
 	ReplyPromise<struct GetDDMetricsReply> reply;
-	bool avgOnly = false;
+	bool midOnly = false;
 
 	GetDDMetricsRequest() {}
-	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit, bool avgOnly = false) : keys(keys), shardLimit(shardLimit), avgOnly(avgOnly) {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false) : keys(keys), shardLimit(shardLimit), midOnly(midOnly) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, shardLimit, reply, avgOnly);
+		serializer(ar, keys, shardLimit, reply, midOnly);
   }
 };
 

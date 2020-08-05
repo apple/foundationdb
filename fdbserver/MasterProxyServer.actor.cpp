@@ -1904,13 +1904,13 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 				}
 				ErrorOr<GetDataDistributorMetricsReply> reply =
 				    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
-				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit, req.avgOnly))));
+				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit, req.midOnly))));
 				if (reply.isError()) {
 					req.reply.sendError(reply.getError());
 				} else {
 					GetDDMetricsReply newReply;
 					newReply.storageMetricsList = reply.get().storageMetricsList;
-					newReply.avgShardSize = reply.get().avgShardSize;
+					newReply.midShardSize = reply.get().midShardSize;
 					req.reply.send(newReply);
 				}
 			}

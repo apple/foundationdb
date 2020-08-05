@@ -5007,16 +5007,17 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					req.reply.sendError(result.getError());
 				} else {
 					GetDataDistributorMetricsReply rep;
-					if(!req.avgOnly) {
+					if(!req.midOnly) {
 						rep.storageMetricsList = result.get();
 					}
 					else {
 						auto& metricVec = result.get();
-						if(metricVec.empty()) rep.avgShardSize = 0;
+						if(metricVec.empty()) rep.midShardSize = 0;
 						else {
-							double totalSize = 0.0;
-							for (auto it = metricVec.cbegin(); it != metricVec.cend(); ++it) totalSize += it->shardBytes;
-							rep.avgShardSize = totalSize / metricVec.size();
+							std::vector<int64_t> shardSizes(metricVec.size());
+							for (int i = 0; i < shardSizes.size(); ++ i) shardSizes[i] = metricVec[i].shardBytes;
+							std::nth_element(shardSizes.begin(), shardSizes.begin() + shardSizes.size()/2, shardSizes.end());
+							rep.midShardSize = shardSizes[shardSizes.size()/2];
 						}
 					}
 					req.reply.send(rep);

@@ -65,8 +65,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 	init( PROXY_COMMIT_OVERHEAD_BYTES,              23 ); //The size of serializing 7 tags (3 primary, 3 remote, 1 log router) + 2 for the tag length
-	init( DEFAULT_SMOOTH_AMOUNT,                   5.0 );
-	init( INIT_MEAN_SHARD_BYTES,                200000 ); if( randomize && BUGGIFY ) INIT_MEAN_SHARD_BYTES = 40000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
+	init( SHARD_STAT_SMOOTH_AMOUNT,                5.0 );
+	init( INIT_MID_SHARD_BYTES,                 200000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -91,7 +91,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
-	init( AVG_SHARD_SIZE_MAX_STALENESS,           30.0 );
+	init( MID_SHARD_SIZE_MAX_STALENESS,           30.0 );
 	init( TAG_ENCODE_KEY_SERVERS,                 true ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = false;
 
 	//KeyRangeMap

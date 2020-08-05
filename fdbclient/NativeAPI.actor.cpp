@@ -874,8 +874,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    avgShardSizeLastUpdated(0), smoothAvgShardSize(CLIENT_KNOBS->DEFAULT_SMOOTH_AMOUNT),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), midShardSizeLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
@@ -897,7 +897,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
-	smoothAvgShardSize.reset(CLIENT_KNOBS->INIT_MEAN_SHARD_BYTES);
+	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG, SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1007,7 +1007,8 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	transactionKeyServerLocationRequests("KeyServerLocationRequests", cc), transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc), transactionsTooOld("TooOld", cc), 
 	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), 
 	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), smoothAvgShardSize(CLIENT_KNOBS->DEFAULT_SMOOTH_AMOUNT),
+	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+	smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
 	internal(false) {}
 
 
@@ -1106,7 +1107,7 @@ bool DatabaseContext::sampleReadTags() {
 bool DatabaseContext::sampleOnBytes(uint64_t bytes) {
 	if(bytes >= clientInfo->get().transactionTagSampleBytes) return true;
 	ASSERT(clientInfo->get().transactionTagSampleBytes > 0);
-	return deterministicRandom()->random01() < bytes / clientInfo->get().transactionTagSampleBytes;
+	return deterministicRandom()->random01() < (double)bytes / clientInfo->get().transactionTagSampleBytes;
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
@@ -3303,8 +3304,8 @@ void Transaction::setupWatches() {
 
 ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
                                                                          CommitTransactionRef* transaction) {
-	if(!self->getDatabase()->avgShardSizeUpdater.present()){ // lazy start: only client who needs tag pay this overload
-		self->getDatabase()->avgShardSizeUpdater = monitorDDMetricsChanges(self->getDatabase());
+	if(!self->getDatabase()->midShardSizeUpdater.present()){ // lazy start: only client who needs tag pay this overload
+		self->getDatabase()->midShardSizeUpdater = monitorDDMetricsChanges(self->getDatabase());
 	}
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
@@ -3331,7 +3332,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				                              &StorageServerInterface::getShardState, self->info));
 				if (locations.empty()) continue;
 				uint64_t bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS +
-				                 (locations.size() - 1) * self->getDatabase()->smoothAvgShardSize.smoothTotal();
+				                 (locations.size() - 1) * self->getDatabase()->smoothMidShardSize.smoothTotal();
 				trCommitCosts.clearIdxBytes.emplace(i, bytes);
 				trCommitCosts.writtenBytes += bytes;
 			}
@@ -4395,18 +4396,18 @@ ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
 				nextTime = Never();
 			}
 			else {
-				ASSERT(rep.get().avgShardSize.present());
-				double avgShardSize = rep.get().avgShardSize.get();
-				if(avgShardSize > 0) {
+				ASSERT(rep.get().midShardSize.present());
+				double midShardSize = rep.get().midShardSize.get();
+				if(midShardSize > 0) {
 					if (isFirstRep) {
-						cx->smoothAvgShardSize.reset(avgShardSize);
+						cx->smoothMidShardSize.reset(midShardSize);
 						isFirstRep = false;
-					} else cx->smoothAvgShardSize.setTotal(avgShardSize);
-					cx->avgShardSizeLastUpdated = now();
+					} else cx->smoothMidShardSize.setTotal(midShardSize);
+					cx->midShardSizeLastUpdated = now();
 				}
-		        nextTime = delay(CLIENT_KNOBS->AVG_SHARD_SIZE_MAX_STALENESS);
+		        nextTime = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
 		        if(deterministicRandom()->random01() < 0.01)
-					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothAvgShardSize.smoothTotal());
+					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothMidShardSize.smoothTotal());
 			}
 		}
 	};

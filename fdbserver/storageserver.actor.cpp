@@ -512,7 +512,7 @@ public:
 					.detail("TagCost", busiestTagCount)
 					.detail("TotalSampledCost", intervalTotalSampledCount)
 					.detail("Reported", previousBusiestTag.present())
-					.trackLatest(id.toString() + "_BusiestReadTag");
+					.trackLatest(id.toString() + "/BusiestReadTag");
 			} 
 
 			intervalCounts.clear();
