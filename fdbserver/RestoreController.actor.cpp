@@ -105,7 +105,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 	ASSERT(controllerWorker->controllerInterf.present());
 	state Reference<RestoreControllerData> self =
 	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.get().id()));
-	state ActorCollectionNoErrors actors;
+	state ActorCollection actors(false);
 
 	try {
 		// recruitRestoreRoles must come after controllerWorker has finished collectWorkerInterface
@@ -117,7 +117,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		actors.add(traceProcessMetrics(self, "RestoreController"));
 		actors.add(sampleBackups(self, controllerWorker->controllerInterf.get()));
 
-		wait(startProcessRestoreRequests(self, cx));
+		wait(startProcessRestoreRequests(self, cx) || actors.getResult());
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
 			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
