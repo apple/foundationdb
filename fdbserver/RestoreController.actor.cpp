@@ -77,6 +77,10 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 	loop {
 		try {
 			RestoreSamplesRequest req = waitNext(ci.samples.getFuture());
+			TraceEvent(SevDebug, "FastRestoreControllerSampleBackups")
+			    .detail("SampleID", req.id)
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("Samples", req.samples.size());
 			if (req.batchIndex > self->batch.size()) {
 				TraceEvent(SevError, "FastRestoreControllerSampleBackupsInvalidBatchIndex")
 				    .detail("BatchIndex", req.batchIndex)
@@ -90,7 +94,9 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 			batch->sampleMsgs.insert(req.id);
 			for (auto& m : req.samples) {
 				batch->samples.addMetric(m.key, m.size);
+				batch->samplesSize += m.size;
 			}
+			req.reply.send(RestoreCommonReply(req.id));
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "FastRestoreControllerSampleBackupsError", self->id()).error(e);
 			break;
@@ -101,11 +107,12 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 }
 
 ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
+	state ActorCollection actors(false);
+
 	ASSERT(controllerWorker.isValid());
 	ASSERT(controllerWorker->controllerInterf.present());
 	state Reference<RestoreControllerData> self =
 	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.get().id()));
-	state ActorCollection actors(false);
 
 	try {
 		// recruitRestoreRoles must come after controllerWorker has finished collectWorkerInterface
@@ -117,7 +124,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		actors.add(traceProcessMetrics(self, "RestoreController"));
 		actors.add(sampleBackups(self, controllerWorker->controllerInterf.get()));
 
-		wait(startProcessRestoreRequests(self, cx) || actors.getResult());
+		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
 			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
@@ -179,6 +186,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 			TraceEvent(SevError, "FastRestoreController").detail("RecruitRestoreRolesInvalidRole", reply.role);
 		}
 	}
+	controllerData->recruitedRoles.send(Void());
 	TraceEvent("FastRestoreRecruitRestoreRolesDone", controllerData->id())
 	    .detail("Workers", controllerWorker->workerInterfaces.size())
 	    .detail("RecruitedRoles", replies.size());
@@ -262,13 +270,13 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> 
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
 			TraceEvent(SevError, "FastRestoreControllerProcessRestoreRequestsFailed", self->id())
-			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString())
-			    .error(e);
+			    .error(e)
+			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 		} else {
 			TraceEvent(SevError, "FastRestoreControllerProcessRestoreRequestsFailed", self->id())
+			    .error(e)
 			    .detail("RestoreRequests", restoreRequests.size())
-			    .detail("RestoreIndex", restoreIndex)
-			    .error(e);
+			    .detail("RestoreIndex", restoreIndex);
 		}
 	}
 
@@ -1038,6 +1046,8 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 
 // Update the most recent time when controller receives hearbeat from each loader and applier
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
+	wait(self->recruitedRoles.getFuture());
+
 	int numRoles = self->loadersInterf.size() + self->appliersInterf.size();
 	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();

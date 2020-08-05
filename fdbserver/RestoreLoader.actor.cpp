@@ -126,11 +126,13 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 }
 
 static inline bool _logMutationTooOld(KeyRangeMap<Version>* pRangeVersions, KeyRangeRef keyRange, Version v) {
+	ASSERT(pRangeVersions != nullptr);
 	auto ranges = pRangeVersions->intersectingRanges(keyRange);
 	Version minVersion = MAX_VERSION;
 	for (auto r = ranges.begin(); r != ranges.end(); ++r) {
 		minVersion = std::min(minVersion, r->value());
 	}
+	ASSERT(minVersion != MAX_VERSION); // pRangeVersions is initialized as entired keyspace, ranges cannot be empty
 	return minVersion >= v;
 }
 
