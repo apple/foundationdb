@@ -56,8 +56,8 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
                                                            Reference<IBackupContainer> bc, RestoreAsset asset);
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
-    std::map<LoadingParam, MutationsVec>::iterator samplesIter, LoaderCounters* cc, Reference<IBackupContainer> bc,
-    Version version, RestoreAsset asset);
+    std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
+    Reference<IBackupContainer> bc, Version version, RestoreAsset asset);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
@@ -385,14 +385,14 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	wait(it->second); // wait on the processing of the req.param.
 
 	// Send sampled mutations back to controller:  batchData->sampleMutations[req.param]
-	std::vector<Future<Void>> fSendSamples;
+	std::vector<Future<RestoreCommonReply>> fSendSamples;
 	SampledMutationsVec& samples = batchData->sampleMutations[req.param];
 	SampledMutationsVec sampleBatch =
 	    SampledMutationsVec(); // sampleBatch is a Standalone pointer to the created object
 	double sampleBatchSize = 0;
 	for (int i = 0; i < samples.size(); ++i) {
 		sampleBatchSize += samples[i].totalSize();
-		sampleBatch.push_back_deep(samples[i]); // TODO: may not need deep copy
+		sampleBatch.push_back_deep(sampleBatch.arena(), samples[i]); // TODO: may not need deep copy
 		if (sampleBatchSize >= SERVER_KNOBS->FASTRESTORE_SAMPLE_MSG_BYTES) {
 			fSendSamples.push_back(self->ci.samples.getReply(
 			    RestoreSamplesRequest(deterministicRandom()->randomUniqueID(), req.batchIndex, sampleBatch)));

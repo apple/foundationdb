@@ -53,6 +53,7 @@ struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
 struct RestoreFinishRequest;
+struct RestoreSamplesRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -206,7 +207,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 struct RestoreControllerInterface : RestoreRoleInterface {
 	constexpr static FileIdentifier file_identifier = 54253047;
 
-	RequestStream<RestoreSimpleRequest> samples;
+	RequestStream<RestoreSamplesRequest> samples;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -444,13 +445,15 @@ struct RestoreSamplesRequest : TimedRequest {
 	int batchIndex;
 	SampledMutationsVec samples; // sampled mutations
 
+	ReplyPromise<RestoreCommonReply> reply;
+
 	RestoreSamplesRequest() = default;
 	explicit RestoreSamplesRequest(UID id, int batchIndex, SampledMutationsVec samples)
 	  : id(id), batchIndex(batchIndex), samples(samples) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, batchIndex, samples);
+		serializer(ar, id, batchIndex, samples, reply);
 	}
 
 	std::string toString() {

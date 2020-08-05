@@ -49,7 +49,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	std::map<UID, RestoreWorkerInterface> workerInterfaces; // UID is worker's node id, RestoreWorkerInterface is worker's communication workerInterface
 
 	// Restore Roles
-	Optional<RestoreLoaderInterface> controllerInterf;
+	Optional<RestoreControllerInterface> controllerInterf;
 	Optional<RestoreLoaderInterface> loaderInterf;
 	Optional<RestoreApplierInterface> applierInterf;
 

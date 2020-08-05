@@ -76,7 +76,7 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
 ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControllerInterface ci) {
 	loop {
 		try {
-			RestoreSamplesRequest req = waitnext(ci.samples.getFuture());
+			RestoreSamplesRequest req = waitNext(ci.samples.getFuture());
 			if (req.batchIndex > self->batch.size()) {
 				TraceEvent(SevError, "FastRestoreControllerSampleBackupsInvalidBatchIndex")
 				    .detail("BatchIndex", req.batchIndex)
@@ -92,10 +92,7 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 				batch->samples.addMetric(m.key, m.size);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreControllerError", self->id())
-			    .detail("RequestType", "RestoreSamplesRequest")
-			    .error(e, true);
-			actors.clear(false);
+			TraceEvent(SevWarn, "FastRestoreControllerSampleBackupsError", self->id()).error(e);
 			break;
 		}
 	}
@@ -107,7 +104,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 	ASSERT(controllerWorker.isValid());
 	ASSERT(controllerWorker->controllerInterf.present());
 	state Reference<RestoreControllerData> self =
-	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.id()));
+	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.get().id()));
 	state ActorCollectionNoErrors actors;
 
 	try {
