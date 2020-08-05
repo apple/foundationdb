@@ -51,7 +51,7 @@ namespace Magnesium
 					}
 					catch (Exception e)
 					{
-						throw new Exception(string.Format("Failed to parse {0}", root), e);
+						throw new Exception(string.Format("Failed to parse JSON {0}", root), e);
 					}
 					if (ev != null) yield return ev;
 				}
@@ -80,8 +80,9 @@ namespace Magnesium
 				TraceFile = file,
 				DDetails = xEvent.Elements()
 					.Where(a=>a.Name != "Type" && a.Name != "Time" && a.Name != "Machine" && a.Name != "ID" && a.Name != "Severity" && (!rolledEvent || a.Name != "OriginalTime"))
-					.ToDictionary(a=>string.Intern(a.Name.LocalName), a=>(object)a.Value),
-				original = keepOriginalElement ? xEvent : null,
+					// When the key contains a colon character, it gets parsed as a:item
+					.ToDictionary(a=>a.Name.LocalName == "item" ? a.Attribute("item").Value : string.Intern(a.Name.LocalName), a=>(object)a.Value),
+				original = keepOriginalElement ? xEvent : null
 			};
 		}
 

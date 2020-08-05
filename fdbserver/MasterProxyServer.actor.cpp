@@ -262,8 +262,14 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
+			TransactionTagMap<uint64_t> tagCounts;
+			for(auto itr : *throttledTags) {
+				for(auto priorityThrottles : itr.second) {
+					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
+				}
+			}
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
-			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
+			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, tagCounts,
 			                       *ssTagCommitCost, detailed)));
 			transactionTagCounter->clear();
 			ssTagCommitCost->clear();
@@ -1110,6 +1116,7 @@ ACTOR Future<Void> commitBatch(
 				yieldBytes += mutationSize;
 				// Determine the set of tags (responsible storage servers) for the mutation, splitting it
 				// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
+
 				if (isSingleKeyMutation((MutationRef::Type) m.type)) {
 					// sample single key mutation based on byte
 					// the expectation of sampling is every COMMIT_SAMPLE_BYTE sample once
