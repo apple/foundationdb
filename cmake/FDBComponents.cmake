@@ -114,6 +114,14 @@ else()
 endif()
 
 ################################################################################
+# TOML11
+################################################################################
+
+# TOML can download and install itself into the binary directory, so it should
+# always be available.
+find_package(TOML11)
+
+################################################################################
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)

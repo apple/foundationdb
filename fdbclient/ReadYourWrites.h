@@ -38,6 +38,7 @@ struct ReadYourWritesTransactionOptions {
 	bool debugRetryLogging : 1;
 	bool disableUsedDuringCommitProtection : 1;
 	bool specialKeySpaceRelaxed : 1;
+	bool specialKeySpaceChangeConfiguration : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -149,6 +150,13 @@ public:
 	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
+	bool specialKeySpaceChangeConfiguration() const { return options.specialKeySpaceChangeConfiguration; }
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
+	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
+	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
+	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
+	Transaction& getTransaction() { return tr; }
 
 private:
 	friend class RYWImpl;
@@ -176,6 +184,9 @@ private:
 	    nativeWriteRanges; // Used to read conflict ranges after committing an ryw disabled transaction
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>> specialKeySpaceWriteMap;
+	Optional<std::string> specialKeySpaceErrorMsg;
 
 	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)

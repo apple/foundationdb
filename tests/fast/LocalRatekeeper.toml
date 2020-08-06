@@ -1,0 +1,12 @@
+[[test]]
+testTitle = 'LocalRateKeeper'
+
+    [[test.workload]]
+    testName = 'LocalRatekeeper'
+    startAfter = 60.0
+    blockWritesFor = 80.0
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 25
+    testDuration = 200

@@ -63,6 +63,7 @@ struct MapHarness {
 		const K& operator->() const { return it->first; }
 
 		bool operator==(result const& k) const { return it == k.it; }
+		bool operator!=(result const& k) const { return it != k.it; }
 	};
 
 	map s;
@@ -100,7 +101,7 @@ void treeBenchmark(T& tree, F generateKey) {
 	keys.resize(std::unique(keys.begin(), keys.end()) - keys.begin());
 
 	auto iter = tree.lower_bound(*keys.begin());
-	timedRun("scan", keys, [&tree, &iter](key const& k) {
+	timedRun("scan", keys, [&iter](key const& k) {
 		ASSERT(k == *iter);
 		++iter;
 	});

@@ -28,9 +28,9 @@
 
 #include "fdbclient/Tuple.h"
 #include "flow/flow.h"
-#include "flow/Stats.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/Stats.h"
 #include <cstdint>
 #include <cstdarg>
 

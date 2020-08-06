@@ -44,7 +44,7 @@ import com.apple.foundationdb.async.AsyncUtil;
  *   operation, the remove is not durable until {@code commit()} on the {@code Transaction}
  *   that yielded this query returns <code>true</code>.
  */
-class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
+class RangeQuery implements AsyncIterable<KeyValue> {
 	private final FDBTransaction tr;
 	private final KeySelector begin;
 	private final KeySelector end;

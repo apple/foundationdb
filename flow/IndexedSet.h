@@ -376,7 +376,9 @@ public:
 		return ::compare(key, r);
 	}
 	bool operator<(MapPair<Key,Value> const& r) const { return key < r.key; }
+	bool operator>(MapPair<Key, Value> const& r) const { return key > r.key; }
 	bool operator<=(MapPair<Key,Value> const& r) const { return key <= r.key; }
+	bool operator>=(MapPair<Key, Value> const& r) const { return key >= r.key; }
 	bool operator==(MapPair<Key,Value> const& r) const { return key == r.key; }
 	bool operator!=(MapPair<Key,Value> const& r) const { return key != r.key; }
 

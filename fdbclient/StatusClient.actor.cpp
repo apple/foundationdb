@@ -276,8 +276,8 @@ void JSONDoc::mergeValueInto(json_spirit::mValue &dst, const json_spirit::mValue
 			break;
 
 		default:
-			if(dst != src)
-				dst = json_spirit::mObject({{"ERROR", "Values do not match."}, {"a", dst}, {"b", src}});
+		    if (!(dst == src))
+			    dst = json_spirit::mObject({ { "ERROR", "Values do not match." }, { "a", dst }, { "b", src } });
 	}
 }
 

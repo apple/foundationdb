@@ -1,0 +1,25 @@
+testTitle=withoutWriteThrottling
+    testName=WriteTagThrottling
+    trPerSecond=10000000
+    keyCount=5000
+    absentFrac=0.01
+    numWritePerTr=1
+    numReadPerTr=1
+    numClearPerTr=1
+    badOpRate = 0.9
+
+    testName=HealthMetricsApi
+
+testTitle=withWriteThrottling
+    testName=WriteTagThrottling
+    writeThrottle = true
+    trPerSecond=10000000
+    keyCount=5000
+    absentFrac=0.01
+    numWritePerTr=1
+    numReadPerTr=1
+    numClearPerTr=1
+    badOpRate = 0.9
+    tpsRate=20
+
+    testName=HealthMetricsApi

@@ -159,14 +159,15 @@ public:
 
 // TeamCollection's server team info.
 class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
-public:
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
-	Reference<TCMachineTeamInfo> machineTeam;
-	Future<Void> tracker;
 	bool healthy;
 	bool wrongConfiguration; //True if any of the servers in the team have the wrong configuration
 	int priority;
+
+public:
+	Reference<TCMachineTeamInfo> machineTeam;
+	Future<Void> tracker;
 
 	explicit TCTeamInfo(vector<Reference<TCServerInfo>> const& servers)
 	  : servers(servers), healthy(true), priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), wrongConfiguration(false) {
@@ -179,21 +180,19 @@ public:
 		}
 	}
 
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() {
-		vector<StorageServerInterface> v;
-		v.reserve(servers.size());
-		for(int i=0; i<servers.size(); i++)
-			v.push_back(servers[i]->lastKnownInterface);
+	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
+		vector<StorageServerInterface> v(servers.size());
+		for (const auto& server : servers) v.push_back(server->lastKnownInterface);
 		return v;
 	}
-	virtual int size() {
+	int size() const override {
 		ASSERT(servers.size() == serverIDs.size());
 		return servers.size();
 	}
-	virtual vector<UID> const& getServerIDs() { return serverIDs; }
+	vector<UID> const& getServerIDs() const override { return serverIDs; }
 	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
 
-	virtual std::string getServerIDsStr() {
+	std::string getServerIDsStr() const {
 		std::stringstream ss;
 
 		if (serverIDs.empty()) return "[unset]";
@@ -205,18 +204,18 @@ public:
 		return ss.str();
 	}
 
-	virtual void addDataInFlightToTeam( int64_t delta ) {
+	void addDataInFlightToTeam(int64_t delta) override {
 		for(int i=0; i<servers.size(); i++)
 			servers[i]->dataInFlightToServer += delta;
 	}
-	virtual int64_t getDataInFlightToTeam() {
+	int64_t getDataInFlightToTeam() const override {
 		int64_t dataInFlight = 0.0;
 		for(int i=0; i<servers.size(); i++)
 			dataInFlight += servers[i]->dataInFlightToServer;
 		return dataInFlight;
 	}
 
-	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) {
+	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
 		int64_t physicalBytes = getLoadAverage();
 		double minAvailableSpaceRatio = getMinAvailableSpaceRatio(includeInFlight);
 		int64_t inFlightBytes = includeInFlight ? getDataInFlightToTeam() / servers.size() : 0;
@@ -233,18 +232,18 @@ public:
 		return (physicalBytes + (inflightPenalty*inFlightBytes)) * availableSpaceMultiplier;
 	}
 
-	virtual int64_t getMinAvailableSpace( bool includeInFlight = true ) {
+	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
-		for(int i=0; i<servers.size(); i++) {
-			if( servers[i]->serverMetrics.present() ) {
-				auto& replyValue = servers[i]->serverMetrics.get();
+		for (const auto& server : servers) {
+			if (server->serverMetrics.present()) {
+				auto& replyValue = server->serverMetrics.get();
 
 				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
 				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesAvailable -= servers[i]->dataInFlightToServer;
+					bytesAvailable -= server->dataInFlightToServer;
 				}
 
 				minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
@@ -254,18 +253,18 @@ public:
 		return minAvailableSpace; // Could be negative
 	}
 
-	virtual double getMinAvailableSpaceRatio( bool includeInFlight = true ) {
+	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override {
 		double minRatio = 1.0;
-		for(int i=0; i<servers.size(); i++) {
-			if( servers[i]->serverMetrics.present() ) {
-				auto& replyValue = servers[i]->serverMetrics.get();
+		for (const auto& server : servers) {
+			if (server->serverMetrics.present()) {
+				auto& replyValue = server->serverMetrics.get();
 
 				ASSERT(replyValue.available.bytes >= 0);
 				ASSERT(replyValue.capacity.bytes >= 0);
 
 				int64_t bytesAvailable = replyValue.available.bytes;
 				if(includeInFlight) {
-					bytesAvailable = std::max((int64_t)0, bytesAvailable - servers[i]->dataInFlightToServer);
+					bytesAvailable = std::max((int64_t)0, bytesAvailable - server->dataInFlightToServer);
 				}
 
 				if(replyValue.capacity.bytes == 0)
@@ -278,29 +277,27 @@ public:
 		return minRatio;
 	}
 
-	virtual bool hasHealthyAvailableSpace(double minRatio) {
+	bool hasHealthyAvailableSpace(double minRatio) const override {
 		return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
 	}
 
-	virtual Future<Void> updateStorageMetrics() {
-		return doUpdateStorageMetrics( this );
-	}
+	Future<Void> updateStorageMetrics() override { return doUpdateStorageMetrics(this); }
 
-	virtual bool isOptimal() {
-		for(int i=0; i<servers.size(); i++) {
-			if( servers[i]->lastKnownClass.machineClassFitness( ProcessClass::Storage ) > ProcessClass::UnsetFit ) {
+	bool isOptimal() const override {
+		for (const auto& server : servers) {
+			if (server->lastKnownClass.machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
 				return false;
 			}
 		}
 		return true;
 	}
 
-	virtual bool isWrongConfiguration() { return wrongConfiguration; }
-	virtual void setWrongConfiguration(bool wrongConfiguration) { this->wrongConfiguration = wrongConfiguration; }
-	virtual bool isHealthy() { return healthy; }
-	virtual void setHealthy(bool h) { healthy = h; }
-	virtual int getPriority() { return priority; }
-	virtual void setPriority(int p) { priority = p; }
+	bool isWrongConfiguration() const override { return wrongConfiguration; }
+	void setWrongConfiguration(bool wrongConfiguration) override { this->wrongConfiguration = wrongConfiguration; }
+	bool isHealthy() const override { return healthy; }
+	void setHealthy(bool h) override { healthy = h; }
+	int getPriority() const override { return priority; }
+	void setPriority(int p) override { priority = p; }
 	virtual void addref() { ReferenceCounted<TCTeamInfo>::addref(); }
 	virtual void delref() { ReferenceCounted<TCTeamInfo>::delref(); }
 
@@ -313,7 +310,7 @@ public:
 
 private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all replies.
-	int64_t getLoadAverage() {
+	int64_t getLoadAverage() const {
 		int64_t bytesSum = 0;
 		int added = 0;
 		for(int i=0; i<servers.size(); i++)
@@ -352,6 +349,7 @@ struct ServerStatus {
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
 	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
+	bool operator!=(ServerStatus const& r) const { return !(*this == r); }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -673,21 +671,49 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	}
 
 	~DDTeamCollection() {
-		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is held by the actor
-		// It also ensures that the trackers are done fiddling with healthyTeamCount before we free this
+		TraceEvent("DDTeamCollectionDestructed", distributorId).detail("Primary", primary);
+		// Other teamCollections also hold pointer to this teamCollection;
+		// TeamTracker may access the destructed DDTeamCollection if we do not reset the pointer
+		for (int i = 0; i < teamCollections.size(); i++) {
+			if (teamCollections[i] != nullptr && teamCollections[i] != this) {
+				for (int j = 0; j < teamCollections[i]->teamCollections.size(); ++j) {
+					if (teamCollections[i]->teamCollections[j] == this) {
+						teamCollections[i]->teamCollections[j] = nullptr;
+					}
+				}
+			}
+		}
+		// Team tracker has pointers to DDTeamCollections both in primary and remote.
+		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is
+		// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
+		// this
 		for(int i=0; i < teams.size(); i++) {
 			teams[i]->tracker.cancel();
 		}
+		// The commented TraceEvent log is useful in detecting what is running during the destruction
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("TeamTrackerDestroyed", teams.size());
 		for(int i=0; i < badTeams.size(); i++) {
 			badTeams[i]->tracker.cancel();
 		}
-		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be stopped
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("BadTeamTrackerDestroyed", badTeams.size());
+		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be
+		// stopped
 		//  before the server_status map to which it has a pointer, is destroyed.
 		for(auto it = server_info.begin(); it != server_info.end(); ++it) {
 			it->second->tracker.cancel();
 			it->second->collection = nullptr;
 		}
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("ServerTrackerDestroyed", server_info.size());
 		teamBuilder.cancel();
+		// TraceEvent("DDTeamCollectionDestructed", distributorId)
+		//     .detail("Primary", primary)
+		//     .detail("TeamBuilderDestroyed", server_info.size());
 	}
 
 	void addLaggingStorageServer(Key zoneId) {
@@ -774,6 +800,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 			}
 
+			bool foundSrc = false;
+			for( int i = 0; i < req.src.size(); i++ ) {
+				if( self->server_info.count( req.src[i] ) ) {
+					foundSrc = true;
+					break;
+				}
+			}
+
 			// Select the best team
 			// Currently the metric is minimum used disk space (adjusted for data in flight)
 			// Only healthy teams may be selected. The team has to be healthy at the moment we update
@@ -784,7 +818,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// self->teams.size() can be 0 under the ConfigureTest.txt test when we change configurations
 			// The situation happens rarely. We may want to eliminate this situation someday
 			if( !self->teams.size() ) {
-				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
+				req.reply.send( std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc) );
 				return Void();
 			}
 
@@ -810,7 +844,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found && teamList[j]->isHealthy()) {
-							req.reply.send( teamList[j] );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
@@ -901,7 +936,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 							}
 						}
 						if(found) {
-							req.reply.send( teamList[j] );
+							bestOption = teamList[j];
+							req.reply.send( std::make_pair(bestOption, foundSrc) );
 							return Void();
 						}
 					}
@@ -912,7 +948,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			// 	self->traceAllInfo(true);
 			// }
 
-			req.reply.send( bestOption );
+			req.reply.send( std::make_pair(bestOption, foundSrc) );
 
 			return Void();
 		} catch( Error &e ) {
@@ -1420,6 +1456,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	void traceAllInfo(bool shouldPrint = false) {
 
 		if (!shouldPrint) return;
+		// Record all team collections IDs
+		for (int i = 0; i < teamCollections.size(); ++i) {
+			TraceEvent("TraceAllInfo", distributorId)
+			    .detail("TeamCollectionIndex", i)
+			    .detail("Primary", teamCollections[i]->primary);
+		}
 
 		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
 		traceConfigInfo();
@@ -3123,7 +3165,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						// The shard split/merge and DD rebooting may make a shard mapped to multiple teams,
 						// so we need to recalculate the shard's priority
 						if (maxPriority < SERVER_KNOBS->PRIORITY_TEAM_FAILED) {
-							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
+							std::pair<vector<ShardsAffectedByTeamFailure::Team>,
+							          vector<ShardsAffectedByTeamFailure::Team>>
+							    teams = self->shardsAffectedByTeamFailure->getTeamsFor(shards[i]);
 							for( int j=0; j < teams.first.size()+teams.second.size(); j++) {
 								// t is the team in primary DC or the remote DC
 								auto& t = j < teams.first.size() ? teams.first[j] : teams.second[j-teams.first.size()];
@@ -3133,7 +3177,16 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 								}
 
 								auto tc = self->teamCollections[t.primary ? 0 : 1];
+								if (tc == nullptr) {
+									// teamTracker only works when all teamCollections are valid.
+									// Always check if all teamCollections are valid, and throw error if any
+									// teamCollection has been destructed, because the teamTracker can be triggered
+									// after a DDTeamCollection was destroyed and before the other DDTeamCollection is
+									// destroyed. Do not throw actor_cancelled() because flow treat it differently.
+									throw dd_cancelled();
+								}
 								ASSERT(tc->primary == t.primary);
+								// tc->traceAllInfo();
 								if( tc->server_info.count( t.servers[0] ) ) {
 									auto& info = tc->server_info[t.servers[0]];
 
@@ -3142,6 +3195,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										if( info->teams[k]->getServerIDs() == t.servers ) {
 											maxPriority = std::max( maxPriority, info->teams[k]->getPriority() );
 											found = true;
+
 											break;
 										}
 									}
@@ -3156,7 +3210,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
-									TEST(true); // A removed server is still associated with a team in SABTF
+									TEST(true); // A removed server is still associated with a team in
+									            // ShardsAffectedByTeamFailure
 								}
 							}
 						}
@@ -3166,15 +3221,15 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						rs.priority = maxPriority;
 
 						self->output.send(rs);
-						if(deterministicRandom()->random01() < 0.01) {
-							TraceEvent("SendRelocateToDDQx100", self->distributorId)
-								.detail("Team", team->getDesc())
-								.detail("KeyBegin", rs.keys.begin)
-								.detail("KeyEnd", rs.keys.end)
-								.detail("Priority", rs.priority)
-								.detail("TeamFailedMachines", team->size() - serversLeft)
-								.detail("TeamOKMachines", serversLeft);
-						}
+						TraceEvent("SendRelocateToDDQueue", self->distributorId)
+						    .suppressFor(1.0)
+						    .detail("Primary", self->primary)
+						    .detail("Team", team->getDesc())
+						    .detail("KeyBegin", rs.keys.begin)
+						    .detail("KeyEnd", rs.keys.end)
+						    .detail("Priority", rs.priority)
+						    .detail("TeamFailedMachines", team->size() - serversLeft)
+						    .detail("TeamOKMachines", serversLeft);
 					}
 				} else {
 					if(logTeamEvents) {
@@ -3189,7 +3244,10 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 		}
 	} catch(Error& e) {
 		if(logTeamEvents) {
-			TraceEvent("TeamTrackerStopping", self->distributorId).detail("Team", team->getDesc()).detail("Priority", team->getPriority());
+			TraceEvent("TeamTrackerStopping", self->distributorId)
+			    .detail("Primary", self->primary)
+			    .detail("Team", team->getDesc())
+			    .detail("Priority", team->getPriority());
 		}
 		self->priority_teams[team->getPriority()]--;
 		if (team->isHealthy()) {
@@ -3197,7 +3255,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 			ASSERT( self->healthyTeamCount >= 0 );
 
 			if( self->healthyTeamCount == 0 ) {
-				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId).detail("SignallingTeam", team->getDesc());
+				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+				    .detail("Primary", self->primary)
+				    .detail("SignallingTeam", team->getDesc());
 				self->zeroHealthyTeams->set(true);
 			}
 		}
@@ -3848,6 +3908,10 @@ ACTOR Future<Void> storageServerTracker(
 	} catch( Error &e ) {
 		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
 			errorOut.sendError(e);
+		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
+		    .suppressFor(1.0)
+		    .detail("Primary", self->primary)
+		    .detail("Server", server->id);
 		throw;
 	}
 }
@@ -4579,8 +4643,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (initData->shards[shard].hasDest) {
-					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
-					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
+					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
+					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
+					// easier to just (with low priority) schedule it for movement.
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
@@ -4633,6 +4698,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 		}
 		catch( Error &e ) {
 			state Error err = e;
+			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();

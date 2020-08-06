@@ -135,22 +135,6 @@ struct TLogConfirmRunningRequest {
 	}
 };
 
-struct VersionUpdateRef {
-	Version version;
-	MutationListRef mutations;
-	bool isPrivateData;
-
-	VersionUpdateRef() : isPrivateData(false), version(invalidVersion) {}
-	VersionUpdateRef( Arena& to, const VersionUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
-	int totalSize() const { return mutations.totalSize(); }
-	int expectedSize() const { return mutations.expectedSize(); }
-
-	template <class Ar> 
-	void serialize( Ar& ar ) {
-		serializer(ar, version, mutations, isPrivateData);
-	}
-};
-
 struct VerUpdateRef {
 	Version version;
 	VectorRef<MutationRef> mutations;
@@ -159,6 +143,11 @@ struct VerUpdateRef {
 	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
 	VerUpdateRef( Arena& to, const VerUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
 	int expectedSize() const { return mutations.expectedSize(); }
+
+	MutationRef push_back_deep(Arena& arena, const MutationRef& m) {
+		mutations.push_back_deep(arena, m);
+		return mutations.back();
+	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {

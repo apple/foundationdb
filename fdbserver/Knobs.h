@@ -88,6 +88,12 @@ public:
 	double TLOG_MAX_CREATE_DURATION;
 	int PEEK_LOGGING_AMOUNT;
 	double PEEK_LOGGING_DELAY;
+	double PEEK_RESET_INTERVAL;
+	double PEEK_MAX_LATENCY;
+	bool PEEK_COUNT_SMALL_MESSAGES;
+	double PEEK_STATS_INTERVAL;
+	double PEEK_STATS_SLOW_AMOUNT;
+	double PEEK_STATS_SLOW_RATIO;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -165,6 +171,7 @@ public:
 	int64_t DD_SHARD_SIZE_GRANULARITY;
 	int64_t DD_SHARD_SIZE_GRANULARITY_SIM;
 	int DD_MOVE_KEYS_PARALLELISM;
+	int DD_FETCH_SOURCE_PARALLELISM;
 	int DD_MERGE_LIMIT;
 	double DD_SHARD_METRICS_TIMEOUT;
 	int64_t DD_LOCATION_CACHE_SIZE;
@@ -302,6 +309,7 @@ public:
 	double PROVISIONAL_DELAY_GROWTH;
 	double PROVISIONAL_MAX_DELAY;
 	double SECONDS_BEFORE_RECRUIT_BACKUP_WORKER;
+	double CC_INTERFACE_TIMEOUT;
 
 	// Resolver
 	int64_t KEY_BYTES_PER_SAMPLE;
@@ -568,10 +576,13 @@ public:
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES;  // Maximum number of pages to free before ending a lazy clear cycle, unless the queue is empty
-	int REDWOOD_REMAP_CLEANUP_BATCH_SIZE; // Number of queue entries for remap cleanup to process and potentially coalesce at once.
-	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN; // Number of versions between head of remap queue and oldest retained version before remap cleanup starts
-	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW;  // Remap remover lag interval in which to coalesce page writes
+	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of the window size
 	double REDWOOD_LOGGING_INTERVAL;
+	
+	// Server request latency measurement
+	int LATENCY_SAMPLE_SIZE;
+	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs();
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);

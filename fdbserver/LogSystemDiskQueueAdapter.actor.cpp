@@ -136,7 +136,7 @@ Future<Standalone<StringRef>> LogSystemDiskQueueAdapter::readNext( int bytes ) {
 	return LogSystemDiskQueueAdapterImpl::readNext(this, bytes);
 }
 
-IDiskQueue::location LogSystemDiskQueueAdapter::getNextReadLocation() {
+IDiskQueue::location LogSystemDiskQueueAdapter::getNextReadLocation() const {
 	return IDiskQueue::location( 0, recoveryQueueLoc );
 }
 

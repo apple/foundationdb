@@ -321,6 +321,12 @@ func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) Futur
 
 // GetEstimatedRangeSizeBytes will get an estimate for the number of bytes
 // stored in the given range.
+// Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
+// algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
+// be sampled and the more accurate its sampled size would be. And due to
+// that reason it is recommended to use this API to query against large ranges for accuracy considerations.
+// For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
+// accurate.
 func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	beginKey, endKey := r.FDBRangeKeys()
 	return t.getEstimatedRangeSizeBytes(

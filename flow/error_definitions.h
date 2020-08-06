@@ -30,6 +30,7 @@
 
 // 1xxx Normal failure (plausibly these should not even be "errors", but they are failures of
 //   the way operations are currently defined)
+// clang-format off
 ERROR( success, 0, "Success" )
 ERROR( end_of_stream, 1, "End of stream" )
 ERROR( operation_failed, 1000, "Operation failed")
@@ -71,6 +72,7 @@ ERROR( connection_unreferenced, 1048, "No peer references for connection" )
 ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
 ERROR( batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
+ERROR( dd_cancelled, 1052, "Data distribution components cancelled")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -156,6 +158,10 @@ ERROR( tag_too_long, 2110, "Tag set on transaction is too long" )
 ERROR( too_many_tag_throttles, 2111, "Too many tag throttles have been created" )
 ERROR( special_keys_cross_module_read, 2112, "Special key space range read crosses modules. Refer to the `special_key_space_relaxed' transaction option for more details." )
 ERROR( special_keys_no_module_found, 2113, "Special key space range read does not intersect a module. Refer to the `special_key_space_relaxed' transaction option for more details." )
+ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to write by default. Refer to the `special_key_space_enable_writes` transaction option for more details." )
+ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
+ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
+ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -228,6 +234,7 @@ ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot o
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+// clang-format on
 
 #undef ERROR
 #endif

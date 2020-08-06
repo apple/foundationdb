@@ -435,7 +435,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, BackupToDBCorrectnessWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
-		state DatabaseBackupAgent restoreAgent(self->extraDB);
+		state DatabaseBackupAgent restoreTool(self->extraDB);
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
 		TraceEvent("BARW_Arguments").detail("BackupTag", printable(self->backupTag)).detail("BackupAfter", self->backupAfter)
@@ -495,6 +495,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				state Transaction tr3(cx);
 				loop {
 					try {
+						// Run on the first proxy to ensure data is cleared
+						// when submitting the backup request below.
+						tr3.setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 						for (auto r : self->backupRanges) {
 							if(!r.empty()) {
 								tr3.addReadConflictRange(r);
@@ -515,7 +518,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 
 				try {
-					wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRange, true, StringRef(), self->backupPrefix, self->locked));
+					wait(restoreTool.submitBackup(cx, self->restoreTag, restoreRange, true, StringRef(), self->backupPrefix, self->locked));
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(self->restoreTag));
@@ -523,8 +526,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						throw;
 				}
 
-				wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
-				wait(restoreAgent.unlockBackup(cx, self->restoreTag));
+				wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
+				wait(restoreTool.unlockBackup(cx, self->restoreTag));
 			}
 
 			if (extraBackup.isValid()) {
@@ -554,7 +557,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 			if (self->performRestore) {
 				state UID restoreUid = wait(backupAgent.getLogUid(self->extraDB, self->restoreTag));
-				wait( checkData(cx, restoreUid, restoreUid, randomID, self->restoreTag, &restoreAgent, self->shareLogRange) );
+				wait( checkData(cx, restoreUid, restoreUid, randomID, self->restoreTag, &restoreTool, self->shareLogRange) );
 			}
 
 			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));

@@ -251,12 +251,25 @@ StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
-std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyValueStoreType::SSD_BTREE_V1, ".fdb" );
-std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
-std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
-std::pair<KeyValueStoreType, std::string> memoryRTSuffix = std::make_pair( KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr" );
-std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
-std::pair<KeyValueStoreType, std::string> rocksdbSuffix = std::make_pair( KeyValueStoreType::SSD_ROCKSDB_V1,   ".rocksdb" );
+enum class FilesystemCheck {
+	FILES_ONLY,
+	DIRECTORIES_ONLY,
+	FILES_AND_DIRECTORIES,
+};
+
+struct KeyValueStoreSuffix {
+	KeyValueStoreType type;
+	std::string suffix;
+	FilesystemCheck check;
+};
+
+KeyValueStoreSuffix bTreeV1Suffix = { KeyValueStoreType::SSD_BTREE_V1, ".fdb", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix bTreeV2Suffix = { KeyValueStoreType::SSD_BTREE_V2, ".sqlite", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix memorySuffix = { KeyValueStoreType::MEMORY, "-0.fdq", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix memoryRTSuffix = { KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix redwoodSuffix = { KeyValueStoreType::SSD_REDWOOD_V1, ".redwood", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix rocksdbSuffix = { KeyValueStoreType::SSD_ROCKSDB_V1, ".rocksdb",
+	                                  FilesystemCheck::DIRECTORIES_ONLY };
 
 std::string validationFilename = "_validate";
 
@@ -376,9 +389,21 @@ struct DiskStore {
 	TLogOptions tLogOptions;
 };
 
-std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, KeyValueStoreType type) {
+std::vector<DiskStore> getDiskStores(std::string folder, std::string suffix, KeyValueStoreType type,
+                                     FilesystemCheck check) {
 	std::vector< DiskStore > result;
-	vector<std::string> files = platform::listFiles( folder, suffix );
+	vector<std::string> files;
+
+	if (check == FilesystemCheck::FILES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
+		files = platform::listFiles(folder, suffix);
+	}
+	if (check == FilesystemCheck::DIRECTORIES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
+		for (const auto& directory : platform::listDirectories(folder)) {
+			if (StringRef(directory).endsWith(suffix)) {
+				files.push_back(directory);
+			}
+		}
+	}
 
 	for( int idx = 0; idx < files.size(); idx++ ) {
 		DiskStore store;
@@ -423,16 +448,16 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 }
 
 std::vector< DiskStore > getDiskStores( std::string folder ) {
-	auto result = getDiskStores( folder, bTreeV1Suffix.second, bTreeV1Suffix.first);
-	auto result1 = getDiskStores( folder, bTreeV2Suffix.second, bTreeV2Suffix.first);
+	auto result = getDiskStores(folder, bTreeV1Suffix.suffix, bTreeV1Suffix.type, bTreeV1Suffix.check);
+	auto result1 = getDiskStores(folder, bTreeV2Suffix.suffix, bTreeV2Suffix.type, bTreeV2Suffix.check);
 	result.insert( result.end(), result1.begin(), result1.end() );
-	auto result2 = getDiskStores( folder, memorySuffix.second, memorySuffix.first );
+	auto result2 = getDiskStores(folder, memorySuffix.suffix, memorySuffix.type, memorySuffix.check);
 	result.insert( result.end(), result2.begin(), result2.end() );
-	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
+	auto result3 = getDiskStores(folder, redwoodSuffix.suffix, redwoodSuffix.type, redwoodSuffix.check);
 	result.insert( result.end(), result3.begin(), result3.end() );
-	auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
+	auto result4 = getDiskStores(folder, memoryRTSuffix.suffix, memoryRTSuffix.type, memoryRTSuffix.check);
 	result.insert( result.end(), result4.begin(), result4.end() );
-	auto result5 = getDiskStores( folder, rocksdbSuffix.second, rocksdbSuffix.first);
+	auto result5 = getDiskStores(folder, rocksdbSuffix.suffix, rocksdbSuffix.type, rocksdbSuffix.check);
 	result.insert( result.end(), result5.begin(), result5.end() );
 	return result;
 }
@@ -1198,7 +1223,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.notifyBackupWorkerDone);
 
 				//printf("Recruited as masterServer\n");
-				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
+				Future<Void> masterProcess = masterServer( recruited, dbInfo, ccInterface, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER, recruited.id(), masterProcess )) );
 				req.reply.send(recruited);
 			}
