@@ -18,8 +18,13 @@
  * limitations under the License.
  */
 
+#include "boost/asio/buffer.hpp"
+#include "boost/asio/ip/address.hpp"
+#include "boost/system/system_error.hpp"
 #include "flow/Platform.h"
+#include "flow/Trace.h"
 #include <algorithm>
+#include <memory>
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -124,6 +129,8 @@ public:
 
 	// INetworkConnections interface
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
+	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr);
+	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6);
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
@@ -217,11 +224,14 @@ public:
 	Future<Void> logTimeOffset();
 
 	Int64MetricHandle bytesReceived;
+	Int64MetricHandle udpBytesReceived;
 	Int64MetricHandle countWriteProbes;
 	Int64MetricHandle countReadProbes;
 	Int64MetricHandle countReads;
+	Int64MetricHandle countUDPReads;
 	Int64MetricHandle countWouldBlock;
 	Int64MetricHandle countWrites;
+	Int64MetricHandle countUDPWrites;
 	Int64MetricHandle countRunLoop;
 	Int64MetricHandle countCantSleep;
 	Int64MetricHandle countWontSleep;
@@ -253,8 +263,20 @@ static boost::asio::ip::address tcpAddress(IPAddress const& n) {
 	}
 }
 
+static IPAddress toIPAddress(boost::asio::ip::address const& addr) {
+	if (addr.is_v4()) {
+		return IPAddress(addr.to_v4().to_uint());
+	} else {
+		return IPAddress(addr.to_v6().to_bytes());
+	}
+}
+
 static tcp::endpoint tcpEndpoint( NetworkAddress const& n ) {
 	return tcp::endpoint(tcpAddress(n.ip), n.port);
+}
+
+static udp::endpoint udpEndpoint(NetworkAddress const& n) {
+	return udp::endpoint(tcpAddress(n.ip), n.port);
 }
 
 class BindPromise {
@@ -479,6 +501,194 @@ private:
 	void onWriteError( const boost::system::error_code& error ) {
 		TraceEvent(SevWarn, "N2_WriteError", id).suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
 		closeSocket();
+	}
+};
+
+class ReadPromise {
+	Promise<int> p;
+	const char* errContext;
+	UID errID;
+	std::shared_ptr<udp::endpoint> endpoint = nullptr;
+
+public:
+	ReadPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
+	ReadPromise(ReadPromise const& other) = default;
+	ReadPromise(ReadPromise&& other) : p(std::move(other.p)), errContext(other.errContext), errID(other.errID) {}
+
+	std::shared_ptr<udp::endpoint>& getEndpoint() { return endpoint; }
+
+	Future<int> getFuture() { return p.getFuture(); }
+	void operator()(const boost::system::error_code& error, size_t bytesWritten) {
+		try {
+			if (error) {
+				TraceEvent evt(SevWarn, errContext, errID);
+				evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
+				p.sendError(connection_failed());
+			} else {
+				p.send(int(bytesWritten));
+			}
+		} catch (Error& e) {
+			p.sendError(e);
+		} catch (...) {
+			p.sendError(unknown_error());
+		}
+	}
+};
+
+class UDPSocket : public IUDPSocket, ReferenceCounted<UDPSocket> {
+	UID id;
+	Optional<NetworkAddress> toAddress;
+	udp::socket socket;
+	bool isPublic = false;
+
+public:
+	ACTOR static Future<Reference<IUDPSocket>> connect(boost::asio::io_service* io_service,
+	                                                   Optional<NetworkAddress> toAddress, bool isV6) {
+		state Reference<UDPSocket> self(new UDPSocket(*io_service, toAddress, isV6));
+		ASSERT(!toAddress.present() || toAddress.get().ip.isV6() == isV6);
+		if (!toAddress.present()) {
+			return self;
+		}
+		try {
+			if (toAddress.present()) {
+				auto to = udpEndpoint(toAddress.get());
+				BindPromise p("N2_UDPConnectError", self->id);
+				Future<Void> onConnected = p.getFuture();
+				self->socket.async_connect(to, std::move(p));
+
+				wait(onConnected);
+			}
+			self->init();
+			return self;
+		} catch (...) {
+			self->closeSocket();
+			throw;
+		}
+	}
+
+	void close() override { closeSocket(); }
+
+	void send(StringRef packet) override {}
+
+	void sendTo(NetworkAddress const& addr, StringRef packet) override {}
+
+	int readFrom(NetworkAddress* outAddr, uint8_t* begin, uint8_t* end) override { return 0; }
+
+	int read(uint8_t* begin, uint8_t* end) override {
+		// boost::system::error_code err;
+		return 0;
+	};
+
+	Future<int> receive(uint8_t* begin, uint8_t* end) override {
+		++g_net2->countUDPReads;
+		ReadPromise p("N2_UDPReadError", id);
+		auto res = p.getFuture();
+		socket.async_receive(boost::asio::mutable_buffer(begin, end - begin), std::move(p));
+		return fmap(
+		    [](int bytes) {
+			    g_net2->udpBytesReceived += bytes;
+			    return bytes;
+		    },
+		    res);
+	}
+
+	Future<int> receiveFrom(uint8_t* begin, uint8_t* end, NetworkAddress* sender) override {
+		++g_net2->countUDPReads;
+		ReadPromise p("N2_UDPReadFromError", id);
+		p.getEndpoint() = std::make_shared<udp::endpoint>();
+		auto endpoint = p.getEndpoint().get();
+		auto res = p.getFuture();
+		socket.async_receive_from(boost::asio::mutable_buffer(begin, end - begin), *endpoint, std::move(p));
+		return fmap(
+		    [endpoint, sender](int bytes) {
+			    if (sender) {
+				    sender->port = endpoint->port();
+				    sender->ip = toIPAddress(endpoint->address());
+			    }
+			    g_net2->udpBytesReceived += bytes;
+			    return bytes;
+		    },
+		    res);
+	}
+
+	Future<int> send(uint8_t const* begin, uint8_t const* end) override {
+		++g_net2->countUDPWrites;
+		ReadPromise p("N2_UDPWriteError", id);
+		auto res = p.getFuture();
+		socket.async_send(boost::asio::const_buffer(begin, end - begin), std::move(p));
+		return res;
+	}
+
+	Future<int> sendTo(uint8_t const* begin, uint8_t const* end, NetworkAddress const& peer) override {
+		++g_net2->countUDPWrites;
+		ReadPromise p("N2_UDPWriteError", id);
+		auto res = p.getFuture();
+		udp::endpoint toEndpoint = udpEndpoint(peer);
+		socket.async_send_to(boost::asio::const_buffer(begin, end - begin), toEndpoint, std::move(p));
+		return res;
+	}
+
+	void bind(NetworkAddress const& addr) override {
+		boost::system::error_code ec;
+		socket.bind(udpEndpoint(addr), ec);
+		if (ec) {
+			Error x;
+			if (ec.value() == EADDRINUSE)
+				x = address_in_use();
+			else if (ec.value() == EADDRNOTAVAIL)
+				x = invalid_local_address();
+			else
+				x = bind_failed();
+			TraceEvent(SevWarnAlways, "Net2UDPBindError").error(x);
+			throw x;
+		}
+		isPublic = true;
+	}
+
+	UID getDebugID() const override { return id; }
+
+	void addref() override { ReferenceCounted<UDPSocket>::addref(); }
+	void delref() override { ReferenceCounted<UDPSocket>::delref(); }
+
+	NetworkAddress localAddress() const {
+		auto endpoint = socket.local_endpoint();
+		return NetworkAddress(toIPAddress(endpoint.address()), endpoint.port(), isPublic, false);
+	}
+
+private:
+	UDPSocket(boost::asio::io_service& io_service, Optional<NetworkAddress> toAddress, bool isV6)
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service, isV6 ? udp::v6() : udp::v4()) {
+		socket.non_blocking(true);
+	}
+
+	void closeSocket() {
+		boost::system::error_code error;
+		socket.close(error);
+		if (error)
+			TraceEvent(SevWarn, "N2_CloseError", id)
+			    .suppressFor(1.0)
+			    .detail("ErrorCode", error.value())
+			    .detail("Message", error.message());
+	}
+
+	void onReadError(const boost::system::error_code& error) {
+		TraceEvent(SevWarn, "N2_UDPReadError", id)
+		    .suppressFor(1.0)
+		    .detail("ErrorCode", error.value())
+		    .detail("Message", error.message());
+		closeSocket();
+	}
+	void onWriteError(const boost::system::error_code& error) {
+		TraceEvent(SevWarn, "N2_UDPWriteError", id)
+		    .suppressFor(1.0)
+		    .detail("ErrorCode", error.value())
+		    .detail("Message", error.message());
+		closeSocket();
+	}
+
+	void init() {
+		socket.non_blocking(true);
+		platform::setCloseOnExec(socket.native_handle());
 	}
 };
 
@@ -1428,6 +1638,14 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 	tcpResolver.cancel();
 
 	return result.get();
+}
+
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
+	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
+}
+
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
+	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {

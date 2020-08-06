@@ -55,6 +55,7 @@ public:
 		ProcessClass startingClass;
 		TDMetricCollection tdmetrics;
 		std::map<NetworkAddress, Reference<IListener>> listenerMap;
+		std::map<NetworkAddress, Reference<IUDPSocket>> boundUDPSockets;
 		bool failed;
 		bool excluded;
 		bool cleared;

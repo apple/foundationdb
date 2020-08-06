@@ -203,6 +203,7 @@ set(FDBSERVER_SRCS
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
+  workloads/UDPWorkload.actor.cpp
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp

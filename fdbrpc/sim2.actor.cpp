@@ -19,8 +19,14 @@
  */
 
 #include <cinttypes>
+#include <deque>
+#include <memory>
+#include <sys/socket.h>
+#include <vector>
 
 #include "fdbrpc/simulator.h"
+#include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -29,6 +35,8 @@
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -824,6 +832,9 @@ public:
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*deterministicRandom()->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
 	}
+
+	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) {
 		throw lookup_failed();
 	}
@@ -1724,6 +1735,196 @@ public:
 	bool yielded;
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
+
+class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
+	using Packet = std::shared_ptr<std::vector<uint8_t>>;
+	UID id;
+	ISimulator::ProcessInfo* process;
+	Optional<NetworkAddress> peerAddress;
+	Optional<ISimulator::ProcessInfo*> peerProcess;
+	Optional<Reference<UDPSimSocket>> peerSocket;
+	ActorCollection actors;
+	Promise<Void> closed;
+	std::deque<std::pair<NetworkAddress, Packet>> recvBuffer;
+	AsyncVar<int64_t> writtenPackets;
+	NetworkAddress _localAddress;
+	bool randomDropPacket() {
+		auto res = deterministicRandom()->random01() < .000001;
+		TEST(res); // UDP packet drop
+		return res;
+	}
+
+	bool isClosed() const { return closed.getFuture().isReady(); }
+	Future<Void> onClosed() const { return closed.getFuture(); }
+
+	ACTOR static Future<Void> cleanupPeerSocket(UDPSimSocket* self) {
+		wait(self->peerSocket.get()->onClosed());
+		self->peerSocket.reset();
+		return Void();
+	}
+
+	ACTOR static Future<Void> send(UDPSimSocket* self, Reference<UDPSimSocket> peerSocket, uint8_t const* begin,
+	                              uint8_t const* end) {
+		state Packet packet(std::make_shared<std::vector<uint8_t>>());
+		packet->resize(begin - end);
+		std::copy(begin, end, packet->begin());
+		wait( delay( .002 * deterministicRandom()->random01() ) );
+		peerSocket->recvBuffer.emplace_back(self->_localAddress, std::move(packet));
+		peerSocket->writtenPackets.set(self->writtenPackets.get() + 1);
+		return Void();
+	}
+
+	ACTOR static Future<int> receiveFrom(UDPSimSocket* self, uint8_t* begin, uint8_t* end, NetworkAddress* sender) {
+		state TaskPriority currentTaskID = g_sim2.getCurrentTask();
+		wait(self->writtenPackets.onChange());
+		wait(g_sim2.onProcess(self->process, currentTaskID));
+		auto packet = self->recvBuffer.front().second;
+		int sz = packet->size();
+		ASSERT(sz <= end - begin);
+		if (sender) {
+			*sender = self->recvBuffer.front().first;
+		}
+		std::copy(packet->begin(), packet->end(), begin);
+		self->recvBuffer.pop_front();
+		return sz;
+	}
+
+public:
+	UDPSimSocket(NetworkAddress const& localAddress, Optional<NetworkAddress> const& peerAddress)
+	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator.getCurrentProcess()), peerAddress(peerAddress),
+	    actors(false), _localAddress(localAddress) {
+		process->boundUDPSockets.emplace(localAddress, this);
+	}
+	~UDPSimSocket() {
+		if (!closed.getFuture().isReady()) {
+			close();
+			closed.send(Void());
+		}
+		actors.clear(true);
+	}
+	void close() override { process->boundUDPSockets.erase(_localAddress); }
+	UID getDebugID() const override { return id; }
+	void addref() override { ReferenceCounted<UDPSimSocket>::addref(); }
+	void delref() override { ReferenceCounted<UDPSimSocket>::delref(); }
+
+	Future<int> send(uint8_t const* begin, uint8_t const* end) override {
+		int sz = int(end - begin);
+		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+		ASSERT(sz <= IUDPSocket::MAX_PACKET_SIZE);
+		ASSERT(peerAddress.present());
+		if (!peerProcess.present()) {
+			auto iter = g_sim2.addressMap.find(peerAddress.get());
+			if (iter == g_sim2.addressMap.end()) {
+				return res;
+			}
+			peerProcess = iter->second;
+		}
+		if (!peerSocket.present() || peerSocket.get()->isClosed()) {
+			peerSocket.reset();
+			auto iter = peerProcess.get()->boundUDPSockets.find(peerAddress.get());
+			if (iter == peerProcess.get()->boundUDPSockets.end()) {
+				return fmap([sz](Void){ return sz; }, delay(0.0));
+			}
+			peerSocket = iter->second.castTo<UDPSimSocket>();
+			// the notation of leaking connections doesn't make much sense in the context of UDP
+			// so we simply handle those in the simulator
+			actors.add(cleanupPeerSocket(this));
+		}
+		if (randomDropPacket()) {
+			return res;
+		}
+		actors.add(send(this, peerSocket.get(), begin, end));
+		return res;
+	}
+	Future<int> sendTo(uint8_t const* begin, uint8_t const* end, NetworkAddress const& peer) override {
+		int sz = int(end - begin);
+		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+		ASSERT(sz <= MAX_PACKET_SIZE);
+		ISimulator::ProcessInfo* peerProcess = nullptr;
+		Reference<UDPSimSocket> peerSocket;
+		{
+			auto iter = g_sim2.addressMap.find(peer);
+			if (iter == g_sim2.addressMap.end()) {
+				return res;
+			}
+			peerProcess = iter->second;
+		}
+		{
+			auto iter = peerProcess->boundUDPSockets.find(peer);
+			if (iter == peerProcess->boundUDPSockets.end()) {
+				return res;
+			}
+			peerSocket = iter->second.castTo<UDPSimSocket>();
+		}
+		actors.add(send(this, peerSocket, begin, end));
+		return res;
+	}
+	Future<int> receive(uint8_t* begin, uint8_t* end) override {
+		return receiveFrom(begin, end, nullptr);
+	}
+	Future<int> receiveFrom(uint8_t* begin, uint8_t* end, NetworkAddress* sender) override {
+		if (!recvBuffer.empty()) {
+			auto buf = recvBuffer.front().second;
+			if (sender) {
+				*sender = recvBuffer.front().first;
+			}
+			int sz = buf->size();
+			ASSERT(sz <= end - begin);
+			std::copy(buf->begin(), buf->end(), begin);
+			auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+			recvBuffer.pop_front();
+			return res;
+		}
+		return receiveFrom(this, begin, end, sender);
+	}
+	void bind(NetworkAddress const& addr) override {
+		process->boundUDPSockets.erase(_localAddress);
+		process->boundUDPSockets.emplace(addr, Reference<UDPSimSocket>::addRef(this));
+		_localAddress = addr;
+	}
+
+	NetworkAddress localAddress() const override {
+		return _localAddress;
+	}
+
+};
+
+Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
+		NetworkAddress localAddress;
+		auto process = g_simulator.getCurrentProcess();
+		if (process->address.ip.isV6()) {
+			IPAddress::IPAddressStore store = process->address.ip.toV6();
+			uint16_t* ipParts = (uint16_t*)store.data();
+			ipParts[7] += deterministicRandom()->randomInt(0, 256);
+			localAddress.ip = IPAddress(store);
+		} else {
+			localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+		}
+		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+		return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
+}
+
+Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
+		NetworkAddress localAddress;
+		auto process = g_simulator.getCurrentProcess();
+		if (process->address.ip.isV6() == isV6) {
+			localAddress = process->address;
+		} else {
+		    ASSERT(process->addresses.secondaryAddress.present() &&
+		           process->addresses.secondaryAddress.get().isV6() == isV6);
+			localAddress = process->addresses.secondaryAddress.get();
+	    }
+	    if (localAddress.ip.isV6()) {
+			IPAddress::IPAddressStore store = localAddress.ip.toV6();
+			uint16_t* ipParts = (uint16_t*)store.data();
+			ipParts[7] += deterministicRandom()->randomInt(0, 256);
+			localAddress.ip = IPAddress(store);
+		} else {
+			localAddress.ip = IPAddress(localAddress.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+		}
+		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+		return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
+}
 
 void startNewSimulator() {
 	ASSERT( !g_network );

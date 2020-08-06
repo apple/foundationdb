@@ -84,12 +84,6 @@ using std::pair;
 
 namespace {
 
-ACTOR template <class T, class Fun>
-Future<T> runAfter(Future<T> in, Fun func) {
-	T res = wait(in);
-	return func(res);
-}
-
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
 	DatabaseContext* ctx, const Reference<LocationInfo> alternatives, RequestStream<Request> Interface::*channel,
@@ -99,13 +93,14 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	if (alternatives->hasCaches) {
 		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
 	}
-	return runAfter(loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model),
-					[ctx](auto res) {
-						if (res.cached) {
-							ctx->updateCache.trigger();
-						}
-						return res;
-	                });
+	return fmap(
+	    [ctx](auto const& res) {
+		    if (res.cached) {
+			    ctx->updateCache.trigger();
+		    }
+		    return res;
+	    },
+	    loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model));
 }
 } // namespace
 

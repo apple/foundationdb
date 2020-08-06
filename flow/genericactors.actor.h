@@ -21,6 +21,7 @@
 #pragma once
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+#include <utility>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 	#define FLOW_GENERICACTORS_ACTOR_G_H
 	#include "flow/genericactors.actor.g.h"
@@ -1810,6 +1811,37 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	return Void();
 }
 
+// Monad
+
+ACTOR template <class Fun, class T>
+Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T> f) {
+	T val = wait(f);
+	return fun(val);
+}
+
+ACTOR template <class T, class Fun>
+Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Future<T> lhs, Fun rhs) {
+	T val1 = wait(lhs);
+	decltype(std::declval<Fun>()(std::declval<T>()).getValue()) res = wait(rhs(val1));
+	return res;
+}
+
+ACTOR template <class T, class U>
+Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
+	T val1 = wait(lhs);
+	U res = wait(rhs);
+	return res;
+}
+
+template <class T, class Res>
+Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
+	return runAfter(lhs, rhs);
+}
+
+template <class T, class U>
+Future<U> operator>> (Future<T> const& lhs, Future<U> const& rhs) {
+	return runAfter(lhs, rhs);
+}
 
 #include "flow/unactorcompiler.h"
 

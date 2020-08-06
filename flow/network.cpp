@@ -167,6 +167,8 @@ Future<Reference<IConnection>> INetworkConnections::connect( std::string host, s
 	});
 }
 
+IUDPSocket::~IUDPSocket() {}
+
 const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
 
 TEST_CASE("/flow/network/ipaddress") {
