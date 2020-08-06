@@ -27,7 +27,7 @@
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
-#include "fdbserver/RestoreMaster.actor.h"
+#include "fdbserver/RestoreController.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -151,6 +151,7 @@ ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::str
 		    .detail("Role", role)
 		    .detail("PipelinedMaxVersionBatchIndex", self->versionBatchId.get())
 		    .detail("FinishedVersionBatchIndex", self->finishedBatch.get())
+		    .detail("CurrentVersionBatchPhase", self->getVersionBatchState(self->finishedBatch.get() + 1))
 		    .detail("CpuUsage", self->cpuUsage)
 		    .detail("UsedMemory", self->memory)
 		    .detail("ResidentMemory", self->residentMemory);

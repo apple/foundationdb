@@ -136,6 +136,44 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "grv_latency_statistics":{
+                     "default":{
+                        "count":0,
+                        "min":0.0,
+                        "max":0.0,
+                        "median":0.0,
+                        "mean":0.0,
+                        "p25":0.0,
+                        "p90":0.0,
+                        "p95":0.0,
+                        "p99":0.0,
+                        "p99.9":0.0
+                     }
+                  },
+                  "read_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
                   "grv_latency_bands":{
                      "$map": 1
                   },
@@ -882,5 +920,13 @@ const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
   "worst_storage_durability_lag": 5050809,
   "worst_storage_queue": 2030,
   "worst_log_queue": 156
+}
+)""");
+
+const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
+{
+   "retriable": false,
+   "command": "exclude",
+   "message": "The reason of the error"
 }
 )""");

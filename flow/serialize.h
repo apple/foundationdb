@@ -78,7 +78,7 @@ inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
 
 template <class Archive, class Item>
 inline typename Archive::READER& operator >> (Archive& ar, Item& item ) {
-	load(ar, item);
+	ar.deserialize(item);
 	return ar;
 }
 
@@ -148,20 +148,6 @@ public:
 	}
 };
 
-template <class F, class S, bool = HasFileIdentifier<F>::value&& HasFileIdentifier<S>::value>
-struct PairFileIdentifier;
-
-template <class F, class S>
-struct PairFileIdentifier<F, S, false> {};
-
-template <class F, class S>
-struct PairFileIdentifier<F, S, true> {
-	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
-};
-
-template <class F, class S>
-struct FileIdentifierFor<std::pair<F, S>> : PairFileIdentifier<F, S> {};
-
 template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
@@ -171,7 +157,11 @@ public:
 };
 
 template <class T, class Allocator>
-struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 0x10> {};
+struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 5> {};
+
+template <class T, class Allocator>
+struct CompositionDepthFor<std::vector<T, Allocator>> : std::integral_constant<int, CompositionDepthFor<T>::value + 1> {
+};
 
 template <class Archive, class T>
 inline void save( Archive& ar, const std::vector<T>& value ) {
@@ -286,10 +276,8 @@ struct _IncludeVersion {
 			TraceEvent(SevWarnAlways, "InvalidSerializationVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
 		}
-		if (v > currentProtocolVersion) {
-			// For now, no forward compatibility whatsoever is supported.  In the future, this check may be weakened for
-			// particular data structures (e.g. to support mismatches between client and server versions when the client
-			// must deserialize zookeeper and database structures)
+		if (v >= minInvalidProtocolVersion) {
+			// Downgrades are only supported for one minor version
 			auto err = incompatible_protocol_version();
 			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
@@ -520,51 +508,28 @@ private:
 	}
 };
 
-
-class ArenaReader {
+template<class Impl>
+class _Reader {
 public:
 	static const int isDeserializing = 1;
 	static constexpr bool isSerializing = false;
-	typedef ArenaReader READER;
+	using READER = Impl;
 
-	const void* readBytes( int bytes ) {
-		const char* b = begin;
-		const char* e = b + bytes;
-		ASSERT( e <= end );
-		begin = e;
-		return b;
-	}
-
-	const void* peekBytes(int bytes) const {
-		ASSERT( begin + bytes <= end );
+	const void *peekBytes(int bytes) const {
+		ASSERT(begin + bytes <= end);
 		return begin;
 	}
 
-	void serializeBytes(void* data, int bytes) {
-		memcpy(data, readBytes(bytes), bytes);
-	}
-	
-	const uint8_t* arenaRead( int bytes ) {
-		return (const uint8_t*)readBytes(bytes);
-	}
-
-	StringRef arenaReadAll() const {
-		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
+	void serializeBytes(void *data, int bytes) {
+		memcpy(data, static_cast<Impl*>(this)->readBytes(bytes), bytes);
 	}
 
 	template <class T>
 	void serializeBinaryItem( T& t ) {
-		t = *(T*)readBytes(sizeof(T));
+		t = *(T*)(static_cast<Impl*>(this)->readBytes(sizeof(T)));
 	}
 
-	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena), check(NULL) {
-		begin = (const char*)input.begin();
-		end = begin + input.size();
-		vo.read(*this);
-	}
-
-	Arena& arena() { return m_pool; }
+	Arena &arena() { return m_pool; }
 
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
@@ -576,62 +541,84 @@ public:
 	}
 
 	void rewind() {
-		ASSERT(check != NULL);
+		ASSERT(check != nullptr);
 		begin = check;
-		check = NULL;
+		check = nullptr;
 	}
 
-private:
-	const char *begin, *end, *check;
+protected:
+	_Reader(const char* begin, const char* end) : begin(begin), end(end) {}
+	_Reader(const char* begin, const char* end, const Arena& arena) : begin(begin), end(end), m_pool(arena) {}
+
+	const char *begin, *end;
+	const char* check = nullptr;
 	Arena m_pool;
 	ProtocolVersion m_protocolVersion;
 };
 
-class BinaryReader {
-public:
-	static const int isDeserializing = 1;
-	static constexpr bool isSerializing = false;
-	typedef BinaryReader READER;
+class ArenaReader : public _Reader<ArenaReader> {
+	Optional<ArenaObjectReader> arenaObjectReader;
 
-	const void* readBytes( int bytes );
+public:
+	const void* readBytes( int bytes ) {
+		const char* b = begin;
+		const char* e = b + bytes;
+		ASSERT( e <= end );
+		begin = e;
+		return b;
+	}
+
+	const uint8_t* arenaRead( int bytes ) {
+		return (const uint8_t*)readBytes(bytes);
+	}
 
 	const void* peekBytes(int bytes) const {
 		ASSERT( begin + bytes <= end );
 		return begin;
 	}
 
-	void serializeBytes(void* data, int bytes) {
-		memcpy(data, readBytes(bytes), bytes);
+	StringRef arenaReadAll() const {
+		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
 	}
-	
+
+	template <class VersionOptions>
+	ArenaReader(Arena const& arena, const StringRef& input, VersionOptions vo)
+	  : _Reader(reinterpret_cast<const char*>(input.begin()), reinterpret_cast<const char*>(input.end()), arena) {
+		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			arenaObjectReader = ArenaObjectReader(arena, input, vo);
+		}
+	}
+
 	template <class T>
-	void serializeBinaryItem( T& t ) {
-		t = *(T*)readBytes(sizeof(T));
+	void deserialize(T& t) {
+		if constexpr (HasFileIdentifier<T>::value) {
+			if (arenaObjectReader.present()) {
+				arenaObjectReader.get().deserialize(t);
+			} else {
+				load(*this, t);
+			}
+		} else {
+			load(*this, t);
+		}
 	}
+};
+
+class BinaryReader : public _Reader<BinaryReader> {
+	Optional<ObjectReader> objectReader;
+
+public:
+	const void* readBytes( int bytes );
 
 	const uint8_t* arenaRead( int bytes ) {
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
-		if (!bytes) return NULL;
+		if (!bytes) return nullptr;
 		uint8_t* dat = new (arena()) uint8_t[ bytes ];
 		serializeBytes( dat, bytes );
 		return dat;
 	}
-
-	template <class VersionOptions>
-	BinaryReader( const void* data, int length, VersionOptions vo ) {
-		begin = (const char*)data;
-		end = begin + length;
-		check = nullptr;
-		vo.read(*this);
-	}
-	template <class VersionOptions>
-	BinaryReader( const StringRef& s, VersionOptions vo ) { begin = (const char*)s.begin(); end = begin + s.size(); vo.read(*this); }
-	template <class VersionOptions>
-	BinaryReader( const std::string& v, VersionOptions vo ) { begin = v.c_str(); end = begin + v.size(); vo.read(*this); }
-
-	Arena& arena() { return m_pool; }
 
 	template <class T, class VersionOptions>
 	static T fromStringRef( StringRef sr, VersionOptions vo ) {
@@ -648,21 +635,42 @@ public:
 
 	bool empty() const { return begin == end; }
 
-	void checkpoint() {
-		check = begin;
+	template <class VersionOptions>
+	BinaryReader(const void* data, int length, VersionOptions vo)
+	  : _Reader(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data) + length) {
+		readVersion(vo);
+	}
+	template <class VersionOptions>
+	BinaryReader(const StringRef& s, VersionOptions vo)
+	  : _Reader(reinterpret_cast<const char*>(s.begin()), reinterpret_cast<const char*>(s.end())) {
+		readVersion(vo);
+	}
+	template <class VersionOptions>
+	BinaryReader(const std::string& s, VersionOptions vo) : _Reader(s.c_str(), s.c_str() + s.size()) {
+		readVersion(vo);
 	}
 
-	void rewind() {
-		ASSERT(check != nullptr);
-		begin = check;
-		check = nullptr;
+	template<class T>
+	void deserialize(T &t) {
+		if constexpr (HasFileIdentifier<T>::value) {
+			if (objectReader.present()) {
+				objectReader.get().deserialize(t);
+			} else {
+				load(*this, t);
+			}
+		} else {
+			load(*this, t);
+		}
 	}
-
 
 private:
-	const char *begin, *end, *check;
-	Arena m_pool;
-	ProtocolVersion m_protocolVersion;
+	template <class VersionOptions>
+	void readVersion(VersionOptions vo) {
+		vo.read(*this);
+		if (m_protocolVersion.hasObjectSerializerFlag()) {
+			objectReader = ObjectReader(reinterpret_cast<const uint8_t*>(begin), AssumeVersion(m_protocolVersion));
+		}
+	}
 };
 
 class SendBuffer {
@@ -674,12 +682,16 @@ public:
 	inline uint8_t* data() { return _data; }
 	SendBuffer* next;
 	int bytes_written, bytes_sent;
+	int bytes_unsent() const {
+		return bytes_written - bytes_sent;
+	}
 };
 
 struct PacketBuffer : SendBuffer {
 private:
 	int reference_count;
 	uint32_t size_;
+	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
 	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
 
 public:
@@ -695,9 +707,9 @@ private:
 
 public:
 	static PacketBuffer* create(size_t size = 0) {
-		size = std::max(size, 4096 - PACKET_BUFFER_OVERHEAD);
-		if (size == 4096 - PACKET_BUFFER_OVERHEAD) {
-			return new (FastAllocator<4096>::allocate()) PacketBuffer{ size };
+		size = std::max(size, PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD);
+		if (size == PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD) {
+			return new (FastAllocator<PACKET_BUFFER_MIN_SIZE>::allocate()) PacketBuffer{ size };
 		}
 		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
 		return new (mem) PacketBuffer{ size };
@@ -706,8 +718,8 @@ public:
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
-			if (size_ == 4096 - PACKET_BUFFER_OVERHEAD) {
-				FastAllocator<4096>::release(this);
+			if (size_ == PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD) {
+				FastAllocator<PACKET_BUFFER_MIN_SIZE>::release(this);
 			} else {
 				delete[] this;
 			}

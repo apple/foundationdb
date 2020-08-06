@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'VersionStamp'
+
+    [[test.workload]]
+    testName = 'VersionStamp'
+    soleOwnerOfMetadataVersionKey = true

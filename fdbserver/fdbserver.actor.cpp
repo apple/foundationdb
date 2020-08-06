@@ -697,10 +697,12 @@ Optional<bool> checkBuggifyOverride(const char *testFile) {
 		std::string value = removeWhitespace(line.substr(found + 1));
 
 		if (attrib == "buggify") {
-			if( !strcmp( value.c_str(), "on" ) ) {
+			// Testspec uses `on` or `off` (without quotes).
+			// TOML uses literal `true` and `false`.
+			if( !strcmp( value.c_str(), "on" ) || !strcmp( value.c_str(), "true" ) ) {
 				ifs.close();
 				return true;
-			} else if( !strcmp( value.c_str(), "off" ) ) {
+			} else if( !strcmp( value.c_str(), "off" ) || !strcmp( value.c_str(), "false" )) {
 				ifs.close();
 				return false;
 			} else {
@@ -1966,7 +1968,8 @@ int main(int argc, char* argv[]) {
 				<< FastAllocator<1024>::pageCount << " "
 				<< FastAllocator<2048>::pageCount << " "
 				<< FastAllocator<4096>::pageCount << " "
-				<< FastAllocator<8192>::pageCount << std::endl;
+				<< FastAllocator<8192>::pageCount << " "
+				<< FastAllocator<16384>::pageCount << std::endl;
 
 			vector< std::pair<std::string, const char*> > typeNames;
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {

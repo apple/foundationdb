@@ -48,8 +48,6 @@
 
 #include <boost/version.hpp>
 
-using namespace std::rel_ops;
-
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
@@ -132,7 +130,7 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr : public ComposedIdentifier<T, 0x1> {
+class ErrorOr : public ComposedIdentifier<T, 2> {
 public:
 	ErrorOr() : ErrorOr(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
@@ -408,7 +406,7 @@ struct SingleCallback {
 	}
 };
 
-// SAV is short for Single Assigment Variable: It can be assigned for only once!
+// SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -791,8 +789,11 @@ public:
 	bool canBeSet() { return sav->canBeSet(); }
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
-	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	Promise(Promise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(const Promise& rhs) : sav(rhs.sav) {
+		sav->addPromiseRef();
+	}
+	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
@@ -877,20 +878,20 @@ private:
 };
 
 template <class Request>
-decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) { return r.reply; }
-
-
+decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
-#define REPLY_TYPE(RequestType) decltype( getReplyPromise( fake<RequestType>() ).getFuture().getValue() )
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( fake<RequestType>() ).getValue() )
+#define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
+//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
 	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
 	//   breaks IntelliSense in VS2010; this is a workaround.
-	typedef decltype(fake<T>().reply.getFuture().getValue()) Type;
+	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
 };
 template <class T> class ReplyPromise;
 template <class T>

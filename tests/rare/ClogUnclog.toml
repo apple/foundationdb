@@ -1,0 +1,55 @@
+[[test]]
+testTitle = 'CloggedCycleTest'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    testDuration = 5.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 5.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 5.0
+    scale = 0.1
+    clogginess = 2.0
+
+[[test]]
+testTitle = 'UncloggedCycleTest'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    testDuration = 5.0
+    expectedRate = 0.25
+
+[[test]]
+testTitle = 'CloggedCycleTest'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    testDuration = 5.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 5.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 5.0
+    scale = 0.1
+    clogginess = 2.0
+
+[[test]]
+testTitle = 'UncloggedCycleTest'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 5000.0
+    testDuration = 5.0
+    expectedRate = 0.25

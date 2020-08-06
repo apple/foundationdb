@@ -47,8 +47,8 @@ struct VersionedMessage {
 
 	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
 	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
-	const Version getVersion() const { return version.version; }
-	const uint32_t getSubVersion() const { return version.sub; }
+	Version getVersion() const { return version.version; }
+	uint32_t getSubVersion() const { return version.sub; }
 
 	// Returns true if the message is a mutation that should be backuped, i.e.,
 	// either key is not in system key space or is not a metadataVersionKey.
@@ -68,10 +68,6 @@ struct VersionedMessage {
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
 	}
 };
-
-static bool sameArena(const Arena& a, const Arena& b) {
-	return a.impl.getPtr() == b.impl.getPtr();
-}
 
 struct BackupData {
 	const UID myId;
@@ -340,11 +336,10 @@ struct BackupData {
 		for (int i = 0; i < num; i++) {
 			const Arena& a = messages[i].arena;
 			const Arena& b = messages[i + 1].arena;
-			if (!sameArena(a, b)) {
+			if (!a.sameArena(b)) {
 				bytes += messages[i].bytes;
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
-				    .detail("Release", messages[i].bytes)
-				    .detail("Arena", (void*)a.impl.getPtr());
+				    .detail("Release", messages[i].bytes);
 			}
 		}
 		lock->release(bytes);
@@ -374,7 +369,7 @@ struct BackupData {
 		bool modified = false;
 		bool minVersionChanged = false;
 		Version minVersion = std::numeric_limits<Version>::max();
-		for (const auto [uid, version] : uidVersions) {
+		for (const auto& [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
@@ -904,10 +899,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
-			if (!sameArena(prev, r->arena())) {
+			if (!prev.sameArena(r->arena())) {
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 				    .detail("Take", r->arena().getSize())
-				    .detail("Arena", (void*)r->arena().impl.getPtr())
 				    .detail("Current", self->lock->activePermits());
 
 				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));

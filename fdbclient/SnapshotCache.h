@@ -245,6 +245,7 @@ public:
 		}
 
 		bool operator == ( const iterator& r ) const { return it == r.it && offset == r.offset; }
+		bool operator!=(const iterator& r) const { return !(*this == r); }
 
 		void skip( KeyRef key ) {      // Changes *this to the segment containing key (so that beginKey()<=key && key < endKey())
 			if( key == allKeys.end ) {

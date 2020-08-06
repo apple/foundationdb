@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'FuzzTest'
+
+    [[test.workload]]
+    testName = 'ActorFuzz'

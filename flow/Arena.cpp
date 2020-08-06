@@ -20,8 +20,100 @@
 
 #include "Arena.h"
 
+#include "flow/UnitTest.h"
+
+// See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
+// of valgrind client requests
+#ifdef VALGRIND_ARENA
+#include <memcheck.h>
+#else
+// Since VALGRIND_ARENA is not set, we don't want to pay the performance penalty for precise tracking of arenas. We'll
+// make these macros noops just for this translation unit.
+#undef VALGRIND_MAKE_MEM_NOACCESS
+#undef VALGRIND_MAKE_MEM_DEFINED
+#undef VALGRIND_MAKE_MEM_UNDEFINED
+#define VALGRIND_MAKE_MEM_NOACCESS(addr, size) ((void)(addr), (void)(size))
+#define VALGRIND_MAKE_MEM_DEFINED(addr, size) ((void)(addr), (void)(size))
+#define VALGRIND_MAKE_MEM_UNDEFINED(addr, size) ((void)(addr), (void)(size))
+#endif
+
+// For each use of arena-internal memory (e.g. ArenaBlock::getSize()), unpoison the memory before use and
+// poison it when done.
+// When creating a new ArenaBlock, poison the memory that will be later allocated to users.
+// When allocating memory to a user, mark that memory as undefined.
+
+namespace {
+void allow_access(ArenaBlock* b) {
+	if (b) {
+		VALGRIND_MAKE_MEM_DEFINED(b, ArenaBlock::TINY_HEADER);
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		VALGRIND_MAKE_MEM_DEFINED(b, headerSize);
+	}
+}
+void disallow_access(ArenaBlock* b) {
+	if (b) {
+		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
+		VALGRIND_MAKE_MEM_NOACCESS(b, headerSize);
+	}
+}
+} // namespace
+
+Arena::Arena() : impl(NULL) {}
+Arena::Arena(size_t reservedSize) : impl(0) {
+	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
+	if (reservedSize) {
+		allow_access(impl.getPtr());
+		ArenaBlock::create((int)reservedSize, impl);
+		disallow_access(impl.getPtr());
+	}
+}
+Arena::Arena(const Arena& r) = default;
+Arena::Arena(Arena&& r) noexcept = default;
+Arena& Arena::operator=(const Arena& r) = default;
+Arena& Arena::operator=(Arena&& r) noexcept = default;
+void Arena::dependsOn(const Arena& p) {
+	if (p.impl) {
+		allow_access(impl.getPtr());
+		allow_access(p.impl.getPtr());
+		ArenaBlock::dependOn(impl, p.impl.getPtr());
+		disallow_access(p.impl.getPtr());
+		if (p.impl.getPtr() != impl.getPtr()) {
+			disallow_access(impl.getPtr());
+		}
+	}
+}
+size_t Arena::getSize() const {
+	if (impl) {
+		allow_access(impl.getPtr());
+		auto result = impl->totalSize();
+		disallow_access(impl.getPtr());
+		return result;
+	}
+	return 0;
+}
+bool Arena::hasFree(size_t size, const void* address) {
+	if (impl) {
+		allow_access(impl.getPtr());
+		auto result = impl->unused() >= size && impl->getNextData() == address;
+		disallow_access(impl.getPtr());
+		return result;
+	}
+	return false;
+}
+
+void ArenaBlock::addref() {
+	VALGRIND_MAKE_MEM_DEFINED(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	ThreadSafeReferenceCounted<ArenaBlock>::addref();
+	VALGRIND_MAKE_MEM_NOACCESS(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+}
+
 void ArenaBlock::delref() {
-	if (delref_no_destroy()) destroy();
+	VALGRIND_MAKE_MEM_DEFINED(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	if (delref_no_destroy()) {
+		destroy();
+	} else {
+		VALGRIND_MAKE_MEM_NOACCESS(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	}
 }
 
 bool ArenaBlock::isTiny() const {
@@ -52,14 +144,20 @@ const void* ArenaBlock::getNextData() const {
 	return (const uint8_t*)getData() + used();
 }
 size_t ArenaBlock::totalSize() {
-	if (isTiny()) return size();
+	if (isTiny()) {
+		return size();
+	}
 
 	size_t s = size();
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
+		allow_access(r->next);
 		s += r->next->totalSize();
+		disallow_access(r->next);
 		o = r->nextBlockOffset;
+		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	}
 	return s;
 }
@@ -71,8 +169,10 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
 		r->next->getUniqueBlocks(a);
 		o = r->nextBlockOffset;
+		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	}
 	return;
 }
@@ -91,8 +191,10 @@ int ArenaBlock::addUsed(int bytes) {
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
 	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
+	VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
 }
@@ -107,9 +209,17 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 	ArenaBlock* b = self.getPtr();
-	if (!self || self->unused() < bytes) b = create(bytes, self);
+	allow_access(b);
+	if (!self || self->unused() < bytes) {
+		auto* tmp = b;
+		b = create(bytes, self);
+		disallow_access(tmp);
+	}
 
-	return (char*)b->getData() + b->addUsed(bytes);
+	void* result = (char*)b->getData() + b->addUsed(bytes);
+	disallow_access(b);
+	VALGRIND_MAKE_MEM_UNDEFINED(result, bytes);
+	return result;
 }
 
 // Return an appropriately-sized ArenaBlock to store the given data
@@ -205,6 +315,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	}
 	b->setrefCountUnsafe(1);
 	next.setPtrUnsafe(b);
+	VALGRIND_MAKE_MEM_NOACCESS(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
 	return b;
 }
 
@@ -212,18 +323,23 @@ void ArenaBlock::destroy() {
 	// If the stack never contains more than one item, nothing will be allocated from stackArena.
 	// If stackArena is used, it will always be a linked list, so destroying *it* will not create another arena
 	ArenaBlock* tinyStack = this;
+	allow_access(this);
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
 	while (stack.size()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
+		allow_access(b);
 
 		if (!b->isTiny()) {
 			int o = b->nextBlockOffset;
 			while (o) {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
+				VALGRIND_MAKE_MEM_DEFINED(br, sizeof(ArenaBlockRef));
+				allow_access(br->next);
 				if (br->next->delref_no_destroy()) stack.push_back(stackArena, br->next);
+				disallow_access(br->next);
 				o = br->nextBlockOffset;
 			}
 		}
@@ -273,4 +389,159 @@ void ArenaBlock::destroyLeaf() {
 			delete[](uint8_t*) this;
 		}
 	}
+}
+
+namespace {
+template <template <class> class VectorRefLike>
+void testRangeBasedForLoop() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+	int i = 0;
+	for (const auto& x : xs) {
+		ASSERT(x == StringRef(std::to_string(i++)));
+	}
+	ASSERT(i == size);
+}
+
+template <template <class> class VectorRefLike>
+void testIteratorIncrement() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter != xs.end();) {
+			ASSERT(*iter++ == StringRef(std::to_string(i++)));
+		}
+		ASSERT(i == size);
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter != xs.end() && i < xs.size() - 1;) {
+			ASSERT(*++iter == StringRef(std::to_string(++i)));
+		}
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter < xs.end();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter += 1;
+			i += 1;
+		}
+	}
+	if (size > 0) {
+		int i = xs.size() - 1;
+		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter -= 1;
+			i -= 1;
+		}
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter < xs.end();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter = iter + 1;
+			i += 1;
+		}
+	}
+	if (size > 0) {
+		int i = xs.size() - 1;
+		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter = iter - 1;
+			i -= 1;
+		}
+	}
+}
+
+template <template <class> class VectorRefLike>
+void testReverseIterator() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+
+	int i = xs.size() - 1;
+	for (auto iter = xs.rbegin(); iter != xs.rend();) {
+		ASSERT(*iter++ == StringRef(std::to_string(i--)));
+	}
+	ASSERT(i == -1);
+}
+
+template <template <class> class VectorRefLike>
+void testAppend() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	VectorRefLike<StringRef> ys;
+	ys.append(a, xs.begin(), xs.size());
+	ASSERT(xs.size() == ys.size());
+	ASSERT(std::equal(xs.begin(), xs.end(), ys.begin()));
+}
+
+template <template <class> class VectorRefLike>
+void testCopy() {
+	Standalone<VectorRefLike<StringRef>> xs;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(xs.arena(), StringRef(std::to_string(i)));
+	}
+	Arena a;
+	VectorRefLike<StringRef> ys(a, xs);
+	xs = Standalone<VectorRefLike<StringRef>>();
+	int i = 0;
+	for (const auto& y : ys) {
+		ASSERT(y == StringRef(std::to_string(i++)));
+	}
+	ASSERT(i == size);
+}
+
+template <template <class> class VectorRefLike>
+void testVectorLike() {
+	testRangeBasedForLoop<VectorRefLike>();
+	testIteratorIncrement<VectorRefLike>();
+	testReverseIterator<VectorRefLike>();
+	testAppend<VectorRefLike>();
+	testCopy<VectorRefLike>();
+}
+} // namespace
+
+// Fix number of template parameters
+template <class T>
+using VectorRefProxy = VectorRef<T>;
+TEST_CASE("/flow/Arena/VectorRef") {
+	testVectorLike<VectorRefProxy>();
+	return Void();
+}
+
+// Fix number of template parameters
+template <class T>
+using SmallVectorRefProxy = SmallVectorRef<T>;
+TEST_CASE("/flow/Arena/SmallVectorRef") {
+	testVectorLike<SmallVectorRefProxy>();
+	return Void();
+}
+
+// Fix number of template parameters
+template <class T>
+using SmallVectorRef10Proxy = SmallVectorRef<T, 10>;
+TEST_CASE("/flow/Arena/SmallVectorRef10") {
+	testVectorLike<SmallVectorRef10Proxy>();
+	return Void();
 }

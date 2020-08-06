@@ -228,6 +228,8 @@ If you interrupt the exclude command with Ctrl-C after seeing the "waiting for s
 
 7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
 
+As of api version 700, excluding servers can be done with the :ref:`special key space management module <special-key-space-management-module>` as well.
+
 Moving a cluster
 ================
 

@@ -107,12 +107,12 @@ private:
 	Promise<T> promise;
 };
 
-Reference<IThreadPool>	createGenericThreadPool();
+Reference<IThreadPool>	createGenericThreadPool(int stackSize = 0);
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
-	DummyThreadPool() : thread(NULL) {}
+	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() {
 		return errors.getFuture();
 	}

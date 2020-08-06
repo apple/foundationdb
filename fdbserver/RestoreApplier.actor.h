@@ -28,12 +28,12 @@
 #define FDBSERVER_RESTORE_APPLIER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -252,6 +252,10 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	long receiveMutationReqs;
 
+	// Stats
+	double receivedBytes;
+	double appliedBytes;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
@@ -371,7 +375,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	// even when no version batch has been started.
 	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
-		if (item == batch.end()) { // Simply caller's effort in when it can call this func.
+		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return ApplierVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();

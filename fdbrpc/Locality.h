@@ -179,6 +179,7 @@ public:
 		return ((_data.size() == rhs._data.size())													&&
 					  (std::equal(_data.begin(), _data.end(), rhs._data.begin())));
 	}
+	bool operator!=(LocalityData const& rhs) const { return !(*this == rhs); }
 
 	Optional<Standalone<StringRef>>	get(StringRef key) const {
 		auto pos = _data.find(key);

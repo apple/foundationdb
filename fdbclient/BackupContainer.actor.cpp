@@ -842,9 +842,17 @@ public:
 
 		state std::vector<LogFile> logs;
 		state std::vector<LogFile> plogs;
+		TraceEvent("BackupContainerListFiles").detail("URL", bc->getURL());
+
 		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
 		     store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+
+		TraceEvent("BackupContainerListFiles")
+		    .detail("URL", bc->getURL())
+		    .detail("LogFiles", logs.size())
+		    .detail("PLogsFiles", plogs.size())
+		    .detail("Snapshots", desc.snapshots.size());
 
 		if (plogs.size() > 0) {
 			desc.partitioned = true;
@@ -1207,7 +1215,7 @@ public:
 		}
 
 		// for each range in tags, check all tags from 1 are continouous
-		for (const auto [beginEnd, count] : tags) {
+		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
 				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
@@ -1310,7 +1318,7 @@ public:
 
 		// for each range in tags, check all partitions from 1 are continouous
 		Version lastEnd = begin;
-		for (const auto [beginEnd, count] : tags) {
+		for (const auto& [beginEnd, count] : tags) {
 			Version tagEnd = beginEnd.second; // This range's minimum continous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
@@ -1545,9 +1553,13 @@ public:
 		// Remove trailing slashes on path
 		path.erase(path.find_last_not_of("\\/") + 1);
 
-		if(!g_network->isSimulated() && path != abspath(path)) {
-			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path);
-			throw io_error();
+		std::string absolutePath = abspath(path);
+		
+		if(!g_network->isSimulated() && path != absolutePath) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path).detail("AbsolutePath", absolutePath);
+			// throw io_error();
+			IBackupContainer::lastOpenError = format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
+			throw backup_invalid_url();
 		}
 
 		// Finalized path written to will be will be <path>/backup-<uid>
@@ -1607,7 +1619,7 @@ public:
 			std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
 			unlink(uniquePath.c_str());
 			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
-			fullPath = uniquePath = uniquePath;
+			fullPath = uniquePath;
 		}
 		// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
 		// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled

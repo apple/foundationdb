@@ -89,7 +89,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
-	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
+	init( TAG_ENCODE_KEY_SERVERS,                 true ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = false;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -181,7 +181,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                60 );
+	init( BLOBSTORE_REQUEST_TIMEOUT_MIN,            60 );
 
 	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
 	init( BLOBSTORE_CONCURRENT_LISTS,               20 );

@@ -409,12 +409,16 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
-			if (sent) {
+			int sent = conn->write(self->unsent.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+
+			if (sent != 0) {
 				self->transport->bytesSent += sent;
 				self->unsent.sent(sent);
 			}
-			if (self->unsent.empty()) break;
+
+			if (self->unsent.empty()) {
+				break;
+			}
 
 			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull.
 			wait( conn->onWritable() );
@@ -554,7 +558,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
 					delayedHealthUpdateF = delayedHealthUpdate(self->destination);
-				wait(connectionWriter(self, conn) || reader || connectionMonitor(self));
+				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) || self->resetConnection.onTrigger());
+				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+				throw connection_failed();
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
 						e.code() == error_code_connection_unreferenced ||
@@ -565,8 +571,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				throw e;
 			}
-
-			ASSERT( false );
 		} catch (Error& e) {
 			delayedHealthUpdateF.cancel();
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
@@ -1428,6 +1432,13 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
+}
+
+void FlowTransport::resetConnection( NetworkAddress address ) {
+	auto peer = self->getPeer(address);
+	if(peer) {
+		peer->resetConnection.trigger();
+	}
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {

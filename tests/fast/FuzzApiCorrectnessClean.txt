@@ -1,5 +1,0 @@
-StderrSeverity=30
-
-testTitle=FuzzApiCorrectness
-    testName=FuzzApiCorrectness
-    testDuration=30.0
