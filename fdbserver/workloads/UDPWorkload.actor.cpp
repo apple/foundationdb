@@ -80,6 +80,7 @@ struct UDPWorkload : TestWorkload {
 				}
 				tr.set(key, serializedLocalAddress);
 				wait(tr.commit());
+				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
@@ -132,7 +133,7 @@ struct UDPWorkload : TestWorkload {
 		state NetworkAddress peerAddress;
 		loop {
 			int sz = wait(self->serverSocket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peerAddress));
-			auto msg = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), Unversioned());
+			auto msg = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
 			if (msg.type() == Message::Type::PONG) {
 				self->successes[peerAddress] += 1;
 			} else if (msg.type() == Message::Type::PING) {
@@ -151,12 +152,12 @@ struct UDPWorkload : TestWorkload {
 			choose {
 				when(wait(delay(0.1))) {
 					peer = deterministicRandom()->randomChoice(*remotes);
-					packetString = BinaryWriter::toValue(Message{ Message::Type::PING }, Unversioned());
+					packetString = BinaryWriter::toValue(Message{ Message::Type::PING }, IncludeVersion());
 					self->sent[peer] += 1;
 				}
 				when(NetworkAddress p = waitNext(self->toAck.getFuture())) {
 					peer = p;
-					packetString = BinaryWriter::toValue(ping(), Unversioned());
+					packetString = BinaryWriter::toValue(ping(), IncludeVersion());
 					self->acked[peer] += 1;
 				}
 			}
@@ -173,7 +174,7 @@ struct UDPWorkload : TestWorkload {
 		loop {
 			choose {
 				when(int sz = wait(socket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peer))) {
-					auto res = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), Unversioned());
+					auto res = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
 					ASSERT(res.type() == Message::Type::PONG);
 					self->successes[peer] += 1;
 				}
@@ -204,7 +205,7 @@ struct UDPWorkload : TestWorkload {
 				socket = s;
 				actors.add(clientReceiver(self, socket.get(), socket.onChange()));
 			}
-			sendString = BinaryWriter::toValue(ping(), Unversioned());
+			sendString = BinaryWriter::toValue(ping(), IncludeVersion());
 			int res = wait(socket.get()->sendTo(sendString.begin(), sendString.end(), peer));
 			ASSERT(res == sendString.size());
 			self->sent[peer] += 1;
