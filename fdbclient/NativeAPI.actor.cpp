@@ -3331,8 +3331,11 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, CLIENT_KNOBS->TOO_MANY, false,
 				                              &StorageServerInterface::getShardState, self->info));
 				if (locations.empty()) continue;
-				uint64_t bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS +
-				                 (locations.size() - 1) * self->getDatabase()->smoothMidShardSize.smoothTotal();
+				uint64_t bytes = 0;
+				if (locations .size() == 1)
+					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS;
+				else
+					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 + (locations.size() - 2) * self->getDatabase()->smoothMidShardSize.smoothTotal();
 				trCommitCosts.clearIdxBytes.emplace(i, bytes);
 				trCommitCosts.writtenBytes += bytes;
 			}

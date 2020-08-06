@@ -542,7 +542,6 @@ struct RatekeeperData {
 
 	std::map<UID, ProxyInfo> proxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
-
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
@@ -937,6 +936,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	limitReason_t limitReason = limitReason_t::unlimited;
 
 	int sscount = 0;
+
 	int64_t worstFreeSpaceStorageServer = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueStorageServer = 0;
 	int64_t limitingStorageQueueStorageServer = 0;
@@ -985,11 +985,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
-		if(limits->priority == TransactionPriority::DEFAULT){
-			// read saturation
-			if(storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+		if(limits->priority == TransactionPriority::DEFAULT && (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
 				tryAutoThrottleTag(self, ss);
-			}
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
@@ -1063,6 +1060,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	// Calculate limited durability lag
 	int64_t limitingDurabilityLag = 0;
+
 	std::set<Optional<Standalone<StringRef>>> ignoredDurabilityLagMachines;
 	for (auto ss = storageDurabilityLagReverseIndex.begin(); ss != storageDurabilityLagReverseIndex.end(); ++ss) {
 		if (ignoredDurabilityLagMachines.size() < std::min(self->configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
