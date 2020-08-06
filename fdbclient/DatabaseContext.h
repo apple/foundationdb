@@ -163,6 +163,7 @@ public:
 
 	bool sampleReadTags();
 
+	void updateProxies();
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
@@ -219,10 +220,8 @@ public:
 	Future<Void> monitorProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	Reference<GrvProxyInfo> grvProxies;
-	bool masterProxyProvisional;
-	bool grvProxyProvisional;
-	UID masterProxiesLastChange;
-	UID grvProxiesLastChange;
+	bool proxyProvisional;
+	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;

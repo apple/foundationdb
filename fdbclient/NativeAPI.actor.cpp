@@ -848,10 +848,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  bool switchable)
   : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
-    apiVersion(apiVersion), switchable(switchable), masterProxyProvisional(false), grvProxyProvisional(false),
-    cc("TransactionMetrics"),
-    transactionReadVersions("ReadVersions", cc), 
-    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+    apiVersion(apiVersion), switchable(switchable), proxyProvisional(false), cc("TransactionMetrics"),
+    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
@@ -1501,31 +1499,32 @@ void stopNetwork() {
 	closeTraceFile();
 }
 
-Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
-	if (masterProxiesLastChange != clientInfo->get().id) {
-		masterProxiesLastChange = clientInfo->get().id;
-		masterProxies.clear();
-		if( clientInfo->get().masterProxies.size() ) {
-			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies));
-			masterProxyProvisional = clientInfo->get().masterProxies[0].provisional;
-		}
+void DatabaseContext::updateProxies() {
+	if (proxiesLastChange == clientInfo->get().id) return;
+	proxiesLastChange = clientInfo->get().id;
+	masterProxies.clear();
+	grvProxies.clear();
+	if (clientInfo->get().masterProxies.size()) {
+		masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().masterProxies));
+		proxyProvisional = clientInfo->get().masterProxies[0].provisional;
 	}
-	if(masterProxyProvisional && !useProvisionalProxies) {
+	if (clientInfo->get().grvProxies.size()) {
+		grvProxies = Reference<GrvProxyInfo>(new GrvProxyInfo(clientInfo->get().grvProxies));
+		proxyProvisional = clientInfo->get().grvProxies[0].provisional;
+	}
+}
+
+Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
+	updateProxies();
+	if (proxyProvisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
 	}
 	return masterProxies;
 }
 
 Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxies) {
-	if (grvProxiesLastChange != clientInfo->get().id) {
-		grvProxiesLastChange = clientInfo->get().id;
-		grvProxies.clear();
-		if( clientInfo->get().grvProxies.size() ) {
-			grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
-			grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
-		}
-	}
-	if(grvProxyProvisional && !useProvisionalProxies) {
+	updateProxies();
+	if (proxyProvisional && !useProvisionalProxies) {
 		return Reference<GrvProxyInfo>();
 	}
 	return grvProxies;

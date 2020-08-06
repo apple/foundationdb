@@ -28,6 +28,7 @@
                   "transaction",
                   "resolution",
                   "proxy",
+                  "grv_proxy",
                   "master",
                   "test",
                   "storage_cache"
@@ -61,6 +62,7 @@
                      "$enum":[
                         "master",
                         "proxy",
+                        "grv_proxy",
                         "log",
                         "storage",
                         "resolver",
@@ -439,6 +441,7 @@
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
+         "required_grv_proxies":1,
          "name":{ // "fully_recovered" is the healthy state; other states are normal to transition through but not to persist in
             "$enum":[
                "reading_coordinated_state",

@@ -1469,9 +1469,21 @@ struct ConsistencyCheckWorkload : TestWorkload
 				return false;
 			}
 		}
+
+		// Check grv proxy
+		ProcessClass::Fitness bestGrvProxyFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::GrvProxy);
 		for (const auto& grvProxy : db.client.grvProxies) {
-			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) || nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestProxyFitness", bestProxyFitness).detail("ExistingGrvProxyFitness", nonExcludedWorkerProcessMap.count(grvProxy.address()) ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
+			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) ||
+			    nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
+			        ProcessClass::GrvProxy) != bestGrvProxyFitness) {
+				TraceEvent("ConsistencyCheck_GrvProxyNotBest")
+				    .detail("BestGrvProxyFitness", bestGrvProxyFitness)
+				    .detail("ExistingGrvProxyFitness",
+				            nonExcludedWorkerProcessMap.count(grvProxy.address())
+				                ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
+				                      ProcessClass::GrvProxy)
+				                : -1);
 				return false;
 			}
 		}

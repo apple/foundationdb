@@ -29,11 +29,13 @@ DatabaseConfiguration::DatabaseConfiguration()
 void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
-	proxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = desiredLogRouterCount = -1;
+	proxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
+	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
 	tLogSpillType = TLogSpillType::DEFAULT;
 	autoProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
+	autoGrvProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	usableRegions = 1;
@@ -162,35 +164,21 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 }
 
 bool DatabaseConfiguration::isValid() const {
-	if( !(initialized &&
-		tLogWriteAntiQuorum >= 0 &&
-		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
-		tLogReplicationFactor >= 1 &&
-		storageTeamSize >= 1 &&
-		getDesiredProxies() >= 1 &&
-		getDesiredLogs() >= 1 &&
-		getDesiredResolvers() >= 1 &&
-		tLogVersion != TLogVersion::UNSET &&
-		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
-		tLogDataStoreType != KeyValueStoreType::END &&
-		tLogSpillType != TLogSpillType::UNSET &&
-		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
-		storageServerStoreType != KeyValueStoreType::END && autoProxyCount >= 2 &&
-		autoResolverCount >= 1 &&
-		autoDesiredTLogCount >= 1 &&
-		storagePolicy &&
-		tLogPolicy &&
-		getDesiredRemoteLogs() >= 1 &&
-		remoteTLogReplicationFactor >= 0 &&
-		repopulateRegionAntiQuorum >= 0 &&
-		repopulateRegionAntiQuorum <= 1 &&
-		usableRegions >= 1 &&
-		usableRegions <= 2 &&
-		regions.size() <= 2 &&
-		( usableRegions == 1 || regions.size() == 2 ) &&
-		( regions.size() == 0 || regions[0].priority >= 0 ) &&
-		( regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") ) ) { //We cannot specify regions with three_datacenter replication
+	if (!(initialized && tLogWriteAntiQuorum >= 0 && tLogWriteAntiQuorum <= tLogReplicationFactor / 2 &&
+	      tLogReplicationFactor >= 1 && storageTeamSize >= 1 && getDesiredProxies() >= 1 &&
+	      getDesiredGrvProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 &&
+	      tLogVersion != TLogVersion::UNSET && tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
+	      tLogVersion <= TLogVersion::MAX_SUPPORTED && tLogDataStoreType != KeyValueStoreType::END &&
+	      tLogSpillType != TLogSpillType::UNSET &&
+	      !(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
+	      storageServerStoreType != KeyValueStoreType::END && autoProxyCount >= 1 && autoGrvProxyCount >= 1 &&
+	      autoResolverCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy && tLogPolicy &&
+	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
+	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
+	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
+	      (regions.size() == 0 ||
+	       tLogPolicy->info() !=
+	           "dcid^2 x zoneid^2 x 1"))) { // We cannot specify regions with three_datacenter replication
 		return false;
 	}
 
@@ -303,6 +291,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if(proxyCount != -1 ) {
 			result["proxies"] = proxyCount;
 		}
+		if (grvProxyCount != -1) {
+			result["grv_proxies"] = grvProxyCount;
+		}
 		if( resolverCount != -1 ) {
 			result["resolvers"] = resolverCount;
 		}
@@ -315,8 +306,11 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( repopulateRegionAntiQuorum != 0 ) {
 			result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
 		}
-		if(autoProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
+		if (autoProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES) {
 			result["auto_proxies"] = autoProxyCount;
+		}
+		if (autoGrvProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES) {
+			result["auto_grv_proxies"] = autoGrvProxyCount;
 		}
 		if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS) {
 			result["auto_resolvers"] = autoResolverCount;
@@ -395,15 +389,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	int type;
 
 	if (ck == LiteralStringRef("initialized")) initialized = true;
-	else if (ck == LiteralStringRef("proxies")) {
+	else if (ck == LiteralStringRef("proxies"))
 		parse(&proxyCount, value);
-		if (proxyCount <= 2 && proxyCount != -1) {
-			TraceEvent(SevWarn, "ForceUpgradeProxiesCount")
-			    .detail("OldProxies", proxyCount)
-			    .detail("NewProxies", 2);
-			proxyCount = 2;
-		}
-	}
+	// Think about restarting tests
+	else if (ck == LiteralStringRef("grv_proxies"))
+		parse(&grvProxyCount, value);
 	else if (ck == LiteralStringRef("resolvers")) parse(&resolverCount, value);
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) {
@@ -413,10 +403,10 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_anti_quorum")) {
 		parse(&tLogWriteAntiQuorum, value);
 		if(tLogReplicationFactor > 0) {
-			tLogWriteAntiQuorum = std::min(tLogWriteAntiQuorum, tLogReplicationFactor/2);
+			tLogWriteAntiQuorum = std::min(tLogWriteAntiQuorum, tLogReplicationFactor / 2);
 		}
-	}
-	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
+	} else if (ck == LiteralStringRef("storage_replicas"))
+		parse(&storageTeamSize, value);
 	else if (ck == LiteralStringRef("log_version")) {
 		parse((&type), value);
 		type = std::max((int)TLogVersion::MIN_RECRUITABLE, type);
@@ -435,17 +425,14 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
 		}
 	}
-	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type; }
-	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
-	else if (ck == LiteralStringRef("auto_proxies")) {
+	else if (ck == LiteralStringRef("log_spill")) { parse((&type), value); tLogSpillType = (TLogSpillType::SpillType)type;
+	} else if (ck == LiteralStringRef("storage_engine")) {
+		parse((&type), value);
+		storageServerStoreType = (KeyValueStoreType::StoreType)type;
+	} else if (ck == LiteralStringRef("auto_proxies"))
 		parse(&autoProxyCount, value);
-		if (autoProxyCount <= 2 && autoProxyCount != -1) {
-			TraceEvent(SevWarn, "ForceUpgradeAutoProxiesCount")
-				.detail("OldAutoProxies", autoProxyCount)
-				.detail("NewAutoProxies", 2);
-			autoProxyCount = 2;
-		}
-	}
+	else if (ck == LiteralStringRef("auto_grv_proxies"))
+		parse(&autoGrvProxyCount, value);
 	else if (ck == LiteralStringRef("auto_resolvers")) parse(&autoResolverCount, value);
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
@@ -454,8 +441,11 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
-	else if (ck == LiteralStringRef("backup_worker_enabled")) { parse((&type), value); backupWorkerEnabled = (type != 0); }
-	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);
+	else if (ck == LiteralStringRef("backup_worker_enabled")) {
+		parse((&type), value);
+		backupWorkerEnabled = (type != 0);
+	} else if (ck == LiteralStringRef("usable_regions"))
+		parse(&usableRegions, value);
 	else if (ck == LiteralStringRef("repopulate_anti_quorum")) parse(&repopulateRegionAntiQuorum, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);
 	else return false;

@@ -94,8 +94,11 @@ public:
 				case ProcessClass::TransactionClass: return true;
 				case ProcessClass::ResolutionClass: return false;
 				case ProcessClass::ProxyClass: return false;
-				case ProcessClass::MasterClass: return false;
-				case ProcessClass::TesterClass: return false;
+			    case ProcessClass::GrvProxyClass:
+				    return false;
+			    case ProcessClass::MasterClass:
+				    return false;
+			    case ProcessClass::TesterClass: return false;
 				case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;

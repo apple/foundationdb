@@ -720,7 +720,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	state std::vector<std::pair<GrvProxyInterface, EventMap>>::iterator grvProxy;
 	for(grvProxy = grvProxies.begin(); grvProxy != grvProxies.end(); ++grvProxy) {
-		roles.addRole( "proxy", grvProxy->first, grvProxy->second );
+		roles.addRole("grv_proxy", grvProxy->first, grvProxy->second);
 		wait(yield());
 	}
 
@@ -1041,12 +1041,14 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
 			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
 			int requiredProxies = atoi( md.getValue("RequiredProxies").c_str() );
+			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
 			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
 			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredProxies));
 			//int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
 			message["required_proxies"] = requiredProxies;
+			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();

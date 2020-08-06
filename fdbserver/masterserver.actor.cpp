@@ -627,16 +627,18 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 		return Never();
 	} else
 		TraceEvent("MasterRecoveryState", self->dbgid)
-			.detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
-			.detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
-			.detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
-			.detail("DesiredTLogs", self->configuration.getDesiredLogs())
-			.detail("RequiredProxies", 2)
-			.detail("DesiredProxies", self->configuration.getDesiredProxies())
-			.detail("RequiredResolvers", 1)
-			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
-			.detail("StoreType", self->configuration.storageServerStoreType)
-			.trackLatest("MasterRecoveryState");
+		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
+		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
+		    .detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
+		    .detail("DesiredTLogs", self->configuration.getDesiredLogs())
+		    .detail("RequiredProxies", 1)
+		    .detail("DesiredProxies", self->configuration.getDesiredProxies())
+		    .detail("RequiredGrvProxies", 1)
+		    .detail("DesiredGrvProxies", self->configuration.getDesiredGrvProxies())
+		    .detail("RequiredResolvers", 1)
+		    .detail("DesiredResolvers", self->configuration.getDesiredResolvers())
+		    .detail("StoreType", self->configuration.storageServerStoreType)
+		    .trackLatest("MasterRecoveryState");
 
 	//FIXME: we only need log routers for the same locality as the master
 	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
@@ -1539,8 +1541,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	recoverAndEndEpoch.cancel();
 
-	ASSERT( self->masterProxies.size() + self->grvProxies.size() <= self->configuration.getDesiredProxies() );
-	ASSERT( self->grvProxies.size() >= 1 && self->masterProxies.size() >= 1 );
+	ASSERT(self->masterProxies.size() <= self->configuration.getDesiredProxies());
+	ASSERT(self->masterProxies.size() >= 1);
+	ASSERT(self->grvProxies.size() <= self->configuration.getDesiredGrvProxies());
+	ASSERT(self->grvProxies.size() >= 1);
 	ASSERT( self->resolvers.size() <= self->configuration.getDesiredResolvers() );
 	ASSERT( self->resolvers.size() >= 1 );
 
