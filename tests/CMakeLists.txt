@@ -87,7 +87,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES StorageMetricsSampleTests.txt IGNORE)
   add_fdb_test(TEST_FILES StreamingWrite.txt IGNORE)
   add_fdb_test(TEST_FILES ThreadSafety.txt IGNORE)
-  add_fdb_test(TEST_FILES Throttling.txt IGNORE)
+  add_fdb_test(TEST_FILES Throttling.toml IGNORE)
   add_fdb_test(TEST_FILES TraceEventMetrics.txt IGNORE)
   add_fdb_test(TEST_FILES PopulateTPCC.txt IGNORE)
   add_fdb_test(TEST_FILES TPCC.txt IGNORE)
@@ -154,6 +154,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/ConflictRangeRYOWCheck.toml)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.toml)
   add_fdb_test(TEST_FILES rare/CycleWithKills.toml)
+  add_fdb_test(TEST_FILES rare/Downgrade.toml)
   add_fdb_test(TEST_FILES rare/FuzzTest.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.toml)
@@ -169,11 +170,11 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
                restarting/from_7.0.0/ConfigureTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/CycleTestRestart-1.txt
-               restarting/CycleTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0/CycleTestRestart-1.txt
+               restarting/from_5.0.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/StorefrontTestRestart-1.txt
-               restarting/StorefrontTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
+               restarting/from_5.0.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
                restarting/from_6.2.0/SnapTestAttrition-2.txt)
@@ -192,6 +193,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
                restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
+               restarting/to_6.3.5/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)

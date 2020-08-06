@@ -432,7 +432,7 @@ struct ProxySnapRequest
 {
 	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
-	StringRef snapPayload;
+	StringRef snapPayload; // command used to snapshot the data folder
 	UID snapUID;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;

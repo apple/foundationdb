@@ -308,6 +308,7 @@ public:
 	double PROVISIONAL_DELAY_GROWTH;
 	double PROVISIONAL_MAX_DELAY;
 	double SECONDS_BEFORE_RECRUIT_BACKUP_WORKER;
+	double CC_INTERFACE_TIMEOUT;
 
 	// Resolver
 	int64_t KEY_BYTES_PER_SAMPLE;
@@ -566,6 +567,9 @@ public:
 	int FASTRESTORE_TXN_CLEAR_MAX; // threshold to start tracking each clear op in a txn
 	int FASTRESTORE_TXN_RETRY_MAX; // threshold to start output error on too many retries
 	double FASTRESTORE_TXN_EXTRA_DELAY; // extra delay to avoid overwhelming fdb
+	bool FASTRESTORE_NOT_WRITE_DB; // do not write result to DB. Only for dev testing
+	bool FASTRESTORE_USE_RANGE_FILE; // use range file in backup
+	bool FASTRESTORE_USE_LOG_FILE; // use log file in backup
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
@@ -574,11 +578,10 @@ public:
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at once
 	int REDWOOD_LAZY_CLEAR_MIN_PAGES;  // Minimum number of pages to free before ending a lazy clear cycle, unless the queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES;  // Maximum number of pages to free before ending a lazy clear cycle, unless the queue is empty
-	int REDWOOD_REMAP_CLEANUP_BATCH_SIZE; // Number of queue entries for remap cleanup to process and potentially coalesce at once.
-	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MIN; // Number of versions between head of remap queue and oldest retained version before remap cleanup starts
-	int REDWOOD_REMAP_CLEANUP_VERSION_LAG_MAX; // Number of versions between head of remap queue and oldest retained version before remap cleanup may stop
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW;  // Remap remover lag interval in which to coalesce page writes
+	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of the window size
 	double REDWOOD_LOGGING_INTERVAL;
-	
+
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;

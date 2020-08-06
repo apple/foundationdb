@@ -31,7 +31,9 @@ struct LogfileTracer : ITracer {
 	TracerType type() const { return TracerType::LOG_FILE; }
 	void trace(Span const& span) override {
 		TraceEvent te(SevInfo, "TracingSpan", span.context);
-		te.detail("Location", span.location.name).detail("Begin", span.begin).detail("End", span.end);
+		te.detail("Location", span.location.name)
+			.detail("Begin", format("%.6f", span.begin))
+			.detail("End", format("%.6f", span.end));
 		if (span.parents.size() == 1) {
 			te.detail("Parent", *span.parents.begin());
 		} else {
@@ -79,6 +81,7 @@ Span& Span::operator=(Span&& o) {
 
 Span::~Span() {
 	if (begin > 0.0) {
+		end = g_network->now();
 		g_tracer->trace(*this);
 	}
 }

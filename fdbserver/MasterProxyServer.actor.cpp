@@ -269,7 +269,7 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 				}
 			}
 			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
-			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
+			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, tagCounts,
 			                       *transactionTagCommitCostEst, detailed)));
 			transactionTagCounter->clear();
 			transactionTagCommitCostEst->clear();
@@ -468,7 +468,7 @@ struct ProxyCommitData {
 		return tags;
 	}
 
-	const bool needsCacheTag(KeyRangeRef range) {
+	bool needsCacheTag(KeyRangeRef range) {
 		auto ranges = cacheInfo.intersectingRanges(range);
 		for(auto r : ranges) {
 			if(r.value()) {
@@ -613,7 +613,7 @@ struct ResolutionRequestBuilder {
 				resolversUsed.push_back(r);
 				outTr[r]->report_conflicting_keys = trIn.report_conflicting_keys;
 			}
-		transactionResolverMap.push_back(std::move(resolversUsed));
+		transactionResolverMap.emplace_back(std::move(resolversUsed));
 	}
 };
 
@@ -674,7 +674,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
 						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
-						batch = std::vector<CommitTransactionRequest>();
+						batch.clear();
 						batchBytes = 0;
 					}
 
@@ -812,7 +812,7 @@ ACTOR Future<Void> commitBatch(
 	int currentBatchMemBytesCount)
 {
 	//WARNING: this code is run at a high priority (until the first delay(0)), so it needs to do as little work as possible
-	state std::vector<CommitTransactionRequest> trs(std::move(*(const_cast<std::vector<CommitTransactionRequest>*>(pTrs))));
+	state std::vector<CommitTransactionRequest> trs(std::move(*pTrs));
 	state int64_t localBatchNumber = ++self->localCommitBatchesStarted;
 	state LogPushData toCommit(self->logSystem);
 	state double t1 = now();
@@ -1636,7 +1636,8 @@ ACTOR static Future<Void> transactionStarter(
 			else
 				batchPriTransactionsStarted[req.flags & 1] += tc;
 
-			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
+			start[req.flags & 1].emplace_back(std::move(req));
+			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
 		}
@@ -2206,7 +2207,7 @@ ACTOR Future<Void> masterProxyServerCore(
 									keyInfoData.emplace_back(MapPair<Key,ServerCacheInfo>(k, info), 1);
 								}
 							} else {
-								mutations.push_back(mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
+								mutations.emplace_back(mutations.arena(), MutationRef::SetValue, kv.key, kv.value);
 							}
 						}
 
