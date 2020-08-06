@@ -114,7 +114,8 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreLoaderError", self->id())
+			TraceEvent(e.code() == error_code_broken_promise ? SevError : SevWarnAlways, "FastRestoreLoaderError",
+			           self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
 			actors.clear(false);
@@ -389,8 +390,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	// Send sampled mutations back to controller:  batchData->sampleMutations[req.param]
 	std::vector<Future<RestoreCommonReply>> fSendSamples;
 	SampledMutationsVec& samples = batchData->sampleMutations[req.param];
-	SampledMutationsVec sampleBatch =
-	    SampledMutationsVec(); // sampleBatch is a Standalone pointer to the created object
+	SampledMutationsVec sampleBatch = SampledMutationsVec(); // sampleBatch: Standalone pointer to the created object
 	double sampleBatchSize = 0;
 	for (int i = 0; i < samples.size(); ++i) {
 		sampleBatchSize += samples[i].totalSize();
@@ -407,7 +407,18 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    RestoreSamplesRequest(deterministicRandom()->randomUniqueID(), req.batchIndex, sampleBatch)));
 		sampleBatchSize = 0;
 	}
-	wait(waitForAll(fSendSamples));
+
+	try {
+		state int samplesMessages = fSendSamples.size();
+		wait(waitForAll(fSendSamples));
+	} catch (Error& e) { // In case ci.samples throws broken_promise due to unstable network
+		if (e.code() == error_code_broken_promise) {
+			TraceEvent(SevWarnAlways, "FastRestoreLoaderPhaseLoadFileSendSamples")
+			    .detail("SamplesMessages", samplesMessages);
+		} else {
+			TraceEvent(SevError, "FastRestoreLoaderPhaseLoadFileSendSamplesUnexpectedError").error(e, true);
+		}
+	}
 
 	// Ack restore controller the param is processed
 	req.reply.send(RestoreLoadFileReply(req.param, isDuplicated));
