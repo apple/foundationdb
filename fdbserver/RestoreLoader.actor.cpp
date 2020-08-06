@@ -26,6 +26,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/StorageMetrics.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -267,11 +268,12 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			    .detail("ParsedMutation", mutation.toString());
 			it->second.push_back_deep(it->second.arena(), mutation);
 			cc->loadedLogBytes += mutation.totalSize();
-			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
-			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
-				cc->sampledLogBytes += mutation.totalSize();
+			// Sampling data similar to SS sample kvs
+			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(mutation.param1, mutation.param2));
+			if (sampleInfo.inSample) {
+				cc->sampledLogBytes += sampleInfo.sampledSize;
 				samplesIter->second.push_back_deep(samplesIter->second.arena(),
-				                                   SampledMutation(mutation.param1, mutation.totalSize()));
+				                                   SampledMutation(mutation.param1, sampleInfo.sampledSize));
 			}
 		}
 
@@ -854,10 +856,11 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 			ASSERT(sub < std::numeric_limits<int32_t>::max()); // range file mutation uses int32_max as subversion
 			it.first->second.push_back_deep(it.first->second.arena(), mutation);
 
-			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
-			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
-				cc->sampledLogBytes += mutation.totalSize();
-				samples.push_back_deep(samples.arena(), SampledMutation(mutation.param1, mutation.totalSize()));
+			// Sampling data similar to how SS sample bytes
+			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(mutation.param1, mutation.param2));
+			if (sampleInfo.inSample) {
+				cc->sampledLogBytes += sampleInfo.sampledSize;
+				samples.push_back_deep(samples.arena(), SampledMutation(mutation.param1, sampleInfo.sampledSize));
 			}
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
 			ASSERT_WE_THINK(vLen >= 0 && vLen < val.size());
@@ -954,9 +957,10 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 
 		it.first->second.push_back_deep(it.first->second.arena(), m);
 		// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
-		if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
-			cc->sampledRangeBytes += m.totalSize();
-			sampleMutations.push_back_deep(sampleMutations.arena(), SampledMutation(m.param1, m.totalSize()));
+		ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(m.param1, m.param2));
+		if (sampleInfo.inSample) {
+			cc->sampledRangeBytes += sampleInfo.sampledSize;
+			sampleMutations.push_back_deep(sampleMutations.arena(), SampledMutation(m.param1, sampleInfo.sampledSize));
 		}
 	}
 
