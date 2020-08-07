@@ -1501,7 +1501,8 @@ namespace SummarizeTest
 
         private static int VersionInfo()
         {
-            Console.WriteLine("Version:         1.01");
+            Console.WriteLine("Version:         1.02");
+
             Console.WriteLine("FDB Project Ver: " + "${CMAKE_PROJECT_VERSION}");
             Console.WriteLine("FDB Version:     " + "${CMAKE_PROJECT_VERSION_MAJOR}" + "." + "${CMAKE_PROJECT_VERSION_MINOR}");
             Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
