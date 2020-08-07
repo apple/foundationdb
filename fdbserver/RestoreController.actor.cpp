@@ -81,12 +81,8 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 			    .detail("SampleID", req.id)
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("Samples", req.samples.size());
-			if (req.batchIndex > self->batch.size()) {
-				TraceEvent(SevError, "FastRestoreControllerSampleBackupsInvalidBatchIndex")
-				    .detail("BatchIndex", req.batchIndex)
-				    .detail("InitializedBatches", self->batch.size());
-				continue;
-			}
+			ASSERT(req.batchIndex < self->batch.size());
+
 			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
 			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
 				req.reply.send(RestoreCommonReply(req.id));
