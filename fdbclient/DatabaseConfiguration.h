@@ -218,13 +218,7 @@ struct DatabaseConfiguration {
 		}
 	}
 
-	void fromKeyValues( Standalone<VectorRef<KeyValueRef>> rawConfig ) {
-		resetInternal();
-		this->rawConfiguration = rawConfig;
-		for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
-			setInternal(c->key, c->value);
-		setDefaultReplicationPolicy();
-	}
+	void fromKeyValues(Standalone<VectorRef<KeyValueRef>> rawConfig);
 
 private:
 	Optional< std::map<std::string, std::string> > mutableConfiguration;  // If present, rawConfiguration is not valid
@@ -236,6 +230,8 @@ private:
 	bool setInternal( KeyRef key, ValueRef value );
 	void resetInternal();
 	void setDefaultReplicationPolicy();
+
+	bool isOverridden(const std::string& key) const;
 };
 
 #endif

@@ -258,7 +258,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			if(!noPolicies)  result["log_replication_policy"] = tLogPolicy->info();
 		}
 
-		if ( tLogVersion > TLogVersion::DEFAULT ) {
+		if (tLogVersion > TLogVersion::DEFAULT || isOverridden("log_version")) {
 			result["log_version"] = (int)tLogVersion;
 		}
 
@@ -298,31 +298,31 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["regions"] = getRegionJSON();
 		}
 
-		if( desiredTLogCount != -1 ) {
+		if (desiredTLogCount != -1 || isOverridden("logs")) {
 			result["logs"] = desiredTLogCount;
 		}
-		if( masterProxyCount != -1 ) {
+		if (masterProxyCount != -1 || isOverridden("proxies")) {
 			result["proxies"] = masterProxyCount;
 		}
-		if( resolverCount != -1 ) {
+		if (resolverCount != -1 || isOverridden("resolvers")) {
 			result["resolvers"] = resolverCount;
 		}
-		if( desiredLogRouterCount != -1 ) {
+		if (desiredLogRouterCount != -1 || isOverridden("log_routers")) {
 			result["log_routers"] = desiredLogRouterCount;
 		}
-		if( remoteDesiredTLogCount != -1 ) {
+		if (remoteDesiredTLogCount != -1 || isOverridden("remote_logs")) {
 			result["remote_logs"] = remoteDesiredTLogCount;
 		}
-		if( repopulateRegionAntiQuorum != 0 ) {
+		if (repopulateRegionAntiQuorum != 0 || isOverridden("repopulate_anti_quorum")) {
 			result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
 		}
-		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
+		if (autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES || isOverridden("auto_proxies")) {
 			result["auto_proxies"] = autoMasterProxyCount;
 		}
-		if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS) {
+		if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS || isOverridden("auto_resolvers")) {
 			result["auto_resolvers"] = autoResolverCount;
 		}
-		if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS) {
+		if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS || isOverridden("auto_logs")) {
 			result["auto_logs"] = autoDesiredTLogCount;
 		}
 
@@ -539,4 +539,36 @@ void DatabaseConfiguration::makeConfigurationImmutable() {
 	for(auto r = mc.begin(); r != mc.end(); ++r)
 		rawConfiguration[i++] = KeyValueRef( rawConfiguration.arena(), KeyValueRef( r->first, r->second ) );
 	mutableConfiguration = Optional<std::map<std::string,std::string>>();
+}
+
+void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> rawConfig) {
+	resetInternal();
+	this->rawConfiguration = rawConfig;
+	for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c) {
+		setInternal(c->key, c->value);
+	}
+	setDefaultReplicationPolicy();
+}
+
+bool DatabaseConfiguration::isOverridden(const std::string& key) const {
+	for (auto iter = rawConfiguration.begin(); iter != rawConfiguration.end(); ++iter) {
+		auto confKey = iter->key.removePrefix(configKeysPrefix).toString();
+		if (key == confKey) {
+			return true;
+		}
+	}
+
+	if (!mutableConfiguration.present()) {
+		return false;
+	}
+
+	for (auto iter = mutableConfiguration.get().begin(); iter != mutableConfiguration.get().end(); ++iter) {
+		UNSTOPPABLE_ASSERT(iter->first.size() >= configKeysPrefix.size() &&
+		                   iter->first.substr(0, configKeysPrefix.size()) == configKeysPrefix.toString());
+		auto confKey = iter->first.substr(configKeysPrefix.size());
+		if (key == confKey) {
+			return true;
+		}
+	}
+	return false;
 }
