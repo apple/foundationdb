@@ -1,5 +1,7 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include <rocksdb/iostats_context.h>
+#include <rocksdb/perf_context.h>
 #include <rocksdb/db.h>
 #include <rocksdb/options.h>
 #include "flow/flow.h"
@@ -130,7 +132,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		explicit Reader(DB& db) : db(db) {}
 
-		void init() override {}
+		void init() override { rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex); }
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
@@ -203,6 +205,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(ReadRangeAction& a) {
 			auto now = timer_monotonic();
+			rocksdb::get_perf_context()->Reset();
+			rocksdb::get_iostats_context()->Reset();
 			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions));
 			Standalone<RangeResultRef> result;
 			int accumulatedBytes = 0;
@@ -240,14 +244,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			a.result.send(result);
 			auto elapsed = timer_monotonic() - now;
-			if (elapsed > 0.1) {
+			if (elapsed > 0.5) {
+				auto time = std::to_string(elapsed);
 				TraceEvent(SevError, "RocksDBSlowRead")
-				    .detail("Time", std::to_string(elapsed))
+				    .detail("Time", time)
 				    .detail("Method", "ReadRange")
 				    .detail("Start", a.keys.begin.printable())
 				    .detail("End", a.keys.end.printable())
 				    .detail("RowLimit", a.rowLimit)
 				    .detail("ByteLimit", a.byteLimit);
+				std::cout << "Time: " << time << "\n";
+				std::cout << "Perf: " << rocksdb::get_perf_context()->ToString() << "\n";
+				std::cout << "IO: " << rocksdb::get_iostats_context()->ToString() << "\n";
 			}
 		}
 	};
