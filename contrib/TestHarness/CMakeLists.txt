@@ -1,5 +1,5 @@
 set(SRCS
-  Program.cs
+	${CMAKE_CURRENT_BINARY_DIR}/Program.cs
   Properties/AssemblyInfo.cs)
 
 set(TEST_HARNESS_REFERENCES

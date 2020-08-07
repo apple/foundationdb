@@ -1511,9 +1511,9 @@ namespace SummarizeTest
             Console.WriteLine("  TestHarness extract-errors [summary-file] [error-summary-file]");
             Console.WriteLine("  TestHarness joshua-run <useValgrind> <maxTries>");
             Console.WriteLine("Version:         1.01");
-            Console.WriteLine("FDB Project Ver: " + ConfigurationManager.AppSettings.Get("PROJECT_VERSION"));
-            Console.WriteLine("FDB Version:     " + ConfigurationManager.AppSettings.Get("PROJECT_VERSION_MAJOR") + "." + ConfigurationManager.AppSettings.Get("PROJECT_VERSION_MINOR"));
-            Console.WriteLine("Source Version:  " + ConfigurationManager.AppSettings.Get("GIT_VERSION"));
+            Console.WriteLine("FDB Project Ver: " + "${CMAKE_PROJECT_VERSION}");
+            Console.WriteLine("FDB Version:     " + "${CMAKE_PROJECT_VERSION_MAJOR}" + "." + "${CMAKE_PROJECT_VERSION_MINOR}");
+            Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
             return 1;
         }
     }
