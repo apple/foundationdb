@@ -89,6 +89,7 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 			}
 			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
 			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
+				req.reply.send(RestoreCommonReply(req.id));
 				continue;
 			}
 			batch->sampleMsgs.insert(req.id);

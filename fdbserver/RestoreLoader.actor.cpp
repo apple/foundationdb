@@ -393,7 +393,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	std::vector<Future<RestoreCommonReply>> fSendSamples;
 	SampledMutationsVec& samples = batchData->sampleMutations[req.param];
 	SampledMutationsVec sampleBatch = SampledMutationsVec(); // sampleBatch: Standalone pointer to the created object
-	double sampleBatchSize = 0;
+	long sampleBatchSize = 0;
 	for (int i = 0; i < samples.size(); ++i) {
 		sampleBatchSize += samples[i].totalSize();
 		sampleBatch.push_back_deep(sampleBatch.arena(), samples[i]); // TODO: may not need deep copy
