@@ -3,11 +3,11 @@ set(SRCS
   Properties/AssemblyInfo.cs)
 
 set(TEST_HARNESS_REFERENCES
-  "-r:System,System.Core,System.Configuration,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml,${TraceLogHelperDll}")
+  "-r:System,System.Core,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml,${TraceLogHelperDll}")
 
 set(out_file ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/App.config.cmake ${CMAKE_CURRENT_BINARY_DIR}/App.config)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/AssemblyInfo.cs.cmake ${CMAKE_CURRENT_BINARY_DIR}/AssemblyInfo.cs)
 
 add_custom_command(OUTPUT ${out_file}
   COMMAND ${MCS_EXECUTABLE} ARGS ${TEST_HARNESS_REFERENCES} ${SRCS} "-target:exe" "-out:${out_file}"
