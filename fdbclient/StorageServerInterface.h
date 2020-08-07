@@ -466,7 +466,7 @@ struct ReadHotSubRangeRequest {
 };
 
 struct SplitRangeReply {
-	constexpr static FileIdentifier file_identifier = 21813134;
+	constexpr static FileIdentifier file_identifier = 11813134;
 	// If the given range can be divided, contains the split points.
 	// If the given range cannot be divided(for exmaple its total size is smaller than the chunk size), this would be
 	// empty
@@ -478,7 +478,7 @@ struct SplitRangeReply {
 	}
 };
 struct SplitRangeRequest {
-	constexpr static FileIdentifier file_identifier = 30725174;
+	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
 	KeyRangeRef keys;
 	int64_t chunkSize;

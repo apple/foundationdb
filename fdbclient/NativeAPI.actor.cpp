@@ -4350,10 +4350,11 @@ Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRang
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize) {
+	state Span span("NAPI:GetRangeSplitPoints"_loc);
 	loop {
 		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 		    wait(getKeyRangeLocations(cx, keys, 100, false, &StorageServerInterface::getRangeSplitPoints,
-		                              TransactionInfo(TaskPriority::DataDistribution)));
+		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
 			state int nLocs = locations.size();
 			state vector<Future<SplitRangeReply>> fReplies(nLocs);
