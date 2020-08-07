@@ -5014,6 +5014,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 						auto& metricVec = result.get();
 						if(metricVec.empty()) rep.midShardSize = 0;
 						else {
+							// TraceEvent("DDMetricsReply").detail("Size", metricVec.size()).detail("Value", metricVec[0].shardBytes);
 							std::vector<int64_t> shardSizes(metricVec.size());
 							for (int i = 0; i < shardSizes.size(); ++ i) shardSizes[i] = metricVec[i].shardBytes;
 							std::nth_element(shardSizes.begin(), shardSizes.begin() + shardSizes.size()/2, shardSizes.end());

@@ -339,8 +339,8 @@ public:
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
 	Smoother smoothMidShardSize;
-	int midShardSizeLastUpdated;
 	Optional<Future<Void>> midShardSizeUpdater;
+	void startShardSizeUpdater();
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 

@@ -692,6 +692,41 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 	}
 }
 
+ACTOR Future<Void> monitorDDMetricsChanges(DatabaseContext *cx) {
+	loop {
+		wait(delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS));
+		try {
+			choose {
+				when(wait(cx->onMasterProxiesChanged())) {}
+				when(GetDDMetricsReply rep = wait(basicLoadBalance(
+				         cx->getMasterProxies(false),&MasterProxyInterface::getDDMetrics,
+				         GetDDMetricsRequest(normalKeys,CLIENT_KNOBS->TOO_MANY, true)))) {
+
+					// TraceEvent("MonitorDDMetricsEnd").detail("MidShardSize", rep.midShardSize.get());
+
+					ASSERT(rep.midShardSize.present());
+					double midShardSize = rep.midShardSize.get();
+					if(midShardSize > 0) {
+						cx->smoothMidShardSize.setTotal(midShardSize);
+					}
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "UnableToUpdateDDMetrics").error(e);
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+		}
+		if(deterministicRandom()->random01() < 0.01)
+			TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothMidShardSize.smoothTotal());
+	};
+
+}
+
+void DatabaseContext::startShardSizeUpdater() {
+	this->midShardSizeUpdater = monitorDDMetricsChanges(this);
+}
+
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
@@ -874,7 +909,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), midShardSizeLastUpdated(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1019,6 +1054,9 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
 	monitorMasterProxiesInfoChange.cancel();
+	if(midShardSizeUpdater.present())
+		midShardSizeUpdater.get().cancel();
+	clientStatusUpdater.actor.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -3305,7 +3343,7 @@ void Transaction::setupWatches() {
 ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
                                                                          CommitTransactionRef* transaction) {
 	if(!self->getDatabase()->midShardSizeUpdater.present()){ // lazy start: only client who needs tag pay this overload
-		self->getDatabase()->midShardSizeUpdater = monitorDDMetricsChanges(self->getDatabase());
+		self->getDatabase()->startShardSizeUpdater();
 	}
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
@@ -3377,12 +3415,13 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		if (!req.tagSet.present()) {
-			wait(store(req.transaction.read_snapshot, readVersion));
-		} else {
+		if(req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE){
 			wait(store(req.transaction.read_snapshot, readVersion) &&
 			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
 			if (!req.commitCostEstimation.present()) req.tagSet.reset();
+		} else {
+			req.tagSet.reset();
+			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
 		startTime = now();
@@ -4379,41 +4418,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
-}
-
-ACTOR Future<Void> monitorDDMetricsChanges(Database cx) {
-	state bool isFirstRep = true;
-	state Future<Void> nextTime = Void();
-	state Future<ErrorOr<GetDDMetricsReply>> nextReply = Never();
-	loop choose {
-		when(wait(cx->onMasterProxiesChanged())) { nextTime=Void(); }
-		when(wait(nextTime)) {
-			nextReply = errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
-			                             GetDDMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
-			nextTime = Never();
-		}
-		when(ErrorOr<GetDDMetricsReply> rep = wait(nextReply)) {
-			nextReply = Never();
-			if(rep.isError()) {
-				TraceEvent(SevWarn,"NAPIMonitorDDMetricsChangeError").error(rep.getError());
-				nextTime = Never();
-			}
-			else {
-				ASSERT(rep.get().midShardSize.present());
-				double midShardSize = rep.get().midShardSize.get();
-				if(midShardSize > 0) {
-					if (isFirstRep) {
-						cx->smoothMidShardSize.reset(midShardSize);
-						isFirstRep = false;
-					} else cx->smoothMidShardSize.setTotal(midShardSize);
-					cx->midShardSizeLastUpdated = now();
-				}
-		        nextTime = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
-		        if(deterministicRandom()->random01() < 0.01)
-					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothMidShardSize.smoothTotal());
-			}
-		}
-	};
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRange const& keys) {
