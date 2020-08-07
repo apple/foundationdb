@@ -296,7 +296,28 @@ public:
 		return results;
 	}
 
-	std::vector<WorkerDetails> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t required, int32_t desired, Reference<IReplicationPolicy> const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(), std::vector<UID> exclusionWorkerIds = {}) {
+	std::vector<WorkerDetails> getWorkersForTlogs(DatabaseConfiguration const& conf, int32_t required, int32_t desired,
+	                                              Reference<IReplicationPolicy> const& policy,
+	                                              std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                              bool checkStable = false,
+	                                              std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
+	                                              std::vector<UID> exclusionWorkerIds = {}) {
+		//		TraceEvent("TL1").detail("Conf", conf.toString())
+		//		    .detail("L1", policy->info())
+		//		    .detail("L2", id_used.size())
+		//		    .detail("L3", checkStable)
+		//			.detail("L4", dcIds.size())
+		//		    .detail("L5", exclusionWorkerIds.size());
+		//		for (auto& pair : id_used) {
+		//			TraceEvent("IdUsed")
+		//			    .detail("Key", pair.first.present() ? pair.first.get().toString() : "absent")
+		//			    .detail("Value", pair.second);
+		//		}
+		//		for (auto& pair : dcIds) {
+		//			TraceEvent("DcIds")
+		//				.detail("Key", pair.present() ? pair.get().toString() : "absent");
+		//		}
+
 		std::map<std::pair<ProcessClass::Fitness,bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		std::vector<LocalityData> unavailableLocals;
@@ -306,17 +327,39 @@ public:
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		logServerMap = (LocalityMap<WorkerDetails>*) logServerSet.getPtr();
+		//		std::unordered_map<std::string, int> pcs;
 		for( auto& it : id_worker ) {
+			//			pcs[it.second.details.processClass.toString()]++;
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), it.second.details.interf.id()) == exclusionWorkerIds.end()) {
 				auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::TLog);
 				if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()) && fitness != ProcessClass::NeverAssign && (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
 					fitness_workers[std::make_pair(fitness, it.second.details.degraded)].push_back(it.second.details);
+					//					TraceEvent("TL4")
+					//						.detail("L5", it.second.details.processClass.toString())
+					//						.detail("L6", it.second.details.interf.locality.toString());
 				}
 				else {
+					//					TraceEvent("TL3")
+					//						.detail("L1", workerAvailable(it.second, checkStable))
+					//						.detail("L2", !conf.isExcludedServer(it.second.details.interf.addresses()))
+					//						.detail("L3", fitness != ProcessClass::NeverAssign)
+					//						.detail("L4", (!dcIds.size() ||
+					//dcIds.count(it.second.details.interf.locality.dcId()))) 						.detail("L5",
+					//it.second.details.processClass.toString()) 						.detail("L6",
+					//it.second.details.interf.locality.toString());
 					unavailableLocals.push_back(it.second.details.interf.locality);
 				}
 			}
 		}
+		//		std::stringstream ss;
+		//		for (auto& p : pcs) {
+		//			ss << p.first << ": " << p.second << ";";
+		//		}
+		//		TraceEvent("TL2")
+		//			.detail("L1", fitness_workers.size())
+		//			.detail("L2", unavailableLocals.size())
+		//			.detail("L3", id_worker.size())
+		//			.detail("L4", ss.str());
 
 		results.reserve(results.size() + id_worker.size());
 		for (int fitness = ProcessClass::BestFit; fitness != ProcessClass::NeverAssign && !bCompleted; fitness++)
@@ -536,59 +579,6 @@ public:
 
 		return results;
 	}
-
-	// vector<WorkerDetails> getWorkersForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId,
-	// ProcessClass::ClusterRole role, int amount, DatabaseConfiguration const& conf, std::map<
-	// Optional<Standalone<StringRef>>, int>& id_used, Optional<std::vector<WorkerFitnessInfo>> minWorkers =
-	// Optional<std::vector<WorkerFitnessInfo>>(), bool checkStable = false ) {
-	// 	std::map<std::pair<ProcessClass::Fitness,int>, std::pair<vector<WorkerDetails>,vector<WorkerDetails>>>
-	// fitness_workers; 	vector<WorkerDetails> results; 	if(minWorkers.present()) { 		for (const auto& worker :
-	// minWorkers.get()) { 			results.push_back(worker.worker);
-	// 		}
-	// 	}
-	// 	if (amount <= results.size()) {
-	// 		return results;
-	// 	}
-
-	// 	for( auto& it : id_worker ) {
-	// 		auto fitness = it.second.details.processClass.machineClassFitness( role );
-	// 		if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses())
-	// 		    && it.second.details.interf.locality.dcId() == dcId ) {
-	// 			bool skip = false;
-	// 			if (minWorkers.present()) {
-	// 				for (const auto& minWorker : minWorkers.get()) {
-	// 					if (it.second.details.interf.id() == minWorker.worker.interf.id() ||
-	// 					    !( fitness < minWorker.fitness || (fitness == minWorker.fitness && id_used[it.first] <=
-	// minWorker.used
-	// )
-	// )) { 						skip = true; 						break;
-	// 					}
-	// 				}
-	// 			}
-	// 			if (skip) continue;
-	// 			if (isLongLivedStateless(it.first)) {
-	// 				fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
-	// 			} else {
-	// 				fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].first.push_back(it.second.details);
-	// 			}
-	// 		}
-	// 	}
-
-	// 	for( auto& it : fitness_workers ) {
-	// 		for( int j=0; j < 2; j++ ) {
-	// 			auto& w = j==0 ? it.second.first : it.second.second;
-	// 			deterministicRandom()->randomShuffle(w);
-	// 			for( int i=0; i < w.size(); i++ ) {
-	// 				results.push_back(w[i]);
-	// 				id_used[w[i].interf.locality.processId()]++;
-	// 				if( results.size() == amount )
-	// 					return results;
-	// 			}
-	// 		}
-	// 	}
-
-	// 	return results;
-	// }
 
 	struct RoleFitness {
 		ProcessClass::Fitness bestFit;
@@ -847,6 +837,7 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
+		TraceEvent("RLoc1").detail("Regions", req.configuration.regions.size());
 		if(req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if(regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
@@ -1867,6 +1858,9 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			}
 			when( wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
+				TraceEvent("RemoveWorker")
+				    .detail("Process", worker.locality.processId())
+				    .detail("PC", failedWorkerInfo.details.processClass.toString());
 
 				if (!failedWorkerInfo.reply.isSet()) {
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo) );
@@ -1938,7 +1932,18 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 	TEST(true); //ClusterController RecruitTLogsRequest
 	loop {
 		try {
+			TraceEvent("RecruitReq").detail("Config", req.configuration.toString());
 			auto rep = self->findWorkersForConfiguration( req );
+			TraceEvent("RecruitRes")
+			    .detail("L1", rep.masterProxies.size())
+			    .detail("L2", rep.grvProxies.size())
+			    .detail("L3", rep.resolvers.size())
+			    .detail("L4", rep.storageServers.size())
+			    .detail("L6", rep.backupWorkers.size())
+			    .detail("L7", rep.oldLogRouters.size())
+			    .detail("L8", rep.satelliteTLogs.size())
+			    .detail("L9", rep.satelliteFallback)
+			    .detail("L10", rep.dcId.present() ? rep.dcId.get().toString() : "absent");
 			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
@@ -2141,6 +2146,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded, req.issues );
+		TraceEvent("AddingWorker").detail("WorkerId", w.locality.processId()).detail("PC", newProcessClass.toString());
 		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}

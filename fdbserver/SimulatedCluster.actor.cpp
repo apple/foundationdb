@@ -19,6 +19,7 @@
  */
 
 #include <fstream>
+#include <ostream>
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -702,6 +703,9 @@ struct SimulationConfig {
 	int machine_count;  // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
+
+	friend std::ostream& operator<<(std::ostream& os, const SimulationConfig& config);
+
 private:
 	void generateNormalConfig(int minimumReplication, int minimumRegions);
 };
@@ -1013,11 +1017,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 	if(generateFearless && minimumReplication > 1) {
 		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
-		machine_count = 16;
+		machine_count = 17;
 	} else if(generateFearless) {
-		machine_count = 12;
+		machine_count = 13;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
-		machine_count = 9;
+		machine_count = 10;
 	} else {
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
 		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minZonesRequiredPerDatacenter()));
@@ -1045,6 +1049,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	}
+	std::stringstream ss;
+	ss << *this;
+	TraceEvent("SimGenerateConfig").detail("Config", ss.str());
+}
+std::ostream& operator<<(std::ostream& os, const SimulationConfig& config) {
+	os << "extraDB: " << config.extraDB << " datacenters: " << config.datacenters
+	   << " machine_count: " << config.machine_count << " processes_per_machine: " << config.processes_per_machine
+	   << " coordinators: " << config.coordinators << " db: " << config.db.toString();
+	return os;
 }
 
 void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFolder, int* pTesterCount,
