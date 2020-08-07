@@ -7,7 +7,7 @@ set(TEST_HARNESS_REFERENCES
 
 set(out_file ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/AssemblyInfo.cs.cmake ${CMAKE_CURRENT_BINARY_DIR}/AssemblyInfo.cs)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Program.cs.cmake ${CMAKE_CURRENT_BINARY_DIR}/Program.cs)
 
 add_custom_command(OUTPUT ${out_file}
   COMMAND ${MCS_EXECUTABLE} ARGS ${TEST_HARNESS_REFERENCES} ${SRCS} "-target:exe" "-out:${out_file}"
