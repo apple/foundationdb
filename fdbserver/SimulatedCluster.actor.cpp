@@ -1017,11 +1017,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 	if(generateFearless && minimumReplication > 1) {
 		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
-		machine_count = 17;
+		machine_count = 16;
 	} else if(generateFearless) {
-		machine_count = 13;
+		machine_count = 12;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
-		machine_count = 10;
+		machine_count = 9;
 	} else {
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
 		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 0) ? datacenters : 1) * std::max(3, db.minZonesRequiredPerDatacenter()));

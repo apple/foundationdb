@@ -67,12 +67,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		switch( _class ) {
 		case ProcessClass::ProxyClass:
 			return ProcessClass::BestFit;
-		case ProcessClass::GrvProxyClass:
-			return ProcessClass::GoodFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::GrvProxyClass:
+			return ProcessClass::GoodFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
@@ -88,12 +88,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		switch (_class) {
 		case ProcessClass::GrvProxyClass:
 			return ProcessClass::BestFit;
-		case ProcessClass::ProxyClass:
-			return ProcessClass::GoodFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::ProxyClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
