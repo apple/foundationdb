@@ -29,6 +29,7 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Xml;
+using System.Configuration;
 
 namespace SummarizeTest
 {
@@ -152,6 +153,10 @@ namespace SummarizeTest
                         AppendXmlMessageToSummary("summary.xml", xout, true);
                         throw;
                     }
+                }
+                else if (args[0] == "version")
+                {
+                    return UsageMessage();
                 }
 
                 return UsageMessage();
@@ -1505,7 +1510,10 @@ namespace SummarizeTest
             Console.WriteLine("  TestHarness remote [queue folder] [root foundation folder] [duration in hours] [amount of tests] [all/fast/<test_path>] [scope]");
             Console.WriteLine("  TestHarness extract-errors [summary-file] [error-summary-file]");
             Console.WriteLine("  TestHarness joshua-run <useValgrind> <maxTries>");
-            Console.WriteLine("Version:  1.01");
+            Console.WriteLine("Version:         1.01");
+            Console.WriteLine("FDB Project Ver: " + ConfigurationManager.AppSettings.Get("PROJECT_VERSION"));
+            Console.WriteLine("FDB Version:     " + ConfigurationManager.AppSettings.Get("PROJECT_VERSION_MAJOR") + "." + ConfigurationManager.AppSettings.Get("PROJECT_VERSION_MINOR"));
+            Console.WriteLine("Source Version:  " + ConfigurationManager.AppSettings.Get("GIT_VERSION"));
             return 1;
         }
     }
