@@ -29,7 +29,6 @@ using System.Diagnostics;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Xml;
-using System.Configuration;
 
 namespace SummarizeTest
 {
