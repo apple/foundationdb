@@ -156,7 +156,7 @@ namespace SummarizeTest
                 }
                 else if (args[0] == "version")
                 {
-                    return UsageMessage();
+                    return VersionInfo();
                 }
 
                 return UsageMessage();
@@ -1500,6 +1500,15 @@ namespace SummarizeTest
             }
         }
 
+        private static int VersionInfo()
+        {
+            Console.WriteLine("Version:         1.01");
+            Console.WriteLine("FDB Project Ver: " + "${CMAKE_PROJECT_VERSION}");
+            Console.WriteLine("FDB Version:     " + "${CMAKE_PROJECT_VERSION_MAJOR}" + "." + "${CMAKE_PROJECT_VERSION_MINOR}");
+            Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
+            return 1;
+        }
+
         private static int UsageMessage()
         {
             Console.WriteLine("Usage:");
@@ -1510,10 +1519,7 @@ namespace SummarizeTest
             Console.WriteLine("  TestHarness remote [queue folder] [root foundation folder] [duration in hours] [amount of tests] [all/fast/<test_path>] [scope]");
             Console.WriteLine("  TestHarness extract-errors [summary-file] [error-summary-file]");
             Console.WriteLine("  TestHarness joshua-run <useValgrind> <maxTries>");
-            Console.WriteLine("Version:         1.01");
-            Console.WriteLine("FDB Project Ver: " + "${CMAKE_PROJECT_VERSION}");
-            Console.WriteLine("FDB Version:     " + "${CMAKE_PROJECT_VERSION_MAJOR}" + "." + "${CMAKE_PROJECT_VERSION_MINOR}");
-            Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
+            VersionInfo();
             return 1;
         }
     }
