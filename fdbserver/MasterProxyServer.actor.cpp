@@ -1918,13 +1918,9 @@ ACTOR static Future<Void> debugReadTxnStateStoreServer(RequestStream<DebugReadTx
 	wait(self->validState.getFuture());
 	loop {
 		DebugReadTxnStateStoreRequest req = waitNext(requests.getFuture());
-		// Since applyMetadataMutations doesn't yield, we won't be reading
-		// mid-transaction. We might be reading between two transactions in a
-		// batch, so while this read may not be occurring at an actual read
-		// version, it should still be serializable.
 		auto result = self->txnStateStore->readRange(req.getKeys(), req.limit).get();
 		ASSERT(!result.more);
-		req.reply.send(DebugReadTxnStateStoreReply(result));
+		req.reply.send(DebugReadTxnStateStoreReply(result, self->version));
 		TEST(true); // Read from txnStateStore for debugging
 	}
 }

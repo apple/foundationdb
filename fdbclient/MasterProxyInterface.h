@@ -438,13 +438,15 @@ struct GetDDMetricsRequest {
 struct DebugReadTxnStateStoreReply {
 	constexpr static FileIdentifier file_identifier = 3220576;
 	Standalone<RangeResultRef> kvs;
+	Version version;
 
 	explicit DebugReadTxnStateStoreReply() = default;
-	explicit DebugReadTxnStateStoreReply(const Standalone<RangeResultRef>& kvs) : kvs(kvs) {}
+	explicit DebugReadTxnStateStoreReply(const Standalone<RangeResultRef>& kvs, Version version)
+	  : kvs(kvs), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, kvs);
+		serializer(ar, kvs, version);
 	}
 };
 
