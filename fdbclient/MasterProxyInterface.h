@@ -56,6 +56,7 @@ struct MasterProxyInterface {
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
 	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
+	RequestStream<struct DebugReadTxnStateStoreRequest> debugReadTxnStateStore;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -77,6 +78,8 @@ struct MasterProxyInterface {
 			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
 			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
 			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(10) );
+			debugReadTxnStateStore =
+			    RequestStream<struct DebugReadTxnStateStoreRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 
@@ -93,6 +96,7 @@ struct MasterProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(debugReadTxnStateStore.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -429,6 +433,48 @@ struct GetDDMetricsRequest {
 	void serialize(Ar& ar) {
 		serializer(ar, keys, shardLimit, reply);
   }
+};
+
+struct DebugReadTxnStateStoreRequest {
+	constexpr static FileIdentifier file_identifier = 4663403;
+	ReplyPromise<struct DebugReadTxnStateStoreReply> reply;
+
+	const KeyRange& getKeys() {
+		validate();
+		return keys;
+	}
+
+	explicit DebugReadTxnStateStoreRequest() = default;
+	explicit DebugReadTxnStateStoreRequest(const KeyRange& keys) : keys(keys) { validate(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, reply);
+		if (Ar::isDeserializing) {
+			validate();
+		}
+	}
+
+private:
+	void validate() {
+		ASSERT(KeyRangeRef(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
+		                   LiteralStringRef("\xff/TESTONLYtxnStateStore0"))
+		           .contains(keys));
+	}
+	KeyRange keys; // Must start with \xff/TESTONLYtxnStateStore/
+};
+
+struct DebugReadTxnStateStoreReply {
+	constexpr static FileIdentifier file_identifier = 3220576;
+	Standalone<RangeResultRef> kvs;
+
+	explicit DebugReadTxnStateStoreReply() = default;
+	explicit DebugReadTxnStateStoreReply(const Standalone<RangeResultRef>& kvs) : kvs(kvs) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, kvs);
+	}
 };
 
 struct ProxySnapRequest

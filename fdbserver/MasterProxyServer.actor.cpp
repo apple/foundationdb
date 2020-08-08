@@ -1913,6 +1913,21 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 	}
 }
 
+ACTOR static Future<Void> debugReadTxnStateStoreServer(RequestStream<DebugReadTxnStateStoreRequest> requests,
+                                                       ProxyCommitData* self) {
+	wait(self->validState.getFuture());
+	loop {
+		DebugReadTxnStateStoreRequest req = waitNext(requests.getFuture());
+		// Since applyMetadataMutations doesn't yield, we won't be reading
+		// mid-transaction. We might be reading between two transactions in a
+		// batch, so while this read may not be occurring at an actual read
+		// version, it should still be serializable.
+		auto result = self->txnStateStore->readRange(req.getKeys()).get();
+		ASSERT(!result.more);
+		req.reply.send(DebugReadTxnStateStoreReply(result));
+	}
+}
+
 ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	loop {
 		wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
@@ -2154,6 +2169,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(ddMetricsRequestServer(proxy, db));
+	addActor.send(debugReadTxnStateStoreServer(proxy.debugReadTxnStateStore, &commitData));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

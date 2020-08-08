@@ -226,7 +226,8 @@ void DatabaseContext::validateVersion(Version version) {
 	if (version == 0) {
 		throw client_invalid_operation();
 	}
-	if (switchable && version < minAcceptableReadVersion) {
+	if (switchable && (version < minAcceptableReadVersion ||
+	                   (version == latestVersion && minAcceptableReadVersion == std::numeric_limits<Version>::max()))) {
 		TEST(true); // Attempted to read a version lower than any this client has seen from the current cluster
 		throw transaction_too_old();
 	}
@@ -2364,6 +2365,20 @@ void getRangeFinished(Database cx, Reference<TransactionLogInfo> trLogInfo, doub
 	}
 }
 
+ACTOR static Future<Standalone<RangeResultRef>> debugReadTxnStateStore(Database cx, KeyRange range, int limit) {
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(DebugReadTxnStateStoreReply rep = wait(basicLoadBalance(
+			         cx->getMasterProxies(false), &MasterProxyInterface::debugReadTxnStateStore,
+			         DebugReadTxnStateStoreRequest(range), TaskPriority::DefaultPromiseEndpoint, true))) {
+				rep.kvs.resize(rep.kvs.arena(), std::min(limit, rep.kvs.size()));
+				return rep.kvs;
+			}
+		}
+	}
+}
+
 ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
 	TransactionInfo info, TagSet tags )
@@ -2377,6 +2392,14 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	try {
 		state Version version = wait( fVersion );
 		cx->validateVersion(version);
+
+		if (version == latestVersion && begin.getKey().startsWith(LiteralStringRef("\xff/TESTONLYtxnStateStore/")) &&
+		    end.getKey().startsWith(LiteralStringRef("\xff/TESTONLYtxnStateStore/")) && begin.isFirstGreaterOrEqual() &&
+		    end.isFirstGreaterOrEqual() && !reverse) {
+			KeyRange range(KeyRangeRef(begin.getKey(), end.getKey()));
+			TEST(true); // Debug read from txnStateStore
+			return debugReadTxnStateStore(cx, range, limits.rows);
+		}
 
 		state double startTime = now();
 		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the version that the first one completed
