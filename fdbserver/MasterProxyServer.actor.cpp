@@ -1925,6 +1925,7 @@ ACTOR static Future<Void> debugReadTxnStateStoreServer(RequestStream<DebugReadTx
 		auto result = self->txnStateStore->readRange(req.getKeys()).get();
 		ASSERT(!result.more);
 		req.reply.send(DebugReadTxnStateStoreReply(result));
+		TEST(true); // Read from txnStateStore for debugging
 	}
 }
 

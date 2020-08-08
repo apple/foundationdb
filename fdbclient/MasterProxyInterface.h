@@ -435,11 +435,24 @@ struct GetDDMetricsRequest {
   }
 };
 
+struct DebugReadTxnStateStoreReply {
+	constexpr static FileIdentifier file_identifier = 3220576;
+	Standalone<RangeResultRef> kvs;
+
+	explicit DebugReadTxnStateStoreReply() = default;
+	explicit DebugReadTxnStateStoreReply(const Standalone<RangeResultRef>& kvs) : kvs(kvs) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, kvs);
+	}
+};
+
 struct DebugReadTxnStateStoreRequest {
 	constexpr static FileIdentifier file_identifier = 4663403;
-	ReplyPromise<struct DebugReadTxnStateStoreReply> reply;
+	ReplyPromise<DebugReadTxnStateStoreReply> reply;
 
-	const KeyRange& getKeys() {
+	const KeyRange& getKeys() const {
 		validate();
 		return keys;
 	}
@@ -456,25 +469,12 @@ struct DebugReadTxnStateStoreRequest {
 	}
 
 private:
-	void validate() {
+	void validate() const {
 		ASSERT(KeyRangeRef(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
 		                   LiteralStringRef("\xff/TESTONLYtxnStateStore0"))
 		           .contains(keys));
 	}
 	KeyRange keys; // Must start with \xff/TESTONLYtxnStateStore/
-};
-
-struct DebugReadTxnStateStoreReply {
-	constexpr static FileIdentifier file_identifier = 3220576;
-	Standalone<RangeResultRef> kvs;
-
-	explicit DebugReadTxnStateStoreReply() = default;
-	explicit DebugReadTxnStateStoreReply(const Standalone<RangeResultRef>& kvs) : kvs(kvs) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, kvs);
-	}
 };
 
 struct ProxySnapRequest

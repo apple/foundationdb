@@ -223,12 +223,16 @@ struct CycleWorkload : TestWorkload {
 			loop {
 				try {
 					state Version v = wait( tr.getReadVersion() );
-					if (BUGGIFY) {
-						// The exact version doesn't matter - the invariant should hold at any version. Also this let's
-						// us read from the txnStateStore directly for the \xff/TESTONLYtxnStateStore/ prefix
-						v = latestVersion;
+					state Standalone<RangeResultRef> data = wait(
+					    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
+					if (self->keyPrefix.startsWith("\xff/TESTONLYtxnStateStore/"_sr)) {
+						Standalone<RangeResultRef> data_ = wait(debugReadTxnStateStore(
+						    cx,
+						    KeyRangeRef(doubleToTestKey(0.0, self->keyPrefix), doubleToTestKey(1.0, self->keyPrefix)),
+						    self->nodeCount + 1));
+						ASSERT(data == data_);
 					}
-					Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
 					ok = self->cycleCheckData( data, v ) && ok;
 					break;
 				} catch (Error& e) {
