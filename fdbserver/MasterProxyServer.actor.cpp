@@ -1922,7 +1922,7 @@ ACTOR static Future<Void> debugReadTxnStateStoreServer(RequestStream<DebugReadTx
 		// mid-transaction. We might be reading between two transactions in a
 		// batch, so while this read may not be occurring at an actual read
 		// version, it should still be serializable.
-		auto result = self->txnStateStore->readRange(req.getKeys()).get();
+		auto result = self->txnStateStore->readRange(req.getKeys(), req.limit).get();
 		ASSERT(!result.more);
 		req.reply.send(DebugReadTxnStateStoreReply(result));
 		TEST(true); // Read from txnStateStore for debugging

@@ -2370,10 +2370,8 @@ ACTOR Future<Standalone<RangeResultRef>> debugReadTxnStateStore(Database cx, Key
 			when(wait(cx->onMasterProxiesChanged())) {}
 			when(DebugReadTxnStateStoreReply rep =
 			         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::debugReadTxnStateStore,
-			                               DebugReadTxnStateStoreRequest(range)))) {
-				auto result = rep.kvs;
-				result.resize(result.arena(), std::min(limit, result.size()));
-				return result;
+			                               DebugReadTxnStateStoreRequest(range, limit)))) {
+				return rep.kvs;
 			}
 		}
 	}

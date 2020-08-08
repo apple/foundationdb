@@ -450,6 +450,7 @@ struct DebugReadTxnStateStoreReply {
 
 struct DebugReadTxnStateStoreRequest {
 	constexpr static FileIdentifier file_identifier = 4663403;
+	int limit;
 	ReplyPromise<DebugReadTxnStateStoreReply> reply;
 
 	const KeyRange& getKeys() const {
@@ -458,11 +459,11 @@ struct DebugReadTxnStateStoreRequest {
 	}
 
 	explicit DebugReadTxnStateStoreRequest() = default;
-	explicit DebugReadTxnStateStoreRequest(const KeyRange& keys) : keys(keys) { validate(); }
+	explicit DebugReadTxnStateStoreRequest(const KeyRange& keys, int limit) : keys(keys), limit(limit) { validate(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, reply);
+		serializer(ar, keys, limit, reply);
 		if (Ar::isDeserializing) {
 			validate();
 		}
@@ -473,6 +474,7 @@ private:
 		ASSERT(KeyRangeRef(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
 		                   LiteralStringRef("\xff/TESTONLYtxnStateStore0"))
 		           .contains(keys));
+		ASSERT(limit >= 0);
 	}
 	KeyRange keys; // Must start with \xff/TESTONLYtxnStateStore/
 };
