@@ -231,7 +231,8 @@ private:
 	void resetInternal();
 	void setDefaultReplicationPolicy();
 
-	bool isOverridden(const std::string& key) const;
+	/// Check if the key is overridden by either mutableConfiguration or rawConfiguration
+	bool isOverridden(std::string key) const;
 };
 
 #endif

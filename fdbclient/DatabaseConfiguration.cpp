@@ -562,25 +562,21 @@ void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> raw
 	setDefaultReplicationPolicy();
 }
 
-bool DatabaseConfiguration::isOverridden(const std::string& key) const {
+bool DatabaseConfiguration::isOverridden(std::string key) const {
+	key = configKeysPrefix.toString() + key;
+
+	if (mutableConfiguration.present() && mutableConfiguration.get().find(key) != mutableConfiguration.get().end()) {
+		return true;
+	}
+
+	const int keyLen = key.size();
 	for (auto iter = rawConfiguration.begin(); iter != rawConfiguration.end(); ++iter) {
-		auto confKey = iter->key.removePrefix(configKeysPrefix).toString();
-		if (key == confKey) {
+		const auto& rawConfKey = iter->key;
+		if (keyLen == rawConfKey.size() &&
+		    strncmp(key.c_str(), reinterpret_cast<const char*>(rawConfKey.begin()), keyLen) == 0) {
 			return true;
 		}
 	}
 
-	if (!mutableConfiguration.present()) {
-		return false;
-	}
-
-	for (auto iter = mutableConfiguration.get().begin(); iter != mutableConfiguration.get().end(); ++iter) {
-		UNSTOPPABLE_ASSERT(iter->first.size() >= configKeysPrefix.size() &&
-		                   iter->first.substr(0, configKeysPrefix.size()) == configKeysPrefix.toString());
-		auto confKey = iter->first.substr(configKeysPrefix.size());
-		if (key == confKey) {
-			return true;
-		}
-	}
 	return false;
 }
