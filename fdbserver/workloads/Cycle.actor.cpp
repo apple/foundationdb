@@ -244,7 +244,7 @@ struct CycleWorkload : TestWorkload {
 					if (self->keyPrefix.startsWith("\xff/TESTONLYtxnStateStore/"_sr)) {
 						wait(ensureNoCommitsInFlight(cx, self));
 						loop {
-							DebugReadTxnStateStoreReply rep =
+							state DebugReadTxnStateStoreReply rep =
 							    wait(debugReadTxnStateStore(cx,
 							                                KeyRangeRef(doubleToTestKey(0.0, self->keyPrefix),
 							                                            doubleToTestKey(1.0, self->keyPrefix)),
