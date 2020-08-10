@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -44,8 +44,9 @@ int g_api_version = 0;
 // Legacy (pre API version 610)
 #define CLUSTER(c) ((char*)c)
 
-/* 
- * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi instance (e.g. from ThreadSafeApi)
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
  */
 #define API ((IClientApi*)MultiVersionApi::api)
 
@@ -74,12 +75,10 @@ fdb_bool_t fdb_error_predicate( int predicate_test, fdb_error_t code ) {
 				code == error_code_cluster_version_changed;
 	}
 	if(predicate_test == FDBErrorPredicates::RETRYABLE_NOT_COMMITTED) {
-		return code == error_code_not_committed ||
-				code == error_code_transaction_too_old ||
-				code == error_code_future_version ||
-				code == error_code_database_locked ||
-				code == error_code_proxy_memory_limit_exceeded ||
-				code == error_code_process_behind;
+		return code == error_code_not_committed || code == error_code_transaction_too_old ||
+		       code == error_code_future_version || code == error_code_database_locked ||
+		       code == error_code_proxy_memory_limit_exceeded || code == error_code_batch_transaction_throttled ||
+		       code == error_code_process_behind || code == error_code_tag_throttled;
 	}
 	return false;
 }
@@ -439,18 +438,17 @@ FDBFuture* fdb_transaction_get_range_impl(
 	}
 
 	/* Zero at the C API maps to "infinity" at lower levels */
-	if (!limit)
-		limit = CLIENT_KNOBS->ROW_LIMIT_UNLIMITED;
-	if (!target_bytes)
-		target_bytes = CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED;
+	if (!limit) limit = GetRangeLimits::ROW_LIMIT_UNLIMITED;
+	if (!target_bytes) target_bytes = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
 
 	/* Unlimited/unlimited with mode _EXACT isn't permitted */
-	if (limit == CLIENT_KNOBS->ROW_LIMIT_UNLIMITED && target_bytes == CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED && mode == FDB_STREAMING_MODE_EXACT)
+	if (limit == GetRangeLimits::ROW_LIMIT_UNLIMITED && target_bytes == GetRangeLimits::BYTE_LIMIT_UNLIMITED &&
+	    mode == FDB_STREAMING_MODE_EXACT)
 		return TSAV_ERROR(Standalone<RangeResultRef>, exact_mode_without_limits);
 
 	/* _ITERATOR mode maps to one of the known streaming modes
 	   depending on iteration */
-	static const int mode_bytes_array[] = {CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000};
+	const int mode_bytes_array[] = { GetRangeLimits::BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 80000 };
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
 	   Goes from small -> medium -> large.  Then 1.5 * previous until serial. */
@@ -475,9 +473,9 @@ FDBFuture* fdb_transaction_get_range_impl(
 	else
 		return TSAV_ERROR(Standalone<RangeResultRef>, client_invalid_operation);
 
-	if(target_bytes == CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED)
+	if (target_bytes == GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = mode_bytes;
-	else if(mode_bytes != CLIENT_KNOBS->BYTE_LIMIT_UNLIMITED)
+	else if (mode_bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		target_bytes = std::min(target_bytes, mode_bytes);
 
 	return (FDBFuture*)( TXN(tr)->getRange(
@@ -626,6 +624,13 @@ fdb_error_t fdb_transaction_add_conflict_range( FDBTransaction*tr, uint8_t const
 			return error_code_client_invalid_operation;
 	);
 
+}
+
+extern "C" DLLEXPORT 
+FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length ) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

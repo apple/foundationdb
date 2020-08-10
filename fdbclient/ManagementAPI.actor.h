@@ -61,7 +61,8 @@ public:
 		NOT_ENOUGH_WORKERS,
 		REGION_REPLICATION_MISMATCH,
 		DCID_MISSING,
-		SUCCESS
+		LOCKED_NOT_NEW,
+		SUCCESS,
 	};
 };
 
@@ -143,6 +144,7 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 // Exclude the given set of servers from use as state servers.  Returns as soon as the change is durable, without necessarily waiting for
 // the servers to be evacuated.  A NetworkAddress with a port of 0 means all servers on the given IP.
 ACTOR Future<Void> excludeServers( Database  cx, vector<AddressExclusion>  servers, bool failed = false );
+void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed = false);
 
 // Remove the given servers from the exclusion list.  A NetworkAddress with a port of 0 means all servers on the given IP.  A NetworkAddress() means
 // all servers (don't exclude anything)
@@ -153,12 +155,16 @@ ACTOR Future<Void> setClass( Database  cx, AddressExclusion  server, ProcessClas
 
 // Get the current list of excluded servers
 ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database  cx );
+ACTOR Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr);
 
 // Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion is
 // true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance, until and
 // unless any of them are explicitly included with includeServers()
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> servers,
                                                                 bool waitForAllExcluded);
+ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
+                                                   std::set<AddressExclusion>* exclusions,
+                                                   std::set<NetworkAddress>* inProgressExclusion);
 
 // Gets a list of all workers in the cluster (excluding testers)
 ACTOR Future<vector<ProcessData>> getWorkers( Database  cx );
@@ -176,6 +182,8 @@ ACTOR Future<Void> unlockDatabase( Database  cx, UID  id );
 
 ACTOR Future<Void> checkDatabaseLock( Transaction*  tr, UID  id );
 ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction>  tr, UID  id );
+
+ACTOR Future<Void> advanceVersion(Database cx, Version v);
 
 ACTOR Future<int> setDDMode( Database  cx, int  mode );
 
@@ -197,6 +205,9 @@ bool schemaMatch( json_spirit::mValue const& schema, json_spirit::mValue const& 
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+Future<Void> addCachedRange(const Database& cx, KeyRangeRef range);
+Future<Void> removeCachedRange(const Database& cx, KeyRangeRef range);
 
 #include "flow/unactorcompiler.h"
 #endif

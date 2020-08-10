@@ -30,11 +30,13 @@
 
 // 1xxx Normal failure (plausibly these should not even be "errors", but they are failures of
 //   the way operations are currently defined)
+// clang-format off
 ERROR( success, 0, "Success" )
 ERROR( end_of_stream, 1, "End of stream" )
 ERROR( operation_failed, 1000, "Operation failed")
 ERROR( wrong_shard_server, 1001, "Shard is not available from this server")
 ERROR( operation_obsolete, 1002, "Operation result no longer necessary")
+ERROR( cold_cache_server, 1003, "Cache server is not warm for this range")
 ERROR( timed_out, 1004, "Operation timed out" )
 ERROR( coordinated_state_conflict, 1005, "Conflict occurred while changing coordination information" )
 ERROR( all_alternatives_failed, 1006, "All alternatives failed" )
@@ -69,6 +71,8 @@ ERROR( serialization_failed, 1044, "Failed to deserialize an object" )
 ERROR( connection_unreferenced, 1048, "No peer references for connection" )
 ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
+ERROR( batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
+ERROR( dd_cancelled, 1052, "Data distribution components cancelled")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -88,6 +92,7 @@ ERROR( master_proxy_failed, 1209, "Master terminating because a Proxy failed" )
 ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
+ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -137,6 +142,7 @@ ERROR( no_commit_version, 2021, "Transaction is read-only and therefore does not
 ERROR( environment_variable_network_option_failed, 2022, "Environment variable network option could not be set" )
 ERROR( transaction_read_only, 2023, "Attempted to commit a transaction specified as read-only" )
 ERROR( invalid_cache_eviction_policy, 2024, "Invalid cache eviction policy, only random and lru are supported" )
+ERROR( network_cannot_be_restarted, 2025, "Network can only be started once" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -147,6 +153,15 @@ ERROR( address_in_use, 2105, "Local address in use" )
 ERROR( invalid_local_address, 2106, "Invalid local address" )
 ERROR( tls_error, 2107, "TLS error" )
 ERROR( unsupported_operation, 2108, "Operation is not supported" )
+ERROR( too_many_tags, 2109, "Too many tags set on transaction" )
+ERROR( tag_too_long, 2110, "Tag set on transaction is too long" )
+ERROR( too_many_tag_throttles, 2111, "Too many tag throttles have been created" )
+ERROR( special_keys_cross_module_read, 2112, "Special key space range read crosses modules. Refer to the `special_key_space_relaxed' transaction option for more details." )
+ERROR( special_keys_no_module_found, 2113, "Special key space range read does not intersect a module. Refer to the `special_key_space_relaxed' transaction option for more details." )
+ERROR( special_keys_write_disabled, 2114, "Special Key space is not allowed to write by default. Refer to the `special_key_space_enable_writes` transaction option for more details." )
+ERROR( special_keys_no_write_module_found, 2115, "Special key space key or keyrange in set or clear does not intersect a module" )
+ERROR( special_keys_cross_module_clear, 2116, "Special key space clear crosses modules" )
+ERROR( special_keys_api_failure, 2117, "Api call through special keys failed. For more information, call get on special key 0xff0xff/error_message to get a json string of the error message." )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -182,7 +197,7 @@ ERROR( backup_duplicate, 2311, "Backup duplicate request")
 ERROR( backup_unneeded, 2312, "Backup unneeded request")
 ERROR( backup_bad_block_size, 2313, "Backup file block size too small")
 ERROR( backup_invalid_url, 2314, "Backup Container URL invalid")
-ERROR( backup_invalid_info, 2315, "Backup Container URL invalid")
+ERROR( backup_invalid_info, 2315, "Backup Container info invalid")
 ERROR( backup_cannot_expire, 2316, "Cannot expire requested data from backup without violating minimum restorability")
 ERROR( backup_auth_missing, 2317, "Cannot find authentication details (such as a password or secret key) for the specified Backup Container URL")
 ERROR( backup_auth_unreadable, 2318, "Cannot read or parse one or more sources of authentication information for Backup Container URLs")
@@ -219,6 +234,7 @@ ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot o
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+// clang-format on
 
 #undef ERROR
 #endif

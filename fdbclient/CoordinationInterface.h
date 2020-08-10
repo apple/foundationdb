@@ -103,8 +103,12 @@ struct LeaderInfo {
 	LeaderInfo() : forward(false) {}
 	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
 
-	bool operator < (LeaderInfo const& r) const { return changeID < r.changeID; }
-	bool operator == (LeaderInfo const& r) const { return changeID == r.changeID; }
+	bool operator<(LeaderInfo const& r) const { return changeID < r.changeID; }
+	bool operator>(LeaderInfo const& r) const { return r < *this; }
+	bool operator<=(LeaderInfo const& r) const { return !(*this > r); }
+	bool operator>=(LeaderInfo const& r) const { return !(*this < r); }
+	bool operator==(LeaderInfo const& r) const { return changeID == r.changeID; }
+	bool operator!=(LeaderInfo const& r) const { return !(*this == r); }
 
 	// The first 7 bits of ChangeID represent cluster controller process class fitness, the lower the better
 	void updateChangeID(ClusterControllerPriorityInfo info) {
@@ -121,6 +125,14 @@ struct LeaderInfo {
 	// 2. the leader process class fitness becomes worse
 	bool leaderChangeRequired(LeaderInfo const& candidate) const {
 		return ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate));
+	}
+
+	ClusterControllerPriorityInfo getPriorityInfo() const {
+		ClusterControllerPriorityInfo info;
+		info.processClassFitness = (changeID.first() >> 57) & 7;
+		info.isExcluded = (changeID.first() >> 60) & 1;
+		info.dcFitness = (changeID.first() >> 61) & 7;
+		return info;
 	}
 
 	template <class Ar>
@@ -170,6 +182,7 @@ public:
 	Reference<ClusterConnectionFile> ccf; 
 
 	explicit ClientCoordinators( Reference<ClusterConnectionFile> ccf );
+	explicit ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators );
 	ClientCoordinators() {}
 };
 

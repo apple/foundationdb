@@ -28,7 +28,6 @@
         #define FLOW_TDMETRIC_ACTOR_H
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
@@ -56,9 +55,21 @@ struct MetricNameRef {
 	int expectedSize() const {
 		return type.expectedSize() + name.expectedSize();
 	}
+
+	inline int compare(MetricNameRef const& r) const {
+		int cmp;
+		if ((cmp = type.compare(r.type))) {
+			return cmp;
+		}
+		if ((cmp = name.compare(r.name))) {
+			return cmp;
+		}
+		return id.compare(r.id);
+	}
 };
 
 extern std::string reduceFilename(std::string const &filename);
+
 inline bool operator < (const MetricNameRef& l, const MetricNameRef& r ) {
 	int cmp = l.type.compare(r.type);
 	if(cmp == 0) {
@@ -216,14 +227,10 @@ struct MetricData {
 		appendStart(appendStart) {
 	}
 
-	MetricData( MetricData&& r ) BOOST_NOEXCEPT :
-		start(r.start),
-		rollTime(r.rollTime),
-		appendStart(r.appendStart),
-		writer(std::move(r.writer)) {
-	}
+	MetricData(MetricData&& r) noexcept
+	  : start(r.start), rollTime(r.rollTime), appendStart(r.appendStart), writer(std::move(r.writer)) {}
 
-	void operator=( MetricData&& r ) BOOST_NOEXCEPT {
+	void operator=(MetricData&& r) noexcept {
 		start = r.start; rollTime = r.rollTime; appendStart = r.appendStart; writer = std::move(r.writer);
 	}
 
@@ -329,7 +336,7 @@ struct Descriptor {
 	using fields = std::tuple<>;
 	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
 
-	static StringRef typeName() {{ return LiteralStringRef(""); }}
+	static StringRef typeName() { return LiteralStringRef(""); }
 #endif
 };
 
@@ -634,11 +641,9 @@ template <class T, class Descriptor = NullDescriptor, class FieldLevelType = Fie
 struct EventField : public Descriptor {
 	std::vector<FieldLevelType> levels;
 
-	EventField( EventField&& r ) BOOST_NOEXCEPT : Descriptor(r), levels(std::move(r.levels)) {}
+	EventField(EventField&& r) noexcept : Descriptor(r), levels(std::move(r.levels)) {}
 
-	void operator=( EventField&& r ) BOOST_NOEXCEPT {
-		levels = std::move(r.levels);
-	}
+	void operator=(EventField&& r) noexcept { levels = std::move(r.levels); }
 
 	EventField(Descriptor d = Descriptor()) : Descriptor(d) {
 	}

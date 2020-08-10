@@ -19,7 +19,6 @@
  */
 
 #include "flow/Hash3.h"
-#include "flow/Stats.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -33,6 +32,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
@@ -131,7 +131,7 @@ namespace oldTLog_4_6 {
 		void push( TLogQueueEntryRef const& qe ) {
 			BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 			wr << uint32_t(0);
-			IncludeVersion().write(wr);  // payload is versioned
+			IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 			wr << qe;
 			wr << uint8_t(1);
 			*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
@@ -270,6 +270,7 @@ namespace oldTLog_4_6 {
 		std::map<UID, Reference<struct LogData>> id_data;
 
 		UID dbgid;
+		UID workerID;
 
 		IKeyValueStore* persistentData;
 		IDiskQueue* rawPersistentQueue;
@@ -303,8 +304,8 @@ namespace oldTLog_4_6 {
 		PromiseStream<Future<Void>> sharedActors;
 		bool terminated;
 
-		TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-				: dbgid(dbgid), instanceID(deterministicRandom()->randomUniqueID().first()),
+		TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
+				: dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
 				  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 				  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 				  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
@@ -323,17 +324,19 @@ namespace oldTLog_4_6 {
 
 			TagData( Version popped, bool nothing_persistent, bool popped_recently, OldTag tag ) : nothing_persistent(nothing_persistent), popped(popped), popped_recently(popped_recently), update_version_sizes(tag != txsTagOld) {}
 
-			TagData(TagData&& r) BOOST_NOEXCEPT : version_messages(std::move(r.version_messages)), nothing_persistent(r.nothing_persistent), popped_recently(r.popped_recently), popped(r.popped), update_version_sizes(r.update_version_sizes) {}
-			void operator= (TagData&& r) BOOST_NOEXCEPT {
-				version_messages = std::move(r.version_messages);
-				nothing_persistent = r.nothing_persistent;
+		    TagData(TagData&& r) noexcept
+		      : version_messages(std::move(r.version_messages)), nothing_persistent(r.nothing_persistent),
+		        popped_recently(r.popped_recently), popped(r.popped), update_version_sizes(r.update_version_sizes) {}
+		    void operator=(TagData&& r) noexcept {
+			    version_messages = std::move(r.version_messages);
+			    nothing_persistent = r.nothing_persistent;
 				popped_recently = r.popped_recently;
 				popped = r.popped;
 				update_version_sizes = r.update_version_sizes;
-			}
+		    }
 
-			// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
-			ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, int64_t* gBytesErased, Reference<LogData> tlogData, TaskPriority taskID ) {
+		    // Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
+		    ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, int64_t* gBytesErased, Reference<LogData> tlogData, TaskPriority taskID ) {
 				while(!self->version_messages.empty() && self->version_messages.front().first < before) {
 					Version version = self->version_messages.front().first;
 					std::pair<int, int> &sizes = tlogData->version_sizes[version];
@@ -412,7 +415,8 @@ namespace oldTLog_4_6 {
 				// These are initialized differently on init() or recovery
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
-			startRole(Role::TRANSACTION_LOG,interf.id(), UID());
+			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, "Restored");
+			addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -954,7 +958,7 @@ namespace oldTLog_4_6 {
 
 			peekMessagesFromMemory( logData, req, messages2, endVersion );
 
-			Standalone<VectorRef<KeyValueRef>> kvs = wait(
+			Standalone<RangeResultRef> kvs = wait(
 				self->persistentData->readRange(KeyRangeRef(
 					persistTagMessagesKey(logData->logId, oldTag, req.begin),
 					persistTagMessagesKey(logData->logId, oldTag, logData->persistentDataDurableVersion + 1)), SERVER_KNOBS->DESIRED_TOTAL_BYTES, SERVER_KNOBS->DESIRED_TOTAL_BYTES));
@@ -1101,7 +1105,7 @@ namespace oldTLog_4_6 {
 					// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
 					TLogRejoinRequest req;
 					req.myInterface = tli;
-					TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
+					TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
 					choose {
 					    when(TLogRejoinReply rep =
 					             wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
@@ -1249,8 +1253,8 @@ namespace oldTLog_4_6 {
 
 		IKeyValueStore *storage = self->persistentData;
 		state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
-		state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
-		state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
+		state Future<Standalone<RangeResultRef>> fVers = storage->readRange(persistCurrentVersionKeys);
+		state Future<Standalone<RangeResultRef>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 
 		// FIXME: metadata in queue?
 
@@ -1263,7 +1267,7 @@ namespace oldTLog_4_6 {
 		}
 
 		if (!fFormat.get().present()) {
-			Standalone<VectorRef<KeyValueRef>> v = wait( self->persistentData->readRange( KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1 ) );
+			Standalone<RangeResultRef> v = wait( self->persistentData->readRange( KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1 ) );
 			if (!v.size()) {
 				TEST(true); // The DB is completely empty, so it was never initialized.  Delete it.
 				throw worker_removed();
@@ -1316,7 +1320,7 @@ namespace oldTLog_4_6 {
 			tagKeys = prefixRange( rawId.withPrefix(persistTagPoppedKeys.begin) );
 			loop {
 				if(logData->removed.isReady()) break;
-				Standalone<VectorRef<KeyValueRef>> data = wait( self->persistentData->readRange( tagKeys, BUGGIFY ? 3 : 1<<30, 1<<20 ) );
+				Standalone<RangeResultRef> data = wait( self->persistentData->readRange( tagKeys, BUGGIFY ? 3 : 1<<30, 1<<20 ) );
 				if (!data.size()) break;
 				((KeyRangeRef&)tagKeys) = KeyRangeRef( keyAfter(data.back().key, tagKeys.arena()), tagKeys.end );
 
@@ -1402,9 +1406,9 @@ namespace oldTLog_4_6 {
 		return Void();
 	}
 
-	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId )
+	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId, UID workerID )
 	{
-		state TLogData self( tlogId, persistentData, persistentQueue, db );
+		state TLogData self( tlogId, workerID, persistentData, persistentQueue, db );
 		state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
 
 		TraceEvent("SharedTlog", tlogId);

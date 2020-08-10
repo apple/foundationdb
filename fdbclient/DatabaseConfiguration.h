@@ -107,7 +107,7 @@ struct DatabaseConfiguration {
 
 	int expectedLogSets( Optional<Key> dcId ) const {
 		int result = 1;
-		if(dcId.present() && getRegion(dcId.get()).satelliteTLogReplicationFactor > 0) {
+		if(dcId.present() && getRegion(dcId.get()).satelliteTLogReplicationFactor > 0 && usableRegions > 1) {
 			result++;
 		}
 		
@@ -178,13 +178,16 @@ struct DatabaseConfiguration {
 	int32_t remoteTLogReplicationFactor;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 
+	// Backup Workers
+	bool backupWorkerEnabled;
+
 	//Data centers
 	int32_t usableRegions;
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
 	// Excluded servers (no state should be here)
-	bool isExcludedServer( NetworkAddress ) const;
+	bool isExcludedServer( NetworkAddressList ) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 
 	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
@@ -203,6 +206,7 @@ struct DatabaseConfiguration {
 		const_cast<DatabaseConfiguration*>(&rhs)->makeConfigurationImmutable();
 		return rawConfiguration == rhs.rawConfiguration;
 	}
+	bool operator!=(DatabaseConfiguration const& rhs) const { return !(*this == rhs); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

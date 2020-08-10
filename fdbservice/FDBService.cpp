@@ -28,11 +28,9 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "..\flow\SimpleOpt.h"
-#include "..\fdbmonitor\SimpleIni.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
+#include "flow/SimpleOpt.h"
+#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/versions.h"
 
 // For PathFileExists
 #include "Shlwapi.h"

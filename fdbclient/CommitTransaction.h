@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -47,9 +48,10 @@ static const char* typeString[] = { "SetValue",
 	                                "ByteMax",
 	                                "MinV2",
 	                                "AndV2",
-	                                "CompareAndClear"};
+	                                "CompareAndClear",
+	                                "MAX_ATOMIC_OP" };
 
-struct MutationRef { 
+struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
 	enum Type : uint8_t {
 		SetValue = 0,
@@ -81,22 +83,42 @@ struct MutationRef {
 
 	MutationRef() {}
 	MutationRef( Type t, StringRef a, StringRef b ) : type(t), param1(a), param2(b) {}
+	MutationRef( Arena& to, Type t, StringRef a, StringRef b ) : type(t), param1(to, a), param2(to, b) {}
 	MutationRef( Arena& to, const MutationRef& from ) : type(from.type), param1( to, from.param1 ), param2( to, from.param2 ) {}
-	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); } 
+	int totalSize() const { return OVERHEAD_BYTES + param1.size() + param2.size(); }
 	int expectedSize() const { return param1.size() + param2.size(); }
-
-	std::string toString() const {
-		if (type < MutationRef::MAX_ATOMIC_OP) {
-			return format("code: %s param1: %s param2: %s", typeString[type], printable(param1).c_str(), printable(param2).c_str());
-		}
-		else {
-			return format("code: Invalid param1: %s param2: %s", printable(param1).c_str(), printable(param2).c_str());
+	int weightedTotalSize() const {
+		// AtomicOp can cause more workload to FDB cluster than the same-size set mutation;
+		// Amplify atomicOp size to consider such extra workload.
+		// A good value for FASTRESTORE_ATOMICOP_WEIGHT needs experimental evaluations.
+		if (isAtomicOp()) {
+			return totalSize() * SERVER_KNOBS->FASTRESTORE_ATOMICOP_WEIGHT;
+		} else {
+			return totalSize();
 		}
 	}
 
+	std::string toString() const {
+		return format("code: %s param1: %s param2: %s",
+		              type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset", printable(param1).c_str(),
+		              printable(param2).c_str());
+	}
+
+	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
+
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, type, param1, param2);
+		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
+			StringRef empty;
+			serializer(ar, type, param2, empty);
+		} else {
+			serializer(ar, type, param1, param2);
+		}
+		if (ar.isDeserializing && type == ClearRange && param2 == StringRef() && param1 != StringRef()) {
+			ASSERT(param1[param1.size()-1] == '\x00');
+			param2 = param1;
+			param1 = param2.substr(0, param2.size()-1);
+		}
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement isSingleKeyMutation() etc)
@@ -110,6 +132,21 @@ struct MutationRef {
 		                       (1 << CompareAndClear)
 	};
 };
+
+template<>
+struct Traceable<MutationRef> : std::true_type {
+	static std::string toString(MutationRef const& value) {
+		return value.toString();
+	}
+};
+
+static inline std::string getTypeString(MutationRef::Type type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[(int)type] : "Unset";
+}
+
+static inline std::string getTypeString(uint8_t type) {
+	return type < MutationRef::MAX_ATOMIC_OP ? typeString[type] : "Unset";
+}
 
 // A 'single key mutation' is one which affects exactly the value of the key specified by its param1
 static inline bool isSingleKeyMutation(MutationRef::Type type) {
@@ -137,21 +174,28 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 }
 
 struct CommitTransactionRef {
-	CommitTransactionRef() : read_snapshot(0) {}
-	CommitTransactionRef(Arena &a, const CommitTransactionRef &from)
-	  : read_conflict_ranges(a, from.read_conflict_ranges),
-		write_conflict_ranges(a, from.write_conflict_ranges),
-		mutations(a, from.mutations),
-		read_snapshot(from.read_snapshot) {
-	}
+	CommitTransactionRef() : read_snapshot(0), report_conflicting_keys(false) {}
+	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
+	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
+	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
+	    report_conflicting_keys(from.report_conflicting_keys) {}
 	VectorRef< KeyRangeRef > read_conflict_ranges;
 	VectorRef< KeyRangeRef > write_conflict_ranges;
 	VectorRef< MutationRef > mutations;
 	Version read_snapshot;
+	bool report_conflicting_keys;
 
 	template <class Ar>
-	force_inline void serialize( Ar& ar ) {
-		serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+	force_inline void serialize(Ar& ar) {
+		if constexpr (is_fb_function<Ar>) {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot,
+			           report_conflicting_keys);
+		} else {
+			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
+			if (ar.protocolVersion().hasReportConflictingKeys()) {
+				serializer(ar, report_conflicting_keys);
+			}
+		}
 	}
 
 	// Convenience for internal code required to manipulate these without the Native API
@@ -169,8 +213,5 @@ struct CommitTransactionRef {
 		return read_conflict_ranges.expectedSize() + write_conflict_ranges.expectedSize() + mutations.expectedSize();
 	}
 };
-
-bool debugMutation( const char* context, Version version, MutationRef const& m );
-bool debugKeyRange( const char* context, Version version, KeyRangeRef const& keyRange );
 
 #endif

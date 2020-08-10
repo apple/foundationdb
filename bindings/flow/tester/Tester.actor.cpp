@@ -28,6 +28,7 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Otherwise we have to type setupNetwork(), FDB::open(), etc.
@@ -216,19 +217,19 @@ ACTOR Future< Standalone<RangeResultRef> > getRange(Reference<Transaction> tr, K
 	}
 }
 
-ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string subspace, std::string msg) {
-	if (!tr)
-		return Void();
-
-	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
-	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
-	       StringRef(subspace).printable().c_str(), results.size());
-	for (auto & s : results) {
-		printf("=====key:%s, value:%s\n", StringRef(s.key).printable().c_str(), StringRef(s.value).printable().c_str());
-	}
-
-	return Void();
-}
+//ACTOR static Future<Void> debugPrintRange(Reference<Transaction> tr, std::string subspace, std::string msg) {
+//	if (!tr)
+//		return Void();
+//
+//	Standalone<RangeResultRef> results = wait(getRange(tr, KeyRange(KeyRangeRef(subspace + '\x00', subspace + '\xff'))));
+//	printf("==================================================DB:%s:%s, count:%d\n", msg.c_str(),
+//	       StringRef(subspace).printable().c_str(), results.size());
+//	for (auto & s : results) {
+//		printf("=====key:%s, value:%s\n", StringRef(s.key).printable().c_str(), StringRef(s.value).printable().c_str());
+//	}
+//
+//	return Void();
+//}
 
 ACTOR Future<Void> stackSub(FlowTesterStack* stack) {
 	if (stack->data.size() < 2)
@@ -429,9 +430,8 @@ struct LogStackFunc : InstructionFunc {
 				wait(logStack(data, entries, prefix));
 				entries.clear();
 			}
-
-			wait(logStack(data, entries, prefix));
 		}
+		wait(logStack(data, entries, prefix));
 
 		return Void();
 	}
@@ -637,6 +637,29 @@ struct GetFunc : InstructionFunc {
 };
 const char* GetFunc::name = "GET";
 REGISTER_INSTRUCTION_FUNC(GetFunc);
+
+struct GetEstimatedRangeSize : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		state std::vector<StackItem> items = data->stack.pop(2);
+		if (items.size() != 2)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		state Standalone<StringRef> beginKey = Tuple::unpack(s1).getString(0);
+
+		Standalone<StringRef> s2 = wait(items[1].value);
+		state Standalone<StringRef> endKey = Tuple::unpack(s2).getString(0);
+		Future<int64_t> fsize = instruction->tr->getEstimatedRangeSizeBytes(KeyRangeRef(beginKey, endKey));
+		int64_t size = wait(fsize);
+		data->stack.pushTuple(LiteralStringRef("GOT_ESTIMATED_RANGE_SIZE"));
+
+		return Void();
+	}
+};
+const char* GetEstimatedRangeSize::name = "GET_ESTIMATED_RANGE_SIZE";
+REGISTER_INSTRUCTION_FUNC(GetEstimatedRangeSize);
 
 struct GetKeyFunc : InstructionFunc {
 	static const char* name;
@@ -1342,12 +1365,12 @@ const char* StartThreadFunc::name = "START_THREAD";
 REGISTER_INSTRUCTION_FUNC(StartThreadFunc);
 
 ACTOR template <class Function>
-Future<decltype(fake<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
-                                                                                 Function func) {
+Future<decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
+                                                                                         Function func) {
 	state Reference<ReadTransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state decltype(fake<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
+			state decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
 			return result;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -1603,6 +1626,7 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_INCLUDE_PORT_IN_ADDRESS);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_REPORT_CONFLICTING_KEYS);
 
 		Optional<FDBStandalone<ValueRef> > _ = wait(tr->get(LiteralStringRef("\xff")));
 		tr->cancel();
@@ -1748,7 +1772,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		populateOpsThatCreateDirectories(); // FIXME
 
 		// This is "our" network
-		g_network = newNet2(false);
+		g_network = newNet2(TLSConfig());
 
 		ASSERT(!API::isAPIVersionSelected());
 		try {
@@ -1791,9 +1815,9 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 ACTOR void _test_versionstamp() {
 	try {
-		g_network = newNet2(false);
+		g_network = newNet2(TLSConfig());
 
-		API *fdb = FDB::API::selectAPIVersion(620);
+		API *fdb = FDB::API::selectAPIVersion(700);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);

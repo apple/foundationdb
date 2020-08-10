@@ -304,4 +304,58 @@ public class ArrayUtilTests {
 		fail("Not yet implemented");
 	}
 
+	private static final int SAMPLE_COUNT = 1000000;
+	private static final int SAMPLE_MAX_SIZE = 2048;
+	private List<byte[]> unsafe;
+	private List<byte[]> java;
+	@Before
+	public void init() {
+		unsafe = new ArrayList(SAMPLE_COUNT);
+		java = new ArrayList(SAMPLE_COUNT);
+		Random random = new Random();
+		for (int i = 0; i <= SAMPLE_COUNT; i++) {
+			byte[] addition = new byte[random.nextInt(SAMPLE_MAX_SIZE)];
+			random.nextBytes(addition);
+			unsafe.add(addition);
+			java.add(addition);
+		}
+	}
+
+	@Test
+	public void testComparatorSort() {
+		Collections.sort(unsafe, FastByteComparisons.lexicographicalComparerUnsafeImpl());
+		Collections.sort(java, FastByteComparisons.lexicographicalComparerJavaImpl());
+		Assert.assertTrue(unsafe.equals(java));
+	}
+
+	@Test
+	public void testUnsafeComparison() {
+		for (int i =0; i< SAMPLE_COUNT; i++) {
+			Assert.assertEquals(FastByteComparisons.lexicographicalComparerUnsafeImpl().compare(unsafe.get(i), java.get(i)), 0);
+		}
+	}
+
+	@Test
+	public void testJavaComparison() {
+		for (int i =0; i< SAMPLE_COUNT; i++) {
+			Assert.assertEquals(FastByteComparisons.lexicographicalComparerJavaImpl().compare(unsafe.get(i), java.get(i)), 0);
+		}
+	}
+
+	@Test
+	public void testUnsafeComparisonWithOffet() {
+		for (int i =0; i< SAMPLE_COUNT; i++) {
+			if (unsafe.get(i).length > 5)
+				Assert.assertEquals(FastByteComparisons.lexicographicalComparerUnsafeImpl().compareTo(unsafe.get(i), 4, unsafe.get(i).length - 4,  java.get(i), 4, java.get(i).length - 4), 0);
+		}
+	}
+
+	@Test
+	public void testJavaComparisonWithOffset() {
+		for (int i =0; i< SAMPLE_COUNT; i++) {
+			if (unsafe.get(i).length > 5)
+				Assert.assertEquals(FastByteComparisons.lexicographicalComparerJavaImpl().compareTo(unsafe.get(i), 4, unsafe.get(i).length - 4,  java.get(i), 4, java.get(i).length - 4), 0);
+		}
+	}
+
 }

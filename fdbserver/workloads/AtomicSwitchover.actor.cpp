@@ -150,7 +150,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
-		state DatabaseBackupAgent restoreAgent(self->extraDB);
+		state DatabaseBackupAgent restoreTool(self->extraDB);
 
 		TraceEvent("AS_Wait1");
 		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
@@ -159,11 +159,11 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Switch1");
 		wait( backupAgent.atomicSwitchover(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait2");
-		wait(success( restoreAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) ));
+		wait(success( restoreTool.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("AS_Ready2");
 		wait( delay(deterministicRandom()->random01()*self->switch2delay) );
 		TraceEvent("AS_Switch2");
-		wait( restoreAgent.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
+		wait( restoreTool.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait3");
 		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("AS_Ready3");

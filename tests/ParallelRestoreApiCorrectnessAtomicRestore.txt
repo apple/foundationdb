@@ -1,0 +1,36 @@
+testTitle=ApiCorrectnessTest
+clearAfterTest=false
+simBackupAgents=BackupToFile
+;timeout is in seconds
+timeout=360000
+runSetup=true
+
+    testName=ApiCorrectness
+    numKeys=5000
+    onlyLowerCase=true
+    shortKeysRatio=0.5
+    minShortKeyLength=1
+    maxShortKeyLength=3
+    minLongKeyLength=1
+    maxLongKeyLength=128
+    minValueLength=1
+    maxValueLength=1000
+    numGets=1000
+    numGetRanges=100
+    numGetRangeSelectors=100
+    numGetKeys=100
+    numClears=100
+    numClearRanges=10
+    maxTransactionBytes=500000
+    randomTestDuration=60
+
+    testName=AtomicRestore
+    startAfter=10.0
+    restoreAfter=50.0
+    fastRestore=true
+    usePartitionedLogs=true
+
+    ; Each testName=RunRestoreWorkerWorkload creates a restore worker
+    ; We need at least 3 restore workers: master, loader, and applier
+    testName=RunRestoreWorkerWorkload
+

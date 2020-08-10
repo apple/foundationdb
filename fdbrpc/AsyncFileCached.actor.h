@@ -28,6 +28,7 @@
 	#define FLOW_ASYNCFILECACHED_ACTOR_H
 
 #include <boost/intrusive/list.hpp>
+#include <type_traits>
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -131,7 +132,7 @@ struct OpenFileInfo : NonCopyable {
 	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
 
 	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo && r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
+	OpenFileInfo(OpenFileInfo&& r) noexcept : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
 
 	Future<Reference<IAsyncFile>> get() {
 		if (f) return Reference<IAsyncFile>::addRef(f);
@@ -166,7 +167,7 @@ public:
 			length = int(this->length - offset);
 			ASSERT(length >= 0);
 		}
-		auto f = read_write_impl(this, data, length, offset, false);
+		auto f = read_write_impl<false>(this, static_cast<uint8_t*>(data), length, offset);
 		if( f.isReady() && !f.isError() ) return length;
 		++countFileCacheReadsBlocked;
 		++countCacheReadsBlocked;
@@ -180,7 +181,7 @@ public:
 			wait(self->currentTruncate);
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
-		Future<Void> f = read_write_impl(self, const_cast<void*>(data), length, offset, true);
+		Future<Void> f = read_write_impl<true>(self, static_cast<const uint8_t*>(data), length, offset);
 		if (!f.isReady()) {
 			++self->countFileCacheWritesBlocked;
 			++self->countCacheWritesBlocked;
@@ -346,7 +347,10 @@ private:
 		return Void();
 	}
 
-	static Future<Void> read_write_impl( AsyncFileCached* self, void* data, int length, int64_t offset, bool writing );
+	template <bool writing>
+	static Future<Void> read_write_impl(AsyncFileCached* self,
+	                                    typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+	                                    int length, int64_t offset);
 
 	void remove_page( AFCPage* page );
 };

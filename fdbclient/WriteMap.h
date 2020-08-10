@@ -37,6 +37,7 @@ struct RYWMutation {
 	bool operator == (const RYWMutation& r) const {
 		return value == r.value && type == r.type;
 	}
+	bool operator!=(const RYWMutation& r) const { return !(*this == r); }
 };
 
 class OperationStack {
@@ -107,18 +108,35 @@ struct WriteMapEntry {
 
 	WriteMapEntry( KeyRef const& key, OperationStack && stack, bool following_keys_cleared, bool following_keys_conflict, bool is_conflict, bool following_keys_unreadable, bool is_unreadable ) : key(key), stack(std::move(stack)), following_keys_cleared(following_keys_cleared), following_keys_conflict(following_keys_conflict), is_conflict(is_conflict), following_keys_unreadable(following_keys_unreadable), is_unreadable(is_unreadable) {}
 
+	int compare(StringRef const& r) const { return key.compare(r); }
+
+	int compare(ExtStringRef const& r) const { return -r.compare(key); }
+
 	std::string toString() const { return printable(key); }
 };
+
+inline int compare(StringRef const& l, WriteMapEntry const& r) {
+	return l.compare(r.key);
+}
+
+inline int compare(ExtStringRef const& l, WriteMapEntry const& r) {
+	return l.compare(r.key);
+}
 
 inline bool operator < ( const WriteMapEntry& lhs, const WriteMapEntry& rhs ) { return lhs.key < rhs.key; }
 inline bool operator < ( const WriteMapEntry& lhs, const StringRef& rhs ) { return lhs.key < rhs; }
 inline bool operator < ( const StringRef& lhs, const WriteMapEntry& rhs ) { return lhs < rhs.key; }
-inline bool operator < ( const WriteMapEntry& lhs, const ExtStringRef& rhs ) { return rhs.cmp(lhs.key)>0; }
-inline bool operator < ( const ExtStringRef& lhs, const WriteMapEntry& rhs ) { return lhs.cmp(rhs.key)<0; }
+inline bool operator<(const WriteMapEntry& lhs, const ExtStringRef& rhs) {
+	return rhs.compare(lhs.key) > 0;
+}
+inline bool operator<(const ExtStringRef& lhs, const WriteMapEntry& rhs) {
+	return lhs.compare(rhs.key) < 0;
+}
 
 class WriteMap {
 private:
-	typedef PTreeImpl::PTree< WriteMapEntry > PTreeT;
+	typedef PTreeImpl::PTree<WriteMapEntry> PTreeT;
+	typedef PTreeImpl::PTreeFinger<WriteMapEntry> PTreeFingerT;
 	typedef Reference<PTreeT> Tree;
 
 public:
@@ -128,8 +146,17 @@ public:
 		PTreeImpl::insert( writes, ver, WriteMapEntry( afterAllKeys, OperationStack(), false, false, false, false, false ) );
 	}
 
-	WriteMap(WriteMap&& r) BOOST_NOEXCEPT : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver), scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
-	WriteMap& operator=(WriteMap&& r) BOOST_NOEXCEPT { writeMapEmpty = r.writeMapEmpty; writes = std::move(r.writes); ver = r.ver; scratch_iterator = std::move(r.scratch_iterator); arena = r.arena; return *this; }
+	WriteMap(WriteMap&& r) noexcept
+	  : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver),
+	    scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
+	WriteMap& operator=(WriteMap&& r) noexcept {
+		writeMapEmpty = r.writeMapEmpty;
+		writes = std::move(r.writes);
+		ver = r.ver;
+		scratch_iterator = std::move(r.scratch_iterator);
+		arena = r.arena;
+		return *this;
+	}
 
 	//a write with addConflict false on top of an existing write with a conflict range will not remove the conflict
 	void mutate( KeyRef key, MutationRef::Type operation, ValueRef param, bool addConflict ) {
@@ -307,25 +334,31 @@ public:
 
 		enum SEGMENT_TYPE { UNMODIFIED_RANGE, CLEARED_RANGE, INDEPENDENT_WRITE, DEPENDENT_WRITE };
 
-		SEGMENT_TYPE type() {
+		SEGMENT_TYPE type() const {
 			if (offset) 
 				return entry().following_keys_cleared ? CLEARED_RANGE : UNMODIFIED_RANGE;
 			else
 				return entry().stack.isDependent() ? DEPENDENT_WRITE : INDEPENDENT_WRITE;
 		}
-		bool is_cleared_range() { return offset && entry().following_keys_cleared; }
-		bool is_unmodified_range() { return offset && !entry().following_keys_cleared; }
-		bool is_operation() { return !offset; }
-		bool is_conflict_range() { return offset ? entry().following_keys_conflict : entry().is_conflict; }
-		bool is_unreadable() { return offset ? entry().following_keys_unreadable : entry().is_unreadable; }
+		bool is_cleared_range() const { return offset && entry().following_keys_cleared; }
+		bool is_unmodified_range() const { return offset && !entry().following_keys_cleared; }
+		bool is_operation() const { return !offset; }
+		bool is_conflict_range() const { return offset ? entry().following_keys_conflict : entry().is_conflict; }
+		bool is_unreadable() const { return offset ? entry().following_keys_unreadable : entry().is_unreadable; }
 
-		bool is_independent() { return entry().following_keys_cleared || !entry().stack.isDependent(); }  // Defined if is_operation()
+		bool is_independent() const {
+			ASSERT(is_operation());
+			return entry().following_keys_cleared || !entry().stack.isDependent();
+		}
 
-		ExtStringRef beginKey() { return ExtStringRef( entry().key, offset && entry().stack.size() ); }
-		ExtStringRef endKey() { return offset ? nextEntry().key : ExtStringRef( entry().key, 1 ); }
+		ExtStringRef beginKey() const { return ExtStringRef(entry().key, offset && entry().stack.size()); }
+		ExtStringRef endKey() const { return offset ? nextEntry().key : ExtStringRef(entry().key, 1); }
 
-		OperationStack const& op() { return entry().stack; }  // Only if is_operation()
-		
+		OperationStack const& op() const {
+			ASSERT(is_operation());
+			return entry().stack;
+		}
+
 		iterator& operator++() {
 			if (!offset && !equalsKeyAfter( entry().key, nextEntry().key )) {
 				offset = true;
@@ -366,15 +399,15 @@ public:
 		friend class WriteMap;
 		void reset( Tree const& tree, Version ver ) { this->tree = tree; this->at = ver; this->finger.clear(); beginLen=endLen=0; offset = false; }
 
-		WriteMapEntry const& entry() { return finger[beginLen-1]->data; }
-		WriteMapEntry const& nextEntry() { return finger[endLen-1]->data; }
+		WriteMapEntry const& entry() const { return finger[beginLen - 1]->data; }
+		WriteMapEntry const& nextEntry() const { return finger[endLen - 1]->data; }
 
 		bool keyAtBegin() { return !offset || !entry().stack.size(); }
 
 		Tree tree;
 		Version at;
 		int beginLen, endLen;
-		vector< PTreeT const* > finger;
+		PTreeFingerT finger;
 		bool offset;  // false-> the operation stack at entry(); true-> the following cleared or unmodified range
 	};
 

@@ -1,0 +1,9 @@
+testTitle=PopulateTPCCTest
+timeout=3600000
+clearAfterTest=false
+runConsistencyCheck=false
+
+    testName=PopulateTPCC
+    clientsUsed=2
+    actors=1
+    warehousesPerActor=200

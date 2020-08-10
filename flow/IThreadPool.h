@@ -60,7 +60,7 @@ public:
 	virtual Future<Void> getError() = 0;  // asynchronously throws an error if there is an internal error
 	virtual void addThread( IThreadPoolReceiver* userData ) = 0;
 	virtual void post( PThreadAction action ) = 0;
-	virtual Future<Void> stop() = 0;
+	virtual Future<Void> stop(Error const& e = success()) = 0;
 	virtual bool isCoro() const { return false; }
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -92,18 +92,58 @@ public:
 	void send( T const& t ) {  // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForward( &promise, t, signal.getFuture() );
-		g_network->onMainThread( std::move(signal), incrementPriorityIfEven( g_network->getCurrentTask() ) );
+		g_network->onMainThread(std::move(signal), g_network->isOnMainThread()
+		                                               ? incrementPriorityIfEven(g_network->getCurrentTask())
+		                                               : TaskPriority::DefaultOnMainThread);
 	}
 	void sendError( Error const& e ) {  // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForwardError( &promise, e, signal.getFuture() );
-		g_network->onMainThread( std::move(signal), incrementPriorityIfEven( g_network->getCurrentTask() ) );
+		g_network->onMainThread(std::move(signal), g_network->isOnMainThread()
+		                                               ? incrementPriorityIfEven(g_network->getCurrentTask())
+		                                               : TaskPriority::DefaultOnMainThread);
 	}
 private:
 	Promise<T> promise;
 };
 
-Reference<IThreadPool>	createGenericThreadPool();
+Reference<IThreadPool>	createGenericThreadPool(int stackSize = 0);
+
+class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
+public:
+	~DummyThreadPool() {}
+	DummyThreadPool() : thread(nullptr) {}
+	Future<Void> getError() {
+		return errors.getFuture();
+	}
+	void addThread( IThreadPoolReceiver* userData ) {
+		ASSERT( !thread );
+		thread = userData;
+	}
+	void post( PThreadAction action ) {
+		try {
+			(*action)( thread );
+		} catch (Error& e) {
+			errors.sendError( e );
+		} catch (...) {
+			errors.sendError( unknown_error() );
+		}
+	}
+	Future<Void> stop(Error const& e) {
+		return Void();
+	}
+	void addref() {
+		ReferenceCounted<DummyThreadPool>::addref();
+	}
+	void delref() {
+		ReferenceCounted<DummyThreadPool>::delref();
+	}
+
+private:
+	IThreadPoolReceiver* thread;
+	Promise<Void> errors;
+};
+
 
 
 #endif

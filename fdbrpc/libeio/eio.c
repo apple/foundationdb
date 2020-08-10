@@ -39,6 +39,8 @@
 
 #ifdef __linux__
 #include "config.h.linux"
+#elif defined(__FreeBSD__)
+#include "config.h.FreeBSD"
 #elif defined(__APPLE__)
 #include "config.h.osx"
 #endif
@@ -364,19 +366,19 @@ tvdiff (struct timeval *tv1, struct timeval *tv2)
        + ((tv2->tv_usec - tv1->tv_usec) >> 10);
 }
 
-static unsigned int started, idle, wanted = 4;
+static _Atomic(unsigned int) started, idle, wanted = 4;
 
 static void (*want_poll_cb) (void);
 static void (*done_poll_cb) (void);
- 
-static unsigned int max_poll_time;     /* reslock */
-static unsigned int max_poll_reqs;     /* reslock */
 
-static unsigned int nreqs;    /* reqlock */
-static unsigned int nready;   /* reqlock */
-static unsigned int npending; /* reqlock */
-static unsigned int max_idle = 4;      /* maximum number of threads that can idle indefinitely */
-static unsigned int idle_timeout = 10; /* number of seconds after which an idle threads exit */
+static _Atomic(unsigned int) max_poll_time; /* reslock */
+static _Atomic(unsigned int) max_poll_reqs; /* reslock */
+
+static _Atomic(unsigned int) nreqs; /* reqlock */
+static _Atomic(unsigned int) nready; /* reqlock */
+static _Atomic(unsigned int) npending; /* reqlock */
+static _Atomic(unsigned int) max_idle = 4; /* maximum number of threads that can idle indefinitely */
+static _Atomic(unsigned int) idle_timeout = 10; /* number of seconds after which an idle threads exit */
 
 static xmutex_t wrklock;
 static xmutex_t reslock;
@@ -433,9 +435,7 @@ static unsigned int
 etp_nreqs (void)
 {
   int retval;
-  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   retval = nreqs;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
   return retval;
 }
 
@@ -444,9 +444,7 @@ etp_nready (void)
 {
   unsigned int retval;
 
-  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   retval = nready;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
 
   return retval;
 }
@@ -456,9 +454,7 @@ etp_npending (void)
 {
   unsigned int retval;
 
-  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   retval = npending;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
 
   return retval;
 }
@@ -468,9 +464,7 @@ etp_nthreads (void)
 {
   unsigned int retval;
 
-  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   retval = started;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
 
   return retval;
 }
@@ -742,33 +736,25 @@ etp_submit (ETP_REQ *req)
 static void ecb_cold
 etp_set_max_poll_time (double nseconds)
 {
-  if (WORDACCESS_UNSAFE) X_LOCK   (reslock);
   max_poll_time = nseconds * EIO_TICKS;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reslock);
 }
 
 static void ecb_cold
 etp_set_max_poll_reqs (unsigned int maxreqs)
 {
-  if (WORDACCESS_UNSAFE) X_LOCK   (reslock);
   max_poll_reqs = maxreqs;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reslock);
 }
 
 static void ecb_cold
 etp_set_max_idle (unsigned int nthreads)
 {
-  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   max_idle = nthreads;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
 }
 
 static void ecb_cold
 etp_set_idle_timeout (unsigned int seconds)
 {
-  if (WORDACCESS_UNSAFE) X_LOCK   (reqlock);
   idle_timeout = seconds;
-  if (WORDACCESS_UNSAFE) X_UNLOCK (reqlock);
 }
 
 static void ecb_cold

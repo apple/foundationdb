@@ -39,6 +39,8 @@ class AsyncFileWinASIO : public IAsyncFile, public ReferenceCounted<AsyncFileWin
 public:
 	static void init() {}
 
+	static void stop() {}
+
 	static bool should_poll() { return false; }
 	// FIXME: This implementation isn't actually asynchronous - it just does operations synchronously!
 

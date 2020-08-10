@@ -23,7 +23,7 @@
 package fdb
 
 //  #cgo LDFLAGS: -lfdb_c -lm
-//  #define FDB_API_VERSION 620
+//  #define FDB_API_VERSION 700
 //  #include <foundationdb/fdb_c.h>
 //  #include <string.h>
 //
@@ -268,6 +268,7 @@ type futureKeyValueArray struct {
 	*future
 }
 
+//go:nocheckptr
 func stringRefToSlice(ptr unsafe.Pointer) []byte {
 	size := *((*C.int)(unsafe.Pointer(uintptr(ptr) + 8)))
 

@@ -19,12 +19,13 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 	#include "fdbclient/NativeAPI.actor.g.h"
 #elif !defined(FDBCLIENT_NATIVEAPI_ACTOR_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_H
-
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
@@ -34,6 +35,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
@@ -55,18 +57,16 @@ struct NetworkOptions {
 	std::string clusterFile;
 	Optional<std::string> traceDirectory;
 	uint64_t traceRollSize;
-	uint64_t traceMaxLogsSize;	
+	uint64_t traceMaxLogsSize;
 	std::string traceLogGroup;
 	std::string traceFormat;
+	std::string traceClockSource;
+	std::string traceFileIdentifier;
 	Optional<bool> logClientInfo;
-	Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-	bool slowTaskProfilingEnabled;
+	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
+	bool runLoopProfilingEnabled;
 
-	// The default values, TRACE_DEFAULT_ROLL_SIZE and TRACE_DEFAULT_MAX_LOGS_SIZE are located in Trace.h.
-	NetworkOptions()
-	  : localAddress(""), clusterFile(""), traceDirectory(Optional<std::string>()),
-	    traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
-	    traceFormat("xml"), slowTaskProfilingEnabled(false) {}
+	NetworkOptions();
 };
 
 class Database {
@@ -79,8 +79,8 @@ public:
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
 	Database( Database const& rhs ) : db(rhs.db) {}
-	Database(Database&& r) BOOST_NOEXCEPT : db(std::move(r.db)) {}
-	void operator= (Database&& r) BOOST_NOEXCEPT { db = std::move(r.db); }
+	Database(Database&& r) noexcept : db(std::move(r.db)) {}
+	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
 	// For internal use by the native client:
 	explicit Database(Reference<DatabaseContext> cx) : db(cx) {}
@@ -132,19 +132,38 @@ struct TransactionOptions {
 	bool readOnly : 1;
 	bool firstInBatch : 1;
 	bool includePort : 1;
+	bool reportConflictingKeys : 1;
+	bool expensiveClearCostEstimation : 1;
+
+	TransactionPriority priority;
+
+	TagSet tags; // All tags set on transaction
+	TagSet readTags; // Tags that can be sent with read requests
+
+	// update clear function if you add a new field
 
 	TransactionOptions(Database const& cx);
 	TransactionOptions();
 
 	void reset(Database const& cx);
+
+private:
+	void clear();
 };
 
+class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
+	SpanID spanID;
 	bool useProvisionalProxies;
+	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
+	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
+	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
+	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
+	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -160,7 +179,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	template <typename T>
 	void addLog(const T& event) {
 		if(logLocation & TRACE_LOG) {
-			ASSERT(!identifier.empty())
+			ASSERT(!identifier.empty());
 			event.logEvent(identifier, maxFieldLength);
 		}
 
@@ -244,8 +263,10 @@ public:
 	Future< Void > warmRange( Database cx, KeyRange keys );
 
 	Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics( KeyRange const& keys, StorageMetrics const& min, StorageMetrics const& max, StorageMetrics const& permittedError, int shardLimit, int expectedShardCount );
+	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
+	Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(KeyRange const& keys);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
@@ -267,8 +288,10 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
-	void operator=(Transaction&& r) BOOST_NOEXCEPT;
+	Transaction()
+	  : info(TaskPriority::DefaultEndpoint, deterministicRandom()->randomUniqueID()),
+	    span(info.spanID, "Transaction"_loc) {}
+	void operator=(Transaction&& r) noexcept;
 
 	void reset();
 	void fullReset();
@@ -293,12 +316,20 @@ public:
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 	TransactionOptions options;
+	Span span;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
+
+	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
+	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
+		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
+	}
+	Standalone<VectorRef<KeyRangeRef>> writeConflictRanges() const {
+		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
+	}
+
 private:
 	Future<Version> getReadVersion(uint32_t flags);
-	void setPriority(uint32_t priorityFlag);
-
 	Database cx;
 
 	double backoff;
@@ -311,7 +342,9 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
+ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
+                                                                               int shardLimit);
 
 std::string unprintable( const std::string& );
 

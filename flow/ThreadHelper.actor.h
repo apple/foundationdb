@@ -28,6 +28,8 @@
 #elif !defined(FLOW_THREADHELPER_ACTOR_H)
 		#define FLOW_THREADHELPER_ACTOR_H
 
+#include <utility>
+
 #include "flow/flow.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -163,12 +165,12 @@ public:
 	Error error;
 	ThreadCallback *callback;
 
-	bool isReady() { 
+	bool isReady() {
 		ThreadSpinLockHolder holder(mutex);
 		return isReadyUnsafe();
 	}
 
-	bool isError() { 
+	bool isError() {
 		ThreadSpinLockHolder holder(mutex);
 		return isErrorUnsafe();
 	}
@@ -180,7 +182,7 @@ public:
 		return error.code();
 	}
 
-	bool canBeSet() { 
+	bool canBeSet() {
 		ThreadSpinLockHolder holder(mutex);
 		return canBeSetUnsafe();
 	}
@@ -197,18 +199,14 @@ public:
 	};
 
 	void blockUntilReady() {
-		if(isReadyUnsafe()) {
-			ThreadSpinLockHolder holder(mutex);
-			ASSERT(isReadyUnsafe());
-		}
-		else {
-			BlockCallback cb( *this );
+		if (!isReady()) {
+			BlockCallback cb(*this);
 		}
 	}
 
 	ThreadSingleAssignmentVarBase() : status(Unset), callback(NULL), valueReferenceCount(0) {} //, referenceCount(1) {}
-	~ThreadSingleAssignmentVarBase() { 
-		this->mutex.assertNotEntered(); 
+	~ThreadSingleAssignmentVarBase() {
+		this->mutex.assertNotEntered();
 
 		if(callback)
 			callback->destroy();
@@ -233,7 +231,7 @@ public:
 			ASSERT(false);  // Promise fulfilled twice
 		}
 		error = err;
-		status = ErrorSet; 
+		status = ErrorSet;
 		if (!callback) {
 			this->mutex.leave();
 			return;
@@ -462,9 +460,7 @@ public:
 	ThreadFuture( const ThreadFuture<T>& rhs ) : sav(rhs.sav) {
 		if (sav) sav->addref();
 	}
-	ThreadFuture(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
-		rhs.sav = 0;
-	}
+	ThreadFuture(ThreadFuture<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	ThreadFuture( const T& presentValue ) 
 		: sav(new ThreadSingleAssignmentVar<T>())
 	{
@@ -487,7 +483,7 @@ public:
 		if (sav) sav->delref();
 		sav = rhs.sav;
 	}
-	void operator=(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT {
+	void operator=(ThreadFuture<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delref();
 			sav = rhs.sav;
@@ -579,14 +575,16 @@ ACTOR template <class F> void doOnMainThreadVoid( Future<Void> signal, F f, Erro
 	}
 }
 
-template <class F> ThreadFuture< decltype(fake<F>()().getValue()) > onMainThread( F f ) {
+template <class F>
+ThreadFuture<decltype(std::declval<F>()().getValue())> onMainThread(F f) {
 	Promise<Void> signal;
-	auto returnValue = new ThreadSingleAssignmentVar< decltype(fake<F>()().getValue()) >();
+	auto returnValue = new ThreadSingleAssignmentVar<decltype(std::declval<F>()().getValue())>();
 	returnValue->addref(); // For the ThreadFuture we return
-	Future<Void> cancelFuture = doOnMainThread<decltype(fake<F>()().getValue()), F>( signal.getFuture(), f, returnValue );
+	Future<Void> cancelFuture =
+	    doOnMainThread<decltype(std::declval<F>()().getValue()), F>(signal.getFuture(), f, returnValue);
 	returnValue->setCancel( std::move(cancelFuture) );
 	g_network->onMainThread( std::move(signal), TaskPriority::DefaultOnMainThread );
-	return ThreadFuture<decltype(fake<F>()().getValue())>( returnValue );
+	return ThreadFuture<decltype(std::declval<F>()().getValue())>(returnValue);
 }
 
 template <class V>

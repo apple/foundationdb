@@ -41,21 +41,27 @@ public:
 	Deque() : arr(0), begin(0), end(0), mask(-1) {}
 
 	// TODO: iterator construction, other constructors
-	Deque(Deque const& r) : arr(0), begin(0), end(r.size()), mask(r.mask) {
+	Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
 		if (r.capacity() > 0) {
 			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
-		for (uint32_t i=0; i<end; i++)
-			new (&arr[i]) T(r[i]);
-		// FIXME: Specialization for POD types using memcpy?
+		if (r.end < r.capacity()) {
+			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
+		} else {
+			// r.begin is always < capacity(), and r.end is always >= r.begin.  Mask is used for wrapping r.end.
+			// but if r.end >= r.capacity(), the deque wraps around so the
+			// copy must be performed in two parts
+			auto partTwo = std::copy(r.arr + r.begin, r.arr + r.capacity(), arr);
+			std::copy(r.arr, r.arr + (r.end & r.mask), partTwo);
+		}
 	}
 
 	void operator=(Deque const& r) {
 		cleanup();
 
-		arr = 0;
+		arr = nullptr;
 		begin = 0;
 		end = r.size();
 		mask = r.mask;
@@ -64,26 +70,32 @@ public:
 			ASSERT(arr != nullptr);
 		}
 		ASSERT(capacity() >= end || end == 0);
-		for (uint32_t i=0; i<end; i++)
-			new (&arr[i]) T(r[i]);
-		// FIXME: Specialization for POD types using memcpy?
+		if (r.end < r.capacity()) {
+			std::copy(r.arr + r.begin, r.arr + r.begin + r.size(), arr);
+		} else {
+			// r.begin is always < capacity(), and r.end is always >= r.begin.  Mask is used for wrapping r.end.
+			// but if r.end >= r.capacity(), the deque wraps around so the
+			// copy must be performed in two parts
+			auto partTwo = std::copy(r.arr + r.begin, r.arr + r.capacity(), arr);
+			std::copy(r.arr, r.arr + (r.end & r.mask), partTwo);
+		}
 	}
 
-	Deque(Deque&& r) BOOST_NOEXCEPT : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
-		r.arr = 0;
+	Deque(Deque&& r) noexcept : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
+		r.arr = nullptr;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
 
-	void operator=(Deque&& r) BOOST_NOEXCEPT {
+	void operator=(Deque&& r) noexcept {
 		cleanup();
 
 		begin = r.begin;
 		end = r.end;
 		mask = r.mask;
 		arr = r.arr;
-		
-		r.arr = 0;
+
+		r.arr = nullptr;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
@@ -96,6 +108,7 @@ public:
 				return false;
 		return true;
 	}
+	bool operator!=(const Deque& r) const { return !(*this == r); }
 
 	~Deque() {
 		cleanup();

@@ -20,16 +20,23 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "flow/FastAlloc.h"
+#include "flow/FastRef.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "flow/genericactors.actor.h"
+#include <vector>
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/Smoother.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -42,8 +49,94 @@ private:
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
-typedef MultiInterface<MasterProxyInterface> ProxyInfo;
+struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
+	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
+	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
+		: Locations(v)
+	{}
+	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
+		: Locations(v)
+		, hasCaches(hasCaches)
+	{}
+	LocationInfo(const LocationInfo&) = delete;
+	LocationInfo(LocationInfo&&) = delete;
+	LocationInfo& operator=(const LocationInfo&) = delete;
+	LocationInfo& operator=(LocationInfo&&) = delete;
+	bool hasCaches = false;
+	Reference<Locations> locations() {
+		return Reference<Locations>::addRef(this);
+	}
+};
+
+typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+
+class ClientTagThrottleData : NonCopyable {
+private:
+	double tpsRate;
+	double expiration;
+	double lastCheck;
+	bool rateSet = false;
+
+	Smoother smoothRate;
+	Smoother smoothReleased;
+
+public:
+	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
+	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
+	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
+	{
+		ASSERT(tpsRate >= 0);
+		smoothRate.reset(tpsRate);
+	}
+
+	void update(ClientTagThrottleLimits const& limits) {
+		ASSERT(limits.tpsRate >= 0);
+		this->tpsRate = limits.tpsRate;
+
+		if(!rateSet || expired()) {
+			rateSet = true;
+			smoothRate.reset(limits.tpsRate);
+		}
+		else {
+			smoothRate.setTotal(limits.tpsRate);
+		}
+
+		expiration = limits.expiration;
+	}
+
+	void addReleased(int released) {
+		smoothReleased.addDelta(released);
+	}
+
+	bool expired() {
+		return expiration <= now();
+	}
+
+	void updateChecked() {
+		lastCheck = now();
+	}
+
+	bool canRecheck() {
+		return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL;
+	}
+
+	double throttleDuration() {
+		if(expiration <= now()) {
+			return 0.0;
+		}
+
+		double capacity = (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+		if(capacity >= 1) {
+			return 0.0;
+		}
+
+		if(tpsRate == 0) {
+			return std::max(0.0, expiration - now());
+		}
+
+		return std::min(expiration - now(), capacity / tpsRate);
+	}
+};
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -61,11 +154,13 @@ public:
 
 	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
 
-	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
 	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
+
+	bool sampleReadTags();
 
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
@@ -114,6 +209,8 @@ public:
 
 	explicit DatabaseContext( const Error &err );
 
+	void expireThrottles();
+
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
@@ -125,9 +222,19 @@ public:
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
 
+	struct VersionRequest {
+		SpanID spanContext;
+		Promise<GetReadVersionReply> reply;
+		TagSet tags;
+		Optional<UID> debugID;
+
+		VersionRequest(SpanID spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
+	};
+
 	// Transaction start request batching
 	struct VersionBatcher {
-		PromiseStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > stream;
+		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
@@ -150,28 +257,54 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
+	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
+	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
+
 	CounterCollection cc;
 
 	Counter transactionReadVersions;
+	Counter transactionReadVersionsThrottled;
+	Counter transactionReadVersionsCompleted;
+	Counter transactionReadVersionBatches;
+	Counter transactionBatchReadVersions;
+	Counter transactionDefaultReadVersions;
+	Counter transactionImmediateReadVersions;
+	Counter transactionBatchReadVersionsCompleted;
+	Counter transactionDefaultReadVersionsCompleted;
+	Counter transactionImmediateReadVersionsCompleted;
 	Counter transactionLogicalReads;
 	Counter transactionPhysicalReads;
+	Counter transactionPhysicalReadsCompleted;
+	Counter transactionGetKeyRequests;
+	Counter transactionGetValueRequests;
+	Counter transactionGetRangeRequests;
+	Counter transactionWatchRequests;
+	Counter transactionGetAddressesForKeyRequests;
+	Counter transactionBytesRead;
+	Counter transactionKeysRead;
+	Counter transactionMetadataVersionReads;
 	Counter transactionCommittedMutations;
 	Counter transactionCommittedMutationBytes;
+	Counter transactionSetMutations;
+	Counter transactionClearMutations;
+	Counter transactionAtomicMutations;
 	Counter transactionsCommitStarted;
 	Counter transactionsCommitCompleted;
+	Counter transactionKeyServerLocationRequests;
+	Counter transactionKeyServerLocationRequestsCompleted;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;
 	Counter transactionsMaybeCommitted;
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
+	Counter transactionsThrottled;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -181,6 +314,7 @@ public:
 	int snapshotRywEnabled;
 
 	Future<Void> logger;
+	Future<Void> throttleExpirer;
 
 	TaskPriority taskID;
 
@@ -190,6 +324,10 @@ public:
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
 	Future<Void> clientInfoMonitor;
 	Future<Void> connected;
+
+	Reference<AsyncVar<Optional<ClusterInterface>>> statusClusterInterface;
+	Future<Void> statusLeaderMon;
+	double lastStatusFetch;
 
 	int apiVersion;
 
@@ -201,6 +339,16 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
+
+	Future<Void> cacheListMonitor;
+	AsyncTrigger updateCache;
+	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
+	std::unique_ptr<SpecialKeySpace> specialKeySpace;
+	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
+	                                   std::unique_ptr<SpecialKeyRangeReadImpl> impl);
+
+	static bool debugUseTags;
+	static const std::vector<std::string> debugTransactionTagChoices; 
 };
 
 #endif

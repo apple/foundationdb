@@ -27,6 +27,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbserver/MutationTracking.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
@@ -36,7 +37,7 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
-// The set of tLog servers and logRouters for a log tag
+// The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
@@ -379,6 +380,8 @@ struct ILogSystem {
 
 		virtual Version getMinKnownCommittedVersion() = 0;
 
+		virtual Optional<UID> getPrimaryPeekLocation() = 0;
+
 		virtual void addref() = 0;
 
 		virtual void delref() = 0;
@@ -404,6 +407,12 @@ struct ILogSystem {
 		Deque<Future<TLogPeekReply>> futureResults;
 		Future<Void> interfaceChanged;
 
+		double lastReset;
+		Future<Void> resetCheck;
+		int slowReplies;
+		int fastReplies;
+		int unknownReplies;
+
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag );
 
@@ -424,6 +433,7 @@ struct ILogSystem {
 		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
+		virtual Optional<UID> getPrimaryPeekLocation();
 
 		virtual void addref() {
 			ReferenceCounted<ServerPeekCursor>::addref();
@@ -473,6 +483,7 @@ struct ILogSystem {
 		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
+		virtual Optional<UID> getPrimaryPeekLocation();
 
 		virtual void addref() {
 			ReferenceCounted<MergedPeekCursor>::addref();
@@ -519,6 +530,7 @@ struct ILogSystem {
 		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
+		virtual Optional<UID> getPrimaryPeekLocation();
 
 		virtual void addref() {
 			ReferenceCounted<SetPeekCursor>::addref();
@@ -553,6 +565,7 @@ struct ILogSystem {
 		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
+		virtual Optional<UID> getPrimaryPeekLocation();
 
 		virtual void addref() {
 			ReferenceCounted<MultiCursor>::addref();
@@ -624,6 +637,7 @@ struct ILogSystem {
 		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
+		virtual Optional<UID> getPrimaryPeekLocation();
 
 		virtual void addref() {
 			ReferenceCounted<BufferedCursor>::addref();
@@ -714,7 +728,8 @@ struct ILogSystem {
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0) will be readable)
 
-	virtual Version getStartVersion() const = 0; // Returns the start version of current epoch.
+	// Returns the start version of current epoch for backup workers.
+	virtual Version getBackupStartVersion() const = 0;
 
 	struct EpochTagsVersionsInfo {
 		int32_t logRouterTags; // Number of log router tags.
@@ -777,6 +792,7 @@ struct ILogSystem {
 	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) = 0;
 
 	virtual LogEpoch getOldestBackupEpoch() const = 0;
+	virtual void setOldestBackupEpoch(LogEpoch epoch) = 0;
 };
 
 struct LengthPrefixedStringRef {
@@ -868,16 +884,27 @@ struct LogPushData : NonCopyable {
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
+		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
 		uint32_t subseq = this->subsequence++;
+		bool first = true;
+		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
-			// FIXME: memcpy after the first time
-			BinaryWriter& wr = messagesWriter[loc];
-			int offset = wr.getLength();
-			wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
-			for(auto& tag : prev_tags)
-				wr << tag;
-			wr << item;
-			*(uint32_t*)((uint8_t*)wr.getData() + offset) = wr.getLength() - offset - sizeof(uint32_t);
+			if (first) {
+				BinaryWriter& wr = messagesWriter[loc];
+				firstOffset = wr.getLength();
+				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+				for(auto& tag : prev_tags)
+					wr << tag;
+				wr << item;
+				firstLength = wr.getLength() - firstOffset;
+				*(uint32_t*)((uint8_t*)wr.getData() + firstOffset) = firstLength - sizeof(uint32_t);
+				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
+				first = false;
+			} else {
+				BinaryWriter& wr = messagesWriter[loc];
+				BinaryWriter& from = messagesWriter[msg_locations[0]];
+				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
+			}
 		}
 		next_message_tags.clear();
 	}

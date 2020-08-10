@@ -20,6 +20,8 @@
 
 #ifndef FLOW_ARENA_H
 #define FLOW_ARENA_H
+#include <array>
+#include <iterator>
 #pragma once
 
 #include "flow/FastAlloc.h"
@@ -33,6 +35,7 @@
 #include <string>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <set>
 #include <type_traits>
 #include <sstream>
@@ -89,24 +92,33 @@ class NonCopyable
 	NonCopyable & operator = (const NonCopyable &);
 };
 
+// An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
+// on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
+// ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
+// memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
-	inline Arena();
-	inline explicit Arena( size_t reservedSize );
+	Arena();
+	explicit Arena(size_t reservedSize);
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) BOOST_NOEXCEPT;
+	Arena(Arena&& r) noexcept;
 	Arena& operator=(const Arena&);
-	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
+	Arena& operator=(Arena&&) noexcept;
 
-	inline void dependsOn( const Arena& p );
-	inline size_t getSize() const;
+	void dependsOn(const Arena& p);
+	size_t getSize() const;
 
-	inline bool hasFree( size_t size, const void *address );
+	bool hasFree(size_t size, const void* address);
 
 	friend void* operator new ( size_t size, Arena& p );
 	friend void* operator new[] ( size_t size, Arena& p );
-//private:
+
+	bool sameArena(const Arena& other) const {
+		return impl.getPtr() == other.impl.getPtr();
+	}
+
+private:
 	Reference<struct ArenaBlock> impl;
 };
 
@@ -143,190 +155,30 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	uint32_t bigSize, bigUsed;	  // include block header
 	uint32_t nextBlockOffset;
 
-	void delref() {
-		if (delref_no_destroy())
-			destroy();
-	}
-
-	bool isTiny() const { return tinySize != NOT_TINY; }
-	int size() const { if (isTiny()) return tinySize; else return bigSize; }
-	int used() const { if (isTiny()) return tinyUsed; else return bigUsed; }
-	inline int unused() const { if (isTiny()) return tinySize-tinyUsed; else return bigSize-bigUsed; }
-	const void* getData() const { return this; }
-	const void* getNextData() const { return (const uint8_t*)getData() + used(); }
-	size_t totalSize() {
-		if (isTiny()) return size();
-
-		size_t s = size();
-		int o = nextBlockOffset;
-		while (o) {
-			ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
-			s += r->next->totalSize();
-			o = r->nextBlockOffset;
-		}
-		return s;
-	}
+	void addref();
+	void delref();
+	bool isTiny() const;
+	int size() const;
+	int used() const;
+	int unused() const;
+	const void* getData() const;
+	const void* getNextData() const;
+	size_t totalSize();
 	// just for debugging:
-	void getUniqueBlocks(std::set<ArenaBlock*>& a) {
-		a.insert(this);
-		if (isTiny()) return;
-
-		int o = nextBlockOffset;
-		while (o) {
-			ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
-			r->next->getUniqueBlocks(a);
-			o = r->nextBlockOffset;
-		}
-		return;
-	}
-
-	inline int addUsed( int bytes ) {
-		if (isTiny()) {
-			int t = tinyUsed;
-			tinyUsed += bytes;
-			return t;
-		} else {
-			int t = bigUsed;
-			bigUsed += bytes;
-			return t;
-		}
-	}
-
-	void makeReference( ArenaBlock* next ) {
-		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
-		r->next = next;
-		r->nextBlockOffset = nextBlockOffset;
-		nextBlockOffset = bigUsed;
-		bigUsed += sizeof(ArenaBlockRef);
-	}
-
-	static void dependOn( Reference<ArenaBlock>& self, ArenaBlock* other ) {
-		other->addref();
-		if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef))
-			create( SMALL, self )->makeReference(other);
-		else
-			self->makeReference( other );
-	}
-
-	static inline void* allocate( Reference<ArenaBlock>& self, int bytes ) {
-		ArenaBlock* b = self.getPtr();
-		if (!self || self->unused() < bytes)
-			b = create( bytes, self );
-
-		return (char*)b->getData() + b->addUsed(bytes);
-	}
-
+	void getUniqueBlocks(std::set<ArenaBlock*>& a);
+	int addUsed(int bytes);
+	void makeReference(ArenaBlock* next);
+	static void dependOn(Reference<ArenaBlock>& self, ArenaBlock* other);
+	static void* allocate(Reference<ArenaBlock>& self, int bytes);
 	// Return an appropriately-sized ArenaBlock to store the given data
-	static ArenaBlock* create( int dataSize, Reference<ArenaBlock>& next ) {
-		ArenaBlock* b;
-		if (dataSize <= SMALL-TINY_HEADER && !next) {
-			if (dataSize <= 16-TINY_HEADER) { b = (ArenaBlock*)FastAllocator<16>::allocate(); b->tinySize = 16; INSTRUMENT_ALLOCATE("Arena16"); }
-			else if (dataSize <= 32-TINY_HEADER) { b = (ArenaBlock*)FastAllocator<32>::allocate(); b->tinySize = 32; INSTRUMENT_ALLOCATE("Arena32"); }
-			else { b = (ArenaBlock*)FastAllocator<64>::allocate(); b->tinySize=64; INSTRUMENT_ALLOCATE("Arena64"); }
-			b->tinyUsed = TINY_HEADER;
+	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
+	void destroy();
+	void destroyLeaf();
 
-		} else {
-			int reqSize = dataSize + sizeof(ArenaBlock);
-			if (next) reqSize += sizeof(ArenaBlockRef);
-
-			if (reqSize < LARGE) {
-				// Each block should be larger than the previous block, up to a limit, to minimize allocations
-				// Worst-case allocation pattern: 1 +10 +17 +42 +67 +170 +323 +681 +1348 +2728 +2210 +2211 (+1K +3K+1 +4K)*
-				// Overhead: 4X for small arenas, 3X intermediate, 1.33X for large arenas
-				int prevSize = next ? next->size() : 0;
-				reqSize = std::max( reqSize, std::min( prevSize*2, std::max( LARGE-1, reqSize*4 ) ) );
-			}
-
-			if (reqSize < LARGE) {
-				if (reqSize <= 128) { b = (ArenaBlock*)FastAllocator<128>::allocate(); b->bigSize = 128; INSTRUMENT_ALLOCATE("Arena128"); }
-				else if (reqSize <= 256) { b = (ArenaBlock*)FastAllocator<256>::allocate(); b->bigSize = 256; INSTRUMENT_ALLOCATE("Arena256"); }
-				else if (reqSize <= 512) { b = (ArenaBlock*)FastAllocator<512>::allocate(); b->bigSize = 512; INSTRUMENT_ALLOCATE("Arena512"); }
-				else if (reqSize <= 1024) { b = (ArenaBlock*)FastAllocator<1024>::allocate(); b->bigSize = 1024; INSTRUMENT_ALLOCATE("Arena1024"); }
-				else if (reqSize <= 2048) { b = (ArenaBlock*)FastAllocator<2048>::allocate(); b->bigSize = 2048; INSTRUMENT_ALLOCATE("Arena2048"); }
-				else if (reqSize <= 4096) { b = (ArenaBlock*)FastAllocator<4096>::allocate(); b->bigSize = 4096; INSTRUMENT_ALLOCATE("Arena4096"); }
-				else { b = (ArenaBlock*)FastAllocator<8192>::allocate(); b->bigSize = 8192; INSTRUMENT_ALLOCATE("Arena8192"); }
-				b->tinySize = b->tinyUsed = NOT_TINY;
-				b->bigUsed = sizeof(ArenaBlock);
-			} else {
-				#ifdef ALLOC_INSTRUMENTATION
-					allocInstr[ "ArenaHugeKB" ].alloc( (reqSize+1023)>>10 );
-				#endif
-				b = (ArenaBlock*)new uint8_t[ reqSize ];
-				b->tinySize = b->tinyUsed = NOT_TINY;
-				b->bigSize = reqSize;
-				b->bigUsed = sizeof(ArenaBlock);
-
-				if(FLOW_KNOBS && g_trace_depth == 0 && nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
-					hugeArenaSample(reqSize);
-				}
-				g_hugeArenaMemory.fetch_add(reqSize);
-
-				// If the new block has less free space than the old block, make the old block depend on it
-				if (next && !next->isTiny() && next->unused() >= reqSize-dataSize) {
-					b->nextBlockOffset = 0;
-					b->setrefCountUnsafe(1);
-					next->makeReference(b);
-					return b;
-				}
-			}
-			b->nextBlockOffset = 0;
-			if (next) b->makeReference(next.getPtr());
-		}
-		b->setrefCountUnsafe(1);
-		next.setPtrUnsafe(b);
-		return b;
-	}
-
-	inline void destroy();
-
-	void destroyLeaf() {
-		if (isTiny()) {
-			if (tinySize <= 16) { FastAllocator<16>::release(this); INSTRUMENT_RELEASE("Arena16");}
-			else if (tinySize <= 32) { FastAllocator<32>::release(this); INSTRUMENT_RELEASE("Arena32"); }
-			else { FastAllocator<64>::release(this); INSTRUMENT_RELEASE("Arena64"); }
-		} else {
-			if (bigSize <= 128) { FastAllocator<128>::release(this); INSTRUMENT_RELEASE("Arena128"); }
-			else if (bigSize <= 256) { FastAllocator<256>::release(this); INSTRUMENT_RELEASE("Arena256"); }
-			else if (bigSize <= 512) { FastAllocator<512>::release(this); INSTRUMENT_RELEASE("Arena512"); }
-			else if (bigSize <= 1024) { FastAllocator<1024>::release(this); INSTRUMENT_RELEASE("Arena1024"); }
-			else if (bigSize <= 2048) { FastAllocator<2048>::release(this); INSTRUMENT_RELEASE("Arena2048"); }
-			else if (bigSize <= 4096) { FastAllocator<4096>::release(this); INSTRUMENT_RELEASE("Arena4096"); }
-			else if (bigSize <= 8192) { FastAllocator<8192>::release(this); INSTRUMENT_RELEASE("Arena8192"); }
-			else {
-				#ifdef ALLOC_INSTRUMENTATION
-					allocInstr[ "ArenaHugeKB" ].dealloc( (bigSize+1023)>>10 );
-				#endif
-				g_hugeArenaMemory.fetch_sub(bigSize);
-				delete[] (uint8_t*)this;
-			}
-		}
-	}
 private:
-	static void* operator new(size_t s);  // not implemented
+	static void* operator new(size_t s); // not implemented
 };
 
-inline Arena::Arena() : impl( NULL ) {}
-inline Arena::Arena(size_t reservedSize) : impl( 0 ) {
-	UNSTOPPABLE_ASSERT( reservedSize < std::numeric_limits<int>::max() );
-	if (reservedSize)
-		ArenaBlock::create((int)reservedSize,impl);
-}
-inline Arena::Arena( const Arena& r ) : impl( r.impl ) {}
-inline Arena::Arena(Arena && r) BOOST_NOEXCEPT : impl(std::move(r.impl)) {}
-inline Arena& Arena::operator=(const Arena& r) {
-	impl = r.impl;
-	return *this;
-}
-inline Arena& Arena::operator=(Arena&& r) BOOST_NOEXCEPT {
-	impl = std::move(r.impl);
-	return *this;
-}
-inline void Arena::dependsOn( const Arena& p ) {
-	if (p.impl)
-		ArenaBlock::dependOn( impl, p.impl.getPtr() );
-}
-inline size_t Arena::getSize() const { return impl ? impl->totalSize() : 0; }
-inline bool Arena::hasFree( size_t size, const void *address ) { return impl && impl->unused() >= size && impl->getNextData() == address; }
 inline void* operator new ( size_t size, Arena& p ) {
 	UNSTOPPABLE_ASSERT( size < std::numeric_limits<int>::max() );
 	return ArenaBlock::allocate( p.impl, (int)size );
@@ -347,26 +199,35 @@ inline void save( Archive& ar, const Arena& p ) {
 	// No action required
 }
 
+// Optional is a wrapper for std::optional. There
+// are two primary reasons to use this wrapper instead
+// of using std::optional directly:
+//
+// 1) Legacy: A lot of code was written using Optional before
+//    std::optional was available.
+// 2) When you call get but no value is present Optional gives an
+//    assertion failure. std::optional, on the other hand, would
+//    throw std::bad_optional_access. It is easier to debug assertion
+//    failures, and FDB generally does not handle std exceptions, so
+//    assertion failures are preferable. This is the main reason we
+//    don't intend to use std::optional directly.
 template <class T>
-class Optional : public ComposedIdentifier<T, 0x10> {
+class Optional : public ComposedIdentifier<T, 4> {
 public:
-	Optional() : valid(false) { memset(&value, 0, sizeof(value)); }
-	Optional(const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(o.get());
-	}
+	Optional() = default;
 
 	template <class U>
-	Optional(const U& t) : valid(true) { new (&value) T(t); }
+	Optional(const U& t) : impl(std::in_place, t) {}
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be converted to Optional<Optional<int>> in the wrong way
 	(a non-present Optional<int> converts to a non-present Optional<Optional<int>>).
 	Use .castTo<>() instead.
 	template <class S> Optional(const Optional<S>& o) : valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
-	Optional(Arena& a, const Optional<T>& o) : valid(o.valid) {
-		if (valid) new (&value) T(a, o.get());
+	Optional(Arena& a, const Optional<T>& o) {
+		if (o.present()) impl = std::make_optional<T>(a, o.get());
 	}
-	int expectedSize() const { return valid ? get().expectedSize() : 0; }
+	int expectedSize() const { return present() ? get().expectedSize() : 0; }
 
 	template <class R> Optional<R> castTo() const {
 		return map<R>([](const T& v){ return (R)v; });
@@ -381,68 +242,58 @@ public:
 		}
 	}
 
-	~Optional() {
-		if (valid) ((T*)&value)->~T();
-	}
-
-	Optional & operator=(Optional const& o) {
-		if (valid) {
-			valid = false;
-			((T*)&value)->~T();
-		}
-		if (o.valid) {
-			new (&value) T(o.get());
-			valid = true;
-		}
-		return *this;
-	}
-
-	bool present() const { return valid; }
+	bool present() const { return impl.has_value(); }
 	T& get() {
-		UNSTOPPABLE_ASSERT(valid);
-		return *(T*)&value;
+		UNSTOPPABLE_ASSERT(impl.has_value());
+		return impl.value();
 	}
 	T const& get() const {
-		UNSTOPPABLE_ASSERT(valid);
-		return *(T const*)&value;
+		UNSTOPPABLE_ASSERT(impl.has_value());
+		return impl.value();
 	}
-	T orDefault(T const& default_value) const { if (valid) return get(); else return default_value; }
+	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		// SOMEDAY: specialize for space efficiency?
-		if (valid && Ar::isDeserializing)
-			(*(T *)&value).~T();
-		serializer(ar, valid);
-		if (valid) {
-			if (Ar::isDeserializing) new (&value) T();
-			serializer(ar, *(T*)&value);
+	// Spaceship operator.  Treats not-present as less-than present.
+	int compare(Optional const & rhs) const {
+		if(present() == rhs.present()) {
+			return present() ? get().compare(rhs.get()) : 0;
 		}
+		return present() ? 1 : -1;
 	}
 
-	bool operator == (Optional const& o) const {
-		return present() == o.present() && (!present() || get() == o.get());
-	}
+	bool operator==(Optional const& o) const { return impl == o.impl; }
 	bool operator != (Optional const& o) const {
 		return !(*this == o);
 	}
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
-	bool operator < (Optional const& o) const {
-		if (present() != o.present()) return o.present();
-		if (!present()) return false;
-		return get() < o.get();
-	}
+	bool operator<(Optional const& o) const { return impl < o.impl; }
 
-	void reset() {
-		if (valid) {
-			valid = false;
-			((T*)&value)->~T();
-		}
-	}
+	void reset() { impl.reset(); }
+
 private:
-	typename std::aligned_storage< sizeof(T), __alignof(T) >::type value;
-	bool valid;
+	std::optional<T> impl;
 };
+
+template <class Archive, class T>
+inline void load(Archive& ar, Optional<T>& value) {
+	bool valid;
+	ar >> valid;
+	if (valid) {
+		T t;
+		ar >> t;
+		value = Optional<T>(t);
+	} else {
+		value.reset();
+	}
+}
+
+template <class Archive, class T>
+inline void save(Archive& ar, const Optional<T>& value) {
+	ar << value.present();
+	if (value.present()) {
+		ar << value.get();
+	}
+}
 
 template<class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
@@ -511,13 +362,16 @@ public:
 	}
 #else
 	Standalone( const T& t, const Arena& arena ) : Arena( arena ), T( t ) {}
-	Standalone( const Standalone<T> & t ) : Arena((Arena const&)t), T((T const&)t) {}
-	Standalone<T>& operator=( const Standalone<T> & t ) {
-		*(Arena*)this = (Arena const&)t;
-		*(T*)this = (T const&)t;
-		return *this;
-	}
+	Standalone(const Standalone<T>&) = default;
+	Standalone<T>& operator=(const Standalone<T>&) = default;
+	Standalone(Standalone<T>&&) = default;
+	Standalone<T>& operator=(Standalone<T>&&) = default;
+	~Standalone() = default;
 #endif
+
+	template <class U> Standalone<U> castTo() const {
+		return Standalone<U>(*this, arena());
+	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -623,7 +477,7 @@ public:
 		return substr( 0, size() - s.size() );
 	}
 
-	std::string toString() const { return std::string( (const char*)data, length ); }
+	std::string toString() const { return std::string((const char*)data, length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
@@ -657,11 +511,12 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		if (std::min(size(), other.size()) > 0) {
-			int c = memcmp(begin(), other.begin(), std::min(size(), other.size()));
+		size_t minSize = std::min(size(), other.size());
+		if (minSize != 0) {
+			int c = memcmp(begin(), other.begin(), minSize);
 			if (c != 0) return c;
 		}
-		return size() - other.size();
+		return ::compare(size(), other.size());
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
@@ -703,6 +558,21 @@ public:
 		return eatAny(StringRef((const uint8_t *)sep, strlen(sep)), foundSeparator);
 	}
 
+	// Copies string contents to dst and returns a pointer to the next byte after
+	uint8_t * copyTo(uint8_t *dst) const {
+		memcpy(dst, data, length);
+		return dst + length;
+	}
+
+	std::vector<StringRef> splitAny(StringRef sep) const {
+		StringRef r = *this;
+		std::vector<StringRef> tokens;
+		while (r.size()) {
+			tokens.push_back(r.eatAny(sep, nullptr));
+		}
+		return tokens;
+	}
+
 private:
 	// Unimplemented; blocks conversion through std::string
 	StringRef( char* );
@@ -712,7 +582,17 @@ private:
 };
 #pragma pack( pop )
 
-template<>
+namespace std {
+	template <>
+	struct hash<StringRef> {
+		static constexpr std::hash<std::string_view> hashFunc{};
+		std::size_t operator()(StringRef const& tag) const {
+			return hashFunc(std::string_view((const char*)tag.begin(), tag.size()));
+		}
+	};
+}
+
+template <>
 struct TraceableString<StringRef> {
 	static const char* begin(StringRef value) {
 		return reinterpret_cast<const char*>(value.begin());
@@ -742,6 +622,9 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 };
 
 #define LiteralStringRef( str ) StringRef( (const uint8_t*)(str), sizeof((str))-1 )
+inline StringRef operator "" _sr(const char* str, size_t size) {
+	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
+}
 
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
@@ -820,15 +703,20 @@ inline bool operator != (const StringRef& lhs, const StringRef& rhs ) { return !
 inline bool operator <= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs>rhs); }
 inline bool operator >= ( const StringRef& lhs, const StringRef& rhs ) { return !(lhs<rhs); }
 
-// This trait is used by VectorRef to determine if it should just memcpy the vector contents.
-// FIXME:  VectorRef really should use std::is_trivially_copyable for this BUT that is not implemented
-// in gcc c++0x so instead we will use this custom trait which defaults to std::is_trivial, which
-// handles most situations but others will have to be specialized.
+// This trait is used by VectorRef to determine if deep copy constructor should recursively
+// call deep copies of each element.
+//
+// TODO: There should be an easier way to identify the difference between flow_ref and non-flow_ref types.
+// std::is_trivially_copyable does not work because some flow_ref types are trivially copyable
+// and some non-flow_ref types are not trivially copyable.
 template <typename T>
-struct memcpy_able : std::is_trivial<T> {};
+struct flow_ref : std::integral_constant<bool, !std::is_fundamental_v<T>> {};
 
 template <>
-struct memcpy_able<UID> : std::integral_constant<bool, true> {};
+struct flow_ref<UID> : std::integral_constant<bool, false> {};
+
+template <class A, class B>
+struct flow_ref<std::pair<A, B>> : std::integral_constant<bool, false> {};
 
 template<class T>
 struct string_serialized_traits : std::false_type {
@@ -895,7 +783,7 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 };
 
 template <class T, VecSerStrategy SerStrategy = VecSerStrategy::FlatBuffers>
-class VectorRef : public ComposedIdentifier<T, 0x8>, public VectorRefPreserializer<T, SerStrategy> {
+class VectorRef : public ComposedIdentifier<T, 3>, public VectorRefPreserializer<T, SerStrategy> {
 	using VPS = VectorRefPreserializer<T, SerStrategy>;
 	friend class VectorRef<T, SerStrategy == VecSerStrategy::FlatBuffers ? VecSerStrategy::String
 	                                                                     : VecSerStrategy::FlatBuffers>;
@@ -904,7 +792,9 @@ public:
 	using value_type = T;
 	static_assert(SerStrategy == VecSerStrategy::FlatBuffers || string_serialized_traits<T>::value);
 
-	// T must be trivially destructible (and copyable)!
+	// T must be trivially copyable!
+	// T must be trivially destructible, because ~T is never called
+	static_assert(std::is_trivially_destructible_v<T>);
 	VectorRef() : data(0), m_size(0), m_capacity(0) {}
 
 	template <VecSerStrategy S>
@@ -919,23 +809,32 @@ public:
 		return *this;
 	}
 
-	// Arena constructor for non-Ref types, identified by memcpy_able
+	// Arena constructor for non-Ref types, identified by !flow_ref
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<memcpy_able<T2>::value, int>::type = 0)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
 	  : VPS(toCopy), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()),
 	    m_capacity(toCopy.size()) {
 		if (m_size > 0) {
-			memcpy(data, toCopy.data, m_size * sizeof(T));
+			std::copy(toCopy.data, toCopy.data + m_size, data);
 		}
 	}
 
 	// Arena constructor for Ref types, which must have an Arena constructor
 	template <class T2 = T, VecSerStrategy S>
-	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<!memcpy_able<T2>::value, int>::type = 0)
+	VectorRef(Arena& p, const VectorRef<T, S>& toCopy, typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
 	  : VPS(), data((T*)new (p) uint8_t[sizeof(T) * toCopy.size()]), m_size(toCopy.size()), m_capacity(toCopy.size()) {
 		for (int i = 0; i < m_size; i++) {
 			auto ptr = new (&data[i]) T(p, toCopy[i]);
 			VPS::add(*ptr);
+		}
+	}
+
+	template <class It>
+	VectorRef(Arena& arena, It first, It last) {
+		if constexpr (flow_ref<T>::value) {
+			append_deep(arena, first, std::distance(first, last));
+		} else {
+			append(arena, first, std::distance(first, last));
 		}
 	}
 
@@ -966,6 +865,12 @@ public:
 	bool empty() const { return m_size == 0; }
 	const T& operator[](int i) const { return data[i]; }
 
+	// const versions of some VectorRef operators
+	const T* cbegin() const { return data; }
+	const T* cend() const { return data + m_size; }
+	T const& cfront() const { return *begin(); }
+	T const& cback() const { return end()[-1]; }
+
 	std::reverse_iterator<const T*> rbegin() const { return std::reverse_iterator<const T*>(end()); }
 	std::reverse_iterator<const T*> rend() const { return std::reverse_iterator<const T*>(begin()); }
 
@@ -980,6 +885,10 @@ public:
 		for (int i = 0; i < m_size; i++)
 			if ((*this)[i] != rhs[i]) return false;
 		return true;
+	}
+	template <VecSerStrategy S>
+	bool operator!=(VectorRef<T, S> const& rhs) const {
+		return !(*this == rhs);
 	}
 
 	// Warning: Do not mutate a VectorRef that has previously been copy constructed or assigned,
@@ -1010,6 +919,16 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
+
+	template<class... Us>
+	T &emplace_back(Arena& p, Us&& ... args) {
+		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		auto ptr = new (&data[m_size]) T(std::forward<Us>(args)...);
+		VPS::add(*ptr);
+		m_size++;
+		return *ptr;
+	}
+
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
@@ -1017,11 +936,23 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
-	void append(Arena& p, const T* begin, int count) {
+
+	// invokes the "Deep copy constructor" T(Arena&, U&&) moving T entirely into arena
+	template<class... Us>
+	T &emplace_back_deep(Arena& p, Us&& ... args) {
+		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		auto ptr = new (&data[m_size]) T(p, std::forward<Us>(args)...);
+		VPS::add(*ptr);
+		m_size++;
+		return *ptr;
+	}
+
+	template <class It>
+	void append(Arena& p, It begin, int count) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
 		VPS::invalidate();
 		if (count > 0) {
-			memcpy(data + m_size, begin, sizeof(T) * count);
+			std::copy(begin, begin + count, data + m_size);
 		}
 		m_size += count;
 	}
@@ -1061,15 +992,15 @@ public:
 		if (size > m_capacity) reallocate(p, size);
 	}
 
-	// expectedSize() for non-Ref types, identified by memcpy_able
+	// expectedSize() for non-Ref types, identified by !flow_ref
 	template <class T2 = T>
-	typename std::enable_if<memcpy_able<T2>::value, size_t>::type expectedSize() const {
+	typename std::enable_if<!flow_ref<T2>::value, size_t>::type expectedSize() const {
 		return sizeof(T) * m_size;
 	}
 
 	// expectedSize() for Ref types, which must in turn have expectedSize() implemented.
 	template <class T2 = T>
-	typename std::enable_if<!memcpy_able<T2>::value, size_t>::type expectedSize() const {
+	typename std::enable_if<flow_ref<T2>::value, size_t>::type expectedSize() const {
 		size_t t = sizeof(T) * m_size;
 		for (int i = 0; i < m_size; i++) t += data[i].expectedSize();
 		return t;
@@ -1079,23 +1010,276 @@ public:
 
 	void extendUnsafeNoReallocNoInit(int amount) { m_size += amount; }
 
-private:
+protected:
 	T* data;
 	int m_size, m_capacity;
 
 	void reallocate(Arena& p, int requiredCapacity) {
 		requiredCapacity = std::max(m_capacity * 2, requiredCapacity);
 		// SOMEDAY: Maybe we are right at the end of the arena and can expand cheaply
-		T* newData = (T*)new (p) uint8_t[requiredCapacity * sizeof(T)];
+		T* newData = new (p) T[requiredCapacity];
 		if (m_size > 0) {
-			memcpy(newData, data, m_size * sizeof(T));
+			std::move(data, data + m_size, newData);
 		}
 		data = newData;
 		m_capacity = requiredCapacity;
 	}
 };
 
-template<class T>
+// This is a VectorRef that optimizes for tiny to small sizes.
+// It keeps the first #InlineMembers on the stack - which means
+// that all of them are always copied. This should be faster
+// when you expect the vector to be usually very small as it
+// won't need allocations in these cases.
+template <class T, int InlineMembers = 1>
+class SmallVectorRef {
+	static_assert(InlineMembers >= 0);
+
+public:
+	// types
+	template <bool isConst>
+	class iterator_impl {
+		using self_t = iterator_impl<isConst>;
+		using VecType = SmallVectorRef<T, InlineMembers>;
+		std::conditional_t<isConst, const VecType*, VecType*> vec = nullptr;
+		int idx = 0;
+
+	public:
+		using iterator_category = std::random_access_iterator_tag;
+		using value_type = std::conditional_t<isConst, const T, T>;
+		using difference_type = int;
+		using pointer = value_type*;
+		using reference = value_type&;
+		friend class SmallVectorRef<T, InlineMembers>;
+		friend bool operator<(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx < rhs.idx;
+		}
+		friend bool operator>(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx > rhs.idx;
+		}
+		friend bool operator<=(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx <= rhs.idx;
+		}
+		friend bool operator>=(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx >= rhs.idx;
+		}
+		friend self_t operator+(const self_t& lhs, difference_type diff) {
+			auto res = lhs;
+			res.idx += diff;
+			return res;
+		}
+		friend self_t operator+(difference_type diff, const self_t& lhs) {
+			auto res = lhs;
+			res.idx += diff;
+			return res;
+		}
+		friend self_t operator-(const self_t& lhs, difference_type diff) {
+			auto res = lhs;
+			res.idx -= diff;
+			return res;
+		}
+		friend difference_type operator-(const self_t& lhs, const self_t& rhs) {
+			ASSERT(lhs.vec == rhs.vec);
+			return lhs.idx - rhs.idx;
+		}
+
+		self_t& operator++() {
+			++idx;
+			return *this;
+		}
+		self_t operator++(int) {
+			auto res = *this;
+			++(*this);
+			return res;
+		}
+		self_t& operator--() {
+			--idx;
+			return *this;
+		}
+		self_t operator--(int) {
+			auto res = *this;
+			--(*this);
+			return res;
+		}
+		self_t& operator+=(difference_type diff) {
+			idx += diff;
+			return *this;
+		}
+		self_t& operator-=(difference_type diff) {
+			idx -= diff;
+			return *this;
+		}
+		bool operator!=(self_t const& o) const { return vec != o.vec || idx != o.idx; }
+		bool operator==(self_t const& o) const { return vec == o.vec && idx == o.idx; }
+		reference operator[](difference_type i) const { return get(idx + i); }
+		reference& get(int i) const {
+			if (i < InlineMembers) {
+				return vec->arr[i];
+			} else {
+				return vec->data[i - InlineMembers];
+			}
+		}
+		reference get() const { return get(idx); }
+		reference operator*() const { return get(); }
+		pointer operator->() const { return &get(); }
+	};
+	using const_iterator = iterator_impl<true>;
+	using iterator = iterator_impl<false>;
+	using reverse_iterator = std::reverse_iterator<iterator>;
+	using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+public: // Construction
+	static_assert(std::is_trivially_destructible_v<T>);
+	SmallVectorRef() {}
+	SmallVectorRef(const SmallVectorRef<T, InlineMembers>& other)
+	  : m_size(other.m_size), arr(other.arr), data(other.data) {}
+	SmallVectorRef& operator=(const SmallVectorRef<T, InlineMembers>& other) {
+		m_size = other.m_size;
+		arr = other.arr;
+		data = other.data;
+		return *this;
+	}
+
+	template <class T2 = T, int IM = InlineMembers>
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T, IM>& toCopy,
+	               typename std::enable_if<!flow_ref<T2>::value, int>::type = 0)
+	  : m_size(0) {
+		append(arena, toCopy.begin(), toCopy.size());
+	}
+
+	template <class T2 = T, int IM = InlineMembers>
+	SmallVectorRef(Arena& arena, const SmallVectorRef<T2, IM>& toCopy,
+	               typename std::enable_if<flow_ref<T2>::value, int>::type = 0)
+	  : m_size(0) {
+		append_deep(arena, toCopy.begin(), toCopy.size());
+	}
+
+	template <class It>
+	SmallVectorRef(Arena& arena, It first, It last) : m_size(0) {
+		if constexpr (flow_ref<T>::value) {
+			append_deep(arena, first, std::distance(first, last));
+		} else {
+			append(arena, first, std::distance(first, last));
+		}
+	}
+
+public: // information
+	int size() const { return m_size; }
+	int capacity() const { return InlineMembers + data.capacity(); }
+	bool empty() const { return m_size == 0; }
+
+public: // element access
+	T const& front() const { return *cbegin(); }
+	T const& back() const { return *crbegin(); }
+	T& front() { return *begin(); }
+	T& back() { return *rbegin(); }
+	T const& operator[](int i) const {
+		if (i < InlineMembers) {
+			return arr[i];
+		} else {
+			return data[i - InlineMembers];
+		}
+	}
+
+public: // Modification
+	void push_back(Arena& arena, T const& value) {
+		if (m_size < InlineMembers) {
+			new (&arr[m_size++]) T(value);
+			return;
+		}
+		++m_size;
+		data.push_back(arena, value);
+	}
+
+	void push_back_deep(Arena& arena, T const& value) {
+		if (m_size < InlineMembers) {
+			new (&arr[m_size++]) T(arena, value);
+			return;
+		}
+		++m_size;
+		data.push_back_deep(arena, value);
+	}
+
+	void pop_back() {--m_size; }
+
+	template <class It>
+	void append(Arena& arena, It first, int count) {
+		ASSERT(count >= 0);
+		while (count > 0 && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(*(first++));
+			--count;
+		}
+		data.append(arena, first, count);
+		m_size += count;
+	}
+
+	template <class It>
+	void append_deep(Arena& arena, It first, int count) {
+		ASSERT(count >= 0);
+		while (count > 0 && m_size < InlineMembers) {
+			new (&(arr[m_size++])) T(arena, *(first++));
+			--count;
+		}
+		data.append_deep(arena, first, count);
+		m_size += count;
+	}
+
+public: // iterator access
+	iterator begin() {
+		iterator res;
+		res.vec = this;
+		res.idx = 0;
+		return res;
+	}
+
+	const_iterator cbegin() const {
+		const_iterator res;
+		res.vec = this;
+		res.idx = 0;
+		return res;
+	}
+
+	const_iterator begin() const { return cbegin(); }
+
+	iterator end() {
+		iterator res;
+		res.vec = this;
+		res.idx = m_size;
+		return res;
+	}
+
+	const_iterator cend() const {
+		const_iterator res;
+		res.vec = this;
+		res.idx = m_size;
+		return res;
+	}
+
+	const_iterator end() const { return cend(); }
+
+	reverse_iterator rbegin() { return reverse_iterator(end()); }
+
+	const_reverse_iterator crbegin() const { return const_reverse_iterator(cend()); }
+
+	const_reverse_iterator rbegin() const { return crbegin(); }
+
+	reverse_iterator rend() { return reverse_iterator(begin()); }
+
+	const_reverse_iterator crend() const { return const_reverse_iterator(begin()); }
+
+	const_reverse_iterator rend() const { return crend(); }
+
+private:
+	int m_size = 0;
+	std::array<T, InlineMembers> arr;
+	VectorRef<T> data;
+};
+
+template <class T>
 struct Traceable<VectorRef<T>> {
 	constexpr static bool value = Traceable<T>::value;
 
@@ -1196,28 +1380,5 @@ struct dynamic_size_traits<VectorRef<V, VecSerStrategy::String>> : std::true_typ
 	}
 };
 
- void ArenaBlock::destroy() {
-	// If the stack never contains more than one item, nothing will be allocated from stackArena.
-	// If stackArena is used, it will always be a linked list, so destroying *it* will not create another arena
-	ArenaBlock* tinyStack = this;
-	Arena stackArena;
-	VectorRef<ArenaBlock*> stack( &tinyStack, 1 );
-
-	while (stack.size()) {
-		ArenaBlock* b = stack.end()[-1];
-		stack.pop_back();
-
-		if (!b->isTiny()) {
-			int o = b->nextBlockOffset;
-			while (o) {
-				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
-				if (br->next->delref_no_destroy())
-					stack.push_back( stackArena, br->next );
-				o = br->nextBlockOffset;
-			}
-		}
-		b->destroyLeaf();
-	}
-}
 
 #endif

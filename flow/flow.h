@@ -48,8 +48,6 @@
 
 #include <boost/version.hpp>
 
-using namespace std::rel_ops;
-
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
@@ -84,6 +82,7 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
@@ -131,7 +130,7 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr : public ComposedIdentifier<T, 0x1> {
+class ErrorOr : public ComposedIdentifier<T, 2> {
 public:
 	ErrorOr() : ErrorOr(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
@@ -240,13 +239,13 @@ class CachedSerialization {
 public:
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
-	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr, 
+	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
 	// we should create a separate SerializeType for direct serialization
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
 	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
-	
+
 	const T& read() const { return data; }
 
 	T& mutate() {
@@ -391,6 +390,7 @@ struct SingleCallback {
 	SingleCallback<T> *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T &&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -406,7 +406,7 @@ struct SingleCallback {
 	}
 };
 
-// SAV is short for Single Assigment Variable: It can be assigned for only once!
+// SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -558,10 +558,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -579,13 +577,14 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
+	uint32_t size() const { return queue.size(); }
 
 	T pop() {
 		if (queue.empty()) {
 			if (error.isValid()) throw error;
 			throw internal_error();
 		}
-		auto copy = queue.front();
+		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
 	}
@@ -641,10 +640,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
 };
 
 
@@ -677,7 +675,7 @@ public:
 		if (sav) sav->addFutureRef();
 		//if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
-	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
+	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
 		rhs.sav = 0;
 		//if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
 	}
@@ -685,6 +683,11 @@ public:
 		: sav(new SAV<T>(1, 0))
 	{
 		sav->send(presentValue);
+	}
+	Future(T&& presentValue)
+		: sav(new SAV<T>(1, 0))
+	{
+		sav->send(std::move(presentValue));
 	}
 	Future(Never)
 		: sav(new SAV<T>(1, 0))
@@ -711,7 +714,7 @@ public:
 		if (sav) sav->delFutureRef();
 		sav = rhs.sav;
 	}
-	void operator=(Future<T>&& rhs) BOOST_NOEXCEPT {
+	void operator=(Future<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delFutureRef();
 			sav = rhs.sav;
@@ -786,8 +789,11 @@ public:
 	bool canBeSet() { return sav->canBeSet(); }
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
-	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	Promise(const Promise& rhs) : sav(rhs.sav) {
+		sav->addPromiseRef();
+	}
 	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
@@ -795,7 +801,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(Promise && rhs) BOOST_NOEXCEPT {
+	void operator=(Promise&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -840,14 +846,14 @@ public:
 	}
 	FutureStream() : queue(NULL) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue) queue->delFutureRef();
 		queue = rhs.queue;
 	}
-	void operator=(FutureStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
 			if (queue) queue->delFutureRef();
 			queue = rhs.queue;
@@ -872,20 +878,20 @@ private:
 };
 
 template <class Request>
-decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) { return r.reply; }
-
-
+decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
-#define REPLY_TYPE(RequestType) decltype( getReplyPromise( fake<RequestType>() ).getFuture().getValue() )
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( fake<RequestType>() ).getValue() )
+#define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
+//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
 	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
 	//   breaks IntelliSense in VS2010; this is a workaround.
-	typedef decltype(fake<T>().reply.getFuture().getValue()) Type;
+	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
 };
 template <class T> class ReplyPromise;
 template <class T>
@@ -906,6 +912,9 @@ public:
 
 	void send(const T& value) const {
 		queue->send(value);
+	}
+	void send(T&& value) const {
+		queue->send(std::move(value));
 	}
 	void sendError(const Error& error) const {
 		queue->sendError(error);
@@ -941,13 +950,13 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	PromiseStream(PromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(PromiseStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(PromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;
@@ -995,20 +1004,19 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void error(Error e) {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
+	virtual void fire(ValueType const& value) override {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) {
+	virtual void fire(ValueType && value) override {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	virtual void error(Error e) override {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

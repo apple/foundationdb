@@ -34,7 +34,7 @@ public class SerialInsertion {
 	private static final int NODES = 1000000;
 
 	public static void main(String[] args) {
-		FDB api = FDB.selectAPIVersion(620);
+		FDB api = FDB.selectAPIVersion(700);
 		try(Database database = api.open()) {
 			long start = System.currentTimeMillis();
 
@@ -88,6 +88,7 @@ public class SerialInsertion {
 							tr.set(buf.array(), value);
 						}
 						tr.commit().join();
+						tr.close();
 						tr = db.createTransaction();
 						done += i;
 					}

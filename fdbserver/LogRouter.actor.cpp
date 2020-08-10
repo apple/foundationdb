@@ -20,6 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/Knobs.h"
@@ -30,7 +31,6 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/Stats.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LogRouterData {
@@ -42,8 +42,10 @@ struct LogRouterData {
 
 		TagData( Tag tag, Version popped, Version durableKnownCommittedVersion ) : tag(tag), popped(popped), durableKnownCommittedVersion(durableKnownCommittedVersion) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped), durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
-		void operator= (TagData&& r) BOOST_NOEXCEPT {
+		TagData(TagData&& r) noexcept
+		  : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped),
+		    durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
+		void operator=(TagData&& r) noexcept {
 			version_messages = std::move(r.version_messages);
 			tag = r.tag;
 			popped = r.popped;
@@ -85,6 +87,10 @@ struct LogRouterData {
 	bool allowPops;
 	LogSet logSet;
 	bool foundEpochEnd;
+	double waitForVersionTime = 0;
+	double maxWaitForVersionTime = 0;
+	double getMoreTime = 0;
+	double maxGetMoreTime = 0;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -94,7 +100,9 @@ struct LogRouterData {
 	std::map<UID, PeekTrackerData> peekTracker;
 
 	CounterCollection cc;
+	Counter getMoreCount, getMoreBlockedCount;
 	Future<Void> logger;
+	Reference<EventCacheHolder> eventCacheHolder;
 
 	std::vector<Reference<TagData>> tag_data; //we only store data for the remote tag locality
 
@@ -115,7 +123,7 @@ struct LogRouterData {
 
 	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
 	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
-		cc("LogRouter", dbgid.toString()) {
+		cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc), getMoreBlockedCount("GetMoreBlockedCount", cc) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -130,10 +138,18 @@ struct LogRouterData {
 			}
 		}
 
-		specialCounter(cc, "Version", [this](){return this->version.get(); });
-		specialCounter(cc, "MinPopped", [this](){return this->minPopped.get(); });
+		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
+
+		specialCounter(cc, "Version", [this](){ return this->version.get(); });
+		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
+		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
+		specialCounter(cc, "FoundEpochEnd", [this](){ return this->foundEpochEnd; });
+		specialCounter(cc, "WaitForVersionMS", [this](){ double val = this->waitForVersionTime; this->waitForVersionTime = 0; return 1000*val; });
+		specialCounter(cc, "WaitForVersionMaxMS", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return 1000*val; });
+		specialCounter(cc, "GetMoreMS", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return 1000*val; });
+		specialCounter(cc, "GetMoreMaxMS", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return 1000*val; });
 		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
 	}
 };
@@ -191,11 +207,14 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	// The only time the log router should allow a gap in versions larger than MAX_READ_TRANSACTION_LIFE_VERSIONS is when processing epoch end.
 	// Since one set of log routers is created per generation of transaction logs, the gap caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
+	state double startTime = now();
 	if(self->version.get() < self->startVersion) {
 		if(ver > self->startVersion) {
 			self->version.set(self->startVersion);
 			wait(self->minPopped.whenAtLeast(self->version.get()));
 		}
+		self->waitForVersionTime += now() - startTime;
+		self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
 		return Void();
 	}
 	if(!self->foundEpochEnd) {
@@ -213,6 +232,8 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	if(ver >= self->startVersion + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT) {
 		self->foundEpochEnd = true;
 	}
+	self->waitForVersionTime += now() - startTime;
+	self->maxWaitForVersionTime = std::max(self->maxWaitForVersionTime, now() - startTime);
 	return Void();
 }
 
@@ -224,15 +245,31 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state std::vector<int> tags; // an optimization to avoid reallocating vector memory in every loop
 
 	loop {
-		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
-			when(wait(dbInfoChange)) { // FIXME: does this actually happen?
-				if (self->logSystem->get()) {
-					r = self->logSystem->get()->peekLogRouter(self->dbgid, tagAt, self->routerTag);
-				} else {
-					r = Reference<ILogSystem::IPeekCursor>();
+		loop {
+			Future<Void> getMoreF = Never();
+			if(r) {
+				getMoreF = r->getMore(TaskPriority::TLogCommit);
+				++self->getMoreCount;
+				if(!getMoreF.isReady()) {
+					++self->getMoreBlockedCount;
 				}
-				dbInfoChange = self->logSystem->onChange();
+			}
+			state double startTime = now();
+			choose {
+				when(wait( getMoreF ) ) {
+					self->getMoreTime += now() - startTime;
+					self->maxGetMoreTime = std::max(self->maxGetMoreTime, now() - startTime);
+					break;
+				}
+				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
+					if( self->logSystem->get() ) {
+						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
+						TraceEvent("LogRouterPeekLocation", self->dbgid).detail("LogID", r->getPrimaryPeekLocation()).trackLatest(self->eventCacheHolder->trackingKey);
+					} else {
+						r = Reference<ILogSystem::IPeekCursor>();
+					}
+					dbInfoChange = self->logSystem->onChange();
+				}
 			}
 		}
 
@@ -338,7 +375,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 			peekId = req.sequence.get().first;
 			sequence = req.sequence.get().second;
 			if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->peekTracker.find(peekId) == self->peekTracker.end()) {
-				throw timed_out();
+				throw operation_obsolete();
 			}
 			auto& trackerData = self->peekTracker[peekId];
 			if (sequence == 0 && trackerData.sequence_version.find(0) == trackerData.sequence_version.end()) {
@@ -516,11 +553,12 @@ ACTOR Future<Void> logRouterCore(
 
 	addActor.send( pullAsyncData(&logRouterData) );
 	addActor.send( cleanupPeekTrackers(&logRouterData) );
+	addActor.send( traceRole(Role::LOG_ROUTER, interf.id()) );
 
 	loop choose {
 		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED;
+			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED && db->get().recoveryCount >= req.recoveryCount;
 			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get(), true ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {

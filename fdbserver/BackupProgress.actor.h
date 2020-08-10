@@ -25,6 +25,8 @@
 #define FDBSERVER_BACKUPPROGRESS_ACTOR_H
 
 #include <map>
+#include <tuple>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/Arena.h"
@@ -41,7 +43,7 @@ public:
 	// savedVersion is used.
 	void addBackupStatus(const WorkerBackupStatus& status);
 
-	// Returns a map of pair<Epoch, endVersion> : map<tag, savedVersion>, so that
+	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
 	//
 	// Specifically, the backup ranges for each old epoch are:
@@ -49,11 +51,18 @@ public:
 	//        backup [epochBegin, endVersion)
 	//    else if savedVersion < endVersion - 1 = knownCommittedVersion
 	//        backup [savedVersion + 1, endVersion)
-	std::map<std::pair<LogEpoch, Version>, std::map<Tag, Version>> getUnfinishedBackup();
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
 
 	// Set the value for "backupStartedKey"
 	void setBackupStartedValue(Optional<Value> value) {
 		backupStartedValue = value;
+	}
+
+	// Returns progress for an epoch.
+	std::map<Tag, Version> getEpochStatus(LogEpoch epoch) const {
+		const auto it = progress.find(epoch);
+		if (it == progress.end()) return {};
+		return it->second;
 	}
 
 	void addref() { ReferenceCounted<BackupProgress>::addref(); }
@@ -69,6 +78,12 @@ private:
 		return tags;
 	}
 
+	// For each tag in progress, the saved version is smaller than endVersion - 1,
+	// add {tag, savedVersion+1} to tagVersions and remove the tag from "tags".
+	void updateTagVersions(std::map<Tag, Version>* tagVersions, std::set<Tag>* tags,
+	                       const std::map<Tag, Version>& progress, Version endVersion, Version adjustedBeginVersion,
+	                       LogEpoch epoch);
+
 	const UID dbgid;
 
 	// Note this MUST be iterated in ascending order.
@@ -79,11 +94,15 @@ private:
 	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
 
+	// LogRouterTags for each epoch obtained by decoding backup progress from
+	// the system keyspace.
+	std::map<LogEpoch, int32_t> epochTags;
+
 	// Value of the "backupStartedKey".
 	Optional<Value> backupStartedValue;
 };
 
-ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus);
+ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging);
 
 #include "flow/unactorcompiler.h"
 #endif

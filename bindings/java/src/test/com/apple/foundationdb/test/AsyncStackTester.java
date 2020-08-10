@@ -223,6 +223,12 @@ public class AsyncStackTester {
 				inst.push(inst.readTcx.readAsync(readTr -> readTr.get((byte[]) param)));
 			});
 		}
+		else if (op == StackOperation.GET_ESTIMATED_RANGE_SIZE) {
+			List<Object> params = inst.popParams(2).join();
+			return inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).thenAcceptAsync(size -> {
+				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if(op == StackOperation.GET_RANGE) {
 			return inst.popParams(5).thenComposeAsync(params -> {
 				int limit = StackUtils.getInt(params.get(2));
@@ -754,10 +760,6 @@ public class AsyncStackTester {
 		//System.out.println("Starting test...");
 		c.run();
 		//System.out.println("Done with test.");
-
-		/*byte[] key = Tuple.from("test_results".getBytes(), 5).pack();
-		byte[] bs = db.createTransaction().get(key).get();
-		System.out.println("output of " + ByteArrayUtil.printable(key) + " as: " + ByteArrayUtil.printable(bs));*/
 
 		db.close();
 		System.gc();

@@ -88,6 +88,20 @@ func (o NetworkOptions) SetTraceFormat(param string) error {
 	return o.setOpt(34, []byte(param))
 }
 
+// Select clock source for trace files. now (the default) or realtime are supported.
+//
+// Parameter: Trace clock source
+func (o NetworkOptions) SetTraceClockSource(param string) error {
+	return o.setOpt(35, []byte(param))
+}
+
+// Once provided, this string will be used to replace the port/PID in the log file names.
+//
+// Parameter: The identifier that will be part of all trace file names
+func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
+	return o.setOpt(36, []byte(param))
+}
+
 // Set internal tuning or debugging knobs
 //
 // Parameter: knob_name=knob_value
@@ -216,8 +230,13 @@ func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
 }
 
-// Enables debugging feature to perform slow task profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production.
+// Deprecated
 func (o NetworkOptions) SetEnableSlowTaskProfiling() error {
+	return o.setOpt(71, nil)
+}
+
+// Enables debugging feature to perform run loop profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production.
+func (o NetworkOptions) SetEnableRunLoopProfiling() error {
 	return o.setOpt(71, nil)
 }
 
@@ -297,7 +316,7 @@ func (o DatabaseOptions) SetTransactionTimeout(param int64) error {
 	return o.setOpt(500, int64ToBytes(param))
 }
 
-// Set a timeout in milliseconds which, when elapsed, will cause a transaction automatically to be cancelled. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
+// Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. This sets the ``retry_limit`` option of each transaction created by this database. See the transaction option description for more information.
 //
 // Parameter: number of times to retry
 func (o DatabaseOptions) SetTransactionRetryLimit(param int64) error {
@@ -323,7 +342,7 @@ func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 	return o.setOpt(504, nil)
 }
 
-// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated.
+// Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
 func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
 }
@@ -343,7 +362,7 @@ func (o TransactionOptions) SetCausalReadDisable() error {
 	return o.setOpt(21, nil)
 }
 
-// Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated.
+// Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
 func (o TransactionOptions) SetIncludePortInAddress() error {
 	return o.setOpt(23, nil)
 }
@@ -422,7 +441,7 @@ func (o TransactionOptions) SetDebugTransactionIdentifier(param string) error {
 	return o.setOpt(403, []byte(param))
 }
 
-// Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled and to get log output.
+// Enables tracing for this transaction and logs results to the client trace logs. The DEBUG_TRANSACTION_IDENTIFIER option must be set before using this option, and client trace logging must be enabled to get log output.
 func (o TransactionOptions) SetLogTransaction() error {
 	return o.setOpt(404, nil)
 }
@@ -432,6 +451,11 @@ func (o TransactionOptions) SetLogTransaction() error {
 // Parameter: Maximum length of escaped key and value fields.
 func (o TransactionOptions) SetTransactionLoggingMaxFieldLength(param int64) error {
 	return o.setOpt(405, int64ToBytes(param))
+}
+
+// Sets an identifier for server tracing of this transaction. When committed, this identifier triggers logging when each part of the transaction authority encounters it, which is helpful in diagnosing slowness in misbehaving clusters. The identifier is randomly generated. When there is also a debug_transaction_identifier, both IDs are logged together.
+func (o TransactionOptions) SetServerRequestTracing() error {
+	return o.setOpt(406, nil)
 }
 
 // Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled. Valid parameter values are ``[0, INT_MAX]``. If set to 0, will disable all timeouts. All pending and any future uses of the transaction will throw an exception. The transaction can be used again after it is reset. Prior to API version 610, like all other transaction options, the timeout must be reset after a call to ``onError``. If the API version is 610 or greater, the timeout is not reset after an ``onError`` call. This allows the user to specify a longer timeout on specific transactions than the default timeout specified through the ``transaction_timeout`` database option without the shorter database timeout cancelling transactions that encounter a retryable error. Note that at all API versions, it is safe and legal to set the timeout each time the transaction begins, so most code written assuming the older behavior can be upgraded to the newer behavior without requiring any modification, and the caller is not required to implement special logic in retry loops to only conditionally set this option.
@@ -472,7 +496,7 @@ func (o TransactionOptions) SetSnapshotRywDisable() error {
 	return o.setOpt(601, nil)
 }
 
-// The transaction can read and write to locked databases, and is resposible for checking that it took the lock.
+// The transaction can read and write to locked databases, and is responsible for checking that it took the lock.
 func (o TransactionOptions) SetLockAware() error {
 	return o.setOpt(700, nil)
 }
@@ -492,6 +516,11 @@ func (o TransactionOptions) SetUseProvisionalProxies() error {
 	return o.setOpt(711, nil)
 }
 
+// The transaction can retrieve keys that are conflicting with other transactions.
+func (o TransactionOptions) SetReportConflictingKeys() error {
+	return o.setOpt(712, nil)
+}
+
 type StreamingMode int
 
 const (
@@ -505,13 +534,14 @@ const (
 	// small portion of data is transferred to the client initially (in order to
 	// minimize costs if the client doesn't read the entire range), and as the
 	// caller iterates over more items in the range larger batches will be
-	// transferred in order to minimize latency.
+	// transferred in order to minimize latency. After enough iterations, the
+	// iterator mode will eventually reach the same byte limit as ``WANT_ALL``
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
+	// ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -628,15 +658,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns “true“ if the error indicates the operations in the transactions
+	// Returns ``true`` if the error indicates the operations in the transactions
 	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns “true“ if the error indicates the transaction may have succeeded,
+	// Returns ``true`` if the error indicates the transaction may have succeeded,
 	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns “true“ if the error indicates the transaction has not committed,
+	// Returns ``true`` if the error indicates the transaction has not committed,
 	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )

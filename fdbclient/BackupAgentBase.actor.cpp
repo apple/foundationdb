@@ -144,6 +144,7 @@ Version getVersionFromString(std::string const& value) {
 // \xff / bklog / keyspace in a funny order for performance reasons.
 // Return the ranges of keys that contain the data for the given range
 // of versions.
+// assert CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE % blocksize = 0. Otherwise calculation of hash will be incorrect
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize) {
 	Standalone<VectorRef<KeyRangeRef>> ret;
 
@@ -200,76 +201,17 @@ Key getApplyKey( Version version, Key backupUid ) {
 	return k2.withPrefix(applyLogKeys.begin);
 }
 
+Version getLogKeyVersion(Key key) {
+	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
+}
+
 //Given a key from one of the ranges returned by get_log_ranges,
 //returns(version, part) where version is the database version number of
 //the transaction log data in the value, and part is 0 for the first such
 //data for a given version, 1 for the second block of data, etc.
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
-	return std::make_pair(bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t))),
+	return std::make_pair(getLogKeyVersion(key),
 		bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
-}
-
-// value is an iterable representing all of the transaction log data for
-// a given version.Returns an iterable(generator) yielding a tuple for
-// each mutation in the log.At present, all mutations are represented as
-// (type, param1, param2) where type is an integer and param1 and param2 are byte strings
-Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
-	try {
-		uint64_t offset(0);
-		uint64_t protocolVersion = 0;
-		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
-		offset += sizeof(uint64_t);
-		if (protocolVersion <= 0x0FDB00A200090001){
-			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
-				.detail("ValueSize", value.size()).detail("Value", value);
-			throw incompatible_protocol_version();
-		}
-
-		Standalone<VectorRef<MutationRef>> result;
-		uint32_t totalBytes = 0;
-		memcpy(&totalBytes, value.begin() + offset, sizeof(uint32_t));
-		offset += sizeof(uint32_t);
-		uint32_t consumed = 0;
-
-		if(totalBytes + offset > value.size())
-			throw restore_missing_data();
-
-		int originalOffset = offset;
-
-		while (consumed < totalBytes){
-			uint32_t type = 0;
-			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
-			offset += sizeof(uint32_t);
-			uint32_t len1 = 0;
-			memcpy(&len1, value.begin() + offset, sizeof(uint32_t));
-			offset += sizeof(uint32_t);
-			uint32_t len2 = 0;
-			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
-			offset += sizeof(uint32_t);
-
-			MutationRef logValue;
-			logValue.type = type;
-			logValue.param1 = value.substr(offset, len1);
-			offset += len1;
-			logValue.param2 = value.substr(offset, len2);
-			offset += len2;
-			result.push_back_deep(result.arena(), logValue);
-
-			consumed += BackupAgentBase::logHeaderSize + len1 + len2;
-		}
-
-		ASSERT(consumed == totalBytes);
-		if (value.size() != offset) {
-			TraceEvent(SevError, "BA_DecodeBackupLogValue").detail("UnexpectedExtraDataSize", value.size()).detail("Offset", offset).detail("TotalBytes", totalBytes).detail("Consumed", consumed).detail("OriginalOffset", originalOffset);
-			throw restore_corrupted_data();
-		}
-
-		return result;
-	}
-	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", value);
-		throw;
-	}
 }
 
 void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mutationSize, StringRef value, StringRef addPrefix, StringRef removePrefix, Version version, Reference<KeyRangeMap<Version>> key_version) {
@@ -412,7 +354,10 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 
 	loop{
 		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -476,7 +421,10 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 
 	loop{
 		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

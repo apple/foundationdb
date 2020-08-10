@@ -70,7 +70,7 @@ public:
 		else if (s=="log") _class = LogClass;
 		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
-		else if (s == "fast_restore") _class = FastRestoreClass;
+		else if (s=="fast_restore") _class = FastRestoreClass;
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
@@ -149,6 +149,7 @@ public:
 
 	Fitness machineClassFitness( ClusterRole role ) const ;
 
+	//To change this serialization, ProtocolVersion::ProcessClassValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, _class, _source);
@@ -178,6 +179,7 @@ public:
 		return ((_data.size() == rhs._data.size())													&&
 					  (std::equal(_data.begin(), _data.end(), rhs._data.begin())));
 	}
+	bool operator!=(LocalityData const& rhs) const { return !(*this == rhs); }
 
 	Optional<Standalone<StringRef>>	get(StringRef key) const {
 		auto pos = _data.find(key);
@@ -283,10 +285,10 @@ static std::string describe(
 	}
 	return s;
 }
-static 	std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeZones( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyZoneId, max_items);
 }
-static 	std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
+inline std::string describeDataHalls( std::vector<LocalityData> const& items, int max_items = -1 ) {
 	return describe(items, LocalityData::keyDataHallId, max_items);
 }
 
@@ -298,6 +300,7 @@ struct ProcessData {
 	ProcessData() {}
 	ProcessData( LocalityData locality, ProcessClass processClass, NetworkAddress address ) : locality(locality), processClass(processClass), address(address) {}
 
+	//To change this serialization, ProtocolVersion::WorkerListValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, locality, processClass, address);

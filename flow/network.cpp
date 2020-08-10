@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "Arena.h"
 #include "boost/asio.hpp"
 
 #include "flow/network.h"
@@ -38,9 +39,9 @@ bool IPAddress::operator<(const IPAddress& rhs) const {
 
 std::string IPAddress::toString() const {
 	if (isV6()) {
-		return boost::asio::ip::address_v6(boost::get<IPAddressStore>(addr)).to_string();
+		return boost::asio::ip::address_v6(std::get<IPAddressStore>(addr)).to_string();
 	} else {
-		auto ip = boost::get<uint32_t>(addr);
+		auto ip = std::get<uint32_t>(addr);
 		return format("%d.%d.%d.%d", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 	}
 }
@@ -56,10 +57,10 @@ Optional<IPAddress> IPAddress::parse(std::string str) {
 
 bool IPAddress::isValid() const {
 	if (isV6()) {
-		const auto& ip = boost::get<IPAddressStore>(addr);
+		const auto& ip = std::get<IPAddressStore>(addr);
 		return std::any_of(ip.begin(), ip.end(), [](uint8_t part) { return part != 0; });
 	}
-	return boost::get<uint32_t>(addr) != 0;
+	return std::get<uint32_t>(addr) != 0;
 }
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
@@ -95,6 +96,15 @@ NetworkAddress NetworkAddress::parse( std::string const& s ) {
 		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
 			throw connection_string_invalid();
 		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS);
+	}
+}
+
+Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
+	try {
+		return NetworkAddress::parse(s);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_connection_string_invalid);
+		return Optional<NetworkAddress>();
 	}
 }
 
@@ -157,6 +167,8 @@ Future<Reference<IConnection>> INetworkConnections::connect( std::string host, s
 	});
 }
 
+const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
+
 TEST_CASE("/flow/network/ipaddress") {
 	ASSERT(NetworkAddress::parse("[::1]:4800").toString() == "[::1]:4800");
 
@@ -200,3 +212,5 @@ TEST_CASE("/flow/network/ipaddress") {
 
 	return Void();
 }
+
+NetworkInfo::NetworkInfo() : handshakeLock( new FlowLock(FLOW_KNOBS->TLS_HANDSHAKE_LIMIT) ) {}

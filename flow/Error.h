@@ -58,9 +58,12 @@ public:
 	explicit Error(int error_code);
 
 	static void init();
-	static std::map<int, int>& errorCounts();
 	static ErrorCodeTable& errorCodeTable();
-	static Error fromCode(int error_code) { Error e; e.error_code = error_code; return e; }  // Doesn't change errorCounts
+	static Error fromCode(int error_code) {
+		Error e;
+		e.error_code = error_code;
+		return e;
+	}
 	static Error fromUnvalidatedCode(int error_code);  // Converts codes that are outside the legal range (but not necessarily individually unknown error codes) to unknown_error()
 
 	Error asInjectedFault() const;  // Returns an error with the same code() as this but isInjectedFault() is true
@@ -75,6 +78,7 @@ Error systemErrorCodeToError();
 
 #undef ERROR
 #define ERROR(name, number, description) inline Error name() { return Error( number ); }; enum { error_code_##name = number };
+
 #include "error_definitions.h"
 
 //actor_cancelled has been renamed
@@ -82,31 +86,107 @@ inline Error actor_cancelled() { return Error( error_code_operation_cancelled );
 enum { error_code_actor_cancelled = error_code_operation_cancelled };
 
 extern Error internal_error_impl( const char* file, int line );
-#define internal_error() internal_error_impl( __FILE__, __LINE__ )
+extern Error internal_error_impl(const char* msg, const char* file, int line);
+extern Error internal_error_impl(const char * a_nm, long long a, const char * op_nm, const char * b_nm, long long b, const char * file, int line);
+
+#define inernal_error_msg(msg) internal_error_impl(msg, __FILE__, __LINE__)
 
 extern bool isAssertDisabled( int line );
 //#define ASSERT( condition ) ((void)0)
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
 		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
-			throw internal_error();                                                                                    \
+			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
-	} while (false);
+	} while (false)
 #define ASSERT_ABORT(condition)                                                                                        \
 	do {                                                                                                               \
 		if (!((condition) || isAssertDisabled(__LINE__))) {                                                            \
-			internal_error();                                                                                          \
+			internal_error_impl(#condition, __FILE__, __LINE__);                                                       \
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
 #define UNSTOPPABLE_ASSERT(condition)                                                                                  \
 	do {                                                                                                               \
 		if (!(condition)) {                                                                                            \
-			throw internal_error();                                                                                    \
+			throw internal_error_impl(#condition, __FILE__, __LINE__);                                                 \
 		}                                                                                                              \
 	} while (false)
 #define UNREACHABLE()                                                                                                  \
-	{ throw internal_error(); }
+	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
+
+enum assert_op { EQ, NE, LT, GT, LE, GE };
+
+// TODO: magic so this works even if const-ness doesn not match.
+template<typename T, typename U>
+void assert_num_impl(char const * a_nm,
+					T const & a,
+					assert_op op,
+					char const * b_nm,
+					U const & b,
+					char const * file,
+					int line) {
+  bool success;
+  char const * op_name;
+  switch (op) {
+    case EQ:
+      success = a == b;
+      op_name = "==";
+      break;
+    case NE:
+      success = a != b;
+      op_name = "!=";
+      break;
+    case LT:
+      success = a < b;
+      op_name = "<";
+      break;
+    case GT:
+      success = a > b;
+      op_name = ">";
+      break;
+    case LE:
+      success = a <= b;
+      op_name = "<=";
+      break;
+    case GE:
+      success = a >= b;
+      op_name = ">=";
+      break;
+    default:
+      success = false;
+      op_name = "UNKNOWN OP";
+  }
+
+  if (!success) {
+	  throw internal_error_impl(a_nm, (long long)a, op_name, b_nm, (long long)b, file, line);
+  }
+}
+
+#define ASSERT_EQ(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::EQ, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_NE(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::NE, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_LT(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::LT, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_LE(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::LE, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_GT(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::GT, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
+#define ASSERT_GE(a, b)                                                        \
+  do {                                                                         \
+    assert_num_impl((#a), (a), assert_op::GE, (#b), (b), __FILE__, __LINE__);  \
+  } while (0)
 
 // ASSERT_WE_THINK() is to be used for assertions that we want to validate in testing, but which are judged too
 // risky to evaluate at runtime, because the code should work even if they are false and throwing internal_error() would

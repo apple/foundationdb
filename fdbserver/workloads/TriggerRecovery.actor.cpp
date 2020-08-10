@@ -19,7 +19,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		numRecoveries = getOption(options, LiteralStringRef("numRecoveries"), deterministicRandom()->randomInt(1, 10));
 		delayBetweenRecoveries = getOption(options, LiteralStringRef("delayBetweenRecoveries"), 0.0);
 		killAllProportion = getOption(options, LiteralStringRef("killAllProportion"), 0.1);
-		ASSERT(numRecoveries > 0 && startTime >= 0 and delayBetweenRecoveries >= 0);
+		ASSERT((numRecoveries > 0) && (startTime >= 0) && (delayBetweenRecoveries >= 0));
 		TraceEvent(SevInfo, "TriggerRecoveryLoopSetup")
 		    .detail("StartTime", startTime)
 		    .detail("NumRecoveries", numRecoveries)
@@ -89,17 +89,25 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Standalone<RangeResultRef> kvs = wait(tr.getRange(
-				    KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1));
+				Standalone<RangeResultRef> kvs =
+				    wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+				                                 LiteralStringRef("\xff\xff/worker_interfaces0")),
+				                     CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!kvs.more);
 				std::map<Key, Value> address_interface;
 				for (auto it : kvs) {
-					auto ip_port = it.key.endsWith(LiteralStringRef(":tls"))
-					                   ? it.key.removeSuffix(LiteralStringRef(":tls"))
-					                   : it.key;
+					auto ip_port =
+					    (it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls"))
+					                                               : it.key)
+					        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 					address_interface[ip_port] = it.value;
 				}
 				for (auto it : address_interface) {
-					tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
+					if (cx->apiVersionAtLeast(700))
+						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
+						    .reboot.send(RebootRequest());
+					else
+						tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
 				}
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll");
 				return Void();

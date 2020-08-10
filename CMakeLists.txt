@@ -80,42 +80,10 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 # Version information
 ################################################################################
 
-if(NOT WIN32)
-  add_custom_target(version_file ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/versions.target)
-  execute_process(
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_version.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
-    OUTPUT_VARIABLE FDB_VERSION_WNL)
-  execute_process(
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_package_name.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
-    OUTPUT_VARIABLE FDB_PACKAGE_NAME_WNL)
-  string(STRIP "${FDB_VERSION_WNL}" FDB_VERSION_TARGET_FILE)
-  string(STRIP "${FDB_PACKAGE_NAME_WNL}" FDB_PACKAGE_NAME_TARGET_FILE)
-endif()
-
-set(USE_VERSIONS_TARGET OFF CACHE BOOL "Use the deprecated versions.target file")
-if(USE_VERSIONS_TARGET)
-  if (WIN32)
-    message(FATAL_ERROR "USE_VERSION_TARGET us not supported on Windows")
-  endif()
-  set(FDB_VERSION ${FDB_VERION_TARGET_FILE})
-  set(FDB_PACKAGE_NAME ${FDB_PACKAGE_NAME_TARGET_FILE})
-  set(FDB_VERSION_PLAIN ${FDB_VERSION})
-else()
-  set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-  set(FDB_VERSION ${PROJECT_VERSION})
-  set(FDB_VERSION_PLAIN ${FDB_VERSION})
-  if(NOT WIN32)
-    # we need to assert that the cmake version is in sync with the target version
-    if(NOT (FDB_VERSION STREQUAL FDB_VERSION_TARGET_FILE))
-      message(SEND_ERROR "The project version in cmake is set to ${FDB_VERSION},\
- but versions.target has it at ${FDB_VERSION_TARGET_FILE}")
-    endif()
-    if(NOT (FDB_PACKAGE_NAME STREQUAL FDB_PACKAGE_NAME_TARGET_FILE))
-      message(SEND_ERROR "The package name in cmake is set to ${FDB_PACKAGE_NAME},\
- but versions.target has it set to ${FDB_PACKAGE_NAME_TARGET_FILE}")
-    endif()
-  endif()
-endif()
+set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+set(FDB_VERSION ${PROJECT_VERSION})
+set(FDB_VERSION_PLAIN ${FDB_VERSION})
+configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_SOURCE_DIR}/versions.target)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -178,10 +146,11 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 # components
 ################################################################################
 
-include(CompileBoost)
-if(WITH_TLS)
-  add_subdirectory(FDBLibTLS)
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  include_directories(/usr/local/include)
 endif()
+
+include(CompileBoost)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
@@ -192,13 +161,15 @@ if(NOT WIN32)
 else()
   add_subdirectory(fdbservice)
 endif()
-add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
+add_subdirectory(contrib)
 add_subdirectory(tests)
+if(WITH_PYTHON)
+  add_subdirectory(bindings)
+endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
-add_subdirectory(contrib/monitoring)
 
 if(WIN32)
   add_subdirectory(packaging/msi)
@@ -206,17 +177,26 @@ else()
   include(CPack)
 endif()
 
+set(BUILD_FLOWBENCH OFF CACHE BOOL "Build microbenchmark program (builds google microbenchmark dependency)")
+if(BUILD_FLOWBENCH)
+  add_subdirectory(flowbench)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  add_link_options(-lexecinfo)
+endif()
+
 ################################################################################
 # process compile commands for IDE
 ################################################################################
 
-if (CMAKE_EXPORT_COMPILE_COMMANDS)
+if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
-	OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
-	ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	COMMENT "Build compile commands for IDE"
+	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
+	  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
+	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	  COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()

@@ -15,8 +15,8 @@ EOF
   s.email = 'fdb-dist@apple.com'
   s.files = ["${CMAKE_SOURCE_DIR}/LICENSE", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdb.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbdirectory.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbimpl.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdblocality.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdboptions.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbsubspace.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbtuple.rb", "${CMAKE_CURRENT_SOURCE_DIR}/lib/fdbimpl_v609.rb"]
   s.homepage = 'https://www.foundationdb.org'
-  s.license = 'Apache v2'
-  s.add_dependency('ffi', '>= 1.1.5')
+  s.license = 'Apache-2.0'
+  s.add_dependency('ffi', '~> 1.1', '>= 1.1.5')
   s.required_ruby_version = '>= 1.9.3'
   s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://www.foundationdb.org/download/.'
 end

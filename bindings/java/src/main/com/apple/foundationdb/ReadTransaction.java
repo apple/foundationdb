@@ -48,7 +48,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  whether read conflict ranges are omitted for any reads done through this {@code ReadTransaction}.
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 * <a href="/foundationdb/developer-guide.html#snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 *
 	 * @return whether this is a snapshot view of the database with relaxed isolation properties
 	 * @see #snapshot()
@@ -58,11 +58,11 @@ public interface ReadTransaction extends ReadTransactionContext {
 	/**
 	 * Return a special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
 	 *  Snapshot reads selectively relax FoundationDB's isolation property, reducing
-	 *  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+	 *  <a href="/foundationdb/developer-guide.html#conflict-ranges" target="_blank">Transaction conflicts</a>
 	 *  but making reasoning about concurrency harder.<br>
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 * <a href="/foundationdb/developer-guide.html#snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 *
 	 * @return a read-only view of this {@code ReadTransaction} with relaxed isolation properties
 	 */
@@ -184,7 +184,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -205,11 +207,22 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -263,7 +276,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -284,11 +299,22 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
@@ -351,7 +377,9 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
@@ -375,15 +403,57 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
 	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
 	 *  will be limited starting at the end of the range.
-	 * @param reverse return results starting at the end of the range in reverse order
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
 	 * @param mode provide a hint about how the results are to be used. This
 	 *  can provide speed improvements or efficiency gains based on the caller's
 	 *  knowledge of the upcoming access pattern.
 	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code ITERATOR} streaming
+	 *     mode, the query is automatically modified to fetch results in larger batches. This is done because it is
+	 *     known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the range. If a limit is specified,
+	 *     the {@code EXACT} streaming mode will be used, and otherwise it will use {@code WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link AsyncIterable#asList()}, the same
+	 *     streaming mode would need to be used.
+	 * </p>
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
+
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 * Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
+	 * algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
+	 * be sampled and the more accurate its sampled size would be. And due to
+	 * that reason it is recommended to use this API to query against large ranges for accuracy considerations.
+	 * For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
+	 * accurate.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end);
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 * Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
+	 * algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
+	 * be sampled and the more accurate its sampled size would be. And due to
+	 * that reason it is recommended to use this API to query against large ranges for accuracy considerations.
+	 * For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
+	 * accurate.
+	 * @param range the range of the keys
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
 
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}

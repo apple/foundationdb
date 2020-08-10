@@ -41,7 +41,7 @@ struct GenerationRegInterface {
 	//   If gen>0 and there was no prior write(_,_,0) or a data loss fault, throws not_created()?
 	//   (gen1==gen is considered a "successful" write)
 	//   There is some earlier or concurrent read(key,gen1) or write(key,_,gen1).  (In the successful case, the concurrent write is this one)
-	
+
 	// All instances of the pattern
 	//    read(key, g)=>v1 and write(key, v2, g)=>true
 	// thus form a totally ordered sequence of modifications, in which
@@ -63,9 +63,13 @@ struct UniqueGeneration {
 		if (r.generation < generation) return false;
 		return uid < r.uid;
 	}
+	bool operator>(UniqueGeneration const& r) const { return r < *this; }
+	bool operator<=(UniqueGeneration const& r) const { return !(*this > r); }
+	bool operator>=(UniqueGeneration const& r) const { return !(*this < r); }
 	bool operator == (UniqueGeneration const& r) const {
 		return generation == r.generation && uid == r.uid;
 	}
+	bool operator!=(UniqueGeneration const& r) const { return !(*this == r); }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, generation, uid);
@@ -112,6 +116,7 @@ struct GenerationRegWriteRequest {
 
 struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	RequestStream< struct CandidacyRequest > candidacy;
+	RequestStream< struct ElectionResultRequest > electionResult;
 	RequestStream< struct LeaderHeartbeatRequest > leaderHeartbeat;
 	RequestStream< struct ForwardRequest > forward;
 
@@ -133,6 +138,22 @@ struct CandidacyRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, myInfo, knownLeader, prevChangeID, reply);
+	}
+};
+
+struct ElectionResultRequest {
+	constexpr static FileIdentifier file_identifier = 11815465;
+	Key key;
+	vector<NetworkAddress> coordinators;
+	UID knownLeader;
+	ReplyPromise<Optional<LeaderInfo>> reply;
+
+	ElectionResultRequest() = default;
+	ElectionResultRequest(Key key, std::vector<NetworkAddress> coordinators, UID knownLeader) : key(key), coordinators(std::move(coordinators)), knownLeader(knownLeader) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, coordinators, knownLeader, reply);
 	}
 };
 

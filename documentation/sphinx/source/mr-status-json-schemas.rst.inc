@@ -113,6 +113,44 @@
                      "counter":0,
                      "roughness":0.0
                   },
+                  "grv_latency_statistics":{
+                     "default":{
+                         "count":0,
+                         "min":0.0,
+                         "max":0.0,
+                         "median":0.0,
+                         "mean":0.0,
+                         "p25":0.0,
+                         "p90":0.0,
+                         "p95":0.0,
+                         "p99":0.0,
+                         "p99.9":0.0
+                     }
+                  },
+                  "read_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
                   "grv_latency_bands":{ // How many GRV requests belong to the latency (in seconds) band (e.g., How many requests belong to [0.01,0.1] latency band). The key is the upper bound of the band and the lower bound is the next smallest band (or 0, if none). Example: {0.01: 27, 0.1: 18, 1: 1, inf: 98,filtered: 10}, we have 18 requests in [0.01, 0.1) band.
                      "$map_key=upperBoundOfBand": 1
                   },
@@ -121,6 +159,13 @@
                   },
                   "commit_latency_bands":{
                      "$map_key=upperBoundOfBand": 1
+                  },
+                  "busiest_read_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz":0.0
+                     }
                   }
                }
             ],
@@ -189,6 +234,9 @@
                   "hz":0.0
                },
                "megabits_received":{
+                  "hz":0.0
+               },
+               "tls_policy_failures":{
                   "hz":0.0
                }
             },
@@ -264,10 +312,16 @@
          "transactions_per_second_limit":0,
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
+         "throttled_tags":{
+            "auto":{
+               "count":0
+            },
+            "manual":{
+               "count":0
+            }
+         },
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-         "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0,
          "limiting_data_lag_storage_server":{
             "versions":0,
             "seconds":0.0
@@ -364,7 +418,9 @@
                   "layer_status_incomplete",
                   "database_availability_timeout",
                   "consistencycheck_suspendkey_fetch_timeout",
-                  "consistencycheck_disabled"
+                  "consistencycheck_disabled",
+                  "primary_dc_missing",
+                  "fetch_primary_dc_timeout"
                ]
             },
             "issues":[
@@ -404,6 +460,7 @@
          },
          "required_logs":3,
          "missing_logs":"7f8d623d0cb9966e",
+         "active_generations":1,
          "description":"Recovery complete."
       },
       "workload":{
@@ -419,6 +476,16 @@
                "roughness":0.0
             },
             "read_requests":{ // measures number of incoming read requests
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "location_requests":{ // measures number of outgoing key server location responses
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -485,6 +552,7 @@
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
       "data_distribution_disabled":true,
+      "active_primary_dc":"pv",
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
@@ -546,6 +614,7 @@
              "ssd-1",
              "ssd-2",
              "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
              "memory"
          ]},
          "coordinators_count":1,
@@ -557,6 +626,7 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "backup_worker_enabled":1,
          "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
@@ -571,6 +641,7 @@
                   "missing_data",
                   "healing",
                   "optimizing_team_collections",
+                  "healthy_populating_region",
                   "healthy_repartitioning",
                   "healthy_removing_server",
                   "healthy_rebalancing",
@@ -605,6 +676,7 @@
                           "missing_data",
                           "healing",
                           "optimizing_team_collections",
+                          "healthy_populating_region",
                           "healthy_repartitioning",
                           "healthy_removing_server",
                           "healthy_rebalancing",

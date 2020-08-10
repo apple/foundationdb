@@ -10,7 +10,7 @@ This document explains at the high level how the recovery works in a single clus
 
 This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration. Only part of the data structure, such as `ClientDBInfo` that contains the list of proxies, is  available to the client.
 
-Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propogate the new `ServerDBInfo` to all workers in the cluster.
+Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propagate the new `ServerDBInfo` to all workers in the cluster.
 
 ## When will recovery happen?
 Failure of certain roles in FDB can cause recovery. Those roles are cluster controller, master, proxy, transaction logs (tLog), resolvers, and log router.
@@ -67,9 +67,9 @@ The transaction system state before the recovery is the starting point for the c
 
 ## Phase 2: LOCKING_CSTATE
 
-This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes. 
+This phase locks the coordinated state (cstate) to make sure there is only one master who can change the cstate. Otherwise, we may end up with more than one master accepting commits after the recovery. To achieve that, the master needs to get currently alive tLogs’ interfaces and sends commands to tLogs to lock their states, preventing them from accepting any further writes.
 
-Recall that `ServerDBInfo` has master's interface and is propogated by CC to every process in a cluster. The current running tLogs can use the master interface in its `ServerDBInfo` to send itself's interface to master.
+Recall that `ServerDBInfo` has master's interface and is propagated by CC to every process in a cluster. The current running tLogs can use the master interface in its `ServerDBInfo` to send itself's interface to master.
 Master simply waits on receiving the `TLogRejoinRequest` streams: for each tLog’s interface received, the master compares the interface ID with the tLog ID read from cstate. Once the master collects enough old tLog interfaces, it will use the interfaces to lock those tLogs.
 The logic of collecting tLogs’ interfaces is implemented in `trackRejoins()` function.
 The logic of locking the tLogs is implemented in `epochEnd()` function in [TagPartitionedLogSystems.actor.cpp](https://github.com/apple/foundationdb/blob/master/fdbserver/TagPartitionedLogSystem.actor.cpp).

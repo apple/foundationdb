@@ -32,24 +32,17 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/simulator.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/RestoreWorker.actor.h"
-#include "fdbserver/RestoreMaster.actor.h"
+#include "fdbserver/RestoreController.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FastRestoreOpConfig opConfig;
-
-int NUM_APPLIERS = 40;
-
-int restoreStatusIndex = 0;
-
 class RestoreConfigFR;
 struct RestoreWorkerData; // Only declare the struct exist but we cannot use its field
-
-void initRestoreWorkerConfig();
 
 ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Reference<RestoreWorkerData> self,
                                                  RestoreWorkerInterface workerInterf, Database cx);
@@ -73,7 +66,7 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 		return Void();
 	}));
 
-	TraceEvent("FastRestore").detail("HandleTerminateWorkerReq", self->id());
+	TraceEvent("FastRestoreWorker").detail("HandleTerminateWorkerReq", self->id());
 
 	return Void();
 }
@@ -98,13 +91,17 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
+		DUMPTOKEN(recruited.updateRestoreSysInfo);
 		DUMPTOKEN(recruited.initVersionBatch);
 		DUMPTOKEN(recruited.loadFile);
 		DUMPTOKEN(recruited.sendMutations);
+		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.finishVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
-		TraceEvent("FastRestore").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
+		TraceEvent("FastRestoreWorker").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
@@ -112,18 +109,18 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface& recruited = self->applierInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
 		DUMPTOKEN(recruited.sendMutationVector);
 		DUMPTOKEN(recruited.applyToDB);
 		DUMPTOKEN(recruited.initVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
 		actors->add(restoreApplierCore(self->applierInterf.get(), req.nodeIndex, cx));
-		TraceEvent("FastRestore").detail("RecruitedApplierNodeIndex", req.nodeIndex);
+		TraceEvent("FastRestoreWorker").detail("RecruitedApplierNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->applierInterf.get().id(), RestoreRole::Applier, self->applierInterf.get()));
 	} else {
-		TraceEvent(SevError, "FastRestore")
-		    .detail("HandleRecruitRoleRequest", "UnknownRole"); //.detail("Request", req.printable());
+		TraceEvent(SevError, "FastRestoreWorkerHandleRecruitRoleRequestUnknownRole").detail("Request", req.toString());
 	}
 
 	return;
@@ -154,7 +151,10 @@ ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> se
 				}
 				break;
 			}
-			TraceEvent("FastRestore").suppressFor(10.0).detail("NotEnoughWorkers", agentValues.size());
+			TraceEvent("FastRestoreWorker")
+			    .suppressFor(10.0)
+			    .detail("NotEnoughWorkers", agentValues.size())
+			    .detail("MinWorkers", min_num_workers);
 			wait(delay(5.0));
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -162,7 +162,7 @@ ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> se
 	}
 	ASSERT(agents.size() >= min_num_workers); // ASSUMPTION: We must have at least 1 loader and 1 applier
 
-	TraceEvent("FastRestore").detail("CollectWorkerInterfaceNumWorkers", self->workerInterfaces.size());
+	TraceEvent("FastRestoreWorker").detail("CollectWorkerInterfaceNumWorkers", self->workerInterfaces.size());
 
 	return Void();
 }
@@ -182,34 +182,27 @@ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
 	}
 }
 
-void initRestoreWorkerConfig() {
-	opConfig.num_loaders = g_network->isSimulated() ? 3 : opConfig.num_loaders;
-	opConfig.num_appliers = g_network->isSimulated() ? 3 : opConfig.num_appliers;
-	// TODO: Set the threshold to a random value in a range
-	opConfig.transactionBatchSizeThreshold =
-	    g_network->isSimulated() ? 512 : opConfig.transactionBatchSizeThreshold; // Byte
-	opConfig.batchSizeThreshold = g_network->isSimulated() ? 10 * 1024 * 1024 : opConfig.batchSizeThreshold; // Byte
-	TraceEvent("FastRestore")
-	    .detail("InitOpConfig", "Result")
-	    .detail("NumLoaders", opConfig.num_loaders)
-	    .detail("NumAppliers", opConfig.num_appliers)
-	    .detail("TxnBatchSize", opConfig.transactionBatchSizeThreshold);
-}
-
-// RestoreWorkerLeader is the worker that runs RestoreMaster role
+// RestoreWorkerLeader is the worker that runs RestoreController role
 ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf,
                                             Database cx) {
 	// We must wait for enough time to make sure all restore workers have registered their workerInterfaces into the DB
-	TraceEvent("FastRestore").detail("Master", workerInterf.id()).detail("WaitForRestoreWorkerInterfaces", opConfig.num_loaders + opConfig.num_appliers);
+	TraceEvent("FastRestoreWorker")
+	    .detail("Controller", workerInterf.id())
+	    .detail("WaitForRestoreWorkerInterfaces",
+	            SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 	wait(delay(10.0));
-	TraceEvent("FastRestore").detail("Master", workerInterf.id()).detail("CollectRestoreWorkerInterfaces", opConfig.num_loaders + opConfig.num_appliers);
+	TraceEvent("FastRestoreWorker")
+	    .detail("Controller", workerInterf.id())
+	    .detail("CollectRestoreWorkerInterfaces",
+	            SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 
-	wait(collectRestoreWorkerInterface(self, cx, opConfig.num_loaders + opConfig.num_appliers));
+	wait(collectRestoreWorkerInterface(self, cx,
+	                                   SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS));
 
 	// TODO: Needs to keep this monitor's future. May use actorCollection
 	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
 
-	wait(startRestoreMaster(self, cx) || workersFailureMonitor);
+	wait(startRestoreController(self, cx) || workersFailureMonitor);
 
 	return Void();
 }
@@ -247,38 +240,69 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 					exitRole = handlerTerminateWorkerRequest(req, self, interf, cx);
 				}
 				when(wait(exitRole)) {
-					TraceEvent("FastRestore").detail("RestoreWorkerCore", "ExitRole").detail("NodeID", self->id());
+					TraceEvent("FastRestoreWorkerCoreExitRole", self->id());
 					break;
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestore")
-			    .detail("RestoreWorkerError", e.what())
-			    .detail("RequestType", requestTypeStr);
+			TraceEvent(SevWarn, "FastRestoreWorkerError").detail("RequestType", requestTypeStr).error(e, true);
 			break;
-			// if ( requestTypeStr.find("[Init]") != std::string::npos ) {
-			// 	TraceEvent(SevError, "FastRestore").detail("RestoreWorkerUnexpectedExit", "RequestType_Init");
-			// 	break;
-			// }
 		}
 	}
 
 	return Void();
 }
 
-// RestoreMaster is the leader
-ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
-                                 RestoreWorkerInterface myWorkerInterf) {
-	TraceEvent("FastRestore").detail("MonitorLeader", "StartLeaderElection");
+ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
 	state ReadYourWritesTransaction tr(cx);
-	// state Future<Void> leaderWatch;
-	state RestoreWorkerInterface leaderInterf;
+	state Optional<Value> numRequests;
+
+	// wait for the restoreRequestTriggerKey to be set by the client/test workload
+	TraceEvent("FastRestoreWaitOnRestoreRequest", nodeID);
 	loop {
 		try {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> _numRequests = wait(tr.get(restoreRequestTriggerKey));
+			numRequests = _numRequests;
+			if (!numRequests.present()) {
+				state Future<Void> watchForRestoreRequest = tr.watch(restoreRequestTriggerKey);
+				wait(tr.commit());
+				TraceEvent(SevInfo, "FastRestoreWaitOnRestoreRequestTriggerKey", nodeID);
+				wait(watchForRestoreRequest);
+				TraceEvent(SevInfo, "FastRestoreDetectRestoreRequestTriggerKeyChanged", nodeID);
+			} else {
+				TraceEvent(SevInfo, "FastRestoreRestoreRequestTriggerKey", nodeID)
+				    .detail("TriggerKey", numRequests.get().toString());
+				break;
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
+}
+
+// RestoreController is the leader
+ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
+                                 RestoreWorkerInterface myWorkerInterf) {
+	wait(delay(SERVER_KNOBS->FASTRESTORE_MONITOR_LEADER_DELAY));
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("MonitorLeader", "StartLeaderElection");
+	state int count = 0;
+	state RestoreWorkerInterface leaderInterf;
+	state ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
+	loop {
+		try {
+			count++;
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> leaderValue = wait(tr.get(restoreLeaderKey));
+			TraceEvent(SevInfo, "FastRestoreLeaderElection")
+			    .detail("Round", count)
+			    .detail("LeaderExisted", leaderValue.present());
 			if (leaderValue.present()) {
 				leaderInterf = BinaryReader::fromStringRef<RestoreWorkerInterface>(leaderValue.get(), IncludeVersion());
 				// Register my interface as an worker if I am not the leader
@@ -287,18 +311,22 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 				}
 			} else {
 				// Workers compete to be the leader
-				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion()));
+				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue())));
 				leaderInterf = myWorkerInterf;
 			}
 			wait(tr.commit());
 			leader->set(leaderInterf);
 			break;
 		} catch (Error& e) {
+			TraceEvent(SevInfo, "FastRestoreLeaderElection").detail("ErrorCode", e.code()).detail("Error", e.what());
 			wait(tr.onError(e));
 		}
 	}
 
-	TraceEvent("FastRestore").detail("MonitorLeader", "FinishLeaderElection").detail("Leader", leaderInterf.id());
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id())
+	    .detail("MonitorLeader", "FinishLeaderElection")
+	    .detail("Leader", leaderInterf.id())
+	    .detail("IamLeader", leaderInterf == myWorkerInterf);
 	return Void();
 }
 
@@ -307,18 +335,46 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	state Future<Void> myWork = Never();
 	state Reference<AsyncVar<RestoreWorkerInterface>> leader =
 	    Reference<AsyncVar<RestoreWorkerInterface>>(new AsyncVar<RestoreWorkerInterface>());
-
 	state RestoreWorkerInterface myWorkerInterf;
-	myWorkerInterf.initEndpoints();
 	state Reference<RestoreWorkerData> self = Reference<RestoreWorkerData>(new RestoreWorkerData());
+
+	myWorkerInterf.initEndpoints();
 	self->workerID = myWorkerInterf.id();
-	initRestoreWorkerConfig();
+
+	// Protect restore worker from being killed in simulation;
+	// Future: Remove the protection once restore can tolerate failure
+	if (g_network->isSimulated()) {
+		auto addresses = g_simulator.getProcessByAddress(myWorkerInterf.address())->addresses;
+
+		g_simulator.protectedAddresses.insert(addresses.address);
+		if (addresses.secondaryAddress.present()) {
+			g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+		}
+		ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(myWorkerInterf.address());
+		TraceEvent("ProtectRestoreWorker")
+		    .detail("Address", addresses.toString())
+		    .detail("IsReliable", p->isReliable())
+		    .detail("ReliableInfo", p->getReliableInfo())
+		    .backtrace();
+		ASSERT(p->isReliable());
+	}
+
+	TraceEvent("FastRestoreWorkerKnobs", myWorkerInterf.id())
+	    .detail("FailureTimeout", SERVER_KNOBS->FASTRESTORE_FAILURE_TIMEOUT)
+	    .detail("HeartBeat", SERVER_KNOBS->FASTRESTORE_HEARTBEAT_INTERVAL)
+	    .detail("SamplePercentage", SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT)
+	    .detail("NumLoaders", SERVER_KNOBS->FASTRESTORE_NUM_LOADERS)
+	    .detail("NumAppliers", SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS)
+	    .detail("TxnBatchSize", SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES)
+	    .detail("VersionBatchSize", SERVER_KNOBS->FASTRESTORE_VERSIONBATCH_MAX_BYTES);
+
+	wait(waitOnRestoreRequests(cx, myWorkerInterf.id()));
 
 	wait(monitorleader(leader, cx, myWorkerInterf));
 
-	TraceEvent("FastRestore").detail("LeaderElection", "WaitForLeader");
+	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("LeaderElection", "WaitForLeader");
 	if (leader->get() == myWorkerInterf) {
-		// Restore master worker: doLeaderThings();
+		// Restore controller worker: doLeaderThings();
 		myWork = startRestoreWorkerLeader(self, myWorkerInterf, cx);
 	} else {
 		// Restore normal worker (for RestoreLoader and RestoreApplier roles): doWorkerThings();
@@ -329,8 +385,15 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	return Void();
 }
 
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> ccf, LocalityData locality) {
-	Database cx = Database::createDatabase(ccf->getFilename(), Database::API_VERSION_LATEST, true, locality);
-	wait(_restoreWorker(cx, locality));
+ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile, LocalityData locality,
+                                 std::string coordFolder) {
+	try {
+		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, true, locality);
+		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
+	} catch (Error& e) {
+		TraceEvent("FastRestoreWorker").detail("Error", e.what());
+		throw e;
+	}
+
 	return Void();
 }

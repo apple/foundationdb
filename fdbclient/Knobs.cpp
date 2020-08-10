@@ -21,15 +21,18 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "flow/UnitTest.h"
 
 ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-ClientKnobs::ClientKnobs(bool randomize) {
-	// FIXME: These are not knobs, get them out of ClientKnobs!
-	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
-	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;
+ClientKnobs::ClientKnobs() {
+	initialize();
+}
+
+void ClientKnobs::initialize(bool randomize) {
+	// clang-format off
 
 	init( TOO_MANY,                            1000000 );
 
@@ -41,11 +44,16 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 	init( FAILURE_EMERGENCY_DELAY,                30.0 );
 	init( FAILURE_MAX_GENERATIONS,                  10 );
+	init( RECOVERY_DELAY_START_GENERATION,          70 );
+	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
+	init( MAX_GENERATIONS,                         100 );
+	init( MAX_GENERATIONS_OVERRIDE,                  0 );
 
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
 	init( MAX_PROXY_CONNECTIONS,                     5 ); if( randomize && BUGGIFY ) MAX_PROXY_CONNECTIONS = 1;
+	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -81,6 +89,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
+	init( TAG_ENCODE_KEY_SERVERS,                 true ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = false;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -132,7 +141,14 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
+	init( COPY_LOG_BLOCK_SIZE,              LOG_RANGE_BLOCK_SIZE ); // the maximum possible value due the getLogRanges limitations
+	init( COPY_LOG_BLOCKS_PER_TASK,               1000 );
+	init( COPY_LOG_PREFETCH_BLOCKS,                  3 );
+	init( COPY_LOG_READ_AHEAD_BYTES,        BACKUP_LOCK_BYTES / COPY_LOG_PREFETCH_BLOCKS); // each task will use up to COPY_LOG_PREFETCH_BLOCKS * COPY_LOG_READ_AHEAD_BYTES memory
+	init( COPY_LOG_TASK_DURATION_NANOS,	      1e10 ); // 10 seconds
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
+	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
+	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
@@ -165,7 +181,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                60 );
+	init( BLOBSTORE_REQUEST_TIMEOUT_MIN,            60 );
 
 	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
 	init( BLOBSTORE_CONCURRENT_LISTS,               20 );
@@ -200,7 +216,35 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
+	
+	//fdbcli		
+	init( CLI_CONNECT_PARALLELISM,                  400 );
+	init( CLI_CONNECT_TIMEOUT,                     10.0 );
 
-	//fdbcli
-	init( CLI_CONNECT_PARALLELISM,                   10 );
+	// trace
+	init( TRACE_LOG_FILE_IDENTIFIER_MAX_LENGTH,      50 );
+
+	// transaction tags
+	init( MAX_TAGS_PER_TRANSACTION,                   5 );
+	init( MAX_TRANSACTION_TAG_LENGTH,                16 );
+	init( READ_TAG_SAMPLE_RATE,                    0.01 ); if( randomize && BUGGIFY ) READ_TAG_SAMPLE_RATE = 1.0; // Communicated to clients from cluster
+	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
+	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;
+	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
+
+	// clang-format on
+}
+
+TEST_CASE("/fdbclient/knobs/initialize") {
+	// This test depends on TASKBUCKET_TIMEOUT_VERSIONS being defined as a constant multiple of CORE_VERSIONSPERSECOND
+	ClientKnobs clientKnobs;
+	int initialCoreVersionsPerSecond = clientKnobs.CORE_VERSIONSPERSECOND;
+	int initialTaskBucketTimeoutVersions = clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS;
+	clientKnobs.setKnob("core_versionspersecond", format("%ld", initialCoreVersionsPerSecond * 2));
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions);
+	clientKnobs.initialize();
+	ASSERT(clientKnobs.CORE_VERSIONSPERSECOND == initialCoreVersionsPerSecond * 2);
+	ASSERT(clientKnobs.TASKBUCKET_TIMEOUT_VERSIONS == initialTaskBucketTimeoutVersions * 2);
+	return Void();
 }

@@ -21,8 +21,27 @@
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/UnitTest.h"
+#include "flow/rte_memcpy.h"
+#include "flow/folly_memcpy.h"
 #include <stdarg.h>
 #include <cinttypes>
+
+#if (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__)
+// For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
+void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
+	return rte_memcpy(__dest, __src, __n);
+}
+
+// This compilation unit will be linked in to the main binary, so this should override glibc memcpy
+__attribute__((visibility ("default"))) void *memcpy (void *__restrict __dest, const void *__restrict __src, size_t __n) {
+	// folly_memcpy is faster for small copies, but rte seems to win out in most other circumstances
+	return rte_memcpy(__dest, __src, __n);
+}
+#else
+void * rte_memcpy_noinline(void *__restrict __dest, const void *__restrict __src, size_t __n) {
+	return memcpy(__dest, __src, __n);
+}
+#endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__)
 
 INetwork *g_network = 0;
 
@@ -107,6 +126,45 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 		ret *= int64_t(1e12);
 	} else if (!unit.compare("TiB")) {
 		ret *= 1LL << 40;
+	} else {
+		return Optional<uint64_t>();
+	}
+
+	return ret;
+}
+
+// Parses a duration with one of the following suffixes and returns the duration in seconds
+// s - seconds
+// m - minutes
+// h - hours
+// d - days
+Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit) {
+	char *endptr;
+	uint64_t ret = strtoull(str.c_str(), &endptr, 10);
+
+	if (endptr == str.c_str()) {
+		return Optional<uint64_t>();
+	}
+
+	std::string unit;
+	if (*endptr == '\0') {
+		if (!defaultUnit.empty()) {
+			unit = defaultUnit;
+		} else {
+			return Optional<uint64_t>();
+		}
+	} else {
+		unit = endptr;
+	}
+
+	if (!unit.compare("s")) {
+		// Nothing to do
+	} else if (!unit.compare("m")) {
+		ret *= 60;
+	} else if (!unit.compare("h")) {
+		ret *= 60 * 60;
+	} else if (!unit.compare("d")) {
+		ret *= 24 * 60 * 60;
 	} else {
 		return Optional<uint64_t>();
 	}

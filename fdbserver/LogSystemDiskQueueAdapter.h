@@ -33,6 +33,7 @@ struct PeekTxsInfo {
 	bool operator == (const PeekTxsInfo& r) const {
 		return primaryLocality == r.primaryLocality && secondaryLocality == r.secondaryLocality && knownCommittedVersion == r.knownCommittedVersion;
 	}
+	bool operator!=(const PeekTxsInfo& r) const { return !(*this == r); }
 
 	PeekTxsInfo(int8_t primaryLocality, int8_t secondaryLocality, Version knownCommittedVersion) : primaryLocality(primaryLocality), secondaryLocality(secondaryLocality), knownCommittedVersion(knownCommittedVersion) {}
 };
@@ -73,23 +74,35 @@ public:
 	Future<CommitMessage> getCommitMessage();
 
 	// IClosable interface
-	virtual Future<Void> getError();
-	virtual Future<Void> onClosed();
-	virtual void dispose();
-	virtual void close();
+	Future<Void> getError() override;
+	Future<Void> onClosed() override;
+	void dispose() override;
+	void close() override;
 
 	// IDiskQueue interface
-	virtual Future<bool> initializeRecovery(location recoverAt) { return false; }
-	virtual Future<Standalone<StringRef>> readNext( int bytes );
-	virtual IDiskQueue::location getNextReadLocation();
-	virtual IDiskQueue::location getNextCommitLocation() { ASSERT(false); throw internal_error(); }
-	virtual IDiskQueue::location getNextPushLocation() { ASSERT(false); throw internal_error(); }
-	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes ch ) { ASSERT(false); throw internal_error(); }
-	virtual IDiskQueue::location push( StringRef contents );
-	virtual void pop( IDiskQueue::location upTo );
-	virtual Future<Void> commit();
-	virtual StorageBytes getStorageBytes() { ASSERT(false); throw internal_error(); }
-	virtual int getCommitOverhead() { return 0; } //SOMEDAY: could this be more accurate?
+	Future<bool> initializeRecovery(location recoverAt) override { return false; }
+	Future<Standalone<StringRef>> readNext(int bytes) override;
+	IDiskQueue::location getNextReadLocation() const override;
+	IDiskQueue::location getNextCommitLocation() const override {
+		ASSERT(false);
+		throw internal_error();
+	}
+	IDiskQueue::location getNextPushLocation() const override {
+		ASSERT(false);
+		throw internal_error();
+	}
+	Future<Standalone<StringRef>> read(location start, location end, CheckHashes ch) override {
+		ASSERT(false);
+		throw internal_error();
+	}
+	IDiskQueue::location push(StringRef contents) override;
+	void pop(IDiskQueue::location upTo) override;
+	Future<Void> commit() override;
+	StorageBytes getStorageBytes() const override {
+		ASSERT(false);
+		throw internal_error();
+	}
+	int getCommitOverhead() const override { return 0; } // SOMEDAY: could this be more accurate?
 
 private:
 	Reference<AsyncVar<PeekTxsInfo>> peekLocality;

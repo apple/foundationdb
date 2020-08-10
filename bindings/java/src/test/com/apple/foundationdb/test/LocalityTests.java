@@ -34,7 +34,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
 public class LocalityTests {
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(620);
+		FDB fdb = FDB.selectAPIVersion(700);
 		try(Database database = fdb.open(args[0])) {
 			try(Transaction tr = database.createTransaction()) {
 				String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).join();
@@ -45,17 +45,16 @@ public class LocalityTests {
 
 			long start = System.currentTimeMillis();
 
-			CloseableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[]{(byte) 255});
-			CompletableFuture<List<byte[]>> collection = AsyncUtil.collectRemaining(keys);
-			List<byte[]> list = collection.join();
-			System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
-					list.size() + " items");
+			try(CloseableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[]{(byte) 255})) {
+				CompletableFuture<List<byte[]>> collection = AsyncUtil.collectRemaining(keys);
+				List<byte[]> list = collection.join();
+				System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
+						list.size() + " items");
 
-			keys.close();
-
-			int i = 0;
-			for(byte[] key : collection.join()) {
-				System.out.println(i++ + ": " + ByteArrayUtil.printable(key));
+				int i = 0;
+				for(byte[] key : collection.join()) {
+					System.out.println(i++ + ": " + ByteArrayUtil.printable(key));
+				}
 			}
 		}
 	}

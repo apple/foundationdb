@@ -68,6 +68,7 @@ struct SaveContext {
 
 template <class ReaderImpl>
 class _ObjectReader {
+protected:
 	ProtocolVersion mProtocolVersion;
 public:
 
@@ -78,7 +79,21 @@ public:
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
-		ASSERT(read_file_identifier(data) == file_identifier);
+		if(read_file_identifier(data) != file_identifier) {
+			// Some file identifiers are changed in 7.0, so file identifier mismatches
+			// are expected during a downgrade from 7.0 to 6.3
+			bool expectMismatch = mProtocolVersion >= ProtocolVersion(0x0FDB00B070000000LL);
+			{
+				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
+				if (expectMismatch) {
+					te.suppressFor(1.0);
+				}
+				te.detail("Expected", file_identifier).detail("Read", read_file_identifier(data));
+			}
+			if (!expectMismatch) {
+				ASSERT(false);
+			}
+		}
 		load_members(data, context, items...);
 	}
 

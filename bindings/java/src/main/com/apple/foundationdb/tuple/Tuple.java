@@ -129,7 +129,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		}
 		return new Tuple(this, o,
 				(o instanceof Versionstamp && !((Versionstamp)o).isComplete()) ||
-						(o instanceof List<?> && TupleUtil.hasIncompleteVersionstamp(((List)o).stream())) ||
+						(o instanceof List<?> && TupleUtil.hasIncompleteVersionstamp(((List<?>)o).stream())) ||
 						(o instanceof Tuple && ((Tuple) o).hasIncompleteVersionstamp()));
 	}
 

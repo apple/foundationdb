@@ -218,7 +218,7 @@ public:
 	void dispose() { shutdown(this, true); }
 	void close() { shutdown(this, false); }
 
-	StorageBytes getStorageBytes() {
+	StorageBytes getStorageBytes() const {
 		int64_t free;
 		int64_t total;
 
@@ -789,7 +789,7 @@ public:
 	{
 	}
 
-	virtual location push( StringRef contents ) {
+	location push(StringRef contents) override {
 		ASSERT( recovered );
 		uint8_t const* begin = contents.begin();
 		uint8_t const* end = contents.end();
@@ -807,7 +807,7 @@ public:
 		return endLocation();
 	}
 
-	virtual void pop( location upTo ) {
+	void pop(location upTo) override {
 		ASSERT( !upTo.hi );
 		ASSERT( !recovered || upTo.lo <= endLocation() );
 
@@ -829,14 +829,14 @@ public:
 		}
 	}
 
-	virtual Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) { return read(this, from, to, ch); }
-
-	int getMaxPayload() {
-		return Page::maxPayload;
+	Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) override {
+		return read(this, from, to, ch);
 	}
 
+	int getMaxPayload() const { return Page::maxPayload; }
+
 	// Always commit an entire page. Commit overhead is the unused space in a to-be-committed page
-	virtual int getCommitOverhead() {
+	int getCommitOverhead() const override {
 		if(!pushedPageCount()) {
 			if(!anyPopped)
 				return 0;
@@ -849,7 +849,7 @@ public:
 			return backPage().remainingCapacity();
 	}
 
-	virtual Future<Void> commit() {
+	Future<Void> commit() override {
 		ASSERT( recovered );
 		if (!pushedPageCount()) {
 			if (!anyPopped) return Void();
@@ -887,30 +887,30 @@ public:
 		rawQueue->stall();
 	}
 
-	virtual Future<bool> initializeRecovery(location recoverAt) { return initializeRecovery( this, recoverAt ); }
-	virtual Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
+	Future<bool> initializeRecovery(location recoverAt) override { return initializeRecovery(this, recoverAt); }
+	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
 
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
 	// to be changed to understand the new intiailizeRecovery protocol.
-	virtual location getNextReadLocation() { return nextReadLocation; }
-	virtual location getNextCommitLocation() { ASSERT( initialized ); return lastCommittedSeq + sizeof(Page); }
-	virtual location getNextPushLocation() { ASSERT( initialized ); return endLocation(); }
+	location getNextReadLocation() const override { return nextReadLocation; }
+	location getNextCommitLocation() const override {
+		ASSERT(initialized);
+		return lastCommittedSeq + sizeof(Page);
+	}
+	location getNextPushLocation() const override {
+		ASSERT(initialized);
+		return endLocation();
+	}
 
-	virtual Future<Void> getError() { return rawQueue->getError(); }
-	virtual Future<Void> onClosed() { return rawQueue->onClosed(); }
+	Future<Void> getError() override { return rawQueue->getError(); }
+	Future<Void> onClosed() override { return rawQueue->onClosed(); }
 
-	virtual void dispose() {
+	void dispose() override {
 		TraceEvent("DQDestroy", dbgid).detail("LastPoppedSeq", lastPoppedSeq).detail("PoppedSeq", poppedSeq).detail("NextPageSeq", nextPageSeq).detail("File0Name", rawQueue->files[0].dbgFilename);
 		dispose(this);
 	}
-	ACTOR static void dispose(DiskQueue* self) {
-		wait( self->onSafeToDestruct() );
-		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
-		self->rawQueue->dispose();
-		delete self;
-	}
 
-	virtual void close() {
+	void close() override {
 		TraceEvent("DQClose", dbgid)
 			.detail("LastPoppedSeq", lastPoppedSeq)
 			.detail("PoppedSeq", poppedSeq)
@@ -919,6 +919,17 @@ public:
 			.detail("File0Name", rawQueue->files[0].dbgFilename);
 		close(this);
 	}
+
+	StorageBytes getStorageBytes() const override { return rawQueue->getStorageBytes(); }
+
+private:
+	ACTOR static void dispose(DiskQueue* self) {
+		wait(self->onSafeToDestruct());
+		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+		self->rawQueue->dispose();
+		delete self;
+	}
+
 	ACTOR static void close(DiskQueue* self) {
 		wait( self->onSafeToDestruct() );
 		TraceEvent("DQCloseDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -926,11 +937,6 @@ public:
 		delete self;
 	}
 
-	virtual StorageBytes getStorageBytes() {
-		return rawQueue->getStorageBytes();
-	}
-
-private:
 	#pragma pack(push, 1)
 	struct PageHeader {
 		union {
@@ -1013,7 +1019,7 @@ private:
 		ASSERT( nextPageSeq%sizeof(Page)==0 );
 
 		auto& p = backPage();
-		memset(&p, 0, sizeof(Page)); // FIXME: unnecessary?
+		memset(static_cast<void*>(&p), 0, sizeof(Page)); // FIXME: unnecessary?
 		p.magic = 0xFDB;
 		switch (diskQueueVersion) {
 		case DiskQueueVersion::V0:
@@ -1399,29 +1405,30 @@ public:
 	Future<bool> initializeRecovery(location recoverAt) { return queue->initializeRecovery(recoverAt); }
 	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
-	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
+	location getNextReadLocation() const override { return queue->getNextReadLocation(); }
 
-	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes ch ) { return queue->read( start, end, ch ); }
-	virtual location getNextCommitLocation() { return queue->getNextCommitLocation(); }
-	virtual location getNextPushLocation() { return queue->getNextPushLocation(); }
+	Future<Standalone<StringRef>> read(location start, location end, CheckHashes ch) override {
+		return queue->read(start, end, ch);
+	}
+	location getNextCommitLocation() const override { return queue->getNextCommitLocation(); }
+	location getNextPushLocation() const override { return queue->getNextPushLocation(); }
 
-
-	virtual location push( StringRef contents ) {
+	location push(StringRef contents) override {
 		pushed = queue->push(contents);
 		return pushed;
 	}
 
-	virtual void pop( location upTo ) {
+	void pop(location upTo) override {
 		popped = std::max(popped, upTo);
 		ASSERT_WE_THINK(committed >= popped);
 		queue->pop(std::min(committed, popped));
 	}
 
-	virtual int getCommitOverhead() {
+	int getCommitOverhead() const override {
 		return queue->getCommitOverhead() + (popped > committed ? queue->getMaxPayload() : 0);
 	}
 
-	Future<Void> commit() {
+	Future<Void> commit() override {
 		location pushLocation = pushed;
 		location popLocation = popped;
 
@@ -1444,7 +1451,7 @@ public:
 		return commitFuture;
 	}
 
-	virtual StorageBytes getStorageBytes() { return queue->getStorageBytes(); }
+	StorageBytes getStorageBytes() const override { return queue->getStorageBytes(); }
 
 private:
 	DiskQueue *queue;

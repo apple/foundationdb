@@ -1,10 +1,12 @@
-testTitle=SnapCycleRestore
-;Post snap restore test
-runSetup=false
-testName=Cycle
-transactionsPerSecond=2500.0
-nodeCount=2500
-testDuration=10.0
-expectedRate=0
 buggify=off
-enableDD=true
+
+testTitle=SnapCycleRestore
+runSetup=false
+
+    ;Post snap restore test
+    testName=Cycle
+    transactionsPerSecond=2500.0
+    nodeCount=2500
+    testDuration=10.0
+    expectedRate=0
+    enableDD=true

@@ -28,7 +28,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -227,15 +226,21 @@ struct ReadWriteWorkload : KVWorkload {
 	ACTOR static Future<bool> traceDumpWorkers( Reference<AsyncVar<ServerDBInfo>> db ) {
 		try {
 			loop {
-				ErrorOr<std::vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );
-				if( workerList.present() ) {
-					std::vector<Future<ErrorOr<Void>>> dumpRequests;
-					for( int i = 0; i < workerList.get().size(); i++)
-						dumpRequests.push_back( workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
-					wait( waitForAll( dumpRequests ) );
-					return true;
+				choose {
+					when( wait( db->onChange() ) ) {}
+
+					when (ErrorOr<std::vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );)
+					{
+						if( workerList.present() ) {
+							std::vector<Future<ErrorOr<Void>>> dumpRequests;
+							for( int i = 0; i < workerList.get().size(); i++)
+								dumpRequests.push_back( workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
+							wait( waitForAll( dumpRequests ) );
+							return true;
+						}
+						wait( delay( 1.0 ) );
+					}
 				}
-				wait( delay( 1.0 ) );
 			}
 		} catch( Error &e ) {
 			TraceEvent(SevError, "FailedToDumpWorkers").error(e);
@@ -327,10 +332,43 @@ struct ReadWriteWorkload : KVWorkload {
 			elapsed += self->periodicLoggingInterval;
 			wait( delayUntil(start + elapsed) );
 
-			TraceEvent((self->description() + "_RowReadLatency").c_str()).detail("Mean", self->readLatencies.mean()).detail("Median", self->readLatencies.median()).detail("Percentile5", self->readLatencies.percentile(.05)).detail("Percentile95", self->readLatencies.percentile(.95)).detail("Count", self->readLatencyCount).detail("Elapsed", elapsed);
-			TraceEvent((self->description() + "_GRVLatency").c_str()).detail("Mean", self->GRVLatencies.mean()).detail("Median", self->GRVLatencies.median()).detail("Percentile5", self->GRVLatencies.percentile(.05)).detail("Percentile95", self->GRVLatencies.percentile(.95));
-			TraceEvent((self->description() + "_CommitLatency").c_str()).detail("Mean", self->commitLatencies.mean()).detail("Median", self->commitLatencies.median()).detail("Percentile5", self->commitLatencies.percentile(.05)).detail("Percentile95", self->commitLatencies.percentile(.95));
-			TraceEvent((self->description() + "_TotalLatency").c_str()).detail("Mean", self->latencies.mean()).detail("Median", self->latencies.median()).detail("Percentile5", self->latencies.percentile(.05)).detail("Percentile95", self->latencies.percentile(.95));
+			TraceEvent((self->description() + "_RowReadLatency").c_str())
+				.detail("Mean", self->readLatencies.mean())
+				.detail("Median", self->readLatencies.median())
+				.detail("Percentile5", self->readLatencies.percentile(.05))
+				.detail("Percentile95", self->readLatencies.percentile(.95))
+				.detail("Percentile99", self->readLatencies.percentile(.99))
+				.detail("Percentile99_9", self->readLatencies.percentile(.999))
+				.detail("Max", self->readLatencies.max())
+				.detail("Count", self->readLatencyCount)
+				.detail("Elapsed", elapsed);
+
+			TraceEvent((self->description() + "_GRVLatency").c_str())
+				.detail("Mean", self->GRVLatencies.mean())
+				.detail("Median", self->GRVLatencies.median())
+				.detail("Percentile5", self->GRVLatencies.percentile(.05))
+				.detail("Percentile95", self->GRVLatencies.percentile(.95))
+				.detail("Percentile99", self->GRVLatencies.percentile(.99))
+				.detail("Percentile99_9", self->GRVLatencies.percentile(.999))
+				.detail("Max", self->GRVLatencies.max());
+				
+			TraceEvent((self->description() + "_CommitLatency").c_str())
+				.detail("Mean", self->commitLatencies.mean())
+				.detail("Median", self->commitLatencies.median())
+				.detail("Percentile5", self->commitLatencies.percentile(.05))
+				.detail("Percentile95", self->commitLatencies.percentile(.95))
+				.detail("Percentile99", self->commitLatencies.percentile(.99))
+				.detail("Percentile99_9", self->commitLatencies.percentile(.999))
+				.detail("Max", self->commitLatencies.max());
+
+			TraceEvent((self->description() + "_TotalLatency").c_str())
+				.detail("Mean", self->latencies.mean())
+				.detail("Median", self->latencies.median())
+				.detail("Percentile5", self->latencies.percentile(.05))
+				.detail("Percentile95", self->latencies.percentile(.95))
+				.detail("Percentile99", self->latencies.percentile(.99))
+				.detail("Percentile99_9", self->latencies.percentile(.999))
+				.detail("Max", self->latencies.max());
 
 			int64_t ops = (self->aTransactions.getValue() * (self->readsPerTransactionA+self->writesPerTransactionA)) + 
 						  (self->bTransactions.getValue() * (self->readsPerTransactionB+self->writesPerTransactionB));
@@ -678,6 +716,53 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 };
+
+ACTOR Future<std::vector<std::pair<uint64_t, double> > > trackInsertionCount(Database cx, std::vector<uint64_t> countsOfInterest, double checkInterval)
+{
+	state KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
+	state KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
+	state Transaction tr(cx);
+	state uint64_t lastInsertionCount = 0;
+	state int currentCountIndex = 0;
+
+	state std::vector<std::pair<uint64_t, double> > countInsertionRates;
+
+	state double startTime = now();
+
+	while(currentCountIndex < countsOfInterest.size())
+	{
+		try
+		{
+			state Future<Standalone<RangeResultRef>> countFuture = tr.getRange(keyPrefix, 1000000000);
+			state Future<Standalone<RangeResultRef>> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
+			wait(success(countFuture) && success(bytesFuture));
+
+			Standalone<RangeResultRef> counts = countFuture.get();
+			Standalone<RangeResultRef> bytes = bytesFuture.get();
+
+			uint64_t numInserted = 0;
+			for(int i = 0; i < counts.size(); i++)
+				numInserted += *(uint64_t*)counts[i].value.begin();
+
+			uint64_t bytesInserted = 0;
+			for(int i = 0; i < bytes.size(); i++)
+				bytesInserted += *(uint64_t*)bytes[i].value.begin();
+
+			while(currentCountIndex < countsOfInterest.size() && countsOfInterest[currentCountIndex] > lastInsertionCount && countsOfInterest[currentCountIndex] <= numInserted)
+				countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++], bytesInserted / (now() - startTime));
+
+			lastInsertionCount = numInserted;
+			wait(delay(checkInterval));
+		}
+		catch(Error& e)
+		{
+			wait(tr.onError(e));
+		}
+	}
+
+	return countInsertionRates;
+}
+
 
 WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory("ReadWrite");
 

@@ -24,8 +24,41 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const std::vector<std::string> RestoreRoleStr = { "Invalid", "Master", "Loader", "Applier" };
+const std::vector<std::string> RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
+
+// Similar to debugMutation(), we use debugFRMutation to track mutations for fast restore systems only.
+#if CENABLED(0, NOT_IN_CLEAN)
+StringRef debugFRKey = LiteralStringRef("\xff\xff\xff\xff");
+
+// Track any mutation in fast restore that has overlap with debugFRKey
+bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
+	if (mutation.type != mutation.ClearRange && mutation.param1 == debugFRKey) { // Single key mutation
+		TraceEvent("FastRestoreMutationTracking")
+		    .detail("At", context)
+		    .detail("Version", version)
+		    .detail("MutationType", getTypeString((MutationRef::Type)mutation.type))
+		    .detail("Key", mutation.param1)
+		    .detail("Value", mutation.param2);
+	} else if (mutation.type == mutation.ClearRange && debugFRKey >= mutation.param1 &&
+	           debugFRKey < mutation.param2) { // debugFRKey is in the range mutation
+		TraceEvent("FastRestoreMutationTracking")
+		    .detail("At", context)
+		    .detail("Version", version)
+		    .detail("MutationType", getTypeString((MutationRef::Type)mutation.type))
+		    .detail("Begin", mutation.param1)
+		    .detail("End", mutation.param2);
+	} else
+		return false;
+
+	return true;
+}
+#else
+// Default implementation.
+bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
+	return false;
+}
+#endif
 
 std::string getRoleStr(RestoreRole role) {
 	if ((int)role >= numRoles || (int)role < 0) {

@@ -19,7 +19,7 @@
  */
 
 #include <foundationdb/ClientWorkload.h>
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 
 #include <jni.h>
@@ -75,6 +75,9 @@ void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring messag
 		sev = FDBSeverity::Warn;
 	} else if (severity < 40) {
 		sev = FDBSeverity::WarnAlways;
+	} else {
+		assert(false);
+		std::abort();
 	}
 	log->trace(sev, msg, detailsMap);
 	if (isCopy) {
@@ -368,9 +371,11 @@ struct JVM {
 		                 { { "send", "(JZ)V", reinterpret_cast<void*>(&promiseSend) } });
 		auto fdbClass = getClass("com/apple/foundationdb/FDB");
 		jmethodID selectMethod =
-		    env->GetStaticMethodID(fdbClass, "selectAPIVersion", "(IZ)Lcom/apple/foundationdb/FDB;");
+		    env->GetStaticMethodID(fdbClass, "selectAPIVersion", "(I)Lcom/apple/foundationdb/FDB;");
 		checkException();
-		env->CallStaticObjectMethod(fdbClass, selectMethod, jint(620), jboolean(false));
+		auto fdbInstance = env->CallStaticObjectMethod(fdbClass, selectMethod, jint(700));
+		checkException();
+		env->CallObjectMethod(fdbInstance, getMethod(fdbClass, "disableShutdownHook", "()V"));
 		checkException();
 	}
 

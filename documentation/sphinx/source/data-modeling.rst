@@ -53,8 +53,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 
@@ -268,6 +266,18 @@ Using the table name as the subspace, we could implement the common row-oriented
             _, c = table_space.unpack(k)
             cols[c] = v
         return cols
+
+
+Versionstamps
+-------------
+
+A common data model is to index your data with a sequencing prefix to allow log scans or tails of recent data. This index requires a unique, monotonically increasing value, like an AUTO_INCREMENT PRIMARY KEY in SQL. This could be implemented at the client level by reading the value for conflict checks before every increment. A better solution is the versionstamp, which can be generated at commit-time with no read conflict ranges, providing a unique sequence ID in a single conflict-free write.
+
+Versioning commits provides FoundationDB with MVCC guarantees and transactional integrity. Versionstamps write the transaction's commit version as a value to an arbitrary key as part of the same transaction, allowing the client to leverage the version's unique and serial properties.  Because the versionstamp is generated at commit-time, the versionstamped key cannot be read in the same transaction that it is written, and the versionstamp's value will be unknown until the transaction is committed. After the transaction is committed, the versionstamp can be obtained.
+
+The versionstamp guarantees uniqueness and monotonically increasing values for the entire lifetime of a single FDB cluster. This is even true if the cluster is restored from a backup, as a restored cluster will begin at a higher version than when the backup was taken. Special care must be taken when moving data between two FoundationDB clusters containing versionstamps, as the differing cluster versions might break the monotonicity.
+
+There are two concepts of versionstamp depending on your context. At the fdb_c client level, or any binding outside of the Tuple layer, the 'versionstamp' is 10 bytes: the transaction's commit version (8 bytes) and transaction batch order (2 bytes). The user can manually add 2 additional bytes to provide application level ordering. The tuple layer provides a useful api for getting and setting both the 10 byte system version and the 2 byte user version. In the context of the Tuple layer, the 'versionstamp' is all 12 bytes. For examples on how to use the versionstamp in the python binding, see the :doc:`api-python` documentation.
 
 .. _data-modeling-entity-relationship:
 
@@ -531,25 +541,25 @@ How you map your application data to keys and values can have a dramatic impact 
 
 * Structure keys so that range reads can efficiently retrieve the most frequently accessed data.
 
-    * If you perform a range read that is, in total, much more than 1 kB, try to restrict your range as much as you can while still retrieving the needed data.
+  * If you perform a range read that is, in total, much more than 1 kB, try to restrict your range as much as you can while still retrieving the needed data.
 
 * Structure keys so that no single key needs to be updated too frequently, which can cause transaction conflicts.
 
-    * If a key is updated more than 10-100 times per second, try to split it into multiple keys.
-    * For example, if a key is storing a counter, split the counter into N separate counters that are randomly incremented by clients. The total value of the counter can then read by adding up the N individual ones.
+  * If a key is updated more than 10-100 times per second, try to split it into multiple keys.
+  * For example, if a key is storing a counter, split the counter into N separate counters that are randomly incremented by clients. The total value of the counter can then read by adding up the N individual ones.
 
 * Keep key sizes small.
 
-    * Try to keep key sizes below 1 kB. (Performance will be best with key sizes below 32 bytes and *cannot* be more than 10 kB.)
-    * When using the tuple layer to encode keys (as is recommended), select short strings or small integers for tuple elements. Small integers will encode to just two bytes.
-    * If your key sizes are above 1 kB, try either to move data from the key to the value, split the key into multiple keys, or encode the parts of the key more efficiently (remembering to preserve any important ordering).
+  * Try to keep key sizes below 1 kB. (Performance will be best with key sizes below 32 bytes and *cannot* be more than 10 kB.)
+  * When using the tuple layer to encode keys (as is recommended), select short strings or small integers for tuple elements. Small integers will encode to just two bytes.
+  * If your key sizes are above 1 kB, try either to move data from the key to the value, split the key into multiple keys, or encode the parts of the key more efficiently (remembering to preserve any important ordering).
 
 * Keep value sizes moderate.
 
-    * Try to keep value sizes below 10 kB. (Value sizes *cannot* be more than 100 kB.)
-    * If your value sizes are above 10 kB, consider splitting the value across multiple keys.
-    * If you read values with sizes above 1 kB but use only a part of each value, consider splitting the values using multiple keys.
-    * If you frequently perform individual reads on a set of values that total to fewer than 200 bytes, try either to combine the values into a single value or to store the values in adjacent keys and use a range read.
+  * Try to keep value sizes below 10 kB. (Value sizes *cannot* be more than 100 kB.)
+  * If your value sizes are above 10 kB, consider splitting the value across multiple keys.
+  * If you read values with sizes above 1 kB but use only a part of each value, consider splitting the values using multiple keys.
+  * If you frequently perform individual reads on a set of values that total to fewer than 200 bytes, try either to combine the values into a single value or to store the values in adjacent keys and use a range read.
 
 Large Values and Blobs
 ----------------------

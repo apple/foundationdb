@@ -131,9 +131,9 @@ set(install_destination_for_log_el6 "var/log/foundationdb")
 set(install_destination_for_log_el7 "var/log/foundationdb")
 set(install_destination_for_log_pm "")
 set(install_destination_for_data_tgz "lib/foundationdb")
-set(install_destination_for_data_deb "var/lib/foundationdb")
-set(install_destination_for_data_el6 "var/lib/foundationdb")
-set(install_destination_for_data_el7 "var/lib/foundationdb")
+set(install_destination_for_data_deb "var/lib/foundationdb/data")
+set(install_destination_for_data_el6 "var/lib/foundationdb/data")
+set(install_destination_for_data_el7 "var/lib/foundationdb/data")
 set(install_destination_for_data_pm "")
 
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -160,7 +160,7 @@ endfunction()
 function(fdb_install)
   if(NOT WIN32 AND NOT OPEN_FOR_IDE)
     set(one_value_options COMPONENT DESTINATION EXPORT DESTINATION_SUFFIX)
-    set(multi_value_options TARGETS FILES DIRECTORY)
+    set(multi_value_options TARGETS FILES PROGRAMS DIRECTORY)
     cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
 
     set(install_export 0)
@@ -168,12 +168,14 @@ function(fdb_install)
       set(args TARGETS ${IN_TARGETS})
     elseif(IN_FILES)
       set(args FILES ${IN_FILES})
+    elseif(IN_PROGRAMS)
+      set(args PROGRAMS ${IN_PROGRAMS})
     elseif(IN_DIRECTORY)
       set(args DIRECTORY ${IN_DIRECTORY})
     elseif(IN_EXPORT)
       set(install_export 1)
     else()
-      message(FATAL_ERROR "Expected FILES or TARGETS")
+      message(FATAL_ERROR "Expected FILES, PROGRAMS, DIRECTORY, or TARGETS")
     endif()
     foreach(package tgz deb el6 el7 pm)
       set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
@@ -210,6 +212,12 @@ endif()
 set(CPACK_PACKAGE_CHECKSUM SHA256)
 configure_file("${CMAKE_SOURCE_DIR}/cmake/CPackConfig.cmake" "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
 set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_BINARY_DIR}/packaging/CPackConfig.cmake")
+
+################################################################################
+# User config
+################################################################################
+
+set(GENERATE_DEBUG_PACKAGES "${FDB_RELEASE}" CACHE BOOL "Build debug rpm/deb packages (default: only ON for FDB_RELEASE)")
 
 ################################################################################
 # Version information
@@ -320,9 +328,14 @@ set(CPACK_RPM_SERVER-EL7_USER_FILELIST
   "%config(noreplace) /etc/foundationdb/foundationdb.conf"
   "%attr(0700,foundationdb,foundationdb) /var/log/foundationdb"
   "%attr(0700, foundationdb, foundationdb) /var/lib/foundationdb")
+set(CPACK_RPM_CLIENTS-EL6_USER_FILELIST "%dir /etc/foundationdb")
+set(CPACK_RPM_CLIENTS-EL7_USER_FILELIST "%dir /etc/foundationdb")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/sbin"
   "/usr/share/java"
+  "/usr/lib64/cmake"
+  "/etc/foundationdb"
+  "/usr/lib64/pkgconfig"
   "/usr/lib64/python2.7"
   "/usr/lib64/python2.7/site-packages"
   "/var"
@@ -332,7 +345,7 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/lib/systemd"
   "/lib/systemd/system"
   "/etc/rc.d/init.d")
-set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
+set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
@@ -377,7 +390,7 @@ set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
 set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
 set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 set(CPACK_DEBIAN_PACKAGE_SECTION "database")
 set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
 

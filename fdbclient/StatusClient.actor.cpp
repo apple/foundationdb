@@ -21,7 +21,6 @@
 #include "flow/flow.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Status.h"
@@ -277,8 +276,8 @@ void JSONDoc::mergeValueInto(json_spirit::mValue &dst, const json_spirit::mValue
 			break;
 
 		default:
-			if(dst != src)
-				dst = json_spirit::mObject({{"ERROR", "Values do not match."}, {"a", dst}, {"b", src}});
+		    if (!(dst == src))
+			    dst = json_spirit::mObject({ { "ERROR", "Values do not match." }, { "a", dst }, { "b", src } });
 	}
 }
 
@@ -452,7 +451,7 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 	return databaseStatus;
 }
 
-ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f ) {
+ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f, Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface) {
 	if (!g_network) throw network_not_setup();
 
 	state StatusObject statusObj;
@@ -462,12 +461,9 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	// This could be read from the JSON but doing so safely is ugly so using a real var.
 	state bool quorum_reachable = false;
 	state int coordinatorsFaultTolerance = 0;
-	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 
 	try {
 		state int64_t clientTime = time(0);
-
-		state Future<Void> leaderMon = monitorLeader<ClusterInterface>(f, clusterInterface);
 
 		StatusObject _statusObjClient = wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
 		statusObjClient = _statusObjClient;
@@ -548,6 +544,23 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	return statusObj;
 }
 
-Future<StatusObject> StatusClient::statusFetcher( Reference<ClusterConnectionFile> clusterFile ) {
-	return statusFetcherImpl(clusterFile);
+ACTOR Future<Void> timeoutMonitorLeader(Database db) {
+	state Future<Void> leadMon = monitorLeader<ClusterInterface>(db->getConnectionFile(), db->statusClusterInterface);
+	loop {
+		wait(delay(CLIENT_KNOBS->STATUS_IDLE_TIMEOUT + 0.00001 + db->lastStatusFetch - now()));
+		if(now() - db->lastStatusFetch > CLIENT_KNOBS->STATUS_IDLE_TIMEOUT) {
+			db->statusClusterInterface = Reference<AsyncVar<Optional<ClusterInterface>>>();
+			return Void();
+		}
+	}
+}
+
+Future<StatusObject> StatusClient::statusFetcher( Database db ) {
+	db->lastStatusFetch = now();
+	if(!db->statusClusterInterface) {
+		db->statusClusterInterface = Reference<AsyncVar<Optional<ClusterInterface>>>(new AsyncVar<Optional<ClusterInterface>>);
+		db->statusLeaderMon = timeoutMonitorLeader(db);
+	}
+
+	return statusFetcherImpl(db->getConnectionFile(), db->statusClusterInterface);
 }

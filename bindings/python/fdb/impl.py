@@ -22,16 +22,17 @@
 
 import ctypes
 import ctypes.util
+import datetime
 import functools
+import inspect
+import multiprocessing
+import os
+import platform
+import sys
 import threading
 import traceback
-import inspect
-import datetime
-import platform
-import os
-import sys
-import multiprocessing
 
+import fdb
 from fdb import six
 
 _network_thread = None
@@ -203,7 +204,9 @@ def transactional(*tr_args, **tr_kwargs):
 
     It is important to note that the wrapped method may be called
     multiple times in the event of a commit failure, until the commit
-    succeeds.
+    succeeds.  This restriction requires that the wrapped function
+    may not be a generator, or a function that returns a closure that
+    contains the `tr` object.
 
     If given a Transaction, the Transaction will be passed into the
     wrapped code, and WILL NOT be committed at completion of the
@@ -247,9 +250,14 @@ def transactional(*tr_args, **tr_kwargs):
                     except FDBError as e:
                         yield asyncio.From(tr.on_error(e.code))
         else:
-
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
+                # We can't throw this from the decorator, as when a user runs
+                # >>> import fdb ; fdb.api_version(700)
+                # the code above uses @transactional before the API version is set
+                if fdb.get_api_version() >= 630 and inspect.isgeneratorfunction(func):
+                    raise ValueError("Generators can not be wrapped with fdb.transactional")
+
                 if isinstance(args[index], TransactionRead):
                     return func(*args, **kwargs)
 
@@ -262,8 +270,11 @@ def transactional(*tr_args, **tr_kwargs):
                 # last = start
 
                 while not committed:
+                    ret = None
                     try:
                         ret = func(*largs, **kwargs)
+                        if fdb.get_api_version() >= 630 and inspect.isgenerator(ret):
+                            raise ValueError("Generators can not be wrapped with fdb.transactional")
                         tr.commit().wait()
                         committed = True
                     except FDBError as e:
@@ -449,6 +460,17 @@ class TransactionRead(_FDBBase):
         if isinstance(key, slice):
             return self.get_range(key.start, key.stop, reverse=(key.step == -1))
         return self.get(key)
+    
+    def get_estimated_range_size_bytes(self, begin_key, end_key):
+        if begin_key is None:
+            begin_key = b''
+        if end_key is None:
+            end_key = b'\xff'
+        return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
+            self.tpointer,
+            begin_key, len(begin_key),
+            end_key, len(end_key)
+            ))
 
 
 class Transaction(TransactionRead):
@@ -1220,6 +1242,8 @@ if platform.system() == 'Windows':
     capi_name = 'fdb_c.dll'
 elif platform.system() == 'Linux':
     capi_name = 'libfdb_c.so'
+elif platform.system() == 'FreeBSD':
+    capi_name = 'libfdb_c.so'
 elif platform.system() == 'Darwin':
     capi_name = 'libfdb_c.dylib'
 elif sys.platform == 'win32':
@@ -1423,6 +1447,9 @@ def init_c_api():
                                                 ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                                 ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_get_range.restype = ctypes.c_void_p
+
+    _capi.fdb_transaction_get_estimated_range_size_bytes.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    _capi.fdb_transaction_get_estimated_range_size_bytes.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_add_conflict_range.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
     _capi.fdb_transaction_add_conflict_range.restype = ctypes.c_int

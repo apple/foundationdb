@@ -129,8 +129,7 @@ public:
 	std::vector<LocalityEntry> const&	getEntries() const
 	{	return _entryArray; }
 
-	std::vector<LocalityEntry> const&	getMutableEntries() const
-	{	return _mutableEntryArray; }
+	std::vector<LocalityEntry>& getMutableEntries() { return _mutableEntryArray; }
 
 	std::vector<LocalityEntry> const&	getGroupEntries() const
 	{	return _localitygroup->_entryArray; }
@@ -253,7 +252,7 @@ public:
 
 		while (nRandomItems > 0)
 		{
-			if (nItemsLeft <= 0) {
+			if (nRandomItems > nItemsLeft || nItemsLeft <= 0) {
 				bComplete = false;
 				break;
 			}
@@ -348,8 +347,9 @@ public:
 
 	std::string keyText(AttribKey indexKey) const
 	{	return _keymap->lookupString(indexKey._id);	}
-	std::string keyText(Optional<AttribKey> indexKey) const
-	{	return (indexKey.present()) ? keyText(indexKey.get()._id) : "<undefined>";	}
+	std::string keyText(Optional<AttribKey> indexKey) const {
+		return (indexKey.present()) ? keyText(AttribKey(indexKey.get()._id)) : "<undefined>";
+	}
 
 	AttribValue valueIndex(std::string const& value) const
 	{	return AttribValue(getGroupValueMap()->convertString(value));	}
@@ -362,8 +362,9 @@ public:
 
 	std::string valueText(AttribValue indexValue) const
 	{	return getGroupValueMap()->lookupString(indexValue._id);	}
-	std::string valueText(Optional<AttribValue> indexValue) const
-	{	return (indexValue.present()) ? valueText(indexValue.get()._id) : "<undefined>";	}
+	std::string valueText(Optional<AttribValue> indexValue) const {
+		return (indexValue.present()) ? valueText(AttribValue(indexValue.get()._id)) : "<undefined>";
+	}
 
 	int size() const { return _entryArray.size(); }
 	int empty() const { return _entryArray.empty(); }
@@ -478,6 +479,8 @@ public:
 	{	return _localitygroup->getGroupKeyMap(); }
 
 	Reference<StringToIntMap> _keymap;
+
+	virtual std::vector<std::vector<AttribValue>> const& getKeyValueArray() const { return _keyValueArray; }
 
 protected:
 	virtual Reference<StringToIntMap>&	getGroupValueMap()

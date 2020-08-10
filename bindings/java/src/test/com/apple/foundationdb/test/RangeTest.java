@@ -34,7 +34,7 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 
 public class RangeTest {
-	private static final int API_VERSION = 620;
+	private static final int API_VERSION = 700;
 
 	public static void main(String[] args) {
 		System.out.println("About to use version " + API_VERSION);
@@ -64,7 +64,9 @@ public class RangeTest {
 
 			System.out.println("First transaction was successful");
 
-			checkRange(db.createTransaction());
+			try(Transaction tr = db.createTransaction()) {
+				checkRange(tr);
+			}
 
 			long version;
 			try(Transaction tr = db.createTransaction()) {
@@ -184,7 +186,6 @@ public class RangeTest {
 			String value = new String(kv.getValue());
 			System.out.println(" -- " + key + " -> " + value);
 		}
-
 	}
 
 	private RangeTest() {}

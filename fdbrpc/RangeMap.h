@@ -66,41 +66,51 @@ template <class Key, class Val, class Range = RangeMapRange<Key>, class Metric =
 class RangeMap {
 private:
 	typedef MapPair<Key,Val> pair_type;
-public:
 	//Applications may decrement an iterator before ranges begin, or increment after ranges end, but once in this state cannot do further incrementing or decrementing
-	class Iterator {
+	template <bool isConst>
+	class IteratorImpl {
+		using self_t = IteratorImpl<isConst>;
+
 	public:
-		Iterator() {}	// singular
-		Iterator( typename Map<Key,Val,pair_type,Metric>::iterator it ) : it(it) {}
+		using value_type = std::conditional_t<isConst, typename Map<Key, Val, pair_type, Metric>::const_iterator,
+		                                      typename Map<Key, Val, pair_type, Metric>::iterator>;
+		typedef std::forward_iterator_tag iterator_category;
+		using difference_type = int;
+		using pointer = self_t*;
+		using reference = self_t&;
+
+		IteratorImpl() {} // singular
+		explicit IteratorImpl<isConst>(const value_type it) : it(it) {}
 
 		Key const& begin() { return it->key; }
 		Key const& end() { auto j = it; ++j; return j->key; }
 
 		Range range() { return Range(begin(),end()); }
 
-		Val& value() { 
+		std::conditional_t<isConst, const Val&, Val&> value() {
 			//ASSERT( it->key != allKeys.end );
-			return it->value; 
+			return it->value;
 		}
+		const Val& cvalue() const { return it->value; }
 
 		void operator ++() { ++it; }
 		void operator --() { it.decrementNonEnd(); }
-		bool operator ==(Iterator const& r) const { return it == r.it; }
-		bool operator !=(Iterator const& r) const { return it != r.it; }
-		
-		// operator* and -> return this
-		Iterator& operator*() { return *this; }
-		Iterator* operator->() { return this; }
+		bool operator==(self_t const& r) const { return it == r.it; }
+		bool operator!=(self_t const& r) const { return it != r.it; }
 
-		typedef std::forward_iterator_tag iterator_category;
-		typedef Iterator value_type;
-		typedef int difference_type;
-		typedef Iterator* pointer;
-		typedef Iterator& reference;
+		// operator* and -> return this
+		self_t& operator*() { return *this; }
+		self_t* operator->() { return this; }
+
 	private:
-		typename Map<Key,Val,pair_type,Metric>::iterator it;
+		value_type it;
 	};
-	typedef iterator_range<Iterator> Ranges;
+
+public:
+	using iterator = IteratorImpl<false>;
+	using const_iterator = IteratorImpl<true>;
+	using Ranges = iterator_range<iterator>;
+	using ConstRanges = iterator_range<const_iterator>;
 
 	explicit RangeMap(Key endKey, Val v=Val(), MetricFunc m = MetricFunc()) : mf(m) { 
 		Key beginKey = Key();
@@ -111,36 +121,56 @@ public:
 	}
 	Val const& operator[]( const Key& k ) { return rangeContaining(k).value(); }
 
-	Ranges ranges() { return Ranges( Iterator(map.begin()), Iterator(map.lastItem()) ); }
-	Ranges intersectingRanges( const Range& r ) { return Ranges(rangeContaining(r.begin), Iterator(map.lower_bound(r.end))); }
+	Ranges ranges() { return Ranges(iterator(map.begin()), iterator(map.lastItem())); }
+	ConstRanges ranges() const { return ConstRanges(const_iterator(map.begin()), const_iterator(map.lastItem())); }
+	// intersectingRanges returns [begin, end] where begin <= r.begin and end >= r.end
+	Ranges intersectingRanges(const Range& r) {
+		return Ranges(rangeContaining(r.begin), iterator(map.lower_bound(r.end)));
+	}
+	ConstRanges intersectingRanges(const Range& r) const {
+		return ConstRanges(rangeContaining(r.begin), const_iterator(map.lower_bound(r.end)));
+	}
 	// containedRanges() will return all ranges that are fully contained by the passed range (note that a range fully contains itself)
-	Ranges containedRanges( const Range& r ) { 
-		auto s = Iterator( map.lower_bound( r.begin ) );
-		if ( s.begin() >= r.end ) return Ranges(s,s);
+	Ranges containedRanges(const Range& r) {
+		iterator s(map.lower_bound(r.begin));
+		if (s.begin() >= r.end) return Ranges(s, s);
 		return Ranges(s, rangeContaining(r.end));
 	}
 	template <class ComparableToKey>
-	Iterator rangeContaining( const ComparableToKey& k ) { 
-		return Iterator(map.lastLessOrEqual(k)); 
+	iterator rangeContaining(const ComparableToKey& k) {
+		return iterator(map.lastLessOrEqual(k));
+	}
+	template <class ComparableToKey>
+	const_iterator rangeContaining(const ComparableToKey& k) const {
+		return const_iterator(map.lastLessOrEqual(k));
 	}
 	// Returns the range containing a key infinitesimally before k, or the first range if k==Key()
 	template <class ComparableToKey>
-	Iterator rangeContainingKeyBefore( const ComparableToKey& k ) {
-		Iterator i = map.lower_bound(k);
+	iterator rangeContainingKeyBefore(const ComparableToKey& k) {
+		iterator i(map.lower_bound(k));
+		if (!i->begin().size()) return i;
+		--i;
+		return i;
+	}
+	template <class ComparableToKey>
+	const_iterator rangeContainingKeyBefore(const ComparableToKey& k) const {
+		const_iterator i(map.lower_bound(k));
 		if ( !i->begin().size() ) return i;
 		--i;
 		return i;
 	}
-	Iterator lastItem() { 
-		auto i = map.lastItem();
+	iterator lastItem() {
+		auto i(map.lastItem());
 		i.decrementNonEnd();
-		return Iterator(i); 
+		return iterator(i);
 	}
 	int size() const { return map.size() - 1; } // We always have one range bounded by two entries
-	Iterator randomRange() {
-		return Iterator( map.index( deterministicRandom()->randomInt(0, map.size()-1) ) );
+	iterator randomRange() { return iterator(map.index(deterministicRandom()->randomInt(0, map.size() - 1))); }
+	const_iterator randomRange() const {
+		return const_iterator(map.index(deterministicRandom()->randomInt(0, map.size() - 1)));
 	}
-	Iterator nthRange(int n) { return Iterator(map.index(n)); }
+	iterator nthRange(int n) { return iterator(map.index(n)); }
+	const_iterator nthRange(int n) const { return const_iterator(map.index(n)); }
 
 	bool allEqual( const Range& r, const Val& v );
 
@@ -149,7 +179,7 @@ public:
 	void coalesce( const Range& k );
 	void validateCoalesced();
 
-	void operator=(RangeMap&& r) BOOST_NOEXCEPT { map = std::move(r.map); }
+	void operator=(RangeMap&& r) noexcept { map = std::move(r.map); }
 	//void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
 
 	void insert( const Range& keys, const Val& value );

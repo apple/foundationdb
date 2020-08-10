@@ -71,6 +71,7 @@ public:
 	}
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 
 	void addReadConflictRange( const KeyRangeRef& keys ) override;
 	void makeSelfConflicting();
@@ -96,8 +97,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(NULL) {}
-	void operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
-	ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
+	void operator=(ThreadSafeTransaction&& r) noexcept;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
 	void reset() override;
 

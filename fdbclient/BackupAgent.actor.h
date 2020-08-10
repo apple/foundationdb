@@ -247,14 +247,11 @@ class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();
 
-	FileBackupAgent( FileBackupAgent&& r ) BOOST_NOEXCEPT :
-		subspace( std::move(r.subspace) ),
-		config( std::move(r.config) ),
-		lastRestorable( std::move(r.lastRestorable) ),
-		taskBucket( std::move(r.taskBucket) ),
-		futureBucket( std::move(r.futureBucket) ) {}
+	FileBackupAgent(FileBackupAgent&& r) noexcept
+	  : subspace(std::move(r.subspace)), config(std::move(r.config)), lastRestorable(std::move(r.lastRestorable)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)) {}
 
-	void operator=( FileBackupAgent&& r ) BOOST_NOEXCEPT {
+	void operator=(FileBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
 		config = std::move(r.config);
 		lastRestorable = std::move(r.lastRestorable),
@@ -274,6 +271,14 @@ public:
 
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
+
+	// parallel restore
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
+	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
+	                                   Key removePrefix);
+	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                   Key addPrefix, Key removePrefix);
 
 	// restore() will
 	//   - make sure that url is readable and appears to be a complete backup
@@ -308,9 +313,16 @@ public:
 
 	/** BACKUP METHODS **/
 
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
-		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone); });
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
+	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool stopWhenDone = true, bool partitionedLog = false);
+	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
+	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
+	                          bool partitionedLog = false) {
+		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
+			                    partitionedLog);
+		});
 	}
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -348,6 +360,9 @@ public:
 
 	Future<bool> checkActive(Database cx) { return taskBucket->checkActive(cx); }
 
+	// If "pause" is true, pause all backups; otherwise, resume all.
+	Future<Void> changePause(Database db, bool pause);
+
 	friend class FileBackupAgentImpl;
 	static const int dataFooterSize;
 
@@ -364,19 +379,13 @@ public:
 	DatabaseBackupAgent();
 	explicit DatabaseBackupAgent(Database src);
 
-	DatabaseBackupAgent( DatabaseBackupAgent&& r ) BOOST_NOEXCEPT :
-		subspace( std::move(r.subspace) ),
-		states( std::move(r.states) ),
-		config( std::move(r.config) ),
-		errors( std::move(r.errors) ),
-		ranges( std::move(r.ranges) ),
-		tagNames( std::move(r.tagNames) ),
-		taskBucket( std::move(r.taskBucket) ),
-		futureBucket( std::move(r.futureBucket) ),
-		sourceStates( std::move(r.sourceStates) ),
-		sourceTagNames( std::move(r.sourceTagNames) ) {}
+	DatabaseBackupAgent(DatabaseBackupAgent&& r) noexcept
+	  : subspace(std::move(r.subspace)), states(std::move(r.states)), config(std::move(r.config)),
+	    errors(std::move(r.errors)), ranges(std::move(r.ranges)), tagNames(std::move(r.tagNames)),
+	    taskBucket(std::move(r.taskBucket)), futureBucket(std::move(r.futureBucket)),
+	    sourceStates(std::move(r.sourceStates)), sourceTagNames(std::move(r.sourceTagNames)) {}
 
-	void operator=( DatabaseBackupAgent&& r ) BOOST_NOEXCEPT {
+	void operator=(DatabaseBackupAgent&& r) noexcept {
 		subspace = std::move(r.subspace);
 		states = std::move(r.states);
 		config = std::move(r.config);
@@ -410,7 +419,7 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false);
+	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false, bool dstOnly = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
@@ -487,9 +496,8 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version en
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
 Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
+Version getLogKeyVersion(Key key);
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
-Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
-void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int64_t& mutationSize, StringRef value, StringRef addPrefix = StringRef(), StringRef removePrefix = StringRef());
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
@@ -782,6 +790,31 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Set to true when all backup workers for saving mutation logs have been started.
+	KeyBackedProperty<bool> allWorkerStarted() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Each backup worker adds its (epoch, tag.id) to this property.
+	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if backup worker is enabled.
+	KeyBackedProperty<bool> backupWorkerEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
+	KeyBackedProperty<bool> partitionedLogEnabled() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Latest version for which all prior versions have saved by backup workers.
+	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -811,10 +844,17 @@ public:
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto lastLog = latestLogEndVersion().get(tr);
 		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
+		auto workerEnabled = backupWorkerEnabled().get(tr);
+		auto plogEnabled = partitionedLogEnabled().get(tr);
+		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
+		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) && success(workerVersion), [=](Void) -> Optional<Version> {
 			// The latest log greater than the oldest snapshot is the restorable version
-			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() > firstSnapshot.get().get()) {
-				return std::max(lastLog.get().get() - 1, firstSnapshot.get().get());
+			Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
+			                                       plogEnabled.get().present() && plogEnabled.get().get()
+			                                   ? workerVersion.get()
+			                                   : lastLog.get();
+			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
+				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
 			}
 			return {};
 		});
@@ -836,17 +876,13 @@ public:
 		}
 		TraceEvent t(SevWarn, "FileBackupError");
 		t.error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
-		// These should not happen
+		// key_not_found could happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
 
 		return updateErrorInfo(cx, e, details);
 	}
 };
-
-ACTOR Future<Version> fastRestore(Database cx, Standalone<StringRef> tagName, Standalone<StringRef> url,
-                                  bool waitForComplete, long targetVersion, bool verbose, Standalone<KeyRangeRef> range,
-                                  Standalone<StringRef> addPrefix, Standalone<StringRef> removePrefix);
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 struct StringRefReader {
@@ -872,14 +908,33 @@ struct StringRefReader {
 
 	// Functions for consuming big endian (network byte order) integers.
 	// Consumes a big endian number, swaps it to little endian, and returns it.
-	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
-	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+	int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+
+	// Convert big Endian value (e.g., encoded in log file) into a littleEndian uint64_t value.
+	int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
+	uint64_t consumeNetworkUInt64() { return bigEndian64(consume<uint64_t>()); }
 
 	bool eof() { return rptr == end; }
 
 	const uint8_t *rptr, *end;
 	Error failure_error;
 };
+
+namespace fileBackup {
+ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file, int64_t offset,
+                                                                      int len);
+
+// Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
+Value makePadding(int size);
+}
+
+// For fast restore simulation test
+// For testing addPrefix feature in fast restore.
+// Transform db content in restoreRanges by removePrefix and then addPrefix.
+// Assume: DB is locked
+ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                             Key addPrefix, Key removePrefix);
 
 #include "flow/unactorcompiler.h"
 #endif

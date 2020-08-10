@@ -25,7 +25,6 @@
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -39,28 +38,28 @@ struct RelocateShard {
 };
 
 struct IDataDistributionTeam {
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
-	virtual int size() = 0;
-	virtual vector<UID> const& getServerIDs() = 0;
+	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
+	virtual int size() const = 0;
+	virtual vector<UID> const& getServerIDs() const = 0;
 	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
-	virtual int64_t getDataInFlightToTeam() = 0;
-	virtual int64_t getLoadBytes( bool includeInFlight = true, double inflightPenalty = 1.0 ) = 0;
-	virtual int64_t getMinFreeSpace( bool includeInFlight = true ) = 0;
-	virtual double getMinFreeSpaceRatio( bool includeInFlight = true ) = 0;
-	virtual bool hasHealthyFreeSpace() = 0;
+	virtual int64_t getDataInFlightToTeam() const = 0;
+	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
+	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
+	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
-	virtual bool isHealthy() = 0;
+	virtual bool isHealthy() const = 0;
 	virtual void setHealthy(bool) = 0;
-	virtual int getPriority() = 0;
+	virtual int getPriority() const = 0;
 	virtual void setPriority(int) = 0;
-	virtual bool isOptimal() = 0;
-	virtual bool isWrongConfiguration() = 0;
+	virtual bool isOptimal() const = 0;
+	virtual bool isWrongConfiguration() const = 0;
 	virtual void setWrongConfiguration(bool) = 0;
 	virtual void addServers(const vector<UID> &servers) = 0;
 
-	std::string getDesc() {
+	std::string getDesc() const {
 		const auto& servers = getLastKnownServerInterfaces();
 		std::string s = format("Size %d; ", servers.size());
 		for(int i=0; i<servers.size(); i++) {
@@ -75,18 +74,23 @@ struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
 	bool preferLowerUtilization;
+	bool teamMustHaveShards;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
-	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
+	std::vector<UID> src;
+	Promise< std::pair<Optional<Reference<IDataDistributionTeam>>,bool> > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
-
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, bool teamMustHaveShards, double inflightPenalty = 1.0 ) 
+		: wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), teamMustHaveShards( teamMustHaveShards ), inflightPenalty( inflightPenalty ) {}
+	
 	std::string getDesc() {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerUtilization:" << preferLowerUtilization << " inflightPenalty:" << inflightPenalty << ";";
+		   << " PreferLowerUtilization:" << preferLowerUtilization 
+		   << " teamMustHaveShards:" << teamMustHaveShards
+		   << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (auto& cs : completeSources) {
 			ss << cs.toString() << ",";
@@ -102,6 +106,15 @@ struct GetMetricsRequest {
 
 	GetMetricsRequest() {}
 	GetMetricsRequest( KeyRange const& keys ) : keys(keys) {}
+};
+
+struct GetMetricsListRequest {
+	KeyRange keys;
+	int shardLimit;
+	Promise<Standalone<VectorRef<DDMetricsRef>>> reply;
+
+	GetMetricsListRequest() {}
+	GetMetricsListRequest( KeyRange const& keys, const int shardLimit ) : keys(keys), shardLimit(shardLimit) {}
 };
 
 struct TeamCollectionInterface {
@@ -123,9 +136,13 @@ public:
 			if( servers == r.servers ) return primary < r.primary;
 			return servers < r.servers;
 		}
+		bool operator>(const Team& r) const { return r < *this; }
+		bool operator<=(const Team& r) const { return !(*this > r); }
+		bool operator>=(const Team& r) const { return !(*this < r); }
 		bool operator == ( const Team& r ) const {
 			return servers == r.servers && primary == r.primary;
 		}
+		bool operator!=(const Team& r) const { return !(*this == r); }
 	};
 
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
@@ -145,6 +162,7 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
+	bool hasShards(Team team);
 
 	//The first element of the pair is either the source for non-moving shards or the destination team for in-flight shards
 	//The second element of the pair is all previous sources for in-flight shards
@@ -199,6 +217,7 @@ Future<Void> dataDistributionTracker(
 	PromiseStream<RelocateShard> const& output,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
+	PromiseStream<GetMetricsListRequest> const& getShardMetricsList,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
 	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
@@ -216,6 +235,7 @@ Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	UID const& distributorId,
 	int const& teamSize,
+	int const& singleRegionTeamSize,
 	double* const& lastLimited);
 
 //Holds the permitted size and IO Bounds for a shard

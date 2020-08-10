@@ -28,7 +28,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
 
-struct FlowReceiver : private NetworkMessageReceiver {
+struct FlowReceiver : public NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 
 	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {
@@ -60,6 +60,12 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		return endpoint;
 	}
 
+	void setEndpoint(Endpoint const& e) {
+		ASSERT(!endpoint.isValid());
+		m_isLocalEndpoint = true;
+		endpoint = e;
+	}
+
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
 		ASSERT(!endpoint.isValid());
 		m_isLocalEndpoint = true;
@@ -84,22 +90,6 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		if (!SAV<T>::canBeSet()) return;  // load balancing and retries can result in the same request being answered twice
-		this->addPromiseRef();
-		bool ok;
-		reader >> ok;
-		if (ok) {
-			T message;
-			reader >> message;
-			SAV<T>::sendAndDelPromiseRef(message);
-		}
-		else {
-			Error error;
-			reader >> error;
-			SAV<T>::sendErrorAndDelPromiseRef(error);
-		}
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		if (!SAV<T>::canBeSet()) return;
 		this->addPromiseRef();
@@ -113,11 +103,8 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	}
 };
 
-
-
 template <class T>
-class ReplyPromise sealed : public ComposedIdentifier<T, 0x2>
-{
+class ReplyPromise sealed : public ComposedIdentifier<T, 1> {
 public:
 	template <class U>
 	void send(U&& value) const {
@@ -131,7 +118,7 @@ public:
 	bool isValid() const { return sav != NULL; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	ReplyPromise(ReplyPromise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() { if (sav) sav->delPromiseRef(); }
 
 	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
@@ -142,7 +129,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(ReplyPromise && rhs) BOOST_NOEXCEPT {
+	void operator=(ReplyPromise&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -239,13 +226,6 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		this->addPromiseRef();
-		T message;
-		reader >> message;
-		this->send(std::move(message));
-		this->delPromiseRef();
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		this->addPromiseRef();
 		T message;
@@ -263,13 +243,15 @@ public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	void send(const T& value) const {
+	template<class U>
+	void send(U && value) const {
 		if (queue->isRemoteEndpoint()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::forward<U>(value)), getEndpoint(), true);
 		}
 		else
-			queue->send(value);
+			queue->send(std::forward<U>(value));
 	}
+
 	/*void sendError(const Error& error) const {
 	ASSERT( !queue->isRemoteEndpoint() );
 	queue->sendError(error);
@@ -378,13 +360,13 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	RequestStream() : queue(new NetNotifiedQueue<T>(0, 1)) {}
 	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	RequestStream(RequestStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(RequestStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(RequestStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;
@@ -404,6 +386,11 @@ public:
 
 	bool operator == (const RequestStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
+	uint32_t size() const { return queue->size(); }
+
+	std::pair<FlowReceiver*, TaskPriority> getReceiver( TaskPriority taskID = TaskPriority::DefaultEndpoint ) {
+		return std::make_pair((FlowReceiver*)queue, taskID);
+	}
 
 private:
 	NetNotifiedQueue<T>* queue;

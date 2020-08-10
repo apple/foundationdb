@@ -48,8 +48,41 @@
 #include <fcntl.h>
 #include <cmath>
 
-FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension, uint64_t maxLogsSize, std::function<void()> onError)
-	: directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), onError(onError) {}
+struct IssuesListImpl {
+	IssuesListImpl(){}
+	void addIssue(std::string issue) {
+		MutexHolder h(mutex);
+		issues.insert(issue);
+	}
+
+	void retrieveIssues(std::set<std::string>& out) {
+		MutexHolder h(mutex);
+		for (auto const& i : issues) {
+			out.insert(i);
+		}
+	}
+
+	void resolveIssue(std::string issue) {
+		MutexHolder h(mutex);
+		issues.erase(issue);
+	}
+
+private:
+	Mutex mutex;
+	std::set<std::string> issues;
+};
+
+IssuesList::IssuesList() : impl(new IssuesListImpl{}) {}
+IssuesList::~IssuesList() { delete impl; }
+void IssuesList::addIssue(std::string issue) { impl->addIssue(issue); }
+void IssuesList::retrieveIssues(std::set<std::string> &out) { impl->retrieveIssues(out); }
+void IssuesList::resolveIssue(std::string issue) { impl->resolveIssue(issue); }
+
+FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,
+                                       std::string extension, uint64_t maxLogsSize, std::function<void()> onError,
+                                       Reference<ITraceLogIssuesReporter> issues)
+  : directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize),
+    traceFileFD(-1), index(0), onError(onError), issues(issues) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -69,8 +102,17 @@ void FileTraceLogWriter::lastError(int err) {
 }
 
 void FileTraceLogWriter::write(const std::string& str) {
-	auto ptr = str.c_str();
-	int remaining = str.size();
+	write(str.data(), str.size());
+}
+
+void FileTraceLogWriter::write(const StringRef& str) {
+	write(reinterpret_cast<const char*>(str.begin()), str.size());
+}
+
+void FileTraceLogWriter::write(const char* str, size_t len) {
+	auto ptr = str;
+	int remaining = len;
+	bool needsResolve = false;
 
 	while ( remaining ) {
 		int ret = __write( traceFileFD, ptr, remaining );
@@ -78,7 +120,14 @@ void FileTraceLogWriter::write(const std::string& str) {
 			lastError(0);
 			remaining -= ret;
 			ptr += ret;
+			if (needsResolve) {
+				issues->resolveIssue("trace_log_file_write_error");
+				needsResolve = false;
+			}
 		} else {
+			issues->addIssue("trace_log_file_write_error");
+			needsResolve = true;
+			fprintf(stderr, "Unexpected error [%d] when flushing trace log.\n", errno);
 			lastError(errno);
 			threadSleep(0.1);
 		}
@@ -87,6 +136,7 @@ void FileTraceLogWriter::write(const std::string& str) {
 
 void FileTraceLogWriter::open() {
 	cleanupTraceFiles();
+	bool needsResolve = false;
 
 	++index;
 
@@ -111,6 +161,8 @@ void FileTraceLogWriter::open() {
 		}
 		else {
 			fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
+			issues->addIssue("trace_log_could_not_create_file");
+			needsResolve = true;
 
 			int errorNum = errno;
 			onMainThreadVoid([finalname, errorNum]{
@@ -123,6 +175,9 @@ void FileTraceLogWriter::open() {
 		}
 	}
 	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
+	if (needsResolve) {
+		issues->resolveIssue("trace_log_could_not_create_file");
+	}
 	lastError(0);
 }
 

@@ -55,7 +55,6 @@ private:
 #ifdef __linux__
 	class EventFD : public IEventFD {
 		int fd;
-		ASIOReactor* reactor;
 		boost::asio::posix::stream_descriptor sd;
 		int64_t fdVal;
 
@@ -66,7 +65,7 @@ private:
 		}
 
 	public:
-		EventFD(ASIOReactor* reactor) : reactor(reactor), sd(reactor->ios, open()) {}
+		EventFD(ASIOReactor* reactor) : sd(reactor->ios, open()) {}
 		~EventFD() {
 			sd.close();  // Also closes the fd, I assume...
 		}

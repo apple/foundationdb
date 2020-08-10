@@ -37,6 +37,8 @@ struct ReadYourWritesTransactionOptions {
 	bool nextWriteDisableConflictRange : 1;
 	bool debugRetryLogging : 1;
 	bool disableUsedDuringCommitProtection : 1;
+	bool specialKeySpaceRelaxed : 1;
+	bool specialKeySpaceChangeConfiguration : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -84,6 +86,7 @@ public:
 	}
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
+	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys);
 
 	void addReadConflictRange( KeyRangeRef const& keys );
 	void makeSelfConflicting() { tr.makeSelfConflicting(); }
@@ -108,8 +111,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}
-	void operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
-	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
+	void operator=(ReadYourWritesTransaction&& r) noexcept;
+	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept;
 
 	virtual void addref() { ReferenceCounted<ReadYourWritesTransaction>::addref(); }
 	virtual void delref() { ReferenceCounted<ReadYourWritesTransaction>::delref(); }
@@ -118,7 +121,12 @@ public:
 	void reset();
 	void debugTransaction(UID dID) { tr.debugTransaction(dID); }
 
-	Future<Void> debug_onIdle() {  return reading; }
+	Future<Void> debug_onIdle() { return reading; }
+
+	// Wait for all reads that are currently pending to complete
+	Future<Void> pendingReads() { return resetPromise.getFuture() || reading; }
+	// Throws before the lifetime of this transaction ends
+	Future<Void> resetFuture() { return resetPromise.getFuture(); }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;
@@ -130,6 +138,25 @@ public:
 	Database getDatabase() const {
 		return tr.getDatabase();
 	}
+
+	const TransactionInfo& getTransactionInfo() const {
+		return tr.info;
+	}
+
+	// Read from the special key space readConflictRangeKeysRange
+	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
+	// Read from the special key space writeConflictRangeKeysRange
+	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
+
+	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
+	bool specialKeySpaceChangeConfiguration() const { return options.specialKeySpaceChangeConfiguration; }
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
+	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
+	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
+	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
+	Transaction& getTransaction() { return tr; }
+
 private:
 	friend class RYWImpl;
 
@@ -147,7 +174,18 @@ private:
 	double creationTime;
 	bool commitStarted;
 
+	// For reading conflict ranges from the special key space
+	VectorRef<KeyRef> versionStampKeys;
+	Future<Standalone<StringRef>> versionStampFuture;
+	Standalone<VectorRef<KeyRangeRef>>
+	    nativeReadRanges; // Used to read conflict ranges after committing an ryw disabled transaction
+	Standalone<VectorRef<KeyRangeRef>>
+	    nativeWriteRanges; // Used to read conflict ranges after committing an ryw disabled transaction
+
 	Reference<TransactionDebugInfo> transactionDebugInfo;
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>> specialKeySpaceWriteMap;
+	Optional<std::string> specialKeySpaceErrorMsg;
 
 	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)

@@ -20,9 +20,15 @@
 
 #ifndef FDBSERVER_RESOLVERINTERFACE_H
 #define FDBSERVER_RESOLVERINTERFACE_H
+#include "fdbclient/CommitTransaction.h"
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 #pragma once
 
+#include "fdbrpc/Locality.h"
+#include "fdbrpc/fdbrpc.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/CommitTransaction.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -77,10 +83,12 @@ struct ResolveTransactionBatchReply {
 	VectorRef<uint8_t> committed;
 	Optional<UID> debugID;
 	VectorRef<VectorRef<StateTransactionRef>> stateMutations;  // [version][transaction#] -> (committed, [mutation#])
+	std::map<int, VectorRef<int>>
+	    conflictingKeyRangeMap; // transaction index -> conflicting read_conflict_range ids given by the resolver
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, stateMutations, arena, debugID);
+		serializer(ar, committed, stateMutations, debugID, conflictingKeyRangeMap, arena);
 	}
 
 };
@@ -89,17 +97,19 @@ struct ResolveTransactionBatchRequest {
 	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 
+	SpanID spanContext;
 	Version prevVersion;
 	Version version;   // FIXME: ?
 	Version lastReceivedVersion;
-	VectorRef<CommitTransactionRef> transactions;
+	VectorRef<struct CommitTransactionRef> transactions;
 	VectorRef<int> txnStateTransactions;   // Offsets of elements of transactions that have (transaction subsystem state) mutations
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena, debugID);
+		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena,
+		           debugID, spanContext);
 	}
 };
 

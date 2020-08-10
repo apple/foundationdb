@@ -22,7 +22,7 @@
 
 package fdb
 
-// #define FDB_API_VERSION 620
+// #define FDB_API_VERSION 700
 // #include <foundationdb/fdb_c.h>
 import "C"
 
@@ -54,7 +54,8 @@ type RangeOptions struct {
 	// Reverse indicates that the read should be performed in lexicographic
 	// (false) or reverse lexicographic (true) order. When Reverse is true and
 	// Limit is non-zero, the last Limit key-value pairs in the range are
-	// returned.
+	// returned. Reading ranges in reverse is supported natively by the
+	// database and should have minimal extra cost.
 	Reverse bool
 }
 
