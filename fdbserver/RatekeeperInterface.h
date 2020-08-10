@@ -79,35 +79,35 @@ struct TransactionCommitCostEstimation {
 	int numWrite = 0;
 	int numAtomicWrite = 0;
 	int numClear = 0;
-	uint64_t bytesWrite = 0;
-	uint64_t bytesAtomicWrite = 0;
-	uint64_t bytesClearEst = 0;
+	uint64_t costWrite = 0;
+	uint64_t costAtomicWrite = 0;
+	uint64_t costClearEst = 0;
 
-	uint64_t getBytesSum() const { return bytesClearEst + bytesAtomicWrite + bytesWrite; }
+	uint64_t getCostSum() const { return costClearEst + costAtomicWrite + costWrite; }
 	int getOpsSum() const { return numWrite + numAtomicWrite + numClear; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear);
+		serializer(ar, costWrite, costClearEst, costAtomicWrite, numWrite, numAtomicWrite, numClear);
 	}
 
 	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
 		numWrite += other.numWrite;
 		numAtomicWrite += other.numAtomicWrite;
 		numClear += other.numClear;
-		bytesWrite += other.bytesWrite;
-		bytesAtomicWrite += other.numAtomicWrite;
-		bytesClearEst += other.bytesClearEst;
+		costWrite += other.costWrite;
+		costAtomicWrite += other.numAtomicWrite;
+		costClearEst += other.costClearEst;
 		return *this;
 	}
 };
 struct ClientTrCommitCostEstimation {
 	int opsCount = 0;
-	uint64_t writtenBytes = 0;
-	std::map<int, uint64_t> clearIdxBytes;
+	uint64_t writeCosts = 0;
+	std::map<int, uint64_t> clearIdxCosts;
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, opsCount, writtenBytes, clearIdxBytes);
+		serializer(ar, opsCount, writeCosts, clearIdxCosts);
 	}
 };
 struct GetRateInfoReply {

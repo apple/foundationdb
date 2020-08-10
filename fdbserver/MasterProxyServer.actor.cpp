@@ -501,23 +501,23 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
-	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int bytes){
+	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int cost){
 		if(ssTagCommitCost.count(id) == 0) {
 			ssTagCommitCost[id] = TransactionTagMap<TransactionCommitCostEstimation>();
 		}
 		for(auto& tag: tagSet) {
-			auto& cost = ssTagCommitCost[id][tag];
+			auto& costItem = ssTagCommitCost[id][tag];
 			if(m.isAtomicOp()) {
-				cost.numAtomicWrite ++;
-				cost.bytesAtomicWrite += bytes;
+				costItem.numAtomicWrite ++;
+				costItem.costAtomicWrite += cost;
 			}
 			else if (m.type == MutationRef::Type::SetValue){
-				cost.numWrite ++;
-				cost.bytesWrite += bytes;
+				costItem.numWrite ++;
+				costItem.costWrite += cost;
 			}
 			else if (m.type == MutationRef::Type::ClearRange){
-				cost.numClear ++;
-				cost.bytesClearEst += bytes;
+				costItem.numClear ++;
+				costItem.costClearEst += cost;
 			}
 		}
 	}
@@ -1151,16 +1151,17 @@ ACTOR Future<Void> commitBatch(
 
 				if (isSingleKeyMutation((MutationRef::Type) m.type)) {
 					// sample single key mutation based on byte
-					// the expectation of sampling is every COMMIT_SAMPLE_BYTE sample once
+					// the expectation of sampling is every COMMIT_SAMPLE_COST sample once
 					if (checkSample) {
-						double totalSize = trCost->get().writtenBytes;
-						double mul = std::max(1.0, (double)mutationSize / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_BYTE));
-						ASSERT(totalSize > 0);
-						double prob = mul * mutationSize / totalSize;
+						double totalCosts = trCost->get().writeCosts;
+						double cost = getOperationCost(mutationSize);
+						double mul = std::max(1.0, totalCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST));
+						ASSERT(totalCosts > 0);
+						double prob = mul * cost / totalCosts;
 						if(deterministicRandom()->random01() < prob) {
 							for(const auto& ssInfo : self->keyInfo[m.param1].src_info) {
 								auto id = ssInfo->interf.id();
-								self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, mutationSize);
+								self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, cost);
 							}
 						}
 					}
@@ -1196,10 +1197,10 @@ ACTOR Future<Void> commitBatch(
 						ranges.begin().value().populateTags();
 						toCommit.addTags(ranges.begin().value().tags);
 						// check whether clear is sampled
-						if(checkSample && trCost->get().clearIdxBytes.count(mutationNum) > 0){
+						if(checkSample && trCost->get().clearIdxCosts.count(mutationNum) > 0){
 							for(const auto& ssInfo : ranges.begin().value().src_info) {
 								auto id = ssInfo->interf.id();
-								self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxBytes[mutationNum]);
+								self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[mutationNum]);
 							}
 						}
 					}
@@ -1210,10 +1211,10 @@ ACTOR Future<Void> commitBatch(
 							r.value().populateTags();
 							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 							// check whether clear is sampled
-							if(checkSample && trCost->get().clearIdxBytes.count(mutationNum) > 0){
+							if(checkSample && trCost->get().clearIdxCosts.count(mutationNum) > 0){
 								for(const auto& ssInfo : r.value().src_info) {
 									auto id = ssInfo->interf.id();
-									self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxBytes[mutationNum]);
+									self->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[mutationNum]);
 								}
 							}
 						}

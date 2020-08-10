@@ -1104,10 +1104,10 @@ Future<Void> DatabaseContext::onMasterProxiesChanged() {
 bool DatabaseContext::sampleReadTags() {
 	return clientInfo->get().transactionTagSampleRate > 0 && deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
 }
-bool DatabaseContext::sampleOnBytes(uint64_t bytes) {
-	if(bytes >= clientInfo->get().transactionTagSampleBytes) return true;
-	ASSERT(clientInfo->get().transactionTagSampleBytes > 0);
-	return deterministicRandom()->random01() < (double)bytes / clientInfo->get().transactionTagSampleBytes;
+
+bool DatabaseContext::sampleOnCost(uint64_t cost) {
+	if(clientInfo->get().transactionTagSampleCost <= 0) return false;
+	return deterministicRandom()->random01() <= (double)cost / clientInfo->get().transactionTagSampleCost;
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
@@ -3311,18 +3311,18 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 		auto* it = &transaction->mutations[i];
 		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
 			trCommitCosts.opsCount++;
-			trCommitCosts.writtenBytes += it->expectedSize();
+			trCommitCosts.writeCosts += getOperationCost(it->expectedSize());
 		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
 			if(it->clearSingleKey) {
-				trCommitCosts.clearIdxBytes.emplace(i, it->expectedSize()); // NOTE: whether we need a weight here?
+				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(it->expectedSize()); // NOTE: whether we need a weight here?
 				continue;
 			}
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(self->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
-				trCommitCosts.clearIdxBytes.emplace(i, m.bytes);
-				trCommitCosts.writtenBytes += m.bytes;
+				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(m.bytes));
+				trCommitCosts.writeCosts += getOperationCost(m.bytes);
 			} else {
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
 				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, CLIENT_KNOBS->TOO_MANY, false,
@@ -3333,32 +3333,32 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", self->getDatabase()->smoothMidShardSize.smoothTotal());
 
 				uint64_t bytes = 0;
-				if (locations .size() == 1)
+				if (locations.size() == 1)
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS;
 				else
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 + (locations.size() - 2) * self->getDatabase()->smoothMidShardSize.smoothTotal();
-				trCommitCosts.clearIdxBytes.emplace(i, bytes);
-				trCommitCosts.writtenBytes += bytes;
+				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(bytes));
+				trCommitCosts.writeCosts += getOperationCost(bytes);
 			}
 		}
 	}
 	// sample on written bytes
-	if (!self->getDatabase()->sampleOnBytes(trCommitCosts.writtenBytes))
+	if (!self->getDatabase()->sampleOnCost(trCommitCosts.writeCosts))
 		return Optional<ClientTrCommitCostEstimation>();
-	// sample clear op: the expectation of sampling is every COMMIT_SAMPLE_BYTE sample once
-	ASSERT(trCommitCosts.writtenBytes > 0);
-	std::map<int, uint64_t> newClearIdxBytes;
-	for (const auto& [idx, bytes] : trCommitCosts.clearIdxBytes) {
-		if(trCommitCosts.writtenBytes >= CLIENT_KNOBS->COMMIT_SAMPLE_BYTE){
-			double mul = trCommitCosts.writtenBytes / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_BYTE);
-			if(deterministicRandom()->random01() < bytes * mul / trCommitCosts.writtenBytes)
-				newClearIdxBytes.emplace(idx, bytes);
+	// sample clear op: the expectation of sampling is every COMMIT_SAMPLE_COST sample once
+	ASSERT(trCommitCosts.writeCosts > 0);
+	std::map<int, uint64_t> newClearIdxCosts;
+	for (const auto& [idx, cost] : trCommitCosts.clearIdxCosts) {
+		if(trCommitCosts.writeCosts >= CLIENT_KNOBS->COMMIT_SAMPLE_COST){
+			double mul = trCommitCosts.writeCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+			if(deterministicRandom()->random01() < cost * mul / trCommitCosts.writeCosts)
+				newClearIdxCosts.emplace(idx, cost);
 		}
-		else if(deterministicRandom()->random01() < (double)bytes / trCommitCosts.writtenBytes){
-			newClearIdxBytes.emplace(idx, bytes);
+		else if(deterministicRandom()->random01() < (double)cost / trCommitCosts.writeCosts){
+			newClearIdxCosts.emplace(idx, cost);
 		}
 	}
-	trCommitCosts.clearIdxBytes = newClearIdxBytes;
+	trCommitCosts.clearIdxCosts.swap(newClearIdxCosts);
 	return trCommitCosts;
 }
 

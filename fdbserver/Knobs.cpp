@@ -654,6 +654,12 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// clang-format on
 
-	if(clientKnobs)
-		clientKnobs->IS_ACCEPTABLE_DELAY = clientKnobs->IS_ACCEPTABLE_DELAY*std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS)/(5.0*VERSIONS_PER_SECOND);
+	if(clientKnobs) {
+		clientKnobs->IS_ACCEPTABLE_DELAY =
+		    clientKnobs->IS_ACCEPTABLE_DELAY *
+		    std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS) /
+		    (5.0 * VERSIONS_PER_SECOND);
+		clientKnobs->OPERATION_COST_BYTE_FACTOR = OPERATION_COST_BYTE_FACTOR;
+		clientKnobs->INIT_MID_SHARD_BYTES = MIN_SHARD_BYTES;
+	}
 }

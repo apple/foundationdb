@@ -357,5 +357,8 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
+inline uint64_t getOperationCost(uint64_t bytes) {
+	return bytes / CLIENT_KNOBS->OPERATION_COST_BYTE_FACTOR + 1;
+}
 #include "flow/unactorcompiler.h"
 #endif

@@ -108,12 +108,11 @@ struct ClientDBInfo {
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
 	double transactionTagSampleRate;
-	int transactionTagSampleBytes;
+	double transactionTagSampleCost;
 
 	ClientDBInfo()
 	  : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1),
-	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE),
-	    transactionTagSampleBytes(CLIENT_KNOBS->COMMIT_SAMPLE_BYTE) {}
+	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE), transactionTagSampleCost(CLIENT_KNOBS->COMMIT_SAMPLE_COST) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -124,7 +123,7 @@ struct ClientDBInfo {
 			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate,
-		           transactionTagSampleBytes);
+		           transactionTagSampleCost);
 	}
 };
 

@@ -161,7 +161,7 @@ public:
 	void invalidateCache( const KeyRangeRef& );
 
 	bool sampleReadTags();
-	bool sampleOnBytes(uint64_t bytes);
+	bool sampleOnCost(uint64_t cost);
 
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);

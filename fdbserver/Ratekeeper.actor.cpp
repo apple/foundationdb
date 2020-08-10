@@ -103,7 +103,7 @@ struct StorageQueueInfo {
 
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
-	uint64_t totalWriteBytes = 0;
+	uint64_t totalWriteCosts = 0;
 	int totalWriteOps = 0;
 
 	StorageQueueInfo(UID id, LocalityData locality)
@@ -855,8 +855,8 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		TransactionCommitCostEstimation maxCost;
 		double maxRate = 0, maxBusyness = 0;
 		for(const auto& [tag, cost] : it->value.tagCostEst) {
-			// opsBeforeSample / opsSampled = COMMIT_SAMPLE_BYTE / 1
-			double rate = CLIENT_KNOBS->COMMIT_SAMPLE_BYTE * cost.getOpsSum() / elapsed;
+			// costBeforeSample / costSampled = COMMIT_SAMPLE_COST / 1
+			double rate = CLIENT_KNOBS->COMMIT_SAMPLE_COST * cost.getCostSum() / elapsed;
 			if(rate > maxRate) {
 				busiestTag = tag;
 				maxRate = rate;
@@ -865,10 +865,10 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		}
 		if(maxRate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
 			it->value.busiestWriteTag = busiestTag;
-			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteBytes", it->value.totalWriteBytes).detail("TotalWriteOps",it->value.totalWriteOps);
-			ASSERT(it->value.totalWriteBytes > 0 && it->value.totalWriteOps > 0);
-			maxBusyness = (SERVER_KNOBS->OPERATION_COST_BYTE_FACTOR * maxCost.getOpsSum() + maxCost.getBytesSum()) /
-			              (SERVER_KNOBS->OPERATION_COST_BYTE_FACTOR * it->value.totalWriteOps + it->value.totalWriteBytes);
+			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
+			ASSERT(it->value.totalWriteCosts > 0 && it->value.totalWriteOps > 0);
+			maxBusyness = double(maxCost.getOpsSum() + maxCost.getCostSum()) /
+			              (it->value.totalWriteOps + it->value.totalWriteCosts);
 			it->value.busiestWriteTagFractionalBusyness = maxBusyness;
 			it->value.busiestWriteTagRate = maxRate;
 		}
@@ -877,7 +877,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 			.detail("Elapsed", elapsed)
 			.detail("Tag", printable(busiestTag))
 			.detail("TagOps", maxCost.getOpsSum())
-			.detail("TagBytes", maxCost.getBytesSum())
+			.detail("TagCosts", maxCost.getCostSum())
 			.detail("TagRate", maxRate)
 			.detail("TagBusyness", maxBusyness)
 			.detail("Reported", it->value.busiestWriteTag.present())
@@ -886,7 +886,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		// reset statistics
 		it->value.tagCostEst.clear();
 		it->value.totalWriteOps = 0;
-		it->value.totalWriteBytes = 0;
+		it->value.totalWriteCosts = 0;
 	}
 	self->lastBusiestCommitTagPick = now();
 	return Void();
@@ -1273,7 +1273,7 @@ void updateCommitCostEstimation(RatekeeperData* self, UIDTransactionTagMap<Trans
 		if(tagCostIt == costEstimation.end()) continue;
 		for(const auto& [tagName, cost] : tagCostIt->second) {
 			it->value.tagCostEst[tagName] += cost;
-			it->value.totalWriteBytes += cost.getBytesSum();
+			it->value.totalWriteCosts += cost.getCostSum();
 			it->value.totalWriteOps += cost.getOpsSum();
 		}
 	}
