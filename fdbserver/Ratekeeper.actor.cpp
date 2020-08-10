@@ -892,29 +892,30 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 	return Void();
 }
 
-void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
-	double busyness = 0, rate = 0;
-	Optional<TransactionTag> busiestTag;
-	if(ss.busiestWriteTag.present()) {
-		busiestTag = ss.busiestWriteTag.get();
-		busyness = ss.busiestWriteTagFractionalBusyness;
-		rate = ss.busiestWriteTagRate;
-	}
-	if(ss.busiestReadTag.present() && ss.busiestReadTagRate > rate) {
-		busiestTag = ss.busiestReadTag.get();
-		busyness = ss.busiestReadTagFractionalBusyness;
-		rate = ss.busiestReadTagRate;
-	}
-	if(busiestTag.present() && busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
+void tryAutoThrottleTag(RatekeeperData* self, TransactionTag tag, double rate, double busyness) {
+	if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 		TEST(true); // Transaction tag auto-throttled
-
-		Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, busiestTag.get(), busyness);
-		if(clientRate.present()) {
+		Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, tag, busyness);
+		if (clientRate.present()) {
 			TagSet tags;
-			tags.addTag(busiestTag.get());
+			tags.addTag(tag);
 
-			self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
+			self->addActor.send(ThrottleApi::throttleTags(
+			    self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO,
+			    TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
 		}
+	}
+}
+
+void tryAutoThrottleTag(RatekeeperData* self, StorageQueueInfo& ss, int64_t storageQueue, int64_t storageDurabilityLag) {
+	if (ss.busiestWriteTag.present() && storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES &&
+	    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+		// write-saturated
+		tryAutoThrottleTag(self, ss.busiestWriteTag.get(), ss.busiestWriteTagRate, ss.busiestWriteTagFractionalBusyness);
+	} else if (ss.busiestReadTag.present() &&
+	           storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+		// read saturated
+		tryAutoThrottleTag(self, ss.busiestReadTag.get(), ss.busiestReadTagRate, ss.busiestReadTagFractionalBusyness);
 	}
 }
 
@@ -985,8 +986,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
-		if(limits->priority == TransactionPriority::DEFAULT && (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
-				tryAutoThrottleTag(self, ss);
+		if(limits->priority == TransactionPriority::DEFAULT) {
+				tryAutoThrottleTag(self, ss, storageQueue, storageDurabilityLag);
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();

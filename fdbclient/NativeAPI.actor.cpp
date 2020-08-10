@@ -3315,7 +3315,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
 			if(it->clearSingleKey) {
-				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(it->expectedSize()); // NOTE: whether we need a weight here?
+				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(it->expectedSize())); // NOTE: whether we need a weight here?
 				continue;
 			}
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
