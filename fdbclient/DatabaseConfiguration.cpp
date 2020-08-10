@@ -565,8 +565,8 @@ void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> raw
 bool DatabaseConfiguration::isOverridden(std::string key) const {
 	key = configKeysPrefix.toString() + key;
 
-	if (mutableConfiguration.present() && mutableConfiguration.get().find(key) != mutableConfiguration.get().end()) {
-		return true;
+	if (mutableConfiguration.present()) {
+		return mutableConfiguration.get().find(key) != mutableConfiguration.get().end();
 	}
 
 	const int keyLen = key.size();
