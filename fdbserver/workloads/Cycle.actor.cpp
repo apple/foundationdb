@@ -210,8 +210,9 @@ struct CycleWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.addReadConflictRange(prefixRange(self->keyPrefix));
-				tr.addWriteConflictRange(prefixRange(self->keyPrefix));
+				KeyRange range = self->keyPrefix.size() ? prefixRange(self->keyPrefix) : normalKeys;
+				tr.addReadConflictRange(range);
+				tr.addWriteConflictRange(range);
 				wait(tr.commit());
 				return tr.getCommittedVersion();
 			} catch (Error& e) {
