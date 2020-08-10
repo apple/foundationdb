@@ -216,7 +216,7 @@ struct CycleWorkload : TestWorkload {
 				wait(tr.commit());
 				return tr.getCommittedVersion();
 			} catch (Error& e) {
-				tr.onError(e);
+				wait(tr.onError(e));
 			}
 		}
 	}
