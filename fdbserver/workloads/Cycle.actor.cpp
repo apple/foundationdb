@@ -206,14 +206,14 @@ struct CycleWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Void> ensureNoCommitsInFlight(Database cx, CycleWorkload* self) {
+	ACTOR static Future<Version> ensureNoCommitsInFlight(Database cx, CycleWorkload* self) {
 		state Transaction tr(cx);
 		loop {
 			try {
 				tr.addReadConflictRange(prefixRange(self->keyPrefix));
 				tr.addWriteConflictRange(prefixRange(self->keyPrefix));
 				wait(tr.commit());
-				return Void();
+				return tr.getCommittedVersion();
 			} catch (Error& e) {
 				tr.onError(e);
 			}
@@ -242,14 +242,14 @@ struct CycleWorkload : TestWorkload {
 					    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
 					if (self->keyPrefix.startsWith("\xff/TESTONLYtxnStateStore/"_sr)) {
-						wait(ensureNoCommitsInFlight(cx, self));
+						state Version minVersion = wait(ensureNoCommitsInFlight(cx, self));
 						loop {
 							state DebugReadTxnStateStoreReply rep =
 							    wait(debugReadTxnStateStore(cx,
 							                                KeyRangeRef(doubleToTestKey(0.0, self->keyPrefix),
 							                                            doubleToTestKey(1.0, self->keyPrefix)),
 							                                self->nodeCount + 1));
-							if (rep.version < v) {
+							if (rep.version < minVersion) {
 								wait(delay(1));
 								continue;
 							}
