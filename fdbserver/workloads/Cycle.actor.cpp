@@ -235,6 +235,8 @@ struct CycleWorkload : TestWorkload {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
 			state int retryCount = 0;
+			state Version minVersion =
+			    wait(ensureNoCommitsInFlight(cx, self)); // For comparing the txnStateStore and the storage servers
 			loop {
 				try {
 					state Version v = wait( tr.getReadVersion() );
@@ -242,7 +244,6 @@ struct CycleWorkload : TestWorkload {
 					    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
 					                firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
 					if (self->keyPrefix.startsWith("\xff/TESTONLYtxnStateStore/"_sr)) {
-						state Version minVersion = wait(ensureNoCommitsInFlight(cx, self));
 						loop {
 							state DebugReadTxnStateStoreReply rep =
 							    wait(debugReadTxnStateStore(cx,
