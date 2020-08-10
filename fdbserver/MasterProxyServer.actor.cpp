@@ -632,6 +632,38 @@ struct ResolutionRequestBuilder {
 	}
 };
 
+ACTOR Future<Void> monitorDDMetricsChanges(double* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<GetDataDistributorMetricsReply> nextReply = Never();
+	state KeyRange keys(normalKeys);
+	if(db->get().distributor.present()) nextRequestTimer = Void();
+	loop {
+		choose {
+			when(wait(db->onChange())) {
+				if ( db->get().distributor.present() ) {
+					TraceEvent("DataDistributorChanged", db->get().id)
+						.detail("DDID", db->get().distributor.get().id());
+					nextRequestTimer = Void();  // trigger GetRate request
+				} else {
+					TraceEvent("DataDistributorDied", db->get().id);
+					nextRequestTimer = Never();
+				}
+			}
+			when(wait(nextRequestTimer)) {
+			    nextRequestTimer = Never();
+//			    nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
+//			        GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true)));
+			}
+			when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
+			    nextReply = Never();
+				ASSERT(reply.midShardSize.present());
+		        *midShardSize = reply.midShardSize.get();
+		        nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int> > out, FutureStream<CommitTransactionRequest> in, int desiredBytes, int64_t memBytesLimit) {
 	wait(delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher));
 
@@ -1536,7 +1568,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Pro
 }
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags) {
+                                  ProxyStats* stats, Version minKnownCommittedVersion,
+                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags, double midShardSize = 0) {
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
 	Version replyVersion = reply.version;
@@ -1558,7 +1591,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		else {
 			reply.version = replyVersion;
 		}
-
+		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
 
 		if(!request.tags.empty()) {
@@ -1617,6 +1650,9 @@ ACTOR static Future<Void> transactionStarter(
 
 	state PromiseStream<double> replyTimes;
 	state Span span;
+
+	state double midShardSize = 0.0;
+	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
@@ -1737,7 +1773,7 @@ ACTOR static Future<Void> transactionStarter(
 				    span.context, commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i],
 				    defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
-				                             commitData->minKnownCommittedVersion, throttledTags));
+				                             commitData->minKnownCommittedVersion, throttledTags, midShardSize));
 
 				// for now, base dynamic batching on the time for normal requests (not read_risky)
 				if (i == 0) {
@@ -1911,13 +1947,12 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 				}
 				ErrorOr<GetDataDistributorMetricsReply> reply =
 				    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
-				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit, req.midOnly))));
+				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
 				if (reply.isError()) {
 					req.reply.sendError(reply.getError());
 				} else {
 					GetDDMetricsReply newReply;
 					newReply.storageMetricsList = reply.get().storageMetricsList;
-					newReply.midShardSize = reply.get().midShardSize;
 					req.reply.send(newReply);
 				}
 			}

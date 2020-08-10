@@ -91,7 +91,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
-	init( MID_SHARD_SIZE_MAX_STALENESS,           30.0 );
+	init( MID_SHARD_SIZE_MAX_STALENESS,           10.0 );
 	init( TAG_ENCODE_KEY_SERVERS,                 true ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = false;
 
 	//KeyRangeMap

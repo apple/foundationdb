@@ -692,41 +692,6 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 	}
 }
 
-ACTOR Future<Void> monitorDDMetricsChanges(DatabaseContext *cx) {
-	loop {
-		wait(delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS));
-		try {
-			choose {
-				when(wait(cx->onMasterProxiesChanged())) {}
-				when(GetDDMetricsReply rep = wait(basicLoadBalance(
-				         cx->getMasterProxies(false),&MasterProxyInterface::getDDMetrics,
-				         GetDDMetricsRequest(normalKeys,CLIENT_KNOBS->TOO_MANY, true)))) {
-
-					// TraceEvent("MonitorDDMetricsEnd").detail("MidShardSize", rep.midShardSize.get());
-
-					ASSERT(rep.midShardSize.present());
-					double midShardSize = rep.midShardSize.get();
-					if(midShardSize > 0) {
-						cx->smoothMidShardSize.setTotal(midShardSize);
-					}
-				}
-			}
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "UnableToUpdateDDMetrics").error(e);
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-		}
-		if(deterministicRandom()->random01() < 0.01)
-			TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", cx->smoothMidShardSize.smoothTotal());
-	};
-
-}
-
-void DatabaseContext::startShardSizeUpdater() {
-	this->midShardSizeUpdater = monitorDDMetricsChanges(this);
-}
-
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
@@ -1054,9 +1019,6 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
 	monitorMasterProxiesInfoChange.cancel();
-	if(midShardSizeUpdater.present())
-		midShardSizeUpdater.get().cancel();
-	clientStatusUpdater.actor.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -2041,7 +2003,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, Spa
 				         cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
 				         GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-
+					cx->smoothMidShardSize.setTotal(v.midShardSize);
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -3342,9 +3304,6 @@ void Transaction::setupWatches() {
 
 ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
                                                                          CommitTransactionRef* transaction) {
-	if(!self->getDatabase()->midShardSizeUpdater.present()){ // lazy start: only client who needs tag pay this overload
-		self->getDatabase()->startShardSizeUpdater();
-	}
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
 	state int i = 0;
@@ -3369,6 +3328,10 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, CLIENT_KNOBS->TOO_MANY, false,
 				                              &StorageServerInterface::getShardState, self->info));
 				if (locations.empty()) continue;
+
+				if(deterministicRandom()->random01() < 0.01)
+					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", self->getDatabase()->smoothMidShardSize.smoothTotal());
+
 				uint64_t bytes = 0;
 				if (locations .size() == 1)
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS;

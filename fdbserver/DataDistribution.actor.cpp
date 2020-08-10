@@ -512,10 +512,10 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				beginKey = keyServers.end()[-1].key;
 				break;
 			} catch (Error& e) {
-				wait( tr.onError(e) );
-
 				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId);
+				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
+
+				wait( tr.onError(e) );
 			}
 		}
 
@@ -5001,8 +5001,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
+				// TraceEvent("GetDataDistributorMetricsRequest").detail("Start",self->ddId);
 				ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
 				    getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
+				// TraceEvent("GetDataDistributorMetricsRequest").detail("End",self->ddId);
 				if ( result.isError() ) {
 					req.reply.sendError(result.getError());
 				} else {
@@ -5014,9 +5016,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 						auto& metricVec = result.get();
 						if(metricVec.empty()) rep.midShardSize = 0;
 						else {
-							// TraceEvent("DDMetricsReply").detail("Size", metricVec.size()).detail("Value", metricVec[0].shardBytes);
 							std::vector<int64_t> shardSizes(metricVec.size());
-							for (int i = 0; i < shardSizes.size(); ++ i) shardSizes[i] = metricVec[i].shardBytes;
+							for (int i = 0; i < shardSizes.size(); ++ i)
+							{
+								shardSizes[i] = metricVec[i].shardBytes;
+								// TraceEvent("DDMetricsReply").detail("Value", metricVec[i].shardBytes).detail("BeginKey", metricVec[i].beginKey);
+							}
 							std::nth_element(shardSizes.begin(), shardSizes.begin() + shardSizes.size()/2, shardSizes.end());
 							rep.midShardSize = shardSizes[shardSizes.size()/2];
 						}

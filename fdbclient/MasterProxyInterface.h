@@ -192,6 +192,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+	double midShardSize;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -199,7 +200,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo);
+		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
 	}
 };
 
@@ -412,13 +413,12 @@ struct GetDDMetricsReply
 {
 	constexpr static FileIdentifier file_identifier = 7277713;
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
-	Optional<double> midShardSize;
 
 	GetDDMetricsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, storageMetricsList, midShardSize);
+		serializer(ar, storageMetricsList);
 	}
 };
 
@@ -427,14 +427,13 @@ struct GetDDMetricsRequest {
 	KeyRange keys;
 	int shardLimit;
 	ReplyPromise<struct GetDDMetricsReply> reply;
-	bool midOnly = false;
 
 	GetDDMetricsRequest() {}
-	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false) : keys(keys), shardLimit(shardLimit), midOnly(midOnly) {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false) : keys(keys), shardLimit(shardLimit) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, shardLimit, reply, midOnly);
+		serializer(ar, keys, shardLimit, reply);
   }
 };
 
