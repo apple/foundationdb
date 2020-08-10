@@ -345,6 +345,14 @@ private:
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit);
+
+// Read directly from the txnStateStore for testing purposes. This comes with several caveats:
+// - You can only read from keys starting with \xff/TESTONLYtxnStateStore/
+// - You won't get causal consistency
+// - You might read uncommitted data
+// The main guarantee is that this reply should have the same contents as a
+// normal read from storage servers at the version in the reply, if the version
+// in the reply was actually committed.
 ACTOR Future<DebugReadTxnStateStoreReply> debugReadTxnStateStore(Database cx, KeyRange range, int limit);
 
 std::string unprintable( const std::string& );
