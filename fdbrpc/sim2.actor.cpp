@@ -1785,7 +1785,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	ACTOR static Future<Void> send(UDPSimSocket* self, Reference<UDPSimSocket> peerSocket, uint8_t const* begin,
 	                              uint8_t const* end) {
 		state Packet packet(std::make_shared<std::vector<uint8_t>>());
-		packet->resize(begin - end);
+		packet->resize(end - begin);
 		std::copy(begin, end, packet->begin());
 		wait( delay( .002 * deterministicRandom()->random01() ) );
 		peerSocket->recvBuffer.emplace_back(self->_localAddress, std::move(packet));
@@ -1812,6 +1812,7 @@ public:
 	UDPSimSocket(NetworkAddress const& localAddress, Optional<NetworkAddress> const& peerAddress)
 	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator.getCurrentProcess()), peerAddress(peerAddress),
 	    actors(false), _localAddress(localAddress) {
+		g_sim2.addressMap.emplace(_localAddress, process);
 		process->boundUDPSockets.emplace(localAddress, this);
 	}
 	~UDPSimSocket() {
@@ -1821,7 +1822,10 @@ public:
 		}
 		actors.clear(true);
 	}
-	void close() override { process->boundUDPSockets.erase(_localAddress); }
+	void close() override {
+		process->boundUDPSockets.erase(_localAddress);
+		g_sim2.addressMap.erase(_localAddress);
+	}
 	UID getDebugID() const override { return id; }
 	void addref() override { ReferenceCounted<UDPSimSocket>::addref(); }
 	void delref() override { ReferenceCounted<UDPSimSocket>::delref(); }
@@ -1897,9 +1901,11 @@ public:
 		return receiveFrom(this, begin, end, sender);
 	}
 	void bind(NetworkAddress const& addr) override {
+		g_sim2.addressMap.erase(_localAddress);
 		process->boundUDPSockets.erase(_localAddress);
 		process->boundUDPSockets.emplace(addr, Reference<UDPSimSocket>::addRef(this));
 		_localAddress = addr;
+		g_sim2.addressMap.emplace(_localAddress, process);
 	}
 
 	NetworkAddress localAddress() const override {

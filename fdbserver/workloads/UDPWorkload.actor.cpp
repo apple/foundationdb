@@ -157,7 +157,7 @@ struct UDPWorkload : TestWorkload {
 				}
 				when(NetworkAddress p = waitNext(self->toAck.getFuture())) {
 					peer = p;
-					packetString = BinaryWriter::toValue(ping(), IncludeVersion());
+					packetString = BinaryWriter::toValue(pong(), IncludeVersion());
 					self->acked[peer] += 1;
 				}
 			}
@@ -206,7 +206,7 @@ struct UDPWorkload : TestWorkload {
 				actors.add(clientReceiver(self, socket.get(), socket.onChange()));
 			}
 			sendString = BinaryWriter::toValue(ping(), IncludeVersion());
-			int res = wait(socket.get()->sendTo(sendString.begin(), sendString.end(), peer));
+			int res = wait(socket.get()->send(sendString.begin(), sendString.end()));
 			ASSERT(res == sendString.size());
 			self->sent[peer] += 1;
 		}
@@ -245,9 +245,6 @@ struct UDPWorkload : TestWorkload {
 		}
 		for (const auto& p : received) {
 			totalReceived += p.second;
-		}
-		for (const auto& p : acked) {
-			totalAcked += p.second;
 		}
 		for (const auto& p : acked) {
 			totalAcked += p.second;
