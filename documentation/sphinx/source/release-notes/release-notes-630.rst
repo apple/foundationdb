@@ -2,6 +2,11 @@
 Release Notes
 #############
 
+6.3.5
+=====
+
+* Fix an issue where ``fdbcli --exec 'exclude no_wait ...'`` would incorrectly report that processes can safely be removed from the cluster. `(PR #3566) <https://github.com/apple/foundationdb/pull/3566>`_
+
 6.3.4
 =====
 

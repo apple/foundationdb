@@ -937,13 +937,13 @@ Management module
 
 The management module is for temporary cluster configuration changes. For
 example, in order to safely remove a process from the cluster, one can add an
-exclusion to the ``\xff\xff/management/exclude/`` key prefix that matches
+exclusion to the ``\xff\xff/management/excluded/`` key prefix that matches
 that process, and wait for necessary data to be moved away.
 
-#. ``\xff\xff/management/exclude/<exclusion>`` Read/write. Indicates that the cluster should move data away from processes matching ``<exclusion>``, so that they can be safely removed. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
+#. ``\xff\xff/management/excluded/<exclusion>`` Read/write. Indicates that the cluster should move data away from processes matching ``<exclusion>``, so that they can be safely removed. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
 #. ``\xff\xff/management/failed/<exclusion>`` Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
 #. ``\xff\xff/management/inProgressExclusion/<address>`` Read-only. Indicates that the process matching ``<address>`` matches an exclusion, but still has necessary data and can't yet be safely removed.
-#. ``\xff\xff/management/options/exclude/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/exclude/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
+#. ``\xff\xff/management/options/excluded/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/excluded/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 #. ``\xff\xff/management/options/failed/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or

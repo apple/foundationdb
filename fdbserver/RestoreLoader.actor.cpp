@@ -801,7 +801,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 				}
 			}
 
-			cc->sampledLogBytes += mutation.totalSize();
+			cc->loadedLogBytes += mutation.totalSize();
 
 			TraceEvent(SevFRMutationInfo, "FastRestoreDecodeLogFile")
 			    .detail("CommitVersion", commitVersion)
@@ -814,6 +814,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 
 			// Sampling (FASTRESTORE_SAMPLING_PERCENT%) data
 			if (deterministicRandom()->random01() * 100 < SERVER_KNOBS->FASTRESTORE_SAMPLING_PERCENT) {
+				cc->sampledLogBytes += mutation.totalSize();
 				samples.push_back_deep(samples.arena(), mutation);
 			}
 			ASSERT_WE_THINK(kLen >= 0 && kLen < val.size());
@@ -942,7 +943,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 
 	if (pProcessedFileOffset->get() == asset.offset) {
 		for (const KeyValueRef& kv : data) {
-			// Concatenate the backuped param1 and param2 (KV) at the same version.
+			// Concatenate the backup param1 and param2 (KV) at the same version.
 			concatenateBackupMutationForLogFile(pMutationMap, kv.key, kv.value, asset);
 		}
 		pProcessedFileOffset->set(asset.offset + asset.len);
