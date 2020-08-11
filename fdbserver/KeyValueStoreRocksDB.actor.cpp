@@ -34,6 +34,9 @@ rocksdb::Options getOptions() {
 	}
 	options.level_compaction_dynamic_level_bytes = true;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
+		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	}
 	return options;
 }
 
