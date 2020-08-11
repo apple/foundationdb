@@ -300,12 +300,8 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			loop {
 				try {
 					Standalone<VectorRef<KeyRangeRef>> readHotRanges = wait(tr.getReadHotRanges(keys));
-					TraceEvent("ReadHotRangeLog").detail("Ranges", readHotRanges.size());
-					int i = 0;
 					for (auto& keyRange : readHotRanges) {
 						TraceEvent("ReadHotRangeLog")
-						    .suppressFor(1.0)
-						    .detail("RangeIndex", i)
 						    .detail("KeyRangeBegin", keyRange.begin)
 						    .detail("KeyRangeEnd", keyRange.end);
 					}
