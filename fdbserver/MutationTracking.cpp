@@ -52,32 +52,39 @@ TraceEvent debugKeyRangeEnabled( const char* context, Version version, KeyRangeR
 TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, StringRef commitBlob ) {
 	BinaryReader rdr(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rdr.empty()) {
-		if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
-			int32_t dummy;
-			rdr >> dummy >> version;
-			continue;
-		}
-		TagsAndMessage msg;
-		msg.loadFromArena(&rdr, nullptr);
-		bool logAdapterMessage = std::any_of(
-				msg.tags.begin(), msg.tags.end(), [](const Tag& t) { return t == txsTag || t.locality == tagLocalityTxs; });
-		StringRef mutationData = msg.getMessageWithoutTags();
-		uint8_t mutationType = *mutationData.begin();
-		if (logAdapterMessage) {
-			// Skip the message, as there will always be an idential non-logAdapterMessage mutation
-			// that we can match against in the same commit.
-		} else if (LogProtocolMessage::startsLogProtocolMessage(mutationType)) {
-			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
-			LogProtocolMessage lpm;
-			br >> lpm;
-			rdr.setProtocolVersion(br.protocolVersion());
-		} else {
-			MutationRef m;
-			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
-			br >> m;
-			TraceEvent&& event = debugMutation(context, version, m);
-			if (event.isEnabled()) {
-				return std::move(event.detail("MessageTags", msg.tags));
+		SpanID spanContext;
+		uint16_t numTransactions = 0;
+		TagsAndMessage::loadTransactionInfoFromArena(&rdr, &spanContext, &numTransactions);
+
+		for (uint16_t i = 0; i < numTransactions; ++i) {
+			if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
+				int32_t dummy;
+				rdr >> dummy >> version;
+				continue;
+			}
+
+			TagsAndMessage msg;
+			msg.loadFromArena(&rdr, nullptr);
+			bool logAdapterMessage = std::any_of(
+					msg.tags.begin(), msg.tags.end(), [](const Tag& t) { return t == txsTag || t.locality == tagLocalityTxs; });
+			StringRef mutationData = msg.getMessageWithoutTags();
+			uint8_t mutationType = *mutationData.begin();
+			if (logAdapterMessage) {
+				// Skip the message, as there will always be an idential non-logAdapterMessage mutation
+				// that we can match against in the same commit.
+			} else if (LogProtocolMessage::startsLogProtocolMessage(mutationType)) {
+				BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
+				LogProtocolMessage lpm;
+				br >> lpm;
+				rdr.setProtocolVersion(br.protocolVersion());
+			} else {
+				MutationRef m;
+				BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
+				br >> m;
+				TraceEvent&& event = debugMutation(context, version, m);
+				if (event.isEnabled()) {
+					return std::move(event.detail("MessageTags", msg.tags));
+				}
 			}
 		}
 	}

@@ -1332,9 +1332,14 @@ void commitMessages( TLogData *self, Reference<LogData> logData, Version version
 	ArenaReader rd( arena, messages, Unversioned() );
 	self->tempTagMessages.clear();
 	while(!rd.empty()) {
-		TagsAndMessage tagsAndMsg;
-		tagsAndMsg.loadFromArena(&rd, nullptr);
-		self->tempTagMessages.push_back(std::move(tagsAndMsg));
+		SpanID spanContext;
+		uint16_t numTransactions = 0;
+		TagsAndMessage::loadTransactionInfoFromArena(&rd, &spanContext, &numTransactions);
+		for (uint16_t i = 0; i < numTransactions; ++i) {
+			TagsAndMessage tagsAndMsg(spanContext);
+			tagsAndMsg.loadFromArena(&rd, nullptr);
+			self->tempTagMessages.push_back(std::move(tagsAndMsg));
+		}
 	}
 	commitMessages(self, logData, version, self->tempTagMessages);
 }
@@ -1395,19 +1400,24 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, 
 	state std::vector<StringRef> relevantMessages;
 	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rd.empty()) {
-		TagsAndMessage tagsAndMessage;
-		tagsAndMessage.loadFromArena(&rd, nullptr);
-		for (Tag t : tagsAndMessage.tags) {
-			if (t == tag || (tag.locality == tagLocalityLogRouter && t.locality == tagLocalityLogRouter &&
-			                 t.id % logRouters == tag.id)) {
-				// Mutations that are in the partially durable span between known comitted version and
-				// recovery version get copied to the new log generation.  These commits might have had more
-				// log router tags than what now exist, so we mod them down to what we have.
-				relevantMessages.push_back(tagsAndMessage.getRawMessage());
-				break;
+		state uint16_t numTransactions = 0;
+		TagsAndMessage::loadTransactionInfoFromArena(&rd, nullptr, &numTransactions);
+		state uint16_t i;
+		for (i = 0; i < numTransactions; ++i) {
+			TagsAndMessage tagsAndMessage;
+			tagsAndMessage.loadFromArena(&rd, nullptr);
+			for (Tag t : tagsAndMessage.tags) {
+				if (t == tag || (tag.locality == tagLocalityLogRouter && t.locality == tagLocalityLogRouter &&
+						 t.id % logRouters == tag.id)) {
+					// Mutations that are in the partially durable span between known comitted version and
+					// recovery version get copied to the new log generation.  These commits might have had more
+					// log router tags than what now exist, so we mod them down to what we have.
+					relevantMessages.push_back(tagsAndMessage.getRawMessage());
+					break;
+				}
 			}
+			wait(yield());
 		}
-		wait(yield());
 	}
 	return relevantMessages;
 }
@@ -1850,6 +1860,7 @@ ACTOR Future<Void> tLogCommit(
 		Reference<LogData> logData,
 		PromiseStream<Void> warningCollectorInput ) {
 	state Optional<UID> tlogDebugID;
+	state Span span("TLog:tLogCommit"_loc, { req.spanContext });
 	if(req.debugID.present())
 	{
 		tlogDebugID = nondeterministicRandom()->randomUniqueID();

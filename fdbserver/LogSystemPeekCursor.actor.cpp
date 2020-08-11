@@ -93,6 +93,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		ASSERT(!rd.empty());
 	}
 
+	// TODO: Handle span context header
 	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
 	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage()).detail("CursorID", this->randomID);
 	// Rewind and consume the header so that reader() starts from the message.

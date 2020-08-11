@@ -129,10 +129,29 @@ enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
+	SpanID spanContext;
 	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
+	TagsAndMessage(SpanID spanContext) : spanContext(spanContext) {}
 	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
+
+	// Reads transaction info from the buffer rd. Returns SpanID and number of
+	// transactions in output parameters. T can be ArenaReader or BinaryReader.
+	template <class T>
+	static void loadTransactionInfoFromArena(T* rd, SpanID *context, uint16_t* transactions) {
+		SpanID spanContext;
+		uint16_t numTransactions;
+
+		*rd >> spanContext >> numTransactions;
+
+		if (context) {
+			*context = spanContext;
+		}
+		if (transactions) {
+			*transactions = numTransactions;
+		}
+	}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at
 	// its begining position to allow the caller to rewind if needed.
