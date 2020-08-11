@@ -28,6 +28,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
@@ -473,9 +474,7 @@ struct DebugReadTxnStateStoreRequest {
 
 private:
 	void validate() const {
-		ASSERT(KeyRangeRef(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
-		                   LiteralStringRef("\xff/TESTONLYtxnStateStore0"))
-		           .contains(keys));
+		ASSERT(testOnlyTxnStateStorePrefixRange.contains(keys));
 		ASSERT(limit >= 0);
 	}
 	KeyRange keys; // Must start with \xff/TESTONLYtxnStateStore/
