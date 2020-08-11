@@ -5001,10 +5001,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
-				// TraceEvent("GetDataDistributorMetricsRequest").detail("Start",self->ddId);
-				ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
-				    getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
-				// TraceEvent("GetDataDistributorMetricsRequest").detail("End",self->ddId);
+				ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
+				    errorOr(timeoutError(getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)),
+				                         SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT)));
 				if ( result.isError() ) {
 					req.reply.sendError(result.getError());
 				} else {

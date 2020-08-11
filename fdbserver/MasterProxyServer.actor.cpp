@@ -411,28 +411,40 @@ ACTOR Future<Void> monitorDDMetricsChanges(double* midShardSize, Reference<Async
 	state KeyRange keys(normalKeys);
 	if(db->get().distributor.present()) nextRequestTimer = Void();
 	loop {
-		choose {
-			when(wait(db->onChange())) {
-				if ( db->get().distributor.present() ) {
-					TraceEvent("DataDistributorChanged", db->get().id)
-						.detail("DDID", db->get().distributor.get().id());
-					nextRequestTimer = Void();  // trigger GetRate request
-				} else {
-					TraceEvent("DataDistributorDied", db->get().id);
+		try {
+			choose {
+				when(wait(db->onChange())) {
+					if ( db->get().distributor.present() ) {
+						TraceEvent("DataDistributorChanged", db->get().id)
+							.detail("DDID", db->get().distributor.get().id());
+						nextRequestTimer = Void();  // trigger GetRate request
+					} else {
+						TraceEvent("DataDistributorDied", db->get().id);
+						nextRequestTimer = Never();
+					}
+					nextReply = Never();
+				}
+				when(wait(nextRequestTimer)) {
 					nextRequestTimer = Never();
+					if(db->get().distributor.present()) {
+						nextReply = timeoutError(db->get().distributor.get().dataDistributorMetrics.getReply(
+						                             GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true)),
+						                         SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
+					}
+				}
+				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
+					nextReply = Never();
+					ASSERT(reply.midShardSize.present());
+					*midShardSize = reply.midShardSize.get();
+					nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
 				}
 			}
-			when(wait(nextRequestTimer)) {
-			    nextRequestTimer = Never();
-//			    nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
-//			        GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true)));
-			}
-			when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
-			    nextReply = Never();
-				ASSERT(reply.midShardSize.present());
-		        *midShardSize = reply.midShardSize.get();
-		        nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
-			}
+		} catch (Error& e) {
+			if(e.code() == error_code_actor_cancelled)
+				throw ;
+			TraceEvent("DDMidShardSizeUpdateFail").error(e);
+			nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
+			nextReply = Never();
 		}
 	}
 }
@@ -1670,8 +1682,9 @@ ACTOR static Future<Void> transactionStarter(
 	state PromiseStream<double> replyTimes;
 	state Span span;
 
-	state double midShardSize = 0.0;
-	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
+	 state double midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
+	// FIXME: There's weird RYWIterator reference problem occurs
+	// addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
@@ -1957,6 +1970,7 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 {
 	loop {
 		choose {
+			when(wait(db->onChange())) { }
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
 				// TraceEvent("DDMetricsRequestServer").detail("HasDistributor", db->get().distributor.present());
