@@ -300,7 +300,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
 	state Version minRangeVersion = MAX_VERSION;
-	state ActorCollection actors(false);
+	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	self->initBackupContainer(request.url);
 
@@ -356,7 +356,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 		}
 	}
 
-	actors.add(monitorFinishedVersion(self, request));
+	self->addActor.send(monitorFinishedVersion(self, request));
 	state std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
 	for (; versionBatch != versionBatches.end(); versionBatch++) {
 		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM && !releaseVBOutOfOrder) {
@@ -378,7 +378,11 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_LAUNCH_DELAY));
 	}
 
-	wait(waitForAll(fBatches));
+	try {
+		wait(waitForAll(fBatches) || error);
+	} catch (Error& e) {
+		TraceEvent(SevError, "FastRestoreControllerDispatchVersionBatchesUnexpectedError").error(e);
+	}
 
 	TraceEvent("FastRestoreController").detail("RestoreToVersion", request.targetVersion);
 	return request.targetVersion;
