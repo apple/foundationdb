@@ -30,7 +30,7 @@ import sun.misc.Unsafe;
 
 /**
  * Utility code to do optimized byte-array comparison.
- * This is borrowed and slightly modified from Guava's  UnsignedBytes
+ * This is borrowed and slightly modified from Guava's UnsignedBytes
  * class to be able to compare arrays that start at non-zero offsets.
  */
 abstract class FastByteComparisons {
@@ -41,10 +41,10 @@ abstract class FastByteComparisons {
      *
      * @param buffer1 left operand, expected to not be null
      * @param buffer2 right operand, expected to not be null
-     * @param offset1 Where to start comparing in the left buffer, expected to be &rt;= 0
-     * @param offset2 Where to start comparing in the right buffer, expected to be &rt;= 0
-     * @param length1 How much to compare from the left buffer, expected to be &rt;= 0
-     * @param length2 How much to compare from the right buffer, expected to be &rt;= 0
+     * @param offset1 Where to start comparing in the left buffer, expected to be &gt;= 0
+     * @param offset2 Where to start comparing in the right buffer, expected to be &gt;= 0
+     * @param length1 How much to compare from the left buffer, expected to be &gt;= 0
+     * @param length2 How much to compare from the right buffer, expected to be &gt;= 0
      * @return 0 if equal, &lt; 0 if left is less than right, etc.
      */
     public static int compareTo(byte[] buffer1, int offset1, int length1,
