@@ -2364,6 +2364,19 @@ void getRangeFinished(Database cx, Reference<TransactionLogInfo> trLogInfo, doub
 	}
 }
 
+ACTOR Future<DebugReadTxnStateStoreReply> debugReadTxnStateStore(Database cx, KeyRange range, int limit) {
+	loop {
+		choose {
+			when(wait(cx->onMasterProxiesChanged())) {}
+			when(DebugReadTxnStateStoreReply rep =
+			         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::debugReadTxnStateStore,
+			                               DebugReadTxnStateStoreRequest(range, limit)))) {
+				return rep;
+			}
+		}
+	}
+}
+
 ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
 	TransactionInfo info, TagSet tags )

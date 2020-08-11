@@ -1913,6 +1913,18 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 	}
 }
 
+ACTOR static Future<Void> debugReadTxnStateStoreServer(RequestStream<DebugReadTxnStateStoreRequest> requests,
+                                                       ProxyCommitData* self) {
+	wait(self->validState.getFuture());
+	loop {
+		DebugReadTxnStateStoreRequest req = waitNext(requests.getFuture());
+		auto result = self->txnStateStore->readRange(req.getKeys(), req.limit).get();
+		ASSERT(!result.more);
+		req.reply.send(DebugReadTxnStateStoreReply(result, self->version));
+		TEST(true); // Read from txnStateStore for debugging
+	}
+}
+
 ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	loop {
 		wait(delay(0)); //allow this actor to be cancelled if we are removed after db changes.
@@ -2154,6 +2166,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(ddMetricsRequestServer(proxy, db));
+	addActor.send(debugReadTxnStateStoreServer(proxy.debugReadTxnStateStore, &commitData));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

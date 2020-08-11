@@ -205,6 +205,22 @@ struct CycleWorkload : TestWorkload {
 		}
 		return true;
 	}
+
+	ACTOR static Future<Version> ensureNoCommitsInFlight(Database cx, CycleWorkload* self) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				KeyRange range = self->keyPrefix.size() ? prefixRange(self->keyPrefix) : normalKeys;
+				tr.addReadConflictRange(range);
+				tr.addWriteConflictRange(range);
+				wait(tr.commit());
+				return tr.getCommittedVersion();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<bool> cycleCheck( Database cx, CycleWorkload* self, bool ok ) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
@@ -220,10 +236,41 @@ struct CycleWorkload : TestWorkload {
 			// One client checks the validity of the cycle
 			state Transaction tr(cx);
 			state int retryCount = 0;
+			state Version minVersion =
+			    wait(ensureNoCommitsInFlight(cx, self)); // For comparing the txnStateStore and the storage servers
 			loop {
 				try {
 					state Version v = wait( tr.getReadVersion() );
-					Standalone<RangeResultRef> data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)), firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
+					state Standalone<RangeResultRef> data = wait(
+					    tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)), self->nodeCount + 1));
+					if (self->keyPrefix.startsWith("\xff/TESTONLYtxnStateStore/"_sr)) {
+						loop {
+							state DebugReadTxnStateStoreReply rep =
+							    wait(debugReadTxnStateStore(cx,
+							                                KeyRangeRef(doubleToTestKey(0.0, self->keyPrefix),
+							                                            doubleToTestKey(1.0, self->keyPrefix)),
+							                                self->nodeCount + 1));
+							if (rep.version < minVersion) {
+								wait(delay(1));
+								continue;
+							}
+							if (data != rep.kvs) {
+								for (const auto& [k, v] : data) {
+									TraceEvent("CycleExpectedKeysForTxnStateStore")
+									    .detail("Key", printable(k))
+									    .detail("Value", printable(v));
+								}
+								for (const auto& [k, v] : rep.kvs) {
+									TraceEvent("CycleActualKeysForTxnStateStore")
+									    .detail("Key", printable(k))
+									    .detail("Value", printable(v));
+								}
+								ASSERT(false);
+							}
+							break;
+						}
+					}
 					ok = self->cycleCheckData( data, v ) && ok;
 					break;
 				} catch (Error& e) {

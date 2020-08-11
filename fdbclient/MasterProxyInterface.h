@@ -28,6 +28,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
@@ -56,6 +57,7 @@ struct MasterProxyInterface {
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
 	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
+	RequestStream<struct DebugReadTxnStateStoreRequest> debugReadTxnStateStore;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -77,6 +79,8 @@ struct MasterProxyInterface {
 			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
 			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
 			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(10) );
+			debugReadTxnStateStore =
+			    RequestStream<struct DebugReadTxnStateStoreRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 
@@ -93,6 +97,7 @@ struct MasterProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(debugReadTxnStateStore.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -429,6 +434,50 @@ struct GetDDMetricsRequest {
 	void serialize(Ar& ar) {
 		serializer(ar, keys, shardLimit, reply);
   }
+};
+
+struct DebugReadTxnStateStoreReply {
+	constexpr static FileIdentifier file_identifier = 3220576;
+	Standalone<RangeResultRef> kvs;
+	Version version;
+
+	explicit DebugReadTxnStateStoreReply() = default;
+	explicit DebugReadTxnStateStoreReply(const Standalone<RangeResultRef>& kvs, Version version)
+	  : kvs(kvs), version(version) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, kvs, version);
+	}
+};
+
+struct DebugReadTxnStateStoreRequest {
+	constexpr static FileIdentifier file_identifier = 4663403;
+	int limit;
+	ReplyPromise<DebugReadTxnStateStoreReply> reply;
+
+	const KeyRange& getKeys() const {
+		validate();
+		return keys;
+	}
+
+	explicit DebugReadTxnStateStoreRequest() = default;
+	explicit DebugReadTxnStateStoreRequest(const KeyRange& keys, int limit) : keys(keys), limit(limit) { validate(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, limit, reply);
+		if (Ar::isDeserializing) {
+			validate();
+		}
+	}
+
+private:
+	void validate() const {
+		ASSERT(testOnlyTxnStateStorePrefixRange.contains(keys));
+		ASSERT(limit >= 0);
+	}
+	KeyRange keys; // Must start with \xff/TESTONLYtxnStateStore/
 };
 
 struct ProxySnapRequest
