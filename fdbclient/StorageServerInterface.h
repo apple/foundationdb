@@ -423,9 +423,30 @@ struct SplitMetricsRequest {
 	}
 };
 
+// Should always be used inside a `Standalone`.
+struct ReadHotRangeWithMetrics {
+	KeyRangeRef keys;
+	double density;
+	double readBandwidth;
+
+	ReadHotRangeWithMetrics() {}
+	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
+	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
+
+	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
+
+	int expectedSize() { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, density, readBandwidth);
+	}
+};
+
 struct ReadHotSubRangeReply {
 	constexpr static FileIdentifier file_identifier = 10424537;
-	Standalone<VectorRef<KeyRangeRef>> readHotRanges;
+	Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

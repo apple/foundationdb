@@ -99,7 +99,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
-				Standalone<VectorRef<KeyRangeRef>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangesSize", keyRanges.size())
 				//     .detail("ReadKey", self->readKey.printable().c_str())
@@ -107,7 +107,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
 				// Loose check.
 				for (auto kr : keyRanges) {
-					if (kr.contains(self->readKey)) {
+					if (kr.keys.contains(self->readKey)) {
 						self->passed = true;
 					}
 				}

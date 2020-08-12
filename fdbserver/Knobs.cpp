@@ -144,17 +144,17 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
-	init( SHARD_MAX_READ_DENSITY_RATIO,                           2.0);
+	init( SHARD_MAX_READ_DENSITY_RATIO,                           8.0);
 	/*
 		The bytesRead/byteSize radio. Will be declared as read hot when larger than this. 2.0 was chosen to avoid reporting table scan as read hot.
 	*/
-	init ( SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS,      166667 * 1000);
+	init ( SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS,      1666667 * 1000);
 	/*
-		The read bandwidth of a given shard needs to be larger than this value in order to be evaluated if it's read hot. The roughly 167KB per second is calculated as following:
-			- Heuristic data suggests that each storage process can do max 50K read operations per second
+		The read bandwidth of a given shard needs to be larger than this value in order to be evaluated if it's read hot. The roughly 1.67MB per second is calculated as following:
+			- Heuristic data suggests that each storage process can do max 500K read operations per second
 			- Each read has a minimum cost of EMPTY_READ_PENALTY, which is 20 bytes
-			- Thus that gives a minimum 1MB per second
-			- But to be conservative, set that number to be 1/6 of 1MB, which is roughly 166,667 bytes per second
+			- Thus that gives a minimum 10MB per second
+			- But to be conservative, set that number to be 1/6 of 10MB, which is roughly 1,666,667 bytes per second
 		Shard with a read bandwidth smaller than this value will never be too busy to handle the reads.
 	*/
 	init( SHARD_MAX_BYTES_READ_PER_KSEC_JITTER,     0.1 );
