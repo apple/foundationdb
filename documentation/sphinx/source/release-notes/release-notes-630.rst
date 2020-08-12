@@ -4,7 +4,13 @@
 Release Notes
 #############
 
-6.3.3
+6.3.5
+=====
+
+* Fix an issue where ``fdbcli --exec 'exclude no_wait ...'`` would incorrectly report that processes can safely be removed from the cluster. `(PR #3566) <https://github.com/apple/foundationdb/pull/3566>`_
+* When a configuration key is changed, it will always be included in ``status json`` output, even the value is reverted back to the default value. `(PR #3610) <https://github.com/apple/foundationdb/pull/3610>`_
+
+6.3.4
 =====
 
 Features
@@ -38,6 +44,7 @@ Performance
 * Reduced the number of comparisons used by various map implementations. `(PR #2882) <https://github.com/apple/foundationdb/pull/2882>`_
 * Reduced the serialized size of empty strings. `(PR #3063) <https://github.com/apple/foundationdb/pull/3063>`_
 * Reduced the serialized size of various interfaces by 10x. `(PR #3068) <https://github.com/apple/foundationdb/pull/3068>`_
+* TLS handshakes can now be done in a background thread pool. `(PR #3403) <https://github.com/apple/foundationdb/pull/3403>`_
 
 Reliability
 -----------
@@ -59,6 +66,8 @@ Fixes
 * Transaction logs configured to spill by reference had an unintended delay between each spilled batch. `(PR #3153) <https://github.com/apple/foundationdb/pull/3153>`_
 * Added guards to honor ``DISABLE_POSIX_KERNEL_AIO``. `(PR #2888) <https://github.com/apple/foundationdb/pull/2888>`_
 * Prevent blob upload timeout if request timeout is lower than expected request time. `(PR #3533) <https://github.com/apple/foundationdb/pull/3533>`_
+* In very rare scenarios, the data distributor process would crash when being shutdown. `(PR #3530) <https://github.com/apple/foundationdb/pull/3530>`_
+* The master would die immediately if it did not have the correct cluster controller interface when recruited. [6.3.4] `(PR #3537) <https://github.com/apple/foundationdb/pull/3537>`_
 
 Status
 ------

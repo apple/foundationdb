@@ -21,6 +21,7 @@
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Knobs.h"
+#include "flow/UnitTest.h"
 #include <iostream>
 using std::cout;
 using std::endl;
@@ -63,6 +64,26 @@ Error internal_error_impl(const char* msg, const char* file, int line) {
 	TraceEvent(SevError, "InternalError")
 	    .error(Error::fromCode(error_code_internal_error))
 	    .detail("FailedAssertion", msg)
+	    .detail("File", file)
+	    .detail("Line", line)
+	    .backtrace();
+	flushTraceFileVoid();
+	return Error(error_code_internal_error);
+}
+
+Error internal_error_impl(const char* a_nm, long long a, const char * op_nm, const char * b_nm, long long b, const char * file, int line) {
+	fprintf(stderr, "Assertion failed @ %s %d:\n", file, line);
+	fprintf(stderr, "  expression:\n");
+	fprintf(stderr, "              %s %s %s\n", a_nm, op_nm, b_nm);
+	fprintf(stderr, "  expands to:\n");
+	fprintf(stderr, "              %lld %s %lld\n\n", a, op_nm, b);
+	fprintf(stderr, "  %s\n", platform::get_backtrace().c_str());
+
+	TraceEvent(SevError, "InternalError")
+	    .error(Error::fromCode(error_code_internal_error))
+	    .detailf("FailedAssertion", "%s %s %s", a_nm, op_nm, b_nm)
+		.detail("LeftValue", a)
+		.detail("RightValue", b)
 	    .detail("File", file)
 	    .detail("Line", line)
 	    .backtrace();
@@ -131,4 +152,21 @@ bool isAssertDisabled(int line) {
 
 void breakpoint_me() {
 	return;
+}
+
+TEST_CASE("/flow/AssertTest") {
+	// this is mostly checking bug for bug compatibility with the C integer / sign promotion rules.
+
+	ASSERT_LT(-1, 0);
+	ASSERT_EQ(0, 0u);
+	ASSERT_GT(1, -1);
+	ASSERT_EQ((int32_t)0xFFFFFFFF, (int32_t)-1);
+	// ASSERT_LT(-1, 0u);  // fails: -1 is promoted to unsigned value in comparison.
+	// ASSERT(-1 < 0u); // also fails
+	int sz = 42;
+	size_t ln = 43;
+	ASSERT(sz < ln);
+	ASSERT_EQ(0xFFFFFFFF, (int32_t)-1);
+
+	return Void();
 }

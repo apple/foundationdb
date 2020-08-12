@@ -153,6 +153,10 @@ namespace SummarizeTest
                         throw;
                     }
                 }
+                else if (args[0] == "version")
+                {
+                    return VersionInfo();
+                }
 
                 return UsageMessage();
             }
@@ -261,7 +265,7 @@ namespace SummarizeTest
                     testFile = random.Choice(uniqueFiles);
                     string oldBinaryVersionLowerBound = "0.0.0";
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
-                    if (lastFolderName.Contains("from_")) // Only perform upgrade tests from certain versions
+                    if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
                         oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
                     }
@@ -295,14 +299,17 @@ namespace SummarizeTest
 
                 if (testDir.EndsWith("restarting"))
                 {
+                    bool isDowngrade = Path.GetFileName(Path.GetDirectoryName(testFile)).Contains("to_");
+                    string firstServerName = isDowngrade ? fdbserverName : oldServerName;
+                    string secondServerName = isDowngrade ? oldServerName : fdbserverName;
                     int expectedUnseed = -1;
                     int unseed;
                     string uid = Guid.NewGuid().ToString();
-                    bool useNewPlugin = oldServerName == fdbserverName || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
-                    result = RunTest(oldServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile + "-1.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
+                    bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile + "-1.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
                     if (result == 0)
                     {
-                        result = RunTest(fdbserverName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile + "-2.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile + "-2.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
                     }
                 }
                 else
@@ -1492,6 +1499,16 @@ namespace SummarizeTest
             }
         }
 
+        private static int VersionInfo()
+        {
+            Console.WriteLine("Version:         1.02");
+
+            Console.WriteLine("FDB Project Ver: " + "${CMAKE_PROJECT_VERSION}");
+            Console.WriteLine("FDB Version:     " + "${CMAKE_PROJECT_VERSION_MAJOR}" + "." + "${CMAKE_PROJECT_VERSION_MINOR}");
+            Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
+            return 1;
+        }
+
         private static int UsageMessage()
         {
             Console.WriteLine("Usage:");
@@ -1502,7 +1519,7 @@ namespace SummarizeTest
             Console.WriteLine("  TestHarness remote [queue folder] [root foundation folder] [duration in hours] [amount of tests] [all/fast/<test_path>] [scope]");
             Console.WriteLine("  TestHarness extract-errors [summary-file] [error-summary-file]");
             Console.WriteLine("  TestHarness joshua-run <useValgrind> <maxTries>");
-            Console.WriteLine("Version:  1.01");
+            VersionInfo();
             return 1;
         }
     }

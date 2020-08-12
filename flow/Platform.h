@@ -135,9 +135,6 @@ do { \
 #include <functional>
 #endif
 
-// fake<T>() is for use in decltype expressions only - there is no implementation
-template <class T> T fake();
-
 // g++ requires that non-dependent names have to be looked up at
 // template definition, which makes circular dependencies a royal
 // pain. (For whatever it's worth, g++ appears to be adhering to spec
@@ -156,13 +153,13 @@ inline static T& makeDependent(T& value) { return value; }
 #define THREAD_FUNC static void __cdecl
 #define THREAD_FUNC_RETURN void
 #define THREAD_HANDLE void *
-THREAD_HANDLE startThread(void (func) (void *), void *arg);
+THREAD_HANDLE startThread(void (func) (void *), void *arg, int stackSize = 0);
 #define THREAD_RETURN return
 #elif defined(__unixish__)
 #define THREAD_FUNC static void *
 #define THREAD_FUNC_RETURN void *
 #define THREAD_HANDLE pthread_t
-THREAD_HANDLE startThread(void *(func) (void *), void *arg);
+THREAD_HANDLE startThread(void *(func) (void *), void *arg, int stackSize = 0);
 #define THREAD_RETURN return NULL
 #else
 #error How do I start a new thread on this platform?

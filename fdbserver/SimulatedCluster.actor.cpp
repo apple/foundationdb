@@ -1187,7 +1187,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 	}
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 
-	ASSERT( coordinatorAddresses.size() == coordinatorCount );
+	ASSERT_EQ( coordinatorAddresses.size(), coordinatorCount );
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
@@ -1216,7 +1216,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		int machines = machineCount / dataCenters + (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
 		printf("Datacenter %d: %d/%d machines, %d/%d coordinators\n", dc, machines, machineCount, dcCoordinators, coordinatorCount);
-		ASSERT( dcCoordinators <= machines );
+		ASSERT_LE(dcCoordinators, machines);
 
 		//FIXME: temporarily code to test storage cache
 		//TODO: caching disabled for this merge
