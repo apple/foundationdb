@@ -3937,11 +3937,11 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(SpanID parentSpan, DatabaseContext* cx, TransactionPriority priority,
+ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, SpanID parent, DatabaseContext* cx, TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
                                          bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
                                          TagSet tags) {
-	// parentSpan here is only used to keep the parent alive until the request completes
+	state Span span(spanContext, location, { parent });
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
@@ -4063,12 +4063,13 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), options.priority, flags );
 		}
 
-		Span span("NAPI:getReadVersion"_loc, info.spanID);
-		auto const req = DatabaseContext::VersionRequest(span.context, options.tags, info.debugID);
+		Location location = "NAPI:getReadVersion"_loc;
+		UID spanContext = deterministicRandom()->randomUniqueID();
+		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion(span.context, cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(),
-		                                 options.lockAware, startTime, metadataVersion, options.tags);
+		readVersion = extractReadVersion(location, spanContext, info.spanID, cx.getPtr(), options.priority, trLogInfo,
+		                                 req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
 	}
 	return readVersion;
 }

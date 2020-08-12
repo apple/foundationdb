@@ -73,9 +73,43 @@ ACTOR static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> se
 void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex);
 
+ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControllerInterface ci) {
+	loop {
+		try {
+			RestoreSamplesRequest req = waitNext(ci.samples.getFuture());
+			TraceEvent(SevDebug, "FastRestoreControllerSampleBackups")
+			    .detail("SampleID", req.id)
+			    .detail("BatchIndex", req.batchIndex)
+			    .detail("Samples", req.samples.size());
+			ASSERT(req.batchIndex < self->batch.size());
+
+			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
+			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
+				req.reply.send(RestoreCommonReply(req.id));
+				continue;
+			}
+			batch->sampleMsgs.insert(req.id);
+			for (auto& m : req.samples) {
+				batch->samples.addMetric(m.key, m.size);
+				batch->samplesSize += m.size;
+			}
+			req.reply.send(RestoreCommonReply(req.id));
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "FastRestoreControllerSampleBackupsError", self->id()).error(e);
+			break;
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
-	state Reference<RestoreControllerData> self = Reference<RestoreControllerData>(new RestoreControllerData());
-	state ActorCollectionNoErrors actors;
+	state ActorCollection actors(false);
+
+	ASSERT(controllerWorker.isValid());
+	ASSERT(controllerWorker->controllerInterf.present());
+	state Reference<RestoreControllerData> self =
+	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.get().id()));
 
 	try {
 		// recruitRestoreRoles must come after controllerWorker has finished collectWorkerInterface
@@ -85,6 +119,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		actors.add(checkRolesLiveness(self));
 		actors.add(updateProcessMetrics(self));
 		actors.add(traceProcessMetrics(self, "RestoreController"));
+		actors.add(sampleBackups(self, controllerWorker->controllerInterf.get()));
 
 		wait(startProcessRestoreRequests(self, cx));
 	} catch (Error& e) {
@@ -107,6 +142,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 	    .detail("NumLoaders", SERVER_KNOBS->FASTRESTORE_NUM_LOADERS)
 	    .detail("NumAppliers", SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 	ASSERT(controllerData->loadersInterf.empty() && controllerData->appliersInterf.empty());
+	ASSERT(controllerWorker->controllerInterf.present());
 
 	ASSERT(controllerData.isValid());
 	ASSERT(SERVER_KNOBS->FASTRESTORE_NUM_LOADERS > 0 && SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS > 0);
@@ -129,7 +165,8 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 		}
 
 		TraceEvent("FastRestoreController", controllerData->id()).detail("WorkerNode", workerInterf.first);
-		requests.emplace_back(workerInterf.first, RestoreRecruitRoleRequest(role, nodeIndex));
+		requests.emplace_back(workerInterf.first,
+		                      RestoreRecruitRoleRequest(controllerWorker->controllerInterf.get(), role, nodeIndex));
 		nodeIndex++;
 	}
 
@@ -146,6 +183,7 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 			TraceEvent(SevError, "FastRestoreController").detail("RecruitRestoreRolesInvalidRole", reply.role);
 		}
 	}
+	controllerData->recruitedRoles.send(Void());
 	TraceEvent("FastRestoreRecruitRestoreRolesDone", controllerData->id())
 	    .detail("Workers", controllerWorker->workerInterfaces.size())
 	    .detail("RecruitedRoles", replies.size());
@@ -229,13 +267,13 @@ ACTOR Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> 
 	} catch (Error& e) {
 		if (restoreIndex < restoreRequests.size()) {
 			TraceEvent(SevError, "FastRestoreControllerProcessRestoreRequestsFailed", self->id())
-			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString())
-			    .error(e);
+			    .error(e)
+			    .detail("RestoreRequest", restoreRequests[restoreIndex].toString());
 		} else {
 			TraceEvent(SevError, "FastRestoreControllerProcessRestoreRequestsFailed", self->id())
+			    .error(e)
 			    .detail("RestoreRequests", restoreRequests.size())
-			    .detail("RestoreIndex", restoreIndex)
-			    .error(e);
+			    .detail("RestoreIndex", restoreIndex);
 		}
 	}
 
@@ -270,6 +308,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state Version targetVersion =
 	    wait(collectBackupFiles(self->bc, &rangeFiles, &logFiles, &minRangeVersion, cx, request));
 	ASSERT(targetVersion > 0);
+	ASSERT(minRangeVersion != MAX_VERSION); // otherwise, all mutations will be skipped
 
 	std::sort(rangeFiles.begin(), rangeFiles.end());
 	std::sort(logFiles.begin(), logFiles.end(), [](RestoreFileFR const& f1, RestoreFileFR const& f2) -> bool {
@@ -452,12 +491,6 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batc
 			TraceEvent(SevError, "FastRestoreControllerPhaseLoadFilesReply")
 			    .detail("RestoreAsset", reply.param.asset.toString())
 			    .detail("UnexpectedReply", reply.toString());
-		}
-		// Update sampled data
-		for (int i = 0; i < reply.samples.size(); ++i) {
-			MutationRef mutation = reply.samples[i];
-			batchData->samples.addMetric(mutation.param1, mutation.weightedTotalSize());
-			batchData->samplesSize += mutation.weightedTotalSize();
 		}
 	}
 
@@ -737,6 +770,9 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 			*minRangeVersion = std::min(*minRangeVersion, file.version);
 		}
 	}
+	if (MAX_VERSION == *minRangeVersion) {
+		*minRangeVersion = 0; // If no range file, range version must be 0 so that we apply all mutations
+	}
 
 	if (SERVER_KNOBS->FASTRESTORE_USE_LOG_FILE) {
 		for (const LogFile& f : restorable.get().logs) {
@@ -1007,6 +1043,8 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 
 // Update the most recent time when controller receives hearbeat from each loader and applier
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
+	wait(self->recruitedRoles.getFuture());
+
 	int numRoles = self->loadersInterf.size() + self->appliersInterf.size();
 	state std::map<UID, RestoreLoaderInterface>::iterator loader = self->loadersInterf.begin();
 	state std::map<UID, RestoreApplierInterface>::iterator applier = self->appliersInterf.begin();
