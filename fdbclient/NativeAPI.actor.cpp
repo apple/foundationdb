@@ -879,7 +879,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
-	connected = (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size()) ? Void() : clientInfo->onChange(); // ?
+	connected = (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size())
+	                ? Void()
+	                : clientInfo->onChange();
 
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;

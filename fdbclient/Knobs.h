@@ -168,7 +168,6 @@ public:
 	// Configuration
 	int32_t DEFAULT_AUTO_PROXIES;
 	int32_t DEFAULT_AUTO_GRV_PROXIES;
-	double GRV_PROXIES_RATIO; // The ratio between the number of GRV proxies and the number of total proxies.
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 

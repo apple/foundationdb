@@ -1019,7 +1019,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
 		machine_count = 16;
 	} else if(generateFearless) {
-		machine_count = 12;
+		machine_count = 13;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
 	} else {

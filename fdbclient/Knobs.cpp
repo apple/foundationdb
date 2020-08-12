@@ -170,7 +170,6 @@ void ClientKnobs::initialize(bool randomize) {
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );
 	init( DEFAULT_AUTO_GRV_PROXIES,                  1 );
-	init( GRV_PROXIES_RATIO,                      0.25 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
 

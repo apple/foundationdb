@@ -261,9 +261,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return Void();
 	}
 
-	static int randomRoleNumber(int requiredNum = 1) {
+	static int randomRoleNumber() {
 		int i = deterministicRandom()->randomInt(0,4);
-		return i >= requiredNum ? i : -1;
+		return i ? i : -1;
 	}
 
 	ACTOR Future<Void> singleDB( ConfigureDatabaseWorkload *self, Database cx ) {
@@ -302,7 +302,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				config += generateRegions();
 
 				if (deterministicRandom()->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
-				if (deterministicRandom()->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber(2));
+				if (deterministicRandom()->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
+				if (deterministicRandom()->random01() < 0.5)
+					config += " grv_proxies=" + format("%d", randomRoleNumber());
 				if (deterministicRandom()->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
 				wait(success( IssueConfigurationChange( cx, config, false ) ));

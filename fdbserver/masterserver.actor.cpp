@@ -440,9 +440,9 @@ Future<Void> waitProxyFailure( vector<MasterProxyInterface> const& proxies ) {
 Future<Void> waitGrvProxyFailure( vector<GrvProxyInterface> const& grvProxies ) {
 	vector<Future<Void>> failed;
 	for(int i=0; i<grvProxies.size(); i++)
-		failed.push_back(
-		    waitFailureClient(grvProxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
-		                      -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY));
+		failed.push_back(waitFailureClient(grvProxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                                   /*trace=*/true));
 	ASSERT( failed.size() >= 1 );
 	return tagError<Void>(quorum( failed, 1 ), grv_proxy_failed());
 }

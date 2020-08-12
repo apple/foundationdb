@@ -69,18 +69,19 @@ struct GrvProxyStats {
 	}
 
 	explicit GrvProxyStats(UID id)
-		: cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
-		  txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
-		  txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
-		  txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
-		  txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
-		  txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
-		  txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
-		  txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
-		  txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc),
-	      txnThrottled("TxnThrottled", cc),
-		  grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	      grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
+	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
+	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
+	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
+	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
+	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
+	    txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
+	    txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
+	    txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnThrottled("TxnThrottled", cc),
+	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		logger = traceCounters("GrvProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "GrvProxyMetrics");
 		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
 			requestBuckets.push_back(0);
