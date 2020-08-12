@@ -3862,7 +3862,7 @@ ACTOR Future< StorageMetrics > extractMetrics( Future<std::pair<Optional<Storage
 	return x.first.get();
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, KeyRange keys) {
+ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Database cx, KeyRange keys) {
 	loop {
 		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only used
 		                          // to find the read-hot sub ranges within a read-hot shard.
@@ -3889,7 +3889,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, K
 			}
 
 			wait(waitForAll(fReplies));
-			Standalone<VectorRef<KeyRangeRef>> results;
+			Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
 
 			for (int i = 0; i < nLocs; i++)
 				results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
@@ -3994,7 +3994,7 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 	}
 }
 
-Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRange const& keys) {
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> Transaction::getReadHotRanges(KeyRange const& keys) {
 	return ::getReadHotRanges(cx, keys);
 }
 

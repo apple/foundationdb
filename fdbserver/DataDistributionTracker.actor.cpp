@@ -299,11 +299,14 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			state Transaction tr(self->cx);
 			loop {
 				try {
-					Standalone<VectorRef<KeyRangeRef>> readHotRanges = wait(tr.getReadHotRanges(keys));
+					Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges = wait(tr.getReadHotRanges(keys));
 					for (auto& keyRange : readHotRanges) {
 						TraceEvent("ReadHotRangeLog")
-						    .detail("KeyRangeBegin", keyRange.begin)
-						    .detail("KeyRangeEnd", keyRange.end);
+						    .detail("ReadDensity", keyRange.density)
+						    .detail("ReadBandwidth", keyRange.readBandwidth)
+						    .detail("ReadDensityThreshold", SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO)
+						    .detail("KeyRangeBegin", keyRange.keys.begin)
+						    .detail("KeyRangeEnd", keyRange.keys.end);
 					}
 					break;
 				} catch (Error& e) {
