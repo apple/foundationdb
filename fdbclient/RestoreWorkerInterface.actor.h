@@ -53,6 +53,7 @@ struct RestoreSendVersionedMutationsRequest;
 struct RestoreSysInfo;
 struct RestoreApplierInterface;
 struct RestoreFinishRequest;
+struct RestoreSamplesRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -198,6 +199,31 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	void serialize(Ar& ar) {
 		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, sendMutationVector, applyToDB, initVersionBatch,
 		           collectRestoreRoleInterfaces, finishRestore);
+	}
+
+	std::string toString() { return nodeID.toString(); }
+};
+
+struct RestoreControllerInterface : RestoreRoleInterface {
+	constexpr static FileIdentifier file_identifier = 54253047;
+
+	RequestStream<RestoreSamplesRequest> samples;
+
+	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
+
+	RestoreControllerInterface() {
+		role = RestoreRole::Controller;
+		nodeID = deterministicRandom()->randomUniqueID();
+	}
+
+	NetworkAddress address() const { return samples.getEndpoint().addresses.address; }
+
+	void initEndpoints() { samples.getEndpoint(TaskPriority::LoadBalancedEndpoint); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, *(RestoreRoleInterface*)this, samples);
 	}
 
 	std::string toString() { return nodeID.toString(); }
@@ -361,22 +387,25 @@ struct RestoreRecruitRoleReply : TimedRequest {
 struct RestoreRecruitRoleRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 3136280;
 
+	RestoreControllerInterface ci;
 	RestoreRole role;
 	int nodeIndex; // Each role is a node
 
 	ReplyPromise<RestoreRecruitRoleReply> reply;
 
 	RestoreRecruitRoleRequest() : role(RestoreRole::Invalid) {}
-	explicit RestoreRecruitRoleRequest(RestoreRole role, int nodeIndex) : role(role), nodeIndex(nodeIndex) {}
+	explicit RestoreRecruitRoleRequest(RestoreControllerInterface ci, RestoreRole role, int nodeIndex)
+	  : ci(ci), role(role), nodeIndex(nodeIndex) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, role, nodeIndex, reply);
+		serializer(ar, ci, role, nodeIndex, reply);
 	}
 
 	std::string printable() {
 		std::stringstream ss;
-		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex;
+		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex
+		   << " RestoreController:" << ci.id().toString();
 		return ss.str();
 	}
 
@@ -410,26 +439,47 @@ struct RestoreSysInfoRequest : TimedRequest {
 	}
 };
 
-struct RestoreLoadFileReply : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 523470;
+struct RestoreSamplesRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 34077901;
+	UID id; // deduplicate data
+	int batchIndex;
+	SampledMutationsVec samples; // sampled mutations
 
-	LoadingParam param;
-	MutationsVec samples; // sampled mutations
-	bool isDuplicated; // true if loader thinks the request is a duplicated one
+	ReplyPromise<RestoreCommonReply> reply;
 
-	RestoreLoadFileReply() = default;
-	explicit RestoreLoadFileReply(LoadingParam param, MutationsVec samples, bool isDuplicated)
-	  : param(param), samples(samples), isDuplicated(isDuplicated) {}
+	RestoreSamplesRequest() = default;
+	explicit RestoreSamplesRequest(UID id, int batchIndex, SampledMutationsVec samples)
+	  : id(id), batchIndex(batchIndex), samples(samples) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, param, samples, isDuplicated);
+		serializer(ar, id, batchIndex, samples, reply);
 	}
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "LoadingParam:" << param.toString() << " samples.size:" << samples.size()
-		   << " isDuplicated:" << isDuplicated;
+		ss << "ID:" << id.toString() << " BatchIndex:" << batchIndex << " samples:" << samples.size();
+		return ss.str();
+	}
+};
+
+struct RestoreLoadFileReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 523470;
+
+	LoadingParam param;
+	bool isDuplicated; // true if loader thinks the request is a duplicated one
+
+	RestoreLoadFileReply() = default;
+	explicit RestoreLoadFileReply(LoadingParam param, bool isDuplicated) : param(param), isDuplicated(isDuplicated) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, param, isDuplicated);
+	}
+
+	std::string toString() {
+		std::stringstream ss;
+		ss << "LoadingParam:" << param.toString() << " isDuplicated:" << isDuplicated;
 		return ss.str();
 	}
 };
