@@ -4,6 +4,7 @@
 #include <rocksdb/iostats_context.h>
 #include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
+#include <rocksdb/utilities/table_properties_collectors.h>
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/Platform.h"
@@ -32,6 +33,8 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
+	// Compact sstables when there's too much deleted stuff.
+	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
 	return options;
 }
 
