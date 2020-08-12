@@ -205,7 +205,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 };
 
 struct RestoreControllerInterface : RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 54253047;
+	constexpr static FileIdentifier file_identifier = 5425347;
 
 	RequestStream<RestoreSamplesRequest> samples;
 
@@ -440,7 +440,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 };
 
 struct RestoreSamplesRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 34077901;
+	constexpr static FileIdentifier file_identifier = 3407791;
 	UID id; // deduplicate data
 	int batchIndex;
 	SampledMutationsVec samples; // sampled mutations
