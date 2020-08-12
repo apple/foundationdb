@@ -440,7 +440,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 };
 
 struct RestoreSamplesRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 34077901;
+	constexpr static FileIdentifier file_identifier = 10751035;
 	UID id; // deduplicate data
 	int batchIndex;
 	SampledMutationsVec samples; // sampled mutations
