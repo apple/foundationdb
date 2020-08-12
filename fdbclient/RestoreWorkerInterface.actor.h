@@ -205,7 +205,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 };
 
 struct RestoreControllerInterface : RestoreRoleInterface {
-	constexpr static FileIdentifier file_identifier = 54253047;
+	constexpr static FileIdentifier file_identifier = 11642024;
 
 	RequestStream<RestoreSamplesRequest> samples;
 
