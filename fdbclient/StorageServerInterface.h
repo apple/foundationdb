@@ -429,7 +429,7 @@ struct ReadHotRangeWithMetrics {
 	double density;
 	double readBandwidth;
 
-	ReadHotRangeWithMetrics() {}
+	ReadHotRangeWithMetrics() = default;
 	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
 	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
 
