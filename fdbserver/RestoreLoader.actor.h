@@ -70,7 +70,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<Key, UID> rangeToApplier;
 
 	// Sampled mutations to be sent back to restore controller
-	std::map<LoadingParam, MutationsVec> sampleMutations;
+	std::map<LoadingParam, SampledMutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	Future<Void> pollMetrics;
@@ -132,6 +132,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	// buffered data per version batch
 	std::map<int, Reference<LoaderBatchData>> batch;
 	std::map<int, Reference<LoaderBatchStatus>> status;
+	RestoreControllerInterface ci;
 
 	KeyRangeMap<Version> rangeVersions;
 
@@ -141,7 +142,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
-	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex) {
+	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci) : ci(ci) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
@@ -191,7 +192,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx);
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
+                                     RestoreControllerInterface ci);
 
 #include "flow/unactorcompiler.h"
 #endif
