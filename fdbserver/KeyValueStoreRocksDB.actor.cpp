@@ -1,9 +1,9 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-#include <rocksdb/iostats_context.h>
-#include <rocksdb/perf_context.h>
 #include <rocksdb/db.h>
+#include <rocksdb/iostats_context.h>
 #include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
 #include "flow/Platform.h"
@@ -25,13 +25,8 @@ StringRef toStringRef(rocksdb::Slice s) {
 	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
 }
 
-rocksdb::Options getOptions() {
-	rocksdb::Options options;
-	options.avoid_unnecessary_blocking_io = true;
-	options.create_if_missing = true;
-	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
-		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
-	}
+rocksdb::ColumnFamilyOptions getCFOptions() {
+	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = true;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
@@ -40,8 +35,14 @@ rocksdb::Options getOptions() {
 	return options;
 }
 
-rocksdb::ColumnFamilyOptions getCFOptions() {
-	return { getOptions() };
+rocksdb::Options getOptions() {
+	rocksdb::Options options({}, getCFOptions());
+	options.avoid_unnecessary_blocking_io = true;
+	options.create_if_missing = true;
+	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
+		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
+	}
+	return options;
 }
 
 struct RocksDBKeyValueStore : IKeyValueStore {
