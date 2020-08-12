@@ -74,9 +74,11 @@ struct ControllerBatchData : public ReferenceCounted<ControllerBatchData> {
 	// sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
+	Optional<Future<Void>> applyToDB;
+
 	IndexedSet<Key, int64_t> samples; // sample of range and log files
 	double samplesSize; // sum of the metric of all samples
-	Optional<Future<Void>> applyToDB;
+	std::set<UID> sampleMsgs; // deduplicate sample messages
 
 	ControllerBatchData() = default;
 	~ControllerBatchData() = default;
@@ -150,9 +152,9 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 
-	RestoreControllerData() {
+	RestoreControllerData(UID interfId) {
 		role = RestoreRole::Controller;
-		nodeID = UID();
+		nodeID = interfId;
 		runningVersionBatches.set(0);
 	}
 

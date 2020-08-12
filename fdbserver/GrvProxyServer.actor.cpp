@@ -367,7 +367,6 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 		}
 }
 
-// Do we need this?
 ACTOR Future<Void> updateLastCommit(GrvProxyData* self, Optional<UID> debugID = Optional<UID>()) {
 	state double confirmStart = now();
 	self->lastStartCommit = confirmStart;
