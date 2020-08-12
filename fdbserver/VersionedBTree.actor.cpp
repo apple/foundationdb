@@ -92,14 +92,14 @@ std::string toString(LogicalPageID id) {
 	if (id == invalidLogicalPageID) {
 		return "LogicalPageID{invalid}";
 	}
-	return format("LogicalPageID{%" PRId64 "}", id);
+	return format("LogicalPageID{%u}", id);
 }
 
 std::string toString(Version v) {
 	if (v == invalidVersion) {
 		return "invalidVersion";
 	}
-	return format("%" PRId64, v);
+	return format("@%" PRId64, v);
 }
 
 std::string toString(bool b) {
@@ -1176,7 +1176,7 @@ public:
 		bool operator<(const RemappedPage& rhs) { return version < rhs.version; }
 
 		std::string toString() const {
-			return format("RemappedPage(%c: %s -> %s @%s}", getType(), ::toString(originalPageID).c_str(),
+			return format("RemappedPage(%c: %s -> %s %s}", getType(), ::toString(originalPageID).c_str(),
 			              ::toString(newPageID).c_str(), ::toString(version).c_str());
 		}
 	};
@@ -1655,13 +1655,13 @@ public:
 			auto j = i->second.upper_bound(v);
 			if (j != i->second.begin()) {
 				--j;
-				debug_printf("DWALPager(%s) read %s @%" PRId64 " -> %s\n", filename.c_str(), toString(pageID).c_str(),
+				debug_printf("DWALPager(%s) op=readAtVersionRemapped %s @%" PRId64 " -> %s\n", filename.c_str(), toString(pageID).c_str(),
 				             v, toString(j->second).c_str());
 				pageID = j->second;
 				ASSERT(pageID != invalidLogicalPageID);
 			}
 		} else {
-			debug_printf("DWALPager(%s) read %s @%" PRId64 " (not remapped)\n", filename.c_str(),
+			debug_printf("DWALPager(%s) op=readAtVersionNotRemapped %s @%" PRId64 " (not remapped)\n", filename.c_str(),
 			             toString(pageID).c_str(), v);
 		}
 
@@ -1696,15 +1696,14 @@ public:
 		// The iterator must be valid and not empty and its first page map entry must match p's version
 		ASSERT(iPageMapPair != self->remappedPages.end());
 		ASSERT(!iPageMapPair->second.empty());
-		state VersionToPageMapT::iterator iVersionPagePair = iPageMapPair->second.begin();
-		ASSERT(iVersionPagePair->first == p.version);
+		state VersionToPageMapT::iterator iVersionPagePair = iPageMapPair->second.find(p.version);
+		ASSERT(iVersionPagePair != iPageMapPair->second.end());
 
 		RemappedPage::Type firstType = p.getType();
 		state RemappedPage::Type secondType;
 		bool secondAfterOldestRetainedVersion = false;
-		bool deleteAtSameVersion = false;
+		state bool deleteAtSameVersion = false;
 		if(p.newPageID == iVersionPagePair->second) {
-			deleteAtSameVersion = false;
 			auto nextEntry = iVersionPagePair;
 			++nextEntry;
 			if(nextEntry == iPageMapPair->second.end()) {
@@ -1772,19 +1771,23 @@ public:
 			++g_redwoodMetrics.pagerRemapSkip;
 		}
 
-		// Now that the page contents have been copied to the original page, if necessary, we can remove the remap entry from memory
-		// But only erase the entry if it matches p.  It won't if the original page ID was remapped and detached at the same version.
-		if(p.newPageID == iVersionPagePair->second) {
+		// Now that the page contents have been copied to the original page, if the corresponding map entry
+		// represented the remap and there wasn't a delete later in the queue at p for the same version then
+		// erase the entry.
+		if(!deleteAtSameVersion) {
+			debug_printf("DWALPager(%s) remapCleanup deleting map entry %s\n", self->filename.c_str(), p.toString().c_str());
+			// Erase the entry and set iVersionPagePair to the next entry or end
 			iVersionPagePair = iPageMapPair->second.erase(iVersionPagePair);
 
+			// If the map is now empty, delete it
 			if(iPageMapPair->second.empty()) {
+				debug_printf("DWALPager(%s) remapCleanup deleting empty map %s\n", self->filename.c_str(), p.toString().c_str());
 				self->remappedPages.erase(iPageMapPair);
-			} else {
-				// If we intend to free the new ID but there is no next entry, one could have been added during the wait above.
-				// If so, and it was a detach operation, then we can't free the new page ID.
-				if(freeNewID && secondType == RemappedPage::NONE && RemappedPage::getTypeOf(iVersionPagePair->second) == RemappedPage::DETACH) {
-					freeNewID = false;
-				}
+			} else if(freeNewID && secondType == RemappedPage::NONE && iVersionPagePair != iPageMapPair->second.end() && RemappedPage::getTypeOf(iVersionPagePair->second) == RemappedPage::DETACH) {
+				// If we intend to free the new ID and there was no map entry, one could have been added during the wait above.
+				// If so, and if it was a detach operation, then we can't free the new page ID as its lifetime will be managed
+				// by the client starting at some later version.
+				freeNewID = false;
 			}
 		}
 
@@ -4404,7 +4407,7 @@ private:
 							debug_printf("%s Inserted %s [mutation, boundary start]\n", context.c_str(),
 							             rec.toString().c_str());
 						} else {
-							debug_printf("%s Inserted failed for %s [mutation, boundary start]\n", context.c_str(),
+							debug_printf("%s Insert failed for %s [mutation, boundary start]\n", context.c_str(),
 							             rec.toString().c_str());
 							switchToLinearMerge();
 						}
@@ -4748,10 +4751,18 @@ private:
 
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
+
 			if(!m.changesMade && detachChildren) {
 				debug_printf("%s Internal page forced rewrite because at least %d children have been updated in-place.\n", context.c_str(), parentInfo->count);
-				m.updating = true;
 				forceUpdate = true;
+				if(!m.updating) {
+					page = self->cloneForUpdate(page);
+					cursor = getCursor(page);
+					btPage = (BTreePage*)page->begin();
+					m.btPage = btPage;
+					m.m = cursor.mirror;
+					m.updating = true;
+				}
 				++g_redwoodMetrics.level(btPage->height).forceUpdate;
 			}
 
@@ -4766,7 +4777,7 @@ private:
 				} else {
 					if (m.updating) {
 						// Page was updated in place (or being forced to be updated in place to update child page ids)
-						debug_printf("%s Internal page modified in-place tryUpdate=%d forceUpdate=%d\n", context.c_str(), tryToUpdate, forceUpdate);
+						debug_printf("%s Internal page modified in-place tryUpdate=%d forceUpdate=%d detachChildren=%d\n", context.c_str(), tryToUpdate, forceUpdate, detachChildren);
 
 						if(detachChildren) {
 							int detached = 0;
@@ -4778,6 +4789,7 @@ private:
 										if(parentInfo->maybeUpdated(p)) {
 											LogicalPageID newID = self->m_pager->detachRemappedPage(p, writeVersion);
 											if(newID != invalidLogicalPageID) {
+												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
 												p = newID;
 												++stats.detachChild;
 												++detached;
@@ -4788,31 +4800,44 @@ private:
 								cursor.moveNext();
 							}
 							parentInfo->clear();
-							if(detached == 0) {
-								debug_printf("%s No children detached, returning %s\n", context.c_str(), toString(*update).c_str());
+							if(forceUpdate && detached == 0) {
+								debug_printf("%s No children detached during forced update, returning %s\n", context.c_str(), toString(*update).c_str());
 								return Void();
 							}
 						}
 
 						BTreePageIDRef newID = wait(self->updateBTreePage(self, rootID, &update->newLinks.arena(),
 						                                                  page.castTo<IPage>(), writeVersion));
+						debug_printf(
+							"%s commitSubtree(): Internal page updated in-place at version %s, new contents: %s\n", context.c_str(), toString(writeVersion).c_str(),
+							btPage->toString(false, newID, snapshot->getVersion(), update->decodeLowerBound, update->decodeUpperBound)
+								.c_str());
 
 						update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
 						debug_printf("%s Internal page updated in-place, returning %s\n", context.c_str(),
 						             toString(*update).c_str());
 					} else {
 						// Page was rebuilt, possibly split.
-						debug_printf("%s Internal page modified, creating replacements.\n", context.c_str());
+						debug_printf("%s Internal page could not be modified, rebuilding replacement(s).\n", context.c_str());
 
 						if(detachChildren) {
 							auto &stats = g_redwoodMetrics.level(btPage->height);
 							for(auto &rec : m.rebuild) {
 								if(rec.value.present()) {
-									for(auto &p : rec.getChildPage()) {
+									BTreePageIDRef oldPages = rec.getChildPage();
+									BTreePageIDRef newPages;
+									for(int i = 0; i < oldPages.size(); ++i) {
+										LogicalPageID p = oldPages[i];
 										if(parentInfo->maybeUpdated(p)) {
 											LogicalPageID newID = self->m_pager->detachRemappedPage(p, writeVersion);
 											if(newID != invalidLogicalPageID) {
-												p = newID;
+												// Rebuild record values reference original page memory so make a copy
+												if(newPages.empty()) {
+													newPages = BTreePageIDRef(m.rebuild.arena(), oldPages);
+													rec.setChildPage(newPages);
+												}
+												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
+												newPages[i] = newID;
 												++stats.detachChild;
 											}
 										}
@@ -5222,7 +5247,7 @@ public:
 		bool isValid() const { return valid; }
 
 		std::string toString() const {
-			std::string r;
+			std::string r = format("{ptr=%p %s ", this, ::toString(pager->getVersion()).c_str());
 			for (int i = 0; i < path.size(); ++i) {
 				r += format("[%d/%d: %s] ", i + 1, path.size(),
 				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage->isLeaf()).c_str()
@@ -5231,6 +5256,7 @@ public:
 			if (!valid) {
 				r += " (invalid) ";
 			}
+			r += "}";
 			return r;
 		}
 
@@ -7441,7 +7467,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 		}
 
 		// Check for errors
-		if (errorCount != 0) throw internal_error();
+		ASSERT(errorCount == 0);
 	}
 
 	debug_printf("Waiting for outstanding commit\n");
@@ -7452,7 +7478,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	wait(verifyTask);
 
 	// Check for errors
-	if (errorCount != 0) throw internal_error();
+	ASSERT(errorCount == 0);
 
 	// Reopen pager and btree with a remap cleanup window of 0 to reclaim all old pages
 	state Future<Void> closedFuture = btree->onClosed();
