@@ -1136,7 +1136,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
 
-	self->computeStart = g_network->now();
+	self->computeStart = g_network->timer();
 
 	pProxyCommitData->stats.txnCommitResolved += trs.size();
 
