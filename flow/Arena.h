@@ -919,6 +919,16 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
+
+	template<class... Us>
+	T &emplace_back(Arena& p, Us&& ... args) {
+		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		auto ptr = new (&data[m_size]) T(std::forward<Us>(args)...);
+		VPS::add(*ptr);
+		m_size++;
+		return *ptr;
+	}
+
 	// invokes the "Deep copy constructor" T(Arena&, const T&) moving T entirely into arena
 	void push_back_deep(Arena& p, const T& value) {
 		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
@@ -926,6 +936,17 @@ public:
 		VPS::add(*ptr);
 		m_size++;
 	}
+
+	// invokes the "Deep copy constructor" T(Arena&, U&&) moving T entirely into arena
+	template<class... Us>
+	T &emplace_back_deep(Arena& p, Us&& ... args) {
+		if (m_size + 1 > m_capacity) reallocate(p, m_size + 1);
+		auto ptr = new (&data[m_size]) T(p, std::forward<Us>(args)...);
+		VPS::add(*ptr);
+		m_size++;
+		return *ptr;
+	}
+
 	template <class It>
 	void append(Arena& p, It begin, int count) {
 		if (m_size + count > m_capacity) reallocate(p, m_size + count);
@@ -1057,11 +1078,6 @@ public:
 			return res;
 		}
 		friend self_t operator-(const self_t& lhs, difference_type diff) {
-			auto res = lhs;
-			res.idx -= diff;
-			return res;
-		}
-		friend self_t operator-(difference_type diff, const self_t& lhs) {
 			auto res = lhs;
 			res.idx -= diff;
 			return res;

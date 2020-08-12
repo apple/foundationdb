@@ -28,6 +28,7 @@
 	#define GENERICACTORS_ACTOR_H
 
 #include <list>
+#include <utility>
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
@@ -299,9 +300,8 @@ Future<Void> storeOrThrow(T &out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 //Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
-Future<U> mapAsync(Future<T> what, F actorFunc)
-{
+ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
+Future<U> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
 	U ret = wait(actorFunc(val));
 	return ret;
@@ -318,8 +318,8 @@ std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> 
 }
 
 //maps a stream with an asynchronous function
-ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
-Future<Void> mapAsync( FutureStream<T> input, F actorFunc, PromiseStream<U> output ) {
+ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
+Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> output) {
 	state Deque<Future<U>> futures;
 
 	loop {
@@ -861,7 +861,7 @@ Future<T> ioTimeoutError( Future<T> what, double time ) {
 	Future<Void> end = lowPriorityDelay( time );
 	choose {
 		when( T t = wait( what ) ) { return t; }
-		when( wait( end ) ) { 
+		when(wait(end)) {
 			Error err = io_timeout();
 			if(g_network->isSimulated()) {
 				err = err.asInjectedFault();
@@ -1364,8 +1364,7 @@ struct NotifiedInt {
 	NotifiedInt( int64_t val = 0 ) : val(val) {}
 
 	Future<Void> whenAtLeast( int64_t limit ) {
-		if (val >= limit) 
-			return Void();
+		if (val >= limit) return Void();
 		Promise<Void> p;
 		waiting.push( std::make_pair(limit,p) );
 		return p.getFuture();

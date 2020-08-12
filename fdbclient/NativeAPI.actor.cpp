@@ -699,15 +699,16 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed);
 }
 
-void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl) {
-	specialKeySpace->registerKeyRange(module, impl->getKeyRange(), impl.get());
+void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
+                                                    std::unique_ptr<SpecialKeyRangeReadImpl> impl) {
+	specialKeySpace->registerKeyRange(module, type, impl->getKeyRange(), impl.get());
 	specialKeySpaceModules.push_back(std::move(impl));
 }
 
 ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces(Reference<ClusterConnectionFile> clusterFile);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
-struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
+struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionFile()) {
 			Key prefix = Key(getKeyRange().begin);
@@ -727,10 +728,10 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 		}
 	}
 
-	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 };
 
-struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
+struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
 		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](Optional<Value> v) {
@@ -743,7 +744,7 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeBaseImpl {
 	}
 
 	SingleSpecialKeyImpl(KeyRef k, const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
-	  : SpecialKeyRangeBaseImpl(singleKeyRange(k)), k(k), f(f) {}
+	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
 	Key k;
@@ -896,20 +897,52 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	if (apiVersionAtLeast(700)) {
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<SingleSpecialKeyImpl>(
+		                                  SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin,
+		                                  [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			                                  if (ryw->getSpecialKeySpaceErrorMsg().present())
+				                                  return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
+			                                  else
+				                                  return Optional<Value>();
+		                                  }));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ManagementCommandsOptionsImpl>(
+		        KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ExcludeServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("exclude")));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<FailedServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("failed")));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<ExclusionInProgressRangeImpl>(
+		        KeyRangeRef(LiteralStringRef("inProgressExclusion/"), LiteralStringRef("inProgressExclusion0"))
+				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+	}
 	if (apiVersionAtLeast(630)) {
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS,
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<ReadConflictRangeImpl>(readConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
+		                              std::make_unique<WriteConflictRangeImpl>(writeConflictRangeKeysRange));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::METRICS, SpecialKeySpace::IMPLTYPE::READONLY,
 		                              std::make_unique<DDStatsRangeImpl>(ddStatsRange));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::METRICS,
+		    SpecialKeySpace::MODULE::METRICS, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<HealthMetricsRangeImpl>(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/"),
 		                                                         LiteralStringRef("\xff\xff/metrics/health0"))));
-		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::WORKERINTERFACE, std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
-		    LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::STATUSJSON,
+		    SpecialKeySpace::MODULE::WORKERINTERFACE, SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
+		        LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::STATUSJSON, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(LiteralStringRef("\xff\xff/status/json"),
 		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                                           if (ryw->getDatabase().getPtr() &&
@@ -920,7 +953,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 			                                           }
 		                                           }));
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::CLUSTERFILEPATH,
+		    SpecialKeySpace::MODULE::CLUSTERFILEPATH, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
 		        LiteralStringRef("\xff\xff/cluster_file_path"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
@@ -936,7 +969,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		        }));
 
 		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
+		    SpecialKeySpace::MODULE::CONNECTIONSTRING, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
 		        LiteralStringRef("\xff\xff/connection_string"),
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
@@ -2928,7 +2961,7 @@ void Transaction::set( const KeyRef& key, const ValueRef& value, bool addConflic
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, value );
-	t.mutations.push_back( req.arena, MutationRef( MutationRef::SetValue, r.begin, v ) );
+	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
 
 	if( addConflictRange ) {
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2954,7 +2987,7 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, operand );
 
-	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
+	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2980,7 +3013,7 @@ void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
 	auto r = KeyRangeRef( req.arena, KeyRangeRef(begin, end) );
 	if (r.empty()) return;
 
-	t.mutations.push_back( req.arena, MutationRef( MutationRef::ClearRange, r.begin, r.end ) );
+	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, r.begin, r.end);
 
 	if(addConflictRange)
 		t.write_conflict_ranges.push_back( req.arena, r );
@@ -2998,10 +3031,11 @@ void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
 	uint8_t* data = new ( req.arena ) uint8_t[ key.size()+1 ];
 	memcpy(data, key.begin(), key.size() );
 	data[key.size()] = 0;
-	t.mutations.push_back( req.arena, MutationRef( MutationRef::ClearRange, KeyRef(data,key.size()), KeyRef(data, key.size()+1)) );
+	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, KeyRef(data, key.size()),
+	                         KeyRef(data, key.size() + 1));
 
 	if(addConflictRange)
-		t.write_conflict_ranges.push_back( req.arena, KeyRangeRef( KeyRef(data,key.size()), KeyRef(data, key.size()+1) ) );
+		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
 void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 	ASSERT( !keys.empty() );
@@ -3507,7 +3541,8 @@ Future<Void> Transaction::commitMutations() {
 		bool isCheckingWrites = options.checkWritesEnabled && deterministicRandom()->random01() < 0.01;
 		for(int i=0; i<extraConflictRanges.size(); i++)
 			if (extraConflictRanges[i].isReady() && extraConflictRanges[i].get().first < extraConflictRanges[i].get().second )
-				tr.transaction.read_conflict_ranges.push_back( tr.arena, KeyRangeRef(extraConflictRanges[i].get().first, extraConflictRanges[i].get().second) );
+				tr.transaction.read_conflict_ranges.emplace_back(tr.arena, extraConflictRanges[i].get().first,
+				                                                 extraConflictRanges[i].get().second);
 
 		if( !options.causalWriteRisky && !intersects( tr.transaction.write_conflict_ranges, tr.transaction.read_conflict_ranges ).present() )
 			makeSelfConflicting();
@@ -3882,11 +3917,11 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-ACTOR Future<Version> extractReadVersion(SpanID parentSpan, DatabaseContext* cx, TransactionPriority priority,
+ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, SpanID parent, DatabaseContext* cx, TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
                                          bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
                                          TagSet tags) {
-	// parentSpan here is only used to keep the parent alive until the request completes
+	state Span span(spanContext, location, { parent });
 	GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
@@ -4008,12 +4043,13 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			batcher.actor = readVersionBatcher( cx.getPtr(), batcher.stream.getFuture(), options.priority, flags );
 		}
 
-		Span span("NAPI:getReadVersion"_loc, info.spanID);
-		auto const req = DatabaseContext::VersionRequest(span.context, options.tags, info.debugID);
+		Location location = "NAPI:getReadVersion"_loc;
+		UID spanContext = deterministicRandom()->randomUniqueID();
+		auto const req = DatabaseContext::VersionRequest(spanContext, options.tags, info.debugID);
 		batcher.stream.send(req);
 		startTime = now();
-		readVersion = extractReadVersion(span.context, cx.getPtr(), options.priority, trLogInfo, req.reply.getFuture(),
-		                                 options.lockAware, startTime, metadataVersion, options.tags);
+		readVersion = extractReadVersion(location, spanContext, info.spanID, cx.getPtr(), options.priority, trLogInfo,
+		                                 req.reply.getFuture(), options.lockAware, startTime, metadataVersion, options.tags);
 	}
 	return readVersion;
 }

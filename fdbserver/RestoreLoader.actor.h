@@ -158,7 +158,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
-		if (item != batch.end()) { // Simply caller's effort in when it can call this func.
+		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return LoaderVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();

@@ -47,8 +47,8 @@ struct VersionedMessage {
 
 	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
 	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
-	const Version getVersion() const { return version.version; }
-	const uint32_t getSubVersion() const { return version.sub; }
+	Version getVersion() const { return version.version; }
+	uint32_t getSubVersion() const { return version.sub; }
 
 	// Returns true if the message is a mutation that should be backuped, i.e.,
 	// either key is not in system key space or is not a metadataVersionKey.
@@ -369,7 +369,7 @@ struct BackupData {
 		bool modified = false;
 		bool minVersionChanged = false;
 		Version minVersion = std::numeric_limits<Version>::max();
-		for (const auto [uid, version] : uidVersions) {
+		for (const auto& [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
