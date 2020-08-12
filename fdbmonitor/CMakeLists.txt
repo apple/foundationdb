@@ -20,8 +20,10 @@ endif()
 # Create a local sandbox for quick manual testing without simulator
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sandbox/data)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sandbox/logs)
-configure_file(${CMAKE_SOURCE_DIR}/cmake/Sandbox.conf.cmake
-  ${CMAKE_BINARY_DIR}/sandbox/foundationdb.conf)
+if(NOT EXISTS ${CMAKE_BINARY_DIR}/sandbox/foundationdb.conf)
+  configure_file(${CMAKE_SOURCE_DIR}/cmake/Sandbox.conf.cmake
+    ${CMAKE_BINARY_DIR}/sandbox/foundationdb.conf)
+endif()
 
 # this is not portable on Windows - but fdbmonitor isn't built there anyways...
 add_custom_target(clean_sandbox
