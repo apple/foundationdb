@@ -954,10 +954,15 @@ public:
 					if(dcId == clusterControllerDcId) {
 						bestFitness = fitness;
 						bestDC = dcId;
-						for(int i = 0; i < resolvers.size(); i++)
+						for (int i = 0; i < resolvers.size(); i++) {
 							result.resolvers.push_back(resolvers[i].interf);
-						for (int i = 0; i < proxies.size(); i++) result.masterProxies.push_back(proxies[i].interf);
-						for (int i = 0; i < grv_proxies.size(); i++) result.grvProxies.push_back(grv_proxies[i].interf);
+						}
+						for (int i = 0; i < proxies.size(); i++) {
+							result.masterProxies.push_back(proxies[i].interf);
+						}
+						for (int i = 0; i < grv_proxies.size(); i++) {
+							result.grvProxies.push_back(grv_proxies[i].interf);
+						}
 
 						if (req.configuration.backupWorkerEnabled) {
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
@@ -1998,7 +2003,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	    .detail("RecoveryState", (int)req.recoveryState)
 	    .detail("RegistrationCount", req.registrationCount)
 	    .detail("MasterProxies", req.masterProxies.size())
-		.detail("GrvProxies", req.grvProxies.size())
+	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
 	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
