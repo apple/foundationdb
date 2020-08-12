@@ -858,7 +858,8 @@ struct RedwoodMetrics {
 
 		if (e != nullptr) {
 			for (auto& m : metrics) {
-				if(!skipZeroes || m.second != 0) {
+				char c = m.first[0];
+				if(c != 0 && (!skipZeroes || m.second != 0) ) {
 					e->detail(m.first, m.second);
 				}
 			}
@@ -906,8 +907,9 @@ struct RedwoodMetrics {
 
 			if(e != nullptr) {
 				for (auto& m : metrics) {
-					if (m.second != 0) {
-						e->detail(format("L%d%s", i + 1, m.first + (m.first[0] == '-' ? 1 : 0)), m.second);
+					char c = m.first[0];
+					if(c != 0 && (!skipZeroes || m.second != 0) ) {
+						e->detail(format("L%d%s", i + 1, m.first + (c == '-' ? 1 : 0)), m.second);
 					}
 				}
 			}
