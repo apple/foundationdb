@@ -88,6 +88,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 
 	if (req.role == RestoreRole::Loader) {
 		ASSERT(!self->loaderInterf.present());
+		self->controllerInterf = req.ci;
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
@@ -100,12 +101,13 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 		DUMPTOKEN(recruited.finishVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
-		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
+		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx, req.ci));
 		TraceEvent("FastRestoreWorker").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT(!self->applierInterf.present());
+		self->controllerInterf = req.ci;
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface& recruited = self->applierInterf.get();
@@ -202,6 +204,10 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 	// TODO: Needs to keep this monitor's future. May use actorCollection
 	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
 
+	RestoreControllerInterface recruited;
+	DUMPTOKEN(recruited.samples);
+
+	self->controllerInterf = recruited;
 	wait(startRestoreController(self, cx) || workersFailureMonitor);
 
 	return Void();
