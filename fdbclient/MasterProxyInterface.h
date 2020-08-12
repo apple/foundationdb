@@ -191,7 +191,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
-	double midShardSize;
+	int64_t midShardSize = 0;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -428,7 +428,7 @@ struct GetDDMetricsRequest {
 	ReplyPromise<struct GetDDMetricsReply> reply;
 
 	GetDDMetricsRequest() {}
-	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false) : keys(keys), shardLimit(shardLimit) {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {

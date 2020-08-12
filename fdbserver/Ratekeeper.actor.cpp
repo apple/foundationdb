@@ -866,9 +866,8 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		if(maxRate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
 			it->value.busiestWriteTag = busiestTag;
 			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
-			ASSERT(it->value.totalWriteCosts > 0 && it->value.totalWriteOps > 0);
-			maxBusyness = double(maxCost.getOpsSum() + maxCost.getCostSum()) /
-			              (it->value.totalWriteOps + it->value.totalWriteCosts);
+			ASSERT(it->value.totalWriteCosts > 0);
+			maxBusyness = double(maxCost.getCostSum()) / it->value.totalWriteCosts;
 			it->value.busiestWriteTagFractionalBusyness = maxBusyness;
 			it->value.busiestWriteTagRate = maxRate;
 		}
@@ -987,7 +986,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		double targetRateRatio = std::min(( storageQueue - targetBytes + springBytes ) / (double)springBytes, 2.0);
 
 		if(limits->priority == TransactionPriority::DEFAULT) {
-				tryAutoThrottleTag(self, ss, storageQueue, storageDurabilityLag);
+			tryAutoThrottleTag(self, ss, storageQueue, storageDurabilityLag);
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();

@@ -2003,7 +2003,8 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, Spa
 				         cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
 				         GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					cx->smoothMidShardSize.setTotal(v.midShardSize);
+					if(v.midShardSize > 0)
+						cx->smoothMidShardSize.setTotal(v.midShardSize);
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -3315,7 +3316,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
 			if(it->clearSingleKey) {
-				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(it->expectedSize())); // NOTE: whether we need a weight here?
+				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(it->expectedSize()));
 				continue;
 			}
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
@@ -3330,13 +3331,14 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				if (locations.empty()) continue;
 
 				if(deterministicRandom()->random01() < 0.01)
-					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", self->getDatabase()->smoothMidShardSize.smoothTotal());
+					TraceEvent("NAPIAvgShardSizex100").detail("SmoothTotal", (uint64_t)self->getDatabase()->smoothMidShardSize.smoothTotal());
 
 				uint64_t bytes = 0;
 				if (locations.size() == 1)
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS;
 				else
-					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 + (locations.size() - 2) * self->getDatabase()->smoothMidShardSize.smoothTotal();
+					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 +
+					        (locations.size() - 2) * (int64_t)self->getDatabase()->smoothMidShardSize.smoothTotal();
 				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(bytes));
 				trCommitCosts.writeCosts += getOperationCost(bytes);
 			}
@@ -3378,7 +3380,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		if(req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE){
+		if(req.tagSet.present() && tr->options.priority == TransactionPriority::DEFAULT){
 			wait(store(req.transaction.read_snapshot, readVersion) &&
 			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
 			if (!req.commitCostEstimation.present()) req.tagSet.reset();

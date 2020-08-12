@@ -405,7 +405,7 @@ struct ResolutionRequestBuilder {
 	}
 };
 
-ACTOR Future<Void> monitorDDMetricsChanges(double* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
+ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<GetDataDistributorMetricsReply> nextReply = Never();
 	state KeyRange keys(normalKeys);
@@ -427,10 +427,9 @@ ACTOR Future<Void> monitorDDMetricsChanges(double* midShardSize, Reference<Async
 				when(wait(nextRequestTimer)) {
 					nextRequestTimer = Never();
 					if(db->get().distributor.present()) {
-						nextReply = timeoutError(db->get().distributor.get().dataDistributorMetrics.getReply(
-						                             GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true)),
-						                         SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
-					}
+						nextReply = db->get().distributor.get().dataDistributorMetrics.getReply(
+						    GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true));
+					} else nextReply = Never();
 				}
 				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
 					nextReply = Never();
@@ -1600,7 +1599,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Pro
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
                                   ProxyStats* stats, Version minKnownCommittedVersion,
-                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags, double midShardSize = 0) {
+                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags, int64_t midShardSize = 0) {
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
 	Version replyVersion = reply.version;
@@ -1682,7 +1681,7 @@ ACTOR static Future<Void> transactionStarter(
 	state PromiseStream<double> replyTimes;
 	state Span span;
 
-	 state double midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
+	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
 	// FIXME: There's weird RYWIterator reference problem occurs
 	// addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
@@ -1970,12 +1969,10 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 {
 	loop {
 		choose {
-			when(wait(db->onChange())) { }
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
-				// TraceEvent("DDMetricsRequestServer").detail("HasDistributor", db->get().distributor.present());
 				if(!db->get().distributor.present()) {
-					req.reply.sendError(dd_cancelled());
+					req.reply.sendError(operation_failed());
 					continue;
 				}
 				ErrorOr<GetDataDistributorMetricsReply> reply =

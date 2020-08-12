@@ -358,7 +358,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
 inline uint64_t getOperationCost(uint64_t bytes) {
-	return bytes / CLIENT_KNOBS->OPERATION_COST_BYTE_FACTOR + 1;
+	return bytes / std::max(1, CLIENT_KNOBS->OPERATION_COST_BYTE_FACTOR) + 1;
 }
 #include "flow/unactorcompiler.h"
 #endif
