@@ -81,7 +81,7 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 			    .detail("SampleID", req.id)
 			    .detail("BatchIndex", req.batchIndex)
 			    .detail("Samples", req.samples.size());
-			ASSERT(req.batchIndex < self->batch.size());
+			ASSERT(req.batchIndex <= self->batch.size()); // batchIndex starts from 1
 
 			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
 			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
