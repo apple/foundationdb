@@ -149,6 +149,10 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 
 	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time controller receives heart beat
 
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the RestoreController is created
+	PromiseStream<Future<Void>> addActor;
+
 	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 

@@ -185,7 +185,7 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 	state int retries = 0;
 	state double numOps = 0;
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
-	TraceEvent(delayTime > 5 ? SevWarnAlways : SevInfo, "FastRestoreApplierClearRangeMutationsStart", applierID)
+	TraceEvent(delayTime > 5 ? SevWarnAlways : SevDebug, "FastRestoreApplierClearRangeMutationsStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Ranges", ranges.size())
 	    .detail("DelayTime", delayTime);
@@ -296,7 +296,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	for (auto& key : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) { // Key not exist in DB
 			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
-			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
+			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
 			    .suppressFor(5.0)
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Key", key.first)
@@ -304,7 +304,7 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
 			    .detail("StagingKeyType", getTypeString(key.second->second.type));
 			for (auto& vm : key.second->second.pendingMutations) {
-				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
+				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
