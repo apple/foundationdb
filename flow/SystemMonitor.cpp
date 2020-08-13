@@ -162,6 +162,8 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				itr.second.duration = 0;
 			}
 
+			g_network->networkInfo.metrics.lastZeroBusy = loggedDurations[TaskPriority::Zero]/currentStats.elapsed;
+
 			for (auto const& itr : loggedDurations) {
 				n.detail(format("PriorityBusy%d", itr.first).c_str(), itr.second);
 			}
