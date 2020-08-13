@@ -421,7 +421,7 @@ struct StorageServerMetrics {
 	// `StorageMetricsSampleTests.txt` after change made.
 	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, double readDensityRatio,
 	                                                      int64_t baseChunkSize,
-	                                                      int64_t minShardReadBandwidthPerKSeconds) {
+	                                                      int64_t minShardReadBandwidthPerKSeconds) const {
 		std::vector<ReadHotRangeWithMetrics> toReturn;
 
 		double shardSize = (double)byteSample.getEstimate(shard);
