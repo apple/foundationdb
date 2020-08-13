@@ -65,7 +65,7 @@ struct AlternativeInfo {
 	int processBusyTime;
 	double lastUpdate;
 
-	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), recentRequests(-1), lastUpdate(0) {}
+	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), processBusyTime(-1), lastUpdate(0) {}
 
 	bool operator < (double const& r) const {
 		return cumulativeProbability < r;

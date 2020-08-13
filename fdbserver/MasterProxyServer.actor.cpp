@@ -1401,7 +1401,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 			rep = v;
 		}
 	}
-	rep.processBusyTime = 1000*g_network->networkInfo.metrics.lastZeroBusy;
+	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? g_random->random01() : g_network->networkInfo.metrics.lastZeroBusy);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
