@@ -815,6 +815,12 @@ struct RedwoodMetrics {
 	unsigned int btreeLeafPreload;
 	unsigned int btreeLeafPreloadExt;
 
+	// Return number of pages read or written, from cache or disk
+	unsigned int pageOps() const {
+		// All page reads are either a cache hit, probe hit, or a disk read
+		return pagerDiskWrite + pagerDiskRead + pagerCacheHit + pagerProbeHit;
+	}
+
 	double startTime;
 
 	Level& level(unsigned int level) {
@@ -7220,24 +7226,23 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state int pageSize =
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
+	state int64_t targetPageOps = shortTest ? 50000 : 1000000;
 	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .01);
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
-	state int mutationBytesTarget =
-	    shortTest ? 100000 : randomSize(std::min<int>(maxCommitSize * 100, pageSize * 100000));
 	state double clearProbability = deterministicRandom()->random01() * .1;
 	state double clearSingleKeyProbability = deterministicRandom()->random01();
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
 	state double coldStartProbability = pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3);
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
-	state double maxDuration = 60;
 	state int64_t cacheSizeBytes =
 	    pagerMemoryOnly ? 2e9 : (BUGGIFY ? deterministicRandom()->randomInt(1, 10 * pageSize) : 0);
 	state Version versionIncrement = deterministicRandom()->randomInt64(1, 1e8);
 	state Version remapCleanupWindow = deterministicRandom()->randomInt64(0, versionIncrement * 50);
 
 	printf("\n");
+	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
@@ -7245,7 +7250,6 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("maxKeySize: %d\n", maxKeySize);
 	printf("maxValueSize: %d\n", maxValueSize);
 	printf("maxCommitSize: %d\n", maxCommitSize);
-	printf("mutationBytesTarget: %d\n", mutationBytesTarget);
 	printf("clearProbability: %f\n", clearProbability);
 	printf("clearSingleKeyProbability: %f\n", clearSingleKeyProbability);
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
@@ -7260,8 +7264,6 @@ TEST_CASE("!/redwood/correctness/btree") {
 	deleteFile(pagerFile);
 
 	printf("Initializing...\n");
-	state double startTime = now();
-
 	pager = new DWALPager(pageSize, pagerFile, cacheSizeBytes, remapCleanupWindow, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, pagerFile);
 	wait(btree->init());
@@ -7290,12 +7292,9 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree) || btree->getError());
 
 	state Future<Void> commit = Void();
+	state int64_t totalPageOps = 0;
 
-	while (mutationBytes.get() < mutationBytesTarget && (now() - startTime) < maxDuration) {
-		if (now() - startTime > 600) {
-			mutationBytesTarget = mutationBytes.get();
-		}
-
+	while (totalPageOps < targetPageOps) {
 		// Sometimes increment the version
 		if (deterministicRandom()->random01() < 0.10) {
 			++version;
@@ -7391,14 +7390,12 @@ TEST_CASE("!/redwood/correctness/btree") {
 		}
 
 		// Commit at end or after this commit's mutation bytes are reached
-		if (mutationBytes.get() >= mutationBytesTarget || mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
+		if (totalPageOps >= targetPageOps || mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
 			// Wait for previous commit to finish
 			wait(commit);
-			printf("Committed.  Next commit %d bytes, %" PRId64
-			       "/%d (%.2f%%)  Stats: Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
-			       mutationBytesThisCommit, mutationBytes.get(), mutationBytesTarget,
-			       (double)mutationBytes.get() / mutationBytesTarget * 100,
-			       (keyBytesInserted.rate() + valueBytesInserted.rate()) / 1e6, keyBytesCleared.rate() / 1e6,
+			printf("Committed.  Next commit %d bytes, %" PRId64 " bytes.", mutationBytesThisCommit, mutationBytes.get());
+			printf("  Stats:  Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
+		          (keyBytesInserted.rate() + valueBytesInserted.rate()) / 1e6, keyBytesCleared.rate() / 1e6,
 			       mutationBytes.rate() / 1e6);
 
 			Version v = version; // Avoid capture of version as a member of *this
@@ -7411,8 +7408,12 @@ TEST_CASE("!/redwood/correctness/btree") {
 				                                                                btree->getOldestVersion() + 1));
 			}
 
-			commit = map(btree->commit(), [=](Void) {
+			commit = map(btree->commit(), [=,&ops=totalPageOps](Void) {
+				// Update pager ops before clearing metrics
+				ops += g_redwoodMetrics.pageOps();
+				printf("PageOps %" PRId64 "/%" PRId64 " (%.2f%%)\n", ops, targetPageOps, ops * 100.0 / targetPageOps);
 				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+
 				// Notify the background verifier that version is committed and therefore readable
 				committedVersions.send(v);
 				return Void();
