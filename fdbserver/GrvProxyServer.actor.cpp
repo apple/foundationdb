@@ -295,16 +295,11 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 }
 
 ACTOR Future<Void> queueGetReadVersionRequests(
-	Reference<AsyncVar<ServerDBInfo>> db,
-	SpannedDeque<GetReadVersionRequest> *systemQueue,
-	SpannedDeque<GetReadVersionRequest> *defaultQueue,
-	SpannedDeque<GetReadVersionRequest> *batchQueue,
-	FutureStream<GetReadVersionRequest> readVersionRequests,
-	PromiseStream<Void> GRVTimer, double *lastGRVTime,
-	double *GRVBatchTime, FutureStream<double> replyTimes,
-	GrvProxyStats* stats, GrvTransactionRateInfo* batchRateInfo,
-	TransactionTagMap<uint64_t>* transactionTagCounter)
-{
+    Reference<AsyncVar<ServerDBInfo>> db, SpannedDeque<GetReadVersionRequest>* systemQueue,
+    SpannedDeque<GetReadVersionRequest>* defaultQueue, SpannedDeque<GetReadVersionRequest>* batchQueue,
+    FutureStream<GetReadVersionRequest> readVersionRequests, PromiseStream<Void> GRVTimer, double* lastGRVTime,
+    double* GRVBatchTime, FutureStream<double> normalGRVLatency, GrvProxyStats* stats,
+    GrvTransactionRateInfo* batchRateInfo, TransactionTagMap<uint64_t>* transactionTagCounter) {
 	loop choose{
 			when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 				//WARNING: this code is run at a high priority, so it needs to do as little work as possible
@@ -356,15 +351,15 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 				}
 			}
 			// dynamic batching monitors reply latencies
-			when(double reply_latency = waitNext(replyTimes)) {
-				double target_latency = reply_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
+		    when(double reply_latency = waitNext(normalGRVLatency)) {
+			    double target_latency = reply_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
 				*GRVBatchTime = std::max(
 					SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN,
 					std::min(SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX,
 							 target_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 							 *GRVBatchTime * (1 - SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-			}
-		}
+		    }
+	    }
 }
 
 ACTOR Future<Void> updateLastCommit(GrvProxyData* self, Optional<UID> debugID = Optional<UID>()) {
@@ -522,16 +517,19 @@ ACTOR static Future<Void> getReadVersionServer(
 	state TransactionTagMap<uint64_t> transactionTagCounter;
 	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
-	state PromiseStream<double> replyTimes;
+	state PromiseStream<double> normalGRVLatency;
 	state Span span;
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
-	addActor.send(queueGetReadVersionRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
-											  GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &grvProxyData->stats, &batchRateInfo,
-											  &transactionTagCounter));
+	addActor.send(queueGetReadVersionRequests(db, &systemQueue, &defaultQueue, &batchQueue,
+	                                          proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime,
+	                                          &GRVBatchTime, normalGRVLatency.getFuture(), &grvProxyData->stats,
+	                                          &batchRateInfo, &transactionTagCounter));
 
-	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) == db->get().client.grvProxies.end())
+	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
+	       db->get().client.grvProxies.end()) {
 		wait(db->onChange());
+	}
 
 	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions from master.
 	TraceEvent("GrvProxyReadyForTxnStarts", proxy.id());
@@ -543,7 +541,10 @@ ACTOR static Future<Void> getReadVersionServer(
 		double elapsed = now() - lastGRVTime;
 		lastGRVTime = t;
 
-		if(elapsed == 0) elapsed = 1e-15; // resolve a possible indeterminant multiplication with infinite transaction rate
+		// Resolve a possible indeterminate multiplication with infinite transaction rate
+		if (elapsed == 0) {
+			elapsed = 1e-15;
+		}
 
 		normalRateInfo.reset();
 		batchRateInfo.reset();
@@ -636,9 +637,9 @@ ACTOR static Future<Void> getReadVersionServer(
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &grvProxyData->stats,
 											 grvProxyData->minKnownCommittedVersion, throttledTags));
 
-				// for now, base dynamic batching on the time for normal requests (not read_risky)
+				// Use normal priority transaction's GRV latency to dynamically calculate transaction batching interval.
 				if (i == 0) {
-					addActor.send(timeReply(readVersionReply, replyTimes));
+					addActor.send(timeReply(readVersionReply, normalGRVLatency));
 				}
 			}
 		}

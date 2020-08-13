@@ -302,9 +302,6 @@ public:
 	                                              bool checkStable = false,
 	                                              std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
 	                                              std::vector<UID> exclusionWorkerIds = {}) {
-		for (auto& pair : dcIds) {
-			TraceEvent("DcIds").detail("Key", pair.present() ? pair.get().toString() : "absent");
-		}
 		std::map<std::pair<ProcessClass::Fitness,bool>, vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		std::vector<LocalityData> unavailableLocals;
@@ -416,7 +413,6 @@ public:
 
 		TraceEvent("GetTLogTeamDone").detail("Completed", bCompleted).detail("Policy", policy->info()).detail("Results", results.size()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size())
 			.detail("Required", required).detail("Desired", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
-
 
 		return results;
 	}
@@ -820,7 +816,6 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
-		TraceEvent("RLoc1").detail("Regions", req.configuration.regions.size());
 		if(req.configuration.regions.size() > 1) {
 			std::vector<RegionInfo> regions = req.configuration.regions;
 			if(regions[0].priority == regions[1].priority && regions[1].dcId == clusterControllerDcId.get()) {
@@ -1846,9 +1841,6 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			}
 			when( wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
-				TraceEvent("RemoveWorker")
-				    .detail("Process", worker.locality.processId())
-				    .detail("PC", failedWorkerInfo.details.processClass.toString());
 
 				if (!failedWorkerInfo.reply.isSet()) {
 					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.details.processClass, failedWorkerInfo.priorityInfo) );
@@ -2123,7 +2115,6 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	if( info == self->id_worker.end() ) {
 		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, newPriorityInfo, req.degraded, req.issues );
-		TraceEvent("AddingWorker").detail("WorkerId", w.locality.processId()).detail("PC", newProcessClass.toString());
 		if (!self->masterProcessId.present() && w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
