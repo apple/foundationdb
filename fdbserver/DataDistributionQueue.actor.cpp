@@ -79,6 +79,7 @@ struct RelocateData {
 	bool operator== (const RelocateData& rhs) const {
 		return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority && healthPriority == rhs.healthPriority && keys == rhs.keys && startTime == rhs.startTime && workFactor == rhs.workFactor && src == rhs.src && completeSources == rhs.completeSources && wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
 	}
+	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
 
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
@@ -364,7 +365,7 @@ struct DDQueueData {
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
 	PromiseStream<RelocateData> relocationComplete;
-	PromiseStream<RelocateData> fetchSourceServersComplete;
+	PromiseStream<RelocateData> fetchSourceServersComplete; // find source SSs for a relocate range
 
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> input;
@@ -374,7 +375,8 @@ struct DDQueueData {
 	double lastInterval;
 	int suppressIntervals;
 
-	Reference<AsyncVar<bool>> rawProcessingUnhealthy; //many operations will remove relocations before adding a new one, so delay a small time before settling on a new number.
+	Reference<AsyncVar<bool>> rawProcessingUnhealthy; // many operations will remove relocations before adding a new
+	                                                  // one, so delay a small time before settling on a new number.
 
 	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
@@ -770,8 +772,8 @@ struct DDQueueData {
 	}
 
 	// For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
-	// with rd. If there exist, cancel them by cancel their actors and reduce the src servers' busyness of those
-	// canceled inflight relocateData Launch the relocation for the rd.
+	// with rd. If there exist, cancel them by cancelling their actors and reducing the src servers' busyness of those
+	// canceled inflight relocateData. Launch the relocation for the rd.
 	void launchQueuedWork( std::set<RelocateData, std::greater<RelocateData>> combined ) {
 		int startedHere = 0;
 		double startTime = now();
@@ -1191,7 +1193,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 		return false;
 	}
 
-	//verify the shard is still in sabtf
+	// Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
 	for( int i = 0; i < shards.size(); i++ ) {
 		if( moveShard == shards[i] ) {

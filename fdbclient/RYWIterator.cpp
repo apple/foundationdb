@@ -32,18 +32,28 @@ const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
 		// DEPENDENT_WRITE
 		RYWIterator::UNKNOWN_RANGE, RYWIterator::KV, RYWIterator::KV };
 
-RYWIterator::SEGMENT_TYPE RYWIterator::type() {
+RYWIterator::SEGMENT_TYPE RYWIterator::type() const {
 	if (is_unreadable())
 		throw accessed_unreadable();
 
 	return typeMap[ writes.type()*3 + cache.type() ];
 }
 
-bool RYWIterator::is_kv() { return type() == KV; }
-bool RYWIterator::is_unknown_range() { return type() == UNKNOWN_RANGE; }
-bool RYWIterator::is_empty_range() { return type() == EMPTY_RANGE; }
-bool RYWIterator::is_dependent() { return writes.type() == WriteMap::iterator::DEPENDENT_WRITE; }
-bool RYWIterator::is_unreadable() { return writes.is_unreadable(); }
+bool RYWIterator::is_kv() const {
+	return type() == KV;
+}
+bool RYWIterator::is_unknown_range() const {
+	return type() == UNKNOWN_RANGE;
+}
+bool RYWIterator::is_empty_range() const {
+	return type() == EMPTY_RANGE;
+}
+bool RYWIterator::is_dependent() const {
+	return writes.type() == WriteMap::iterator::DEPENDENT_WRITE;
+}
+bool RYWIterator::is_unreadable() const {
+	return writes.is_unreadable();
+}
 
 ExtStringRef RYWIterator::beginKey() { return begin_key_cmp <= 0 ? writes.beginKey() : cache.beginKey(); }
 ExtStringRef RYWIterator::endKey() { return end_key_cmp <= 0 ? cache.endKey() : writes.endKey(); }
@@ -85,6 +95,9 @@ RYWIterator& RYWIterator::operator--() {
 }
 
 bool RYWIterator::operator == ( const RYWIterator& r ) const { return cache == r.cache && writes == r.writes; }
+bool RYWIterator::operator!=(const RYWIterator& r) const {
+	return !(*this == r);
+}
 
 void RYWIterator::skip( KeyRef key ) {     // Changes *this to the segment containing key (so that beginKey()<=key && key < endKey())
 	cache.skip(key);

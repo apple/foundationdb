@@ -36,6 +36,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
+#include "fdbserver/MutationTracking.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 
@@ -60,19 +61,17 @@ struct StagingKey {
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
 	void add(const MutationRef& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
-		if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
-			TraceEvent("StagingKeyAdd")
-			    .detail("Version", version.toString())
-			    .detail("NewVersion", newVersion.toString())
-			    .detail("Mutation", m.toString());
-		}
+		DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
+		    .detail("Version", version.toString())
+		    .detail("NewVersion", newVersion.toString())
+		    .detail("Mutation", m);
 		if (version == newVersion) {
 			// This could happen because the same mutation can be present in
 			// overlapping mutation logs, because new TLogs can copy mutations
 			// from old generation TLogs (or backup worker is recruited without
 			// knowning previously saved progress).
 			ASSERT(type == m.type && key == m.param1 && val == m.param2);
-			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m.toString());
+			TraceEvent("SameVersion").detail("Version", version.toString()).detail("Mutation", m);
 			return;
 		}
 
@@ -84,15 +83,13 @@ struct StagingKey {
 				ASSERT(m.param1 == m.param2);
 			}
 			if (version < newVersion) {
-				if (debugMutation("StagingKeyAdd", newVersion.version, m)) {
-					TraceEvent("StagingKeyAdd")
+				DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
 					    .detail("Version", version.toString())
 					    .detail("NewVersion", newVersion.toString())
 					    .detail("MType", getTypeString(type))
 					    .detail("Key", key)
 					    .detail("Val", val)
 					    .detail("NewMutation", m.toString());
-				}
 				key = m.param1;
 				val = m.param2;
 				type = (MutationRef::Type)m.type;
@@ -108,8 +105,8 @@ struct StagingKey {
 				TraceEvent("SameVersion")
 				    .detail("Version", version.toString())
 				    .detail("NewVersion", newVersion.toString())
-				    .detail("OldMutation", it->second.toString())
-				    .detail("NewMutation", m.toString());
+				    .detail("OldMutation", it->second)
+				    .detail("NewMutation", m);
 				ASSERT(it->second.type == m.type && it->second.param1 == m.param1 && it->second.param2 == m.param2);
 			}
 		}

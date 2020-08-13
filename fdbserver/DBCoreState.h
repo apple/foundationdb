@@ -149,6 +149,7 @@ struct DBCoreState {
 		       pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
+	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {

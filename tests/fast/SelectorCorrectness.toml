@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'RYOW_test'
+
+    [[test.workload]]
+    testName = 'SelectorCorrectness'

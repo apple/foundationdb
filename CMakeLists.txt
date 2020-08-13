@@ -18,7 +18,7 @@
 # limitations under the License.
 cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 6.3.5
+  VERSION 7.0.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -175,6 +175,11 @@ if(WIN32)
   add_subdirectory(packaging/msi)
 else()
   include(CPack)
+endif()
+
+set(BUILD_FLOWBENCH OFF CACHE BOOL "Build microbenchmark program (builds google microbenchmark dependency)")
+if(BUILD_FLOWBENCH)
+  add_subdirectory(flowbench)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")

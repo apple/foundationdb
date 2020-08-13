@@ -48,7 +48,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *  whether read conflict ranges are omitted for any reads done through this {@code ReadTransaction}.
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 * <a href="/foundationdb/developer-guide.html#snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 *
 	 * @return whether this is a snapshot view of the database with relaxed isolation properties
 	 * @see #snapshot()
@@ -58,11 +58,11 @@ public interface ReadTransaction extends ReadTransactionContext {
 	/**
 	 * Return a special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
 	 *  Snapshot reads selectively relax FoundationDB's isolation property, reducing
-	 *  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+	 *  <a href="/foundationdb/developer-guide.html#conflict-ranges" target="_blank">Transaction conflicts</a>
 	 *  but making reasoning about concurrency harder.<br>
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 * <a href="/foundationdb/developer-guide.html#snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 *
 	 * @return a read-only view of this {@code ReadTransaction} with relaxed isolation properties
 	 */

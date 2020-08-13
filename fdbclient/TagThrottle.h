@@ -54,7 +54,10 @@ public:
 	const_iterator end() const {
 		return tags.end();
 	}
-
+	void clear() {
+		tags.clear();
+		bytes = 0;
+	}
 //private:
 	Arena arena;
 	std::set<TransactionTagRef> tags;

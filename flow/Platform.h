@@ -618,9 +618,6 @@ inline static int clz( uint32_t value ) {
 #define clz __builtin_clz
 #endif
 
-#include <boost/config.hpp>
-// The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
-
 // These return thread local counts
 int64_t getNumProfilesDeferred();
 int64_t getNumProfilesOverflowed();

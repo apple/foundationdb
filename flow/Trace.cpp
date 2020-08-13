@@ -21,6 +21,7 @@
 
 #include "flow/Trace.h"
 #include "flow/FileTraceLogWriter.h"
+#include "flow/Knobs.h"
 #include "flow/XmlTraceLogFormatter.h"
 #include "flow/JsonTraceLogFormatter.h"
 #include "flow/flow.h"
@@ -54,40 +55,7 @@
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
 
-class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
-public:
-	~DummyThreadPool() {}
-	DummyThreadPool() : thread(NULL) {}
-	Future<Void> getError() {
-		return errors.getFuture();
-	}
-	void addThread( IThreadPoolReceiver* userData ) {
-		ASSERT( !thread );
-		thread = userData;
-	}
-	void post( PThreadAction action ) {
-		try {
-			(*action)( thread );
-		} catch (Error& e) {
-			errors.sendError( e );
-		} catch (...) {
-			errors.sendError( unknown_error() );
-		}
-	}
-	Future<Void> stop(Error const& e) {
-		return Void();
-	}
-	void addref() {
-		ReferenceCounted<DummyThreadPool>::addref();
-	}
-	void delref() {
-		ReferenceCounted<DummyThreadPool>::delref();
-	}
-
-private:
-	IThreadPoolReceiver* thread;
-	Promise<Void> errors;
-};
+ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
 
 struct SuppressionMap {
 	struct SuppressionInfo {
@@ -227,33 +195,6 @@ public:
 			if (!b->isReady())
 				b->send(Void());
 		}
-	};
-
-	struct IssuesList : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
-		IssuesList(){};
-		void addIssue(std::string issue) override {
-			MutexHolder h(mutex);
-			issues.insert(issue);
-		}
-
-		void retrieveIssues(std::set<std::string>& out) override {
-			MutexHolder h(mutex);
-			for (auto const& i : issues) {
-				out.insert(i);
-			}
-		}
-
-		void resolveIssue(std::string issue) override {
-			MutexHolder h(mutex);
-			issues.erase(issue);
-		}
-
-		void addref() { ThreadSafeReferenceCounted<IssuesList>::addref(); }
-		void delref() { ThreadSafeReferenceCounted<IssuesList>::delref(); }
-
-	private:
-		Mutex mutex;
-		std::set<std::string> issues;
 	};
 
 	Reference<IssuesList> issues;
@@ -783,6 +724,7 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
 
 	ev.initialized = true;
 	ev.enabled = false;
@@ -803,6 +745,7 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
 
 	ev.initialized = true;
 	ev.enabled = false;
