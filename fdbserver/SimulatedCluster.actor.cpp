@@ -703,9 +703,6 @@ struct SimulationConfig {
 	int machine_count;  // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
-
-	friend std::ostream& operator<<(std::ostream& os, const SimulationConfig& config);
-
 private:
 	void generateNormalConfig(int minimumReplication, int minimumRegions);
 };
@@ -1049,15 +1046,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	} else {
 		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	}
-	std::stringstream ss;
-	ss << *this;
-	TraceEvent("SimGenerateConfig").detail("Config", ss.str());
-}
-std::ostream& operator<<(std::ostream& os, const SimulationConfig& config) {
-	os << "extraDB: " << config.extraDB << " datacenters: " << config.datacenters
-	   << " machine_count: " << config.machine_count << " processes_per_machine: " << config.processes_per_machine
-	   << " coordinators: " << config.coordinators << " db: " << config.db.toString();
-	return os;
 }
 
 void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFolder, int* pTesterCount,

@@ -302,18 +302,6 @@ public:
 	                                              bool checkStable = false,
 	                                              std::set<Optional<Key>> dcIds = std::set<Optional<Key>>(),
 	                                              std::vector<UID> exclusionWorkerIds = {}) {
-		TraceEvent("TL1")
-			.detail("Conf", conf.toString())
-			.detail("L1", policy->info())
-			.detail("L2", id_used.size())
-			.detail("L3", checkStable)
-			.detail("L4", dcIds.size())
-			.detail("L5", exclusionWorkerIds.size());
-		for (auto& pair : id_used) {
-			TraceEvent("IdUsed")
-				.detail("Key", pair.first.present() ? pair.first.get().toString() : "absent")
-				.detail("Value", pair.second);
-		}
 		for (auto& pair : dcIds) {
 			TraceEvent("DcIds").detail("Key", pair.present() ? pair.get().toString() : "absent");
 		}
@@ -326,38 +314,17 @@ public:
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
 		logServerMap = (LocalityMap<WorkerDetails>*) logServerSet.getPtr();
-		std::unordered_map<std::string, int> pcs;
 		for( auto& it : id_worker ) {
-			pcs[it.second.details.processClass.toString()]++;
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), it.second.details.interf.id()) == exclusionWorkerIds.end()) {
 				auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::TLog);
 				if (workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()) && fitness != ProcessClass::NeverAssign && (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId()))) {
 					fitness_workers[std::make_pair(fitness, it.second.details.degraded)].push_back(it.second.details);
-					TraceEvent("TL4")
-					    .detail("L5", it.second.details.processClass.toString())
-					    .detail("L6", it.second.details.interf.locality.toString());
 				}
 				else {
-					TraceEvent("TL3")
-					    .detail("L1", workerAvailable(it.second, checkStable))
-					    .detail("L2", !conf.isExcludedServer(it.second.details.interf.addresses()))
-					    .detail("L3", fitness != ProcessClass::NeverAssign)
-					    .detail("L4", (!dcIds.size() || dcIds.count(it.second.details.interf.locality.dcId())))
-					    .detail("L5", it.second.details.processClass.toString())
-					    .detail("L6", it.second.details.interf.locality.toString());
 					unavailableLocals.push_back(it.second.details.interf.locality);
 				}
 			}
 		}
-		std::stringstream ss;
-		for (auto& p : pcs) {
-			ss << p.first << ": " << p.second << ";";
-		}
-		TraceEvent("TL2")
-		    .detail("L1", fitness_workers.size())
-		    .detail("L2", unavailableLocals.size())
-		    .detail("L3", id_worker.size())
-		    .detail("L4", ss.str());
 
 		results.reserve(results.size() + id_worker.size());
 		for (int fitness = ProcessClass::BestFit; fitness != ProcessClass::NeverAssign && !bCompleted; fitness++)
@@ -1953,18 +1920,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 	TEST(true); //ClusterController RecruitTLogsRequest
 	loop {
 		try {
-			TraceEvent("RecruitReq").detail("Config", req.configuration.toString());
 			auto rep = self->findWorkersForConfiguration( req );
-			TraceEvent("RecruitRes")
-			    .detail("L1", rep.masterProxies.size())
-			    .detail("L2", rep.grvProxies.size())
-			    .detail("L3", rep.resolvers.size())
-			    .detail("L4", rep.storageServers.size())
-			    .detail("L6", rep.backupWorkers.size())
-			    .detail("L7", rep.oldLogRouters.size())
-			    .detail("L8", rep.satelliteTLogs.size())
-			    .detail("L9", rep.satelliteFallback)
-			    .detail("L10", rep.dcId.present() ? rep.dcId.get().toString() : "absent");
 			req.reply.send( rep );
 			return Void();
 		} catch (Error& e) {
