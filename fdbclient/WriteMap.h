@@ -37,6 +37,7 @@ struct RYWMutation {
 	bool operator == (const RYWMutation& r) const {
 		return value == r.value && type == r.type;
 	}
+	bool operator!=(const RYWMutation& r) const { return !(*this == r); }
 };
 
 class OperationStack {

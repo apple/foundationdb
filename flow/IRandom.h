@@ -33,6 +33,7 @@
 #include <unordered_map>
 #endif
 #include <functional>
+#include <utility>
 
 // Until we move to C++20, we'll need something to take the place of operator<=>.
 // This is as good a place as any, I guess.
@@ -79,6 +80,9 @@ public:
 	bool operator == ( const UID& r ) const { return part[0]==r.part[0] && part[1]==r.part[1]; }
 	bool operator != ( const UID& r ) const { return part[0]!=r.part[0] || part[1]!=r.part[1]; }
 	bool operator < ( const UID& r ) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
+	bool operator>(const UID& r) const { return r < *this; }
+	bool operator<=(const UID& r) const { return !(*this > r); }
+	bool operator>=(const UID& r) const { return !(*this < r); }
 
 	uint64_t hash() const { return first(); }
 	uint64_t first() const { return part[0]; }
@@ -137,7 +141,9 @@ public:
 
 	// The following functions have fixed implementations for now:
 	template <class C>
-	decltype((fake<const C>()[0])) randomChoice( const C& c ) { return c[randomInt(0,(int)c.size())]; }
+	decltype((std::declval<const C>()[0])) randomChoice(const C& c) {
+		return c[randomInt(0, (int)c.size())];
+	}
 
 	template <class C>
 	void randomShuffle( C& container ) {
@@ -158,13 +164,13 @@ extern FILE* randLog;
 // Sets the seed for the deterministic random number generator on the current thread
 void setThreadLocalDeterministicRandomSeed(uint32_t seed);
 
-// Returns the random number generator that can be seeded. This generator should only 
+// Returns the random number generator that can be seeded. This generator should only
 // be used in contexts where the choice to call it is deterministic.
 //
 // This generator is only deterministic if given a seed using setThreadLocalDeterministicRandomSeed
 Reference<IRandom> deterministicRandom();
 
-// A random number generator that cannot be manually seeded and may be called in 
+// A random number generator that cannot be manually seeded and may be called in
 // non-deterministic contexts.
 Reference<IRandom> nondeterministicRandom();
 

@@ -39,9 +39,9 @@ bool IPAddress::operator<(const IPAddress& rhs) const {
 
 std::string IPAddress::toString() const {
 	if (isV6()) {
-		return boost::asio::ip::address_v6(boost::get<IPAddressStore>(addr)).to_string();
+		return boost::asio::ip::address_v6(std::get<IPAddressStore>(addr)).to_string();
 	} else {
-		auto ip = boost::get<uint32_t>(addr);
+		auto ip = std::get<uint32_t>(addr);
 		return format("%d.%d.%d.%d", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 	}
 }
@@ -57,10 +57,10 @@ Optional<IPAddress> IPAddress::parse(std::string str) {
 
 bool IPAddress::isValid() const {
 	if (isV6()) {
-		const auto& ip = boost::get<IPAddressStore>(addr);
+		const auto& ip = std::get<IPAddressStore>(addr);
 		return std::any_of(ip.begin(), ip.end(), [](uint8_t part) { return part != 0; });
 	}
-	return boost::get<uint32_t>(addr) != 0;
+	return std::get<uint32_t>(addr) != 0;
 }
 
 NetworkAddress NetworkAddress::parse( std::string const& s ) {
@@ -213,4 +213,4 @@ TEST_CASE("/flow/network/ipaddress") {
 	return Void();
 }
 
-NetworkInfo::NetworkInfo() : handshakeLock( new BoundedFlowLock(FLOW_KNOBS->UNRESTRICTED_HANDSHAKE_LIMIT, FLOW_KNOBS->BOUNDED_HANDSHAKE_LIMIT) ) {}
+NetworkInfo::NetworkInfo() : handshakeLock( new FlowLock(FLOW_KNOBS->TLS_HANDSHAKE_LIMIT) ) {}

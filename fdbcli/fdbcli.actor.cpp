@@ -556,6 +556,10 @@ void initHelp() {
 		"kill all|list|<ADDRESS...>",
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process.");
+	helpMap["suspend"] = CommandHelp(
+		"suspend <SECONDS> <ADDRESS...>",
+		"attempts to suspend one or more processes in the cluster",
+		"If no parameters are specified, populates the list of processes which can be suspended. Processes cannot be suspended before this list has been populated.\n\nFor each IP:port pair in <ADDRESS...>, attempt to suspend the processes for the specified SECONDS after which the process will die.");
 	helpMap["profile"] = CommandHelp(
 		"profile <client|list|flow|heap> <action> <ARGS>",
 		"namespace for all the profiling-related commands.",
@@ -576,6 +580,11 @@ void initHelp() {
 		"throttle <on|off|enable auto|disable auto|list> [ARGS]",
 		"view and control throttled tags",
 		"Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n"
+	);
+	helpMap["cache_range"] = CommandHelp(
+		"cache_range <set|clear> <BEGINKEY> <ENDKEY>",
+		"Mark a key range to add to or remove from storage caches.",
+		"Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing heavy load, and clear them when they are no longer necessary."
 	);
 	helpMap["lock"] = CommandHelp(
 		"lock",
@@ -2150,8 +2159,8 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		return false;
 	} else {
-		state std::vector<AddressExclusion> addresses;
-		state std::set<AddressExclusion> exclusions;
+		state std::vector<AddressExclusion> exclusionVector;
+		state std::set<AddressExclusion> exclusionSet;
 		bool force = false;
 		state bool waitForAllExcluded = true;
 		state bool markFailed = false;
@@ -2170,8 +2179,8 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 						printf("        Do not include the `:tls' suffix when naming a process\n");
 					return true;
 				}
-				addresses.push_back( a );
-				exclusions.insert( a );
+				exclusionVector.push_back(a);
+				exclusionSet.insert(a);
 			}
 		}
 
@@ -2179,9 +2188,10 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			if (markFailed) {
 				state bool safe;
 				try {
-					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, addresses)));
+					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, exclusionVector)));
 					safe = _safe;
 				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) throw;
 					TraceEvent("CheckSafeExclusionsError").error(e);
 					safe = false;
 				}
@@ -2240,7 +2250,8 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 						return true;
 					}
 					NetworkAddress addr = NetworkAddress::parse(addrStr);
-					bool excluded = (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusions, addr);
+					bool excluded =
+					    (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusionSet, addr);
 					ssTotalCount++;
 					if (excluded)
 						ssExcludedCount++;
@@ -2281,7 +2292,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			}
 		}
 
-		wait(makeInterruptable(excludeServers(db, addresses, markFailed)));
+		wait(makeInterruptable(excludeServers(db, exclusionVector, markFailed)));
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
@@ -2292,7 +2303,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			warn.cancel();
 
 		state std::set<NetworkAddress> notExcludedServers =
-		    wait(makeInterruptable(checkForExcludingServers(db, addresses, waitForAllExcluded)));
+		    wait(makeInterruptable(checkForExcludingServers(db, exclusionVector, waitForAllExcluded)));
 		std::vector<ProcessData> workers = wait( makeInterruptable(getWorkers(db)) );
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for(auto addr : workers)
@@ -2300,7 +2311,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		// Print a list of all excluded addresses that don't have a corresponding worker
 		std::set<AddressExclusion> absentExclusions;
-		for(auto addr : addresses) {
+		for (const auto& addr : exclusionVector) {
 			auto worker = workerPorts.find(addr.ip);
 			if(worker == workerPorts.end())
 				absentExclusions.insert(addr);
@@ -2308,43 +2319,46 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 				absentExclusions.insert(addr);
 		}
 
-		for (auto addr : addresses) {
-			NetworkAddress _addr(addr.ip, addr.port);
-			if (absentExclusions.find(addr) != absentExclusions.end()) {
-				if(addr.port == 0)
+		for (const auto& exclusion : exclusionVector) {
+			if (absentExclusions.find(exclusion) != absentExclusions.end()) {
+				if (exclusion.port == 0) {
 					printf("  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
 					       "correct machines before removing them from the cluster!\n",
-					       addr.ip.toString().c_str());
-				else
+					       exclusion.ip.toString().c_str());
+				} else {
 					printf("  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
 					       "before removing them from the cluster!\n",
-					       addr.toString().c_str());
-			} else if (notExcludedServers.find(_addr) != notExcludedServers.end()) {
-				if (addr.port == 0)
+					       exclusion.toString().c_str());
+				}
+			} else if (std::any_of(notExcludedServers.begin(), notExcludedServers.end(),
+			                       [&](const NetworkAddress& a) { return addressExcluded({ exclusion }, a); })) {
+				if (exclusion.port == 0) {
 					printf("  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
 					       "machine from the cluster\n",
-					       addr.ip.toString().c_str());
-				else
+					       exclusion.ip.toString().c_str());
+				} else {
 					printf("  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
 					       "cluster\n",
-					       addr.toString().c_str());
+					       exclusion.toString().c_str());
+				}
 			} else {
-				if (addr.port == 0)
+				if (exclusion.port == 0) {
 					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
 					       "from the cluster.\n",
-					       addr.ip.toString().c_str());
-				else
+					       exclusion.ip.toString().c_str());
+				} else {
 					printf(
 					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
-					    addr.toString().c_str());
+					    exclusion.toString().c_str());
+				}
 			}
 		}
 
 		bool foundCoordinator = false;
 		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
 		for( auto& c : ccs.coordinators()) {
-			if (std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip, c.port) ) ||
-					std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip) )) {
+			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
+			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
 				printf("WARNING: %s is a coordinator!\n", c.toString().c_str());
 				foundCoordinator = true;
 			}
@@ -3365,7 +3379,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
+							if (db->apiVersionAtLeast(700))
+								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								    .reboot.send(RebootRequest());
+							else
+								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
@@ -3383,9 +3401,78 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]].first);
+								if (db->apiVersionAtLeast(700))
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest());
+								else
+									tr->set(LiteralStringRef("\xff\xff/reboot_worker"),
+									        address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
+						}
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "suspend")) {
+					getTransaction(db, tr, options, intrans);
+					if (tokens.size() == 1) {
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
+						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						std::vector<Future<Void>> addInterfs;
+						for( auto it : kvs ) {
+							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
+						}
+						wait( waitForAll(addInterfs) );
+						if(address_interface.size() == 0) {
+							printf("\nNo addresses can be suspended.\n");
+						} else if(address_interface.size() == 1) {
+							printf("\nThe following address can be suspended:\n");
+						} else {
+							printf("\nThe following %zu addresses can be suspended:\n", address_interface.size());
+						}
+						for( auto it : address_interface ) {
+							printf("%s\n", printable(it.first).c_str());
+						}
+						printf("\n");
+					} else if(tokens.size() == 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						for(int i = 2; i < tokens.size(); i++) {
+							if(!address_interface.count(tokens[i])) {
+								printf("ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+								is_error = true;
+								break;
+							}
+						}
+
+						if(!is_error) {
+							double seconds;
+							int n=0;
+							auto secondsStr = tokens[1].toString();
+							if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
+								printUsage(tokens[0]);
+								is_error = true;
+							} else {
+								int64_t timeout_ms = seconds*1000;
+								tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t *)&timeout_ms, sizeof(int64_t)));
+								for(int i = 2; i < tokens.size(); i++) {
+									if (db->apiVersionAtLeast(700))
+										BinaryReader::fromStringRef<ClientWorkerInterface>(
+										    address_interface[tokens[i]].first, IncludeVersion())
+										    .reboot.send(RebootRequest(false, false, seconds));
+									else
+										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
+										        address_interface[tokens[i]].first);
+								}
+								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
+							}
 						}
 					}
 					continue;
@@ -3634,13 +3721,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-								tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-																					LiteralStringRef("\xff\xff\xff")),
-															1)));
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						std::map<Key, ClientWorkerInterface> interfaces;
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+							                    : pair.key)
+							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 							interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 						}
 						state Key ip_port = tokens[2];
@@ -3665,7 +3756,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3687,7 +3782,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
+							if (db->apiVersionAtLeast(700))
+								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								    .reboot.send(RebootRequest(false, true));
+							else
+								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
@@ -3705,7 +3804,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]].first);
+								if (db->apiVersionAtLeast(700))
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest(false, true));
+								else
+									tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"),
+									        address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
@@ -4216,6 +4321,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					continue;
 				}
+				if (tokencmp(tokens[0], "cache_range")) {
+					if (tokens.size() != 4) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					KeyRangeRef cacheRange(tokens[2], tokens[3]);
+					if (tokencmp(tokens[1], "set")) {
+						wait(makeInterruptable(addCachedRange(db, cacheRange)));
+					} else if (tokencmp(tokens[1], "clear")) {
+						wait(makeInterruptable(removeCachedRange(db, cacheRange)));
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					continue;
+				}
+
 
 				printf("ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 				is_error = true;

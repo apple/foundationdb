@@ -28,9 +28,9 @@
 
 #include "fdbclient/Tuple.h"
 #include "flow/flow.h"
-#include "flow/Stats.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/Stats.h"
 #include <cstdint>
 #include <cstdarg>
 
@@ -49,6 +49,7 @@ struct RestoreWorkerData :  NonCopyable, public ReferenceCounted<RestoreWorkerDa
 	std::map<UID, RestoreWorkerInterface> workerInterfaces; // UID is worker's node id, RestoreWorkerInterface is worker's communication workerInterface
 
 	// Restore Roles
+	Optional<RestoreControllerInterface> controllerInterf;
 	Optional<RestoreLoaderInterface> loaderInterf;
 	Optional<RestoreApplierInterface> applierInterf;
 

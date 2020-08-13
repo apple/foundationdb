@@ -55,6 +55,7 @@ public:
         bool operator==(const const_iterator &other) const {
             return (artIterator) == (other.artIterator);
         }
+        bool operator!=(const const_iterator& other) const { return !(*this == other); }
 
         const_iterator &operator++() {
             ++(artIterator);

@@ -53,7 +53,7 @@ struct RebootRequest {
 	constexpr static FileIdentifier file_identifier = 11913957;
 	bool deleteData;
 	bool checkData;
-	uint32_t waitForDuration;
+	uint32_t waitForDuration; // seconds
 
 	explicit RebootRequest(bool deleteData = false, bool checkData = false, uint32_t waitForDuration = 0)
 	  : deleteData(deleteData), checkData(checkData), waitForDuration(waitForDuration) {}

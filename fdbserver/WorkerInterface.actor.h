@@ -378,7 +378,7 @@ struct InitializeLogRouterRequest {
 };
 
 struct InitializeBackupReply {
-	constexpr static FileIdentifier file_identifier = 63843557;
+	constexpr static FileIdentifier file_identifier = 13511909;
 	struct BackupInterface interf;
 	LogEpoch backupEpoch;
 
@@ -392,7 +392,7 @@ struct InitializeBackupReply {
 };
 
 struct InitializeBackupRequest {
-	constexpr static FileIdentifier file_identifier = 68354279;
+	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
 	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
@@ -617,6 +617,27 @@ struct EventLogRequest {
 	}
 };
 
+struct DebugEntryRef {
+	double time;
+	NetworkAddress address;
+	StringRef context;
+	Version version;
+	MutationRef mutation;
+	DebugEntryRef() {}
+	DebugEntryRef(const char* c, Version v, MutationRef const& m)
+	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
+	    address(g_network->getLocalAddress()) {}
+	DebugEntryRef(Arena& a, DebugEntryRef const& d)
+	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
+
+	size_t expectedSize() const { return context.expectedSize() + mutation.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, time, address, context, version, mutation);
+	}
+};
+
 struct DiskStoreRequest {
 	constexpr static FileIdentifier file_identifier = 1986262;
 	bool includePartialStores;
@@ -695,7 +716,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
                                  Reference<AsyncVar<ServerDBInfo>> db, std::string folder,
                                  Promise<Void> recovered,
                                  Reference<ClusterConnectionFile> connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);

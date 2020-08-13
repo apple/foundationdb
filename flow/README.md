@@ -335,7 +335,7 @@ you are holding the corresponding future.
     - Unions
     ```
     // Flow type
-    using T = boost::variant<A, B, C>;
+    using T = std::variant<A, B, C>;
 
     // IDL equivalent
     union T { A, B, C}
@@ -363,7 +363,7 @@ you are holding the corresponding future.
     - `scalar_traits` corresponds to a flatbuffers struct. See `UID` for an example.
     - `vector_like_traits` corresponds to a flatbuffers vector. See `VectorRef` for an example.
     - `dynamic_size_traits` corresponds to a flatbuffers vector of uint8_t. See `StringRef` for an example.
-    - `union_like_traits` corresponds to a flatbuffers union. See `boost::variant` for an example.
+    - `union_like_traits` corresponds to a flatbuffers union. See `std::variant` for an example.
 
 1. Potential Gotchas
     - Flatbuffers 'vtables' are collected from default-constructed instances of

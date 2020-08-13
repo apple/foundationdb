@@ -767,15 +767,16 @@ void MultiVersionDatabase::Connector::connect() {
 				}
 
 				tr = candidateDatabase->createTransaction();
-				return ErrorOr<ThreadFuture<Void>>(mapThreadFuture<Version, Void>(tr->getReadVersion(), [this](ErrorOr<Version> v) {
-					// If the version attempt returns an error, we regard that as a connection (except operation_cancelled)
-					if(v.isError() && v.getError().code() == error_code_operation_cancelled) {
-						return ErrorOr<Void>(v.getError());
-					}
-					else {
-						return ErrorOr<Void>(Void());
-					}
-				}));
+				return ErrorOr<ThreadFuture<Void>>(
+				    mapThreadFuture<Version, Void>(tr->getReadVersion(), [](ErrorOr<Version> v) {
+					    // If the version attempt returns an error, we regard that as a connection (except
+					    // operation_cancelled)
+					    if (v.isError() && v.getError().code() == error_code_operation_cancelled) {
+						    return ErrorOr<Void>(v.getError());
+					    } else {
+						    return ErrorOr<Void>(Void());
+					    }
+				    }));
 			});
 
 
@@ -1045,7 +1046,7 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 	}, NULL);
 
 	if(!bypassMultiClientApi) {
-		runOnExternalClients([this, versions](Reference<ClientInfo> client){
+		runOnExternalClients([versions](Reference<ClientInfo> client) {
 			client->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
 		});
 	}
@@ -1105,9 +1106,8 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 
 		if(!bypassMultiClientApi) {
 			if(networkSetup) {
-				runOnExternalClients([this, option, value](Reference<ClientInfo> client) {
-					client->api->setNetworkOption(option, value);
-				});
+				runOnExternalClients(
+				    [option, value](Reference<ClientInfo> client) { client->api->setNetworkOption(option, value); });
 			}
 			else {
 				options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
@@ -1378,7 +1378,7 @@ void ClientInfo::loadProtocolVersion() {
 	}
 
 	char *next;
-	std::string protocolVersionStr = ClientVersionRef(version).protocolVersion.toString();
+	std::string protocolVersionStr = ClientVersionRef(StringRef(version)).protocolVersion.toString();
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
 
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);

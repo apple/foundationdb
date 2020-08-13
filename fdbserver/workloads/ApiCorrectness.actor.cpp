@@ -27,15 +27,7 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 //An enum of API operation types used in the random test
-enum OperationType {
-	SET,
-	GET,
-	GET_RANGE,
-	GET_RANGE_SELECTOR,
-	GET_KEY,
-	CLEAR,
-	CLEAR_RANGE
-};
+enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE, UNINITIALIZED };
 
 //A workload that executes the NativeAPIs functions and verifies that their outcomes are correct
 struct ApiCorrectnessWorkload : ApiWorkload {
@@ -230,7 +222,7 @@ public:
 			int pdfArray[] = { 0, (int)(100 * setProbability), 100, 50, 50, 20, (int)(100 * (1 - setProbability)), (int)(10 * (1 - setProbability)) };
 			vector<int> pdf = vector<int>(pdfArray, pdfArray + 8);
 
-			OperationType operation;
+			OperationType operation = UNINITIALIZED;
 
 			//Choose a random operation type (SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE).
 			int totalDensity = 0;
@@ -247,6 +239,7 @@ public:
 
 				cumulativeDensity += pdf[i];
 			}
+			ASSERT(operation != UNINITIALIZED);
 
 			++self->numRandomOperations;
 
@@ -358,9 +351,8 @@ public:
 	//results were the same
 	ACTOR Future<bool> runGet(VectorRef<KeyValueRef> data, int numReads, ApiCorrectnessWorkload *self) {
 		//Generate a set of random keys to get
-		state Standalone<VectorRef<Key>> keys;
-		for(int i = 0; i < numReads; i++)
-			keys.push_back(keys.arena(), self->selectRandomKey(data, 0.9));
+		state Standalone<VectorRef<KeyRef>> keys;
+		for (int i = 0; i < numReads; i++) keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
 		state vector<Optional<Value>> values;
 
@@ -555,9 +547,9 @@ public:
 	//results were the same
 	ACTOR Future<bool> runGetKey(VectorRef<KeyValueRef> data, int numGetKeys, ApiCorrectnessWorkload *self) {
 		//Generate a set of random key selectors
-		state Standalone<VectorRef<KeySelector>> selectors;
+		state Standalone<VectorRef<KeySelectorRef>> selectors;
 		for(int i = 0; i < numGetKeys; i++)
-			selectors.push_back(selectors.arena(), self->generateKeySelector(data, 100));
+			selectors.push_back_deep(selectors.arena(), self->generateKeySelector(data, 100));
 
 		state Standalone<VectorRef<KeyRef>> keys;
 
@@ -641,9 +633,8 @@ public:
 	ACTOR Future<bool> runClear(VectorRef<KeyValueRef> data, int numClears, ApiCorrectnessWorkload *self)
 	{
 		//Generate a random set of keys to clear
-		state Standalone<VectorRef<Key>> keys;
-		for(int i = 0; i < numClears; i++)
-			keys.push_back(keys.arena(), self->selectRandomKey(data, 0.9));
+		state Standalone<VectorRef<KeyRef>> keys;
+		for (int i = 0; i < numClears; i++) keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
 		state int currentIndex = 0;
 		while(currentIndex < keys.size()) {

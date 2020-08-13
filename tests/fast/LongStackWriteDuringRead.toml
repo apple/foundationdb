@@ -1,0 +1,10 @@
+StderrSeverity = 30
+
+[[test]]
+testTitle = 'WriteDuringReadTest'
+
+    [[test.workload]]
+    testName = 'WriteDuringRead'
+    numOps = 10000
+    rarelyCommit = true
+    testDuration = 30

@@ -18,15 +18,21 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/serialize.h"
+#include <cstring>
 
 struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
-	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
+	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key		keyPrefix;
 
 	vector<Future<Void>> clients;
@@ -38,12 +44,13 @@ struct CycleWorkload : TestWorkload {
 		transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
 		tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed")
 	{
-		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
-		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
-		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), transactionsPerSecond * clientCount);
-		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
-		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.7);
+		testDuration = getOption( options, "testDuration"_sr, 10.0 );
+		transactionsPerSecond = getOption( options, "transactionsPerSecond"_sr, 5000.0 ) / clientCount;
+		actorCount = getOption( options, "actorsPerClient"_sr, transactionsPerSecond / 5 );
+		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
+		keyPrefix = unprintable( getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString() );
+		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
+		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
 
 	virtual std::string description() { return "CycleWorkload"; }
@@ -98,6 +105,12 @@ struct CycleWorkload : TestWorkload {
 				state double tstart = now();
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
+				if (deterministicRandom()->random01() >= self->traceParentProbability) {
+					state Span span("CycleClient"_loc);
+					TraceEvent("CycleTracingTransaction", span.context);
+					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
+					             BinaryWriter::toValue(span.context, Unversioned()));
+				}
 				while (true) {
 					try {
 						// Reverse next and next^2 node
@@ -115,9 +128,9 @@ struct CycleWorkload : TestWorkload {
 						tr.set( self->key(r), self->value(r3) );
 						tr.set( self->key(r2), self->value(r4) );
 						tr.set( self->key(r3), self->value(r2) );
-						//TraceEvent("CyclicTestMX1").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-						//TraceEvent("CyclicTestMX2").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-						//TraceEvent("CyclicTestMX3").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
 						wait( tr.commit() );
 						// TraceEvent("CycleCommit");
@@ -194,7 +207,10 @@ struct CycleWorkload : TestWorkload {
 	}
 	ACTOR Future<bool> cycleCheck( Database cx, CycleWorkload* self, bool ok ) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
-			TraceEvent(SevWarnAlways, "TestFailure").detail("Reason", "Rate below desired rate").detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
+			TraceEvent(SevWarnAlways, "TestFailure")
+				.detail("Reason", "Rate below desired rate")
+				.detail("File", __FILE__)
+				.detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
 				.detail("TransactionsAchieved", self->transactions.getMetric().value())
 				.detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 				.detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);

@@ -1,3 +1,0 @@
-testTitle=RYOW_test
-    testName=RandomSelector
-    maxKeySpace=3

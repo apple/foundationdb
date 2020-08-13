@@ -273,9 +273,10 @@ public:
 	static StringRef restoreStateText(ERestoreState id);
 
 	// parallel restore
-	Future<Void> parallelRestoreFinish(Database cx, UID randomUID);
+	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID);
+	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
+	                                   Key removePrefix);
 	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                   Key addPrefix, Key removePrefix);
 
@@ -418,7 +419,7 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false);
+	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false, bool dstOnly = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
@@ -495,6 +496,7 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version en
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
 Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr, Key logUidValue, Key destUidValue, Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
+Version getLogKeyVersion(Key key);
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
@@ -906,8 +908,8 @@ struct StringRefReader {
 
 	// Functions for consuming big endian (network byte order) integers.
 	// Consumes a big endian number, swaps it to little endian, and returns it.
-	const int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
-	const uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
+	int32_t consumeNetworkInt32() { return (int32_t)bigEndian32((uint32_t)consume<int32_t>()); }
+	uint32_t consumeNetworkUInt32() { return bigEndian32(consume<uint32_t>()); }
 
 	// Convert big Endian value (e.g., encoded in log file) into a littleEndian uint64_t value.
 	int64_t consumeNetworkInt64() { return (int64_t)bigEndian64((uint32_t)consume<int64_t>()); }
@@ -926,6 +928,13 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);
 }
+
+// For fast restore simulation test
+// For testing addPrefix feature in fast restore.
+// Transform db content in restoreRanges by removePrefix and then addPrefix.
+// Assume: DB is locked
+ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                             Key addPrefix, Key removePrefix);
 
 #include "flow/unactorcompiler.h"
 #endif

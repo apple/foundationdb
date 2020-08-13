@@ -107,7 +107,43 @@ private:
 	Promise<T> promise;
 };
 
-Reference<IThreadPool>	createGenericThreadPool();
+Reference<IThreadPool>	createGenericThreadPool(int stackSize = 0);
+
+class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
+public:
+	~DummyThreadPool() {}
+	DummyThreadPool() : thread(nullptr) {}
+	Future<Void> getError() {
+		return errors.getFuture();
+	}
+	void addThread( IThreadPoolReceiver* userData ) {
+		ASSERT( !thread );
+		thread = userData;
+	}
+	void post( PThreadAction action ) {
+		try {
+			(*action)( thread );
+		} catch (Error& e) {
+			errors.sendError( e );
+		} catch (...) {
+			errors.sendError( unknown_error() );
+		}
+	}
+	Future<Void> stop(Error const& e) {
+		return Void();
+	}
+	void addref() {
+		ReferenceCounted<DummyThreadPool>::addref();
+	}
+	void delref() {
+		ReferenceCounted<DummyThreadPool>::delref();
+	}
+
+private:
+	IThreadPoolReceiver* thread;
+	Promise<Void> errors;
+};
+
 
 
 #endif

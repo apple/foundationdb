@@ -138,7 +138,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 }
 
 // Save each tag's savedVersion for all epochs into "bStatus".
-ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus) {
+ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging) {
 	state Transaction tr(cx);
 
 	loop {
@@ -156,12 +156,14 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 				const UID workerID = decodeBackupProgressKey(it.key);
 				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
 				bStatus->addBackupStatus(status);
-				TraceEvent("GotBackupProgress", dbgid)
-				    .detail("BackupWorker", workerID)
-				    .detail("Epoch", status.epoch)
-				    .detail("Version", status.version)
-				    .detail("Tag", status.tag.toString())
-				    .detail("TotalTags", status.totalTags);
+				if (logging) {
+					TraceEvent("GotBackupProgress", dbgid)
+					    .detail("BackupWorker", workerID)
+					    .detail("Epoch", status.epoch)
+					    .detail("Version", status.version)
+					    .detail("Tag", status.tag.toString())
+					    .detail("TotalTags", status.totalTags);
+				}
 			}
 			return Void();
 		} catch (Error& e) {
@@ -182,7 +184,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
 
 	ASSERT(unfinished.size() == 1);
-	for (const auto [epochVersionCount, tagVersion] : unfinished) {
+	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
 		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
 		       std::get<2>(epochVersionCount) == 1);
 		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1);
@@ -193,7 +195,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	progress.addBackupStatus(status1);
 	unfinished = progress.getUnfinishedBackup();
 	ASSERT(unfinished.size() == 1);
-	for (const auto [epochVersionCount, tagVersion] : unfinished) {
+	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
 		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
 		       std::get<2>(epochVersionCount) == 1);
 		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == saved1 + 1);

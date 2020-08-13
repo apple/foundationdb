@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'RYOW_test'
+
+    [[test.workload]]
+    testName = 'RandomSelector'
+    maxKeySpace = 3

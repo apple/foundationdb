@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'WatchesTest'
+
+    [[test.workload]]
+    testName = 'Watches'

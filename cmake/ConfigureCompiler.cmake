@@ -4,6 +4,7 @@ env_set(USE_GPERFTOOLS OFF BOOL "Use gperfools for profiling")
 env_set(USE_DTRACE ON BOOL "Enable dtrace probes on supported platforms")
 env_set(USE_VALGRIND OFF BOOL "Compile for valgrind usage")
 env_set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} BOOL "Use valgrind for ctest")
+env_set(VALGRIND_ARENA OFF BOOL "Inform valgrind about arena-allocated memory. Makes valgrind slower but more precise.")
 env_set(ALLOC_INSTRUMENTATION OFF BOOL "Instrument alloc")
 env_set(WITH_UNDODB OFF BOOL "Use rr or undodb")
 env_set(USE_ASAN OFF BOOL "Compile with address sanitizer")
@@ -212,11 +213,21 @@ else()
   # Tentatively re-enabling vector instructions
   set(USE_AVX512F OFF CACHE BOOL "Enable AVX 512F instructions")
   if (USE_AVX512F)
-    add_compile_options(-mavx512f)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx512f)
+    else()
+      message(STATUS "USE_AVX512F is supported on x86 or x86_64 only")
+      set(USE_AVX512F OFF)
+    endif()
   endif()
   set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
   if (USE_AVX)
-    add_compile_options(-mavx)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx)
+    else()
+      message(STATUS "USE_AVX is supported on x86 or x86_64 only")
+      set(USE_AVX OFF)
+    endif()
   endif()
 
   # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
@@ -229,7 +240,10 @@ else()
   #add_compile_options(-fno-builtin-memcpy)
 
   if (USE_VALGRIND)
-    add_compile_options(-DVALGRIND -DUSE_VALGRIND)
+    add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
+  endif()
+  if (VALGRIND_ARENA)
+    add_compile_options(-DVALGRIND_ARENA=1)
   endif()
   if (CLANG)
     add_compile_options()
@@ -252,16 +266,32 @@ else()
         -Wno-unknown-attributes)
     endif()
     add_compile_options(
-      -Wno-unknown-warning-option
-      -Wno-dangling-else
-      -Wno-sign-compare
+      -Wall -Wextra
+      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
       -Wno-comment
-      -Wno-unknown-pragmas
+      -Wno-dangling-else
       -Wno-delete-non-virtual-dtor
+      -Wno-format
+      -Wno-mismatched-tags
+      -Wno-missing-field-initializers
+      -Wno-overloaded-virtual
+      -Wno-reorder
+      -Wno-reorder-ctor
+      -Wno-sign-compare
+      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
-      -Wno-format
-      -Woverloaded-virtual)
+      -Wredundant-move
+      -Wpessimizing-move
+      -Woverloaded-virtual
+      -Wno-unknown-pragmas
+      -Wno-unknown-warning-option
+      -Wno-unused-function
+      -Wno-unused-local-typedef
+      -Wno-unused-parameter
+      -Wno-unused-value
+      -Wno-self-assign
+      )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
@@ -286,7 +316,9 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
+  endif()
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(
       -fno-builtin-malloc
@@ -325,3 +357,4 @@ else()
     endif()
   endif()
 endif()
+

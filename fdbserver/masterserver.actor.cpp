@@ -18,31 +18,34 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbrpc/PerfMetric.h"
-#include "flow/Trace.h"
-#include "fdbrpc/FailureMonitor.h"
+#include <iterator>
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/Knobs.h"
-#include <iterator>
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/PerfMetric.h"
+#include "fdbrpc/sim_validation.h"
+#include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"  // copy constructors for ServerCoordinators class
-#include "fdbrpc/sim_validation.h"
 #include "fdbserver/DBCoreState.h"
+#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/ApplyMetadataMutation.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Trace.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
@@ -405,17 +408,23 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 }
 
 Future<Void> waitProxyFailure( vector<MasterProxyInterface> const& proxies ) {
-	vector<Future<Void>> failed;
-	for(int i=0; i<proxies.size(); i++)
-		failed.push_back( waitFailureClient( proxies[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+	std::vector<Future<Void>> failed;
+	for (auto proxy : proxies) {
+		failed.push_back(waitFailureClient(proxy.waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                                   /*trace=*/true));
+	}
 	ASSERT( failed.size() >= 1 );
 	return tagError<Void>(quorum( failed, 1 ), master_proxy_failed());
 }
 
 Future<Void> waitResolverFailure( vector<ResolverInterface> const& resolvers ) {
-	vector<Future<Void>> failed;
-	for(int i=0; i<resolvers.size(); i++)
-		failed.push_back( waitFailureClient( resolvers[i].waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+	std::vector<Future<Void>> failed;
+	for (auto resolver : resolvers) {
+		failed.push_back(waitFailureClient(resolver.waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
+		                                   /*trace=*/true));
+	}
 	ASSERT( failed.size() >= 1 );
 	return tagError<Void>(quorum( failed, 1 ), master_resolver_failed());
 }
@@ -921,6 +930,7 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 }
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+	state Span span("M:getVersion"_loc, { req.spanContext });
 	state std::map<UID, ProxyVersionReplies>::iterator proxyItr = self->lastProxyVersionReplies.find(req.requestingProxy); // lastProxyVersionReplies never changes
 
 	if (proxyItr == self->lastProxyVersionReplies.end()) {
@@ -1324,7 +1334,7 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<MasterData> self, Datab
 	state LogEpoch epoch = self->cstate.myDBState.recoveryCount;
 	state Reference<BackupProgress> backupProgress(
 	    new BackupProgress(self->dbgid, self->logSystem->getOldEpochTagsVersionsInfo()));
-	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress);
+	state Future<Void> gotProgress = getBackupProgress(cx, self->dbgid, backupProgress, /*logging=*/true);
 	state std::vector<Future<InitializeBackupReply>> initializationReplies;
 
 	state std::vector<std::pair<UID, Tag>> idsTags; // worker IDs and tags for current epoch
@@ -1554,7 +1564,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		}
 	}
 
-	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, nullptr, nullptr);
+	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()),
+	                       self->txnStateStore);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion;  // lastEpochEnd would make more sense, but isn't in the initial window of the resolver(s)
@@ -1643,8 +1654,19 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, ServerCoordinators coordinators, LifetimeToken lifetime, bool forceRecovery )
+ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, ServerCoordinators coordinators, LifetimeToken lifetime, bool forceRecovery )
 {
+	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
+	while(!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
+		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
+		if(ccTimeout.isReady()) {
+			TraceEvent("MasterTerminated", mi.id()).detail("Reason", "Timeout")
+			  .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
+			  .detail("DBInfoInterface", db->get().clusterInterface.id());
+			return Void();
+		}
+	}
+	
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
 	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery ) );

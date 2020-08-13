@@ -32,7 +32,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbclient/TagThrottle.h"
 
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
 struct MasterProxyInterface {
@@ -50,7 +50,6 @@ struct MasterProxyInterface {
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
@@ -71,12 +70,11 @@ struct MasterProxyInterface {
 			getKeyServersLocations = RequestStream< struct GetKeyServerLocationsRequest >( commit.getEndpoint().getAdjustedEndpoint(2) );
 			getStorageServerRejoinInfo = RequestStream< struct GetStorageServerRejoinInfoRequest >( commit.getEndpoint().getAdjustedEndpoint(3) );
 			waitFailure = RequestStream<ReplyPromise<Void>>( commit.getEndpoint().getAdjustedEndpoint(4) );
-			getRawCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( commit.getEndpoint().getAdjustedEndpoint(5) );
-			txnState = RequestStream< struct TxnStateRequest >( commit.getEndpoint().getAdjustedEndpoint(6) );
-			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
-			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
-			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
-			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(10) );
+			txnState = RequestStream< struct TxnStateRequest >( commit.getEndpoint().getAdjustedEndpoint(5) );
+			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(6) );
+			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
+			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
+			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
 		}
 	}
 
@@ -87,7 +85,6 @@ struct MasterProxyInterface {
 		streams.push_back(getKeyServersLocations.getReceiver(TaskPriority::ReadSocket)); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
 		streams.push_back(getStorageServerRejoinInfo.getReceiver(TaskPriority::ProxyStorageRejoin));
 		streams.push_back(waitFailure.getReceiver());
-		streams.push_back(getRawCommittedVersion.getReceiver(TaskPriority::ProxyGetRawCommittedVersion));
 		streams.push_back(txnState.getReceiver());
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(proxySnapReq.getReceiver());
@@ -153,16 +150,19 @@ struct CommitTransactionRequest : TimedRequest {
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
 	
 	Arena arena;
+	SpanID spanContext;
 	CommitTransactionRef transaction;
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
+	Optional<TransactionCommitCostEstimation> commitCostEstimation;
+	Optional<TagSet> tagSet;
 
 	CommitTransactionRequest() : flags(0) {}
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID);
+		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext);
 	}
 };
 
@@ -209,6 +209,7 @@ struct GetReadVersionRequest : TimedRequest {
 		FLAG_PRIORITY_MASK = PRIORITY_SYSTEM_IMMEDIATE,
 	};
 
+	SpanID spanContext;
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
@@ -219,9 +220,11 @@ struct GetReadVersionRequest : TimedRequest {
 	ReplyPromise<GetReadVersionReply> reply;
 
 	GetReadVersionRequest() : transactionCount(1), flags(0) {}
-	GetReadVersionRequest(uint32_t transactionCount, TransactionPriority priority, uint32_t flags = 0, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(), Optional<UID> debugID = Optional<UID>()) 
-	    : transactionCount(transactionCount), priority(priority), flags(flags), tags(tags), debugID(debugID) 
-	{
+	GetReadVersionRequest(SpanID spanContext, uint32_t transactionCount, TransactionPriority priority,
+	                      uint32_t flags = 0, TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
+	                      Optional<UID> debugID = Optional<UID>())
+	  : spanContext(spanContext), transactionCount(transactionCount), priority(priority), flags(flags), tags(tags),
+	    debugID(debugID) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch(priority) {
 			case TransactionPriority::BATCH:
@@ -237,12 +240,12 @@ struct GetReadVersionRequest : TimedRequest {
 				ASSERT(false);
 		}
 	}
-	
+
 	bool operator < (GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		serializer(ar, transactionCount, flags, tags, debugID, reply);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
 
 		if(ar.isDeserializing) {
 			if((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
@@ -275,6 +278,7 @@ struct GetKeyServerLocationsReply {
 struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
+	SpanID spanContext;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
@@ -282,24 +286,28 @@ struct GetKeyServerLocationsRequest {
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
-	GetKeyServerLocationsRequest( KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse, Arena const& arena ) : begin( begin ), end( end ), limit( limit ), reverse( reverse ), arena( arena ) {}
-	
-	template <class Ar> 
+	GetKeyServerLocationsRequest(SpanID spanContext, KeyRef const& begin, Optional<KeyRef> const& end, int limit,
+	                             bool reverse, Arena const& arena)
+	  : spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse), arena(arena) {}
+
+	template <class Ar>
 	void serialize(Ar& ar) { 
-		serializer(ar, begin, end, limit, reverse, reply, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, arena);
 	}
 };
 
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
+	SpanID spanContext;
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	explicit GetRawCommittedVersionRequest(Optional<UID> const& debugID = Optional<UID>()) : debugID(debugID) {}
+	explicit GetRawCommittedVersionRequest(SpanID spanContext, Optional<UID> const& debugID = Optional<UID>()) : spanContext(spanContext), debugID(debugID) {}
+	explicit GetRawCommittedVersionRequest() : spanContext(), debugID() {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, debugID, reply);
+		serializer(ar, debugID, reply, spanContext);
 	}
 };
 
@@ -422,9 +430,9 @@ struct GetDDMetricsRequest {
 
 struct ProxySnapRequest
 {
-	constexpr static FileIdentifier file_identifier = 22204900;
+	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
-	StringRef snapPayload;
+	StringRef snapPayload; // command used to snapshot the data folder
 	UID snapUID;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;

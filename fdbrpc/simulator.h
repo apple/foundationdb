@@ -114,7 +114,7 @@ public:
 			return listener->second;
 		}
 
-		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
+		inline flowGlobalType global(int id) const { return (globals.size() > id) ? globals[id] : nullptr; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
@@ -143,6 +143,8 @@ public:
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
+	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
+	// onProcess: wait for the process to be scheduled by the runloop; a task will be created for the process.
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
@@ -313,7 +315,7 @@ public:
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 
-	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
+	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
 	virtual void disableFor(const std::string& desc, double time) {

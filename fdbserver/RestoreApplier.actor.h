@@ -28,12 +28,12 @@
 #define FDBSERVER_RESTORE_APPLIER_H
 
 #include <sstream>
-#include "flow/Stats.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -250,20 +250,30 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	RoleVersionBatchState vbState;
 
+	long receiveMutationReqs;
+
+	// Stats
+	long receivedBytes;
+	long appliedBytes;
+
 	// Status counters
 	struct Counters {
 		CounterCollection cc;
 		Counter receivedBytes, receivedWeightedBytes, receivedMutations, receivedAtomicOps;
-		Counter appliedWeightedBytes, appliedMutations, appliedAtomicOps;
-		Counter appliedTxns;
-		Counter fetchKeys; // number of keys to fetch from dest. FDB cluster.
+		Counter appliedBytes, appliedWeightedBytes, appliedMutations, appliedAtomicOps;
+		Counter appliedTxns, appliedTxnRetries;
+		Counter fetchKeys, fetchTxns, fetchTxnRetries; // number of keys to fetch from dest. FDB cluster.
+		Counter clearOps, clearTxns;
 
 		Counters(ApplierBatchData* self, UID applierInterfID, int batchIndex)
 		  : cc("ApplierBatch", applierInterfID.toString() + ":" + std::to_string(batchIndex)),
 		    receivedBytes("ReceivedBytes", cc), receivedMutations("ReceivedMutations", cc),
 		    receivedAtomicOps("ReceivedAtomicOps", cc), receivedWeightedBytes("ReceivedWeightedMutations", cc),
-		    appliedWeightedBytes("AppliedWeightedBytes", cc), appliedMutations("AppliedMutations", cc),
-		    appliedAtomicOps("AppliedAtomicOps", cc), appliedTxns("AppliedTxns", cc), fetchKeys("FetchKeys", cc) {}
+		    appliedBytes("AppliedBytes", cc), appliedWeightedBytes("AppliedWeightedBytes", cc),
+		    appliedMutations("AppliedMutations", cc), appliedAtomicOps("AppliedAtomicOps", cc),
+		    appliedTxns("AppliedTxns", cc), appliedTxnRetries("AppliedTxnRetries", cc), fetchKeys("FetchKeys", cc),
+		    fetchTxns("FetchTxns", cc), fetchTxnRetries("FetchTxnRetries", cc), clearOps("ClearOps", cc),
+		    clearTxns("ClearTxns", cc) {}
 	} counters;
 
 	void addref() { return ReferenceCounted<ApplierBatchData>::addref(); }
@@ -271,7 +281,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
-	    vbState(ApplierVersionBatchState::NOT_INIT) {
+	    vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
 		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
@@ -365,7 +375,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	// even when no version batch has been started.
 	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
-		if (item == batch.end()) { // Simply caller's effort in when it can call this func.
+		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return ApplierVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();

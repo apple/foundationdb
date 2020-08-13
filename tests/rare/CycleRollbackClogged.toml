@@ -1,0 +1,27 @@
+[[test]]
+testTitle = 'RollbackCycleTest'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 30.0
+    meanDelay = 10
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+    scale = 0.1
+    clogginess = 2.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    testDuration = 30.0
