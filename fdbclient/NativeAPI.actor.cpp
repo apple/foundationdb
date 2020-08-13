@@ -3351,7 +3351,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			if (info.debugID.present()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
 					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().first());
+					.detail("ServerTraceID", info.debugID.get());
 
 			}
 			break;
@@ -3387,7 +3387,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			if (trLogInfo && !trLogInfo->identifier.empty()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
 					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().first());
+					.detail("ServerTraceID", info.debugID.get());
 			}
 			break;
 
