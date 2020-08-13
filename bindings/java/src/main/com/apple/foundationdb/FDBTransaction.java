@@ -25,6 +25,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.nio.ByteBuffer;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
@@ -86,7 +87,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 				int limit, boolean reverse, StreamingMode mode) {
-			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode);
+			return new DirectRangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode);
 		}
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -288,7 +289,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode) {
-		return new RangeQuery(this, false, begin, end, limit, reverse, mode);
+		return new DirectRangeQuery(this, false, begin, end, limit, reverse, mode);
 	}
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -373,6 +374,25 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
 					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
 					streamingMode, iteration, isSnapshot, reverse), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	// Users of this function must close the returned FutureResults when finished
+	protected void getDirectRange_internal(
+		DirectBufferIterator iterator,
+		KeySelector begin, KeySelector end,
+		int rowLimit, int targetBytes, int streamingMode,
+		int iteration, boolean isSnapshot, boolean reverse) {
+
+		pointerReadLock.lock();
+		try {
+			iterator.prepareRequest(begin.getKey(), begin.orEqual(), begin.getOffset(),
+									end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
+									streamingMode, iteration, isSnapshot, reverse);
+			Transaction_getDirectRange(getPtr(), iterator.getBuffer(), iterator.getBuffer().capacity());
+			iterator.readSummary();
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -667,6 +687,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			byte[] keyEnd, boolean orEqualEnd, int offsetEnd,
 			int rowLimit, int targetBytes, int streamingMode, int iteration,
 			boolean isSnapshot, boolean reverse);
+	private native void Transaction_getDirectRange(long cPtr, ByteBuffer jbuffer, int bufferCapacity);
 	private native void Transaction_addConflictRange(long cPtr,
 			byte[] keyBegin, byte[] keyEnd, int conflictRangeType);
 	private native void Transaction_set(long cPtr, byte[] key, byte[] value);
