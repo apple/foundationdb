@@ -373,6 +373,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
 		writeThread->post(a);
+		threadYield();
 		return res;
 	}
 
@@ -380,6 +381,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Reader::ReadValueAction(key, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
+		threadYield();
 		return res;
 	}
 
@@ -387,6 +389,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
+		threadYield();
 		return res;
 	}
 
@@ -394,6 +397,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 		auto res = a->result.getFuture();
 		readThreads->post(a);
+		threadYield();
 		return res;
 	}
 
