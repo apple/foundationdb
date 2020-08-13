@@ -225,9 +225,8 @@ private:
 
 		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to m_error
 		// Also, hold a releaser for the concurrent upload slot while all that is going on.
-		f->m_parts.back()->etag = holdWhile(std::shared_ptr<FlowLock::Releaser>(new FlowLock::Releaser(f->m_concurrentUploads, 1)),
-									joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error)
-								  );
+		f->m_parts.back()->etag = holdWhile(std::make_shared<FlowLock::Releaser>(f->m_concurrentUploads, 1),
+		                                    joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error));
 
 		// Make a new part to write to
 		if(startNew)
