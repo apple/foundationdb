@@ -337,7 +337,7 @@ public:
 		return u;
 	}
 
-	MutationRef addMutationToMutationLog(Standalone<VersionUpdateRef> &mLV, MutationRef const& m){
+	MutationRef addMutationToMutationLog(Standalone<VerUpdateRef> &mLV, MutationRef const& m){
 		//TraceEvent(SevDebug, "AddMutationToMutationLog")
 		//	.detail("Key", m.param1)
 		//	.detail("Value",m.param2);
@@ -1797,7 +1797,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			start = now();
 			wait( data->updateVersionLock.take(TaskPriority::TLogPeekReply,1) );
-			state FlowLock::Releaser holdingDVL( data->updateVersionLock );
+			// state FlowLock::Releaser holdingDVL( data->updateVersionLock );
 			if(now() - start > 0.1)
 				TraceEvent("SCSlowTakeLock1", data->thisServerID).detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken).detail("Duration", now() - start).detail("Version", data->version.get());
 
