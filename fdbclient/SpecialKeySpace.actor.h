@@ -67,9 +67,15 @@ private:
 
 class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {
 public:
-	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) = 0;
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) = 0;
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) = 0;
+	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
+	}
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+		ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
+	}
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+	}
 	virtual Future<Optional<std::string>> commit(
 	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 	// Given the special key to write, return the real key that needs to be modified
@@ -125,6 +131,7 @@ class SpecialKeySpace {
 public:
 	enum class MODULE {
 		CLUSTERFILEPATH,
+		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
 		MANAGEMENT, // Management-API
@@ -271,6 +278,15 @@ class ExclusionInProgressRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit ExclusionInProgressRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class ProcessClassRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ProcessClassRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Key decode(const KeyRef& key) const override { return Key(); }
+	Key encode(const KeyRef& key) const override { return Key(); }
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
 #include "flow/unactorcompiler.h"

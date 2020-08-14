@@ -36,7 +36,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
 	{ SpecialKeySpace::MODULE::MANAGEMENT,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/management/"), LiteralStringRef("\xff\xff/management0")) },
-	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) }
+	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) },
+	{ SpecialKeySpace::MODULE::CONFIGURATION,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -587,6 +589,46 @@ Future<Optional<std::string>> ManagementCommandsOptionsImpl::commit(ReadYourWrit
 	return Optional<std::string>();
 }
 
+Standalone<RangeResultRef> rywModuleGetRange(ReadYourWritesTransaction* ryw, Standalone<RangeResultRef>* res,
+                                             KeyRangeRef kr) {
+	// res is read from database, if ryw enabled, we update it with writes in the transaction
+	if (ryw->readYourWritesDisabled()) {
+		return *res;
+	} else {
+		Standalone<RangeResultRef> result;
+		result.arena().dependsOn(res->arena());
+		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+		    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
+		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+		int index = 0;
+		while (iter != ranges.end()) {
+			// add all previous entries into result
+			KeyRef rk = (*res)[index].key;
+			while (index < res->size() && rk < iter->begin()) {
+				result.push_back(result.arena(), KeyValueRef(rk, (*res)[index].value));
+				++index;
+			}
+			std::pair<bool, Optional<Value>> entry = iter->value();
+			if (entry.first) {
+				// add the writen entries if exists
+				if (entry.second.present()) {
+					result.push_back(result.arena(), KeyValueRef(iter->begin(), entry.second.get()));
+				}
+				// move index to skip all entries in the iter->range
+				while (index < res->size() && iter->range().contains((*res)[index].key)) ++index;
+			}
+			++iter;
+		}
+		// add all remaining entries into result
+		while (index < res->size()) {
+			const KeyValueRef& kv = (*res)[index];
+			result.push_back(result.arena(), KeyValueRef(kv.key, kv.value));
+			++index;
+		}
+		return result;
+	}
+}
+
 // read from rwModule
 ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTransaction* ryw,
                                                                const SpecialKeyRangeRWImpl* impl, KeyRangeRef kr) {
@@ -671,7 +713,7 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, bool failed, std::
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
 		// only check for exclude(set) operation, include(clear) are not checked
-		TraceEvent(SevInfo, "ParseNetworkAddress")
+		TraceEvent(SevInfo, "ParseNetworkAddress") // TODO : change to SevDebug
 		    .detail("Valid", entry.first)
 		    .detail("Set", entry.second.present())
 		    .detail("Key", iter->begin().toString());
@@ -958,4 +1000,81 @@ ExclusionInProgressRangeImpl::ExclusionInProgressRangeImpl(KeyRangeRef kr) : Spe
 Future<Standalone<RangeResultRef>> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                           KeyRangeRef kr) const {
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
+}
+
+ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
+                                                              KeyRangeRef kr) {
+	state Future<Standalone<RangeResultRef>> processClasses = ryw->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<Standalone<RangeResultRef>> processData = ryw->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+	wait(success(processClasses) && success(processData));
+	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
+	for (int i = 0; i < processClasses.get().size(); i++) {
+		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
+		    decodeProcessClassValue(processClasses.get()[i].value);
+	}
+
+	Standalone<RangeResultRef> result;
+
+	for (int i = 0; i < processData.get().size(); i++) {
+		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+		ProcessClass processClass = id_class[data.locality.processId()];
+
+		if (processClass.classSource() == ProcessClass::DBSource ||
+		    data.processClass.classType() == ProcessClass::UnsetClass)
+			data.processClass = processClass;
+
+		if (data.processClass.classType() != ProcessClass::TesterClass) {
+			result.push_back_deep(result.arena(), KeyValueRef(prefix.withSuffix(data.address.toString()),
+			                                                  Value(data.processClass.toString())));
+		}
+	}
+	return rywModuleGetRange(ryw, &result, kr);
+}
+
+ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef range) {
+	state Optional<std::string> result;
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
+	auto iter = ranges.begin();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		// only check for setclass(set) operation, (clear) are not checked
+		if (entry.first && entry.second.present()) {
+			// validate network address
+			Key address = iter->begin().removePrefix(range.begin);
+			auto a = AddressExclusion::parse(address);
+			if (!a.isValid()) {
+				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
+				if (address.toString().find(":tls") != std::string::npos)
+					error += "        Do not include the `:tls' suffix when naming a process\n";
+				result = ManagementAPIError::toJsonString(false, "setclass", error);
+				return result;
+			}
+			// validate class type
+			ValueRef processClassType = entry.second.get();
+			ProcessClass processClass(processClassType.toString(), ProcessClass::DBSource);
+			if (processClass.classType() == ProcessClass::InvalidClass &&
+			    processClassType != LiteralStringRef("default")) {
+				std::string error = "ERROR: \'" + processClassType.toString() + "\' is not a valid process class\n";
+				result = ManagementAPIError::toJsonString(false, "setclass", error);
+				return result;
+			}
+		}
+		++iter;
+	}
+	return result;
+}
+
+ProcessClassRangeImpl::ProcessClassRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> ProcessClassRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                   KeyRangeRef kr) const {
+	return getProcessClassActor(ryw, getKeyRange().begin, kr);
+}
+
+Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	return processClassCommitActor(ryw, getKeyRange());
 }
