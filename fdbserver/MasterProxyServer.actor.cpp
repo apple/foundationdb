@@ -427,8 +427,8 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 				when(wait(nextRequestTimer)) {
 					nextRequestTimer = Never();
 					if(db->get().distributor.present()) {
-						nextReply = db->get().distributor.get().dataDistributorMetrics.getReply(
-						    GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true));
+						nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
+						    GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true)));
 					} else nextReply = Never();
 				}
 				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
@@ -439,9 +439,9 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 				}
 			}
 		} catch (Error& e) {
-			if(e.code() == error_code_actor_cancelled)
-				throw ;
 			TraceEvent("DDMidShardSizeUpdateFail").error(e);
+			if(e.code() != error_code_timed_out)
+				throw ;
 			nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
 			nextReply = Never();
 		}
@@ -1666,7 +1666,7 @@ ACTOR static Future<Void> transactionStarter(
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
 	// FIXME: There's weird RYWIterator reference problem occurs
-	// addActor.send(monitorDDMetricsChanges(&midShardSize, db));
+	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
@@ -1951,7 +1951,7 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
 				if(!db->get().distributor.present()) {
-					req.reply.sendError(operation_failed());
+					req.reply.sendError(dd_not_found());
 					continue;
 				}
 				ErrorOr<GetDataDistributorMetricsReply> reply =
@@ -2088,7 +2088,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		// send a snap request to DD
 		if (!commitData->db->get().distributor.present()) {
 			TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
-			throw operation_failed();
+			throw dd_not_found();
 		}
 		state Future<ErrorOr<Void>> ddSnapReq =
 			commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));

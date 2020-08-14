@@ -1101,11 +1101,11 @@ Future<Void> DatabaseContext::onMasterProxiesChanged() {
 	return this->masterProxiesChangeTrigger.onTrigger();
 }
 
-bool DatabaseContext::sampleReadTags() {
+bool DatabaseContext::sampleReadTags() const {
 	return clientInfo->get().transactionTagSampleRate > 0 && deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
 }
 
-bool DatabaseContext::sampleOnCost(uint64_t cost) {
+bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 	if(clientInfo->get().transactionTagSampleCost <= 0) return false;
 	return deterministicRandom()->random01() <= (double)cost / clientInfo->get().transactionTagSampleCost;
 }
@@ -3020,7 +3020,6 @@ void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
 	data[key.size()] = 0;
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, KeyRef(data, key.size()),
 	                         KeyRef(data, key.size() + 1));
-	t.mutations.back().clearSingleKey = true;
 	if(addConflictRange)
 		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
@@ -3304,7 +3303,7 @@ void Transaction::setupWatches() {
 }
 
 ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
-                                                                         CommitTransactionRef* transaction) {
+                                                                         CommitTransactionRef const * transaction) {
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRange keyRange;
 	state int i = 0;
@@ -3315,10 +3314,6 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 			trCommitCosts.writeCosts += getOperationCost(it->expectedSize());
 		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
-			if(it->clearSingleKey) {
-				trCommitCosts.clearIdxCosts.emplace(i, getOperationCost(it->expectedSize()));
-				continue;
-			}
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(self->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
@@ -3380,7 +3375,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		if(req.tagSet.present() && tr->options.priority == TransactionPriority::DEFAULT){
+		if(req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE){
 			wait(store(req.transaction.read_snapshot, readVersion) &&
 			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
 			if (!req.commitCostEstimation.present()) req.tagSet.reset();

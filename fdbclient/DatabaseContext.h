@@ -160,8 +160,8 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	bool sampleReadTags();
-	bool sampleOnCost(uint64_t cost);
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);

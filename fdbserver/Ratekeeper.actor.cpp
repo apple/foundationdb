@@ -1267,7 +1267,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	}
 }
 
-void updateCommitCostEstimation(RatekeeperData* self, UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
+static void updateCommitCostEstimation(RatekeeperData* self, UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation) {
 	for(auto it = self->storageQueueInfo.begin(); it != self->storageQueueInfo.end(); ++ it) {
 		auto tagCostIt = costEstimation.find(it->key);
 		if(tagCostIt == costEstimation.end()) continue;
