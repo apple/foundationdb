@@ -570,7 +570,7 @@ struct RatekeeperData {
 	    smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-	    throttledTagChangeId(0), lastBusiestCommitTagPick(now()),
+	    throttledTagChangeId(0), lastBusiestCommitTagPick(0),
 	    normalLimits(TransactionPriority::DEFAULT, "", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
 	                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER, SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
 	                 SERVER_KNOBS->SPRING_BYTES_TLOG, SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
@@ -846,8 +846,11 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 }
 
 Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
+	if(self->lastBusiestCommitTagPick == 0) { // the first call should be skipped
+		self->lastBusiestCommitTagPick = now();
+		return Void();
+	}
 	double elapsed = now() - self->lastBusiestCommitTagPick;
-	if(elapsed <= 0) return Void();
 	// for each SS, select the busiest commit tag from ssTagCommitCost
 	for(auto it = self->storageQueueInfo.begin(); it != self->storageQueueInfo.end(); ++it) {
 		it->value.busiestWriteTag.reset();
