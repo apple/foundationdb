@@ -583,7 +583,7 @@ Clients should also specify their datacenter with the database option ``datacent
 Changing the region configuration
 ---------------------------------
 
-To change the region configure, use the ``fileconfigure`` command ``fdbcli``. For example::
+To change the region configuration, use the ``fileconfigure`` command ``fdbcli``. For example::
 
     user@host$ fdbcli
     Using cluster file `/etc/foundationdb/fdb.cluster'.

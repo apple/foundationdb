@@ -266,7 +266,7 @@ public:
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
-	Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(KeyRange const& keys);
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]

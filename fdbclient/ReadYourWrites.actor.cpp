@@ -1391,7 +1391,7 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 	return result;
 }
 
-Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRange& keys) {
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();
 	}
@@ -1401,7 +1401,7 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
 }
 
-Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(const KeyRange& range,
                                                                                      int64_t chunkSize) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();
