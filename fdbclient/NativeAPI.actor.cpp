@@ -847,7 +847,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
   : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
     apiVersion(apiVersion), switchable(switchable), provisional(false), cc("TransactionMetrics"),
-    transactionReadVersions("ReadVersions", cc), 
+    transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -995,17 +995,17 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 }
 
 DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
-	transactionReadVersionsCompleted("ReadVersionsCompleted", cc), transactionReadVersionBatches("ReadVersionBatches", cc), transactionBatchReadVersions("BatchPriorityReadVersions", cc), 
-	transactionDefaultReadVersions("DefaultPriorityReadVersions", cc), transactionImmediateReadVersions("ImmediatePriorityReadVersions", cc), 
-	transactionBatchReadVersionsCompleted("BatchPriorityReadVersionsCompleted", cc), transactionDefaultReadVersionsCompleted("DefaultPriorityReadVersionsCompleted", cc), 
-	transactionImmediateReadVersionsCompleted("ImmediatePriorityReadVersionsCompleted", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc), 
-	transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc), transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc), 
-	transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc), transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), 
-	transactionBytesRead("BytesRead", cc), transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc), transactionCommittedMutations("CommittedMutations", cc), 
-	transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionSetMutations("SetMutations", cc), transactionClearMutations("ClearMutations", cc), 
-	transactionAtomicMutations("AtomicMutations", cc), transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc), 
-	transactionKeyServerLocationRequests("KeyServerLocationRequests", cc), transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc), transactionsTooOld("TooOld", cc), 
-	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc), 
+	transactionReadVersionsCompleted("ReadVersionsCompleted", cc), transactionReadVersionBatches("ReadVersionBatches", cc), transactionBatchReadVersions("BatchPriorityReadVersions", cc),
+	transactionDefaultReadVersions("DefaultPriorityReadVersions", cc), transactionImmediateReadVersions("ImmediatePriorityReadVersions", cc),
+	transactionBatchReadVersionsCompleted("BatchPriorityReadVersionsCompleted", cc), transactionDefaultReadVersionsCompleted("DefaultPriorityReadVersionsCompleted", cc),
+	transactionImmediateReadVersionsCompleted("ImmediatePriorityReadVersionsCompleted", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
+	transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc), transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
+	transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc), transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc),
+	transactionBytesRead("BytesRead", cc), transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc), transactionCommittedMutations("CommittedMutations", cc),
+	transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionSetMutations("SetMutations", cc), transactionClearMutations("ClearMutations", cc),
+	transactionAtomicMutations("AtomicMutations", cc), transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
+	transactionKeyServerLocationRequests("KeyServerLocationRequests", cc), transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc), transactionsTooOld("TooOld", cc),
+	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
 	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
 	smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
@@ -2334,7 +2334,7 @@ void getRangeFinished(Database cx, Reference<TransactionLogInfo> trLogInfo, doub
 
 	cx->transactionBytesRead += bytes;
 	cx->transactionKeysRead += result.size();
-	
+
 	if( trLogInfo ) {
 		trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 	}
@@ -2604,11 +2604,11 @@ Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version>
 }
 
 bool DatabaseContext::debugUseTags = false;
-const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" }; 
+const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
 
 void debugAddTags(Transaction *tr) {
 	int numTags = deterministicRandom()->randomInt(0, CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION+1);
-	for(int i = 0; i < numTags; ++i) { 
+	for(int i = 0; i < numTags; ++i) {
 		TransactionTag tag;
 		if(deterministicRandom()->random01() < 0.7) {
 			tag = TransactionTagRef(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
@@ -3711,7 +3711,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			if (info.debugID.present()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
 					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().toString());
+					.detail("ServerTraceID", info.debugID.get().first());
 
 			}
 			break;
@@ -3747,7 +3747,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			if (trLogInfo && !trLogInfo->identifier.empty()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
 					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().toString());
+					.detail("ServerTraceID", info.debugID.get().first());
 			}
 			break;
 
@@ -4013,7 +4013,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			case TransactionPriority::DEFAULT:
 				flags |= GetReadVersionRequest::PRIORITY_DEFAULT;
 				++cx->transactionDefaultReadVersions;
-				break;	
+				break;
 			case TransactionPriority::BATCH:
 				flags |= GetReadVersionRequest::PRIORITY_BATCH;
 				++cx->transactionBatchReadVersions;
@@ -4249,7 +4249,7 @@ ACTOR Future< StorageMetrics > extractMetrics( Future<std::pair<Optional<Storage
 	return x.first.get();
 }
 
-ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, KeyRange keys) {
+ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Database cx, KeyRange keys) {
 	state Span span("NAPI:GetReadHotRanges"_loc);
 	loop {
 		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only used
@@ -4277,7 +4277,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, K
 			}
 
 			wait(waitForAll(fReplies));
-			Standalone<VectorRef<KeyRangeRef>> results;
+			Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
 
 			for (int i = 0; i < nLocs; i++)
 				results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
@@ -4294,7 +4294,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(Database cx, K
 		}
 	}
 }
-	
+
 ACTOR Future< std::pair<Optional<StorageMetrics>, int> > waitStorageMetrics(
 	Database cx,
 	KeyRange keys,
@@ -4386,7 +4386,7 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 	}
 }
 
-Future<Standalone<VectorRef<KeyRangeRef>>> Transaction::getReadHotRanges(KeyRange const& keys) {
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> Transaction::getReadHotRanges(KeyRange const& keys) {
 	return ::getReadHotRanges(cx, keys);
 }
 
