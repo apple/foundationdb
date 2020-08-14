@@ -971,9 +971,13 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
+			int64_t initialMetadataEffectsCount = pProxyCommitData->txnStateStoreWrapper.getMutationsAppliedCount();
 			applyMetadataMutations(*pProxyCommitData, self->arena, pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations, &self->toCommit, self->forceRecovery,
 			                       self->commitVersion + 1, /* initialCommit= */ false);
+			if (pProxyCommitData->txnStateStoreWrapper.getMutationsAppliedCount() > initialMetadataEffectsCount) {
+				ASSERT(trs[t].isLockAware());
+			}
 		}
 		if(self->firstStateMutations) {
 			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
