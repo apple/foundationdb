@@ -101,15 +101,17 @@ struct TransactionCommitCostEstimation {
 		return *this;
 	}
 };
+
 struct ClientTrCommitCostEstimation {
 	int opsCount = 0;
 	uint64_t writeCosts = 0;
-	std::map<int, uint64_t> clearIdxCosts;
+	std::deque<std::pair<int, uint64_t>> clearIdxCosts;
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, opsCount, writeCosts, clearIdxCosts);
 	}
 };
+
 struct GetRateInfoReply {
 	constexpr static FileIdentifier file_identifier = 7845006;
 	double transactionRate;

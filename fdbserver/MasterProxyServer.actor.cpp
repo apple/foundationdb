@@ -440,7 +440,7 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 			}
 		} catch (Error& e) {
 			TraceEvent("DDMidShardSizeUpdateFail").error(e);
-			if(e.code() != error_code_timed_out)
+			if(e.code() != error_code_timed_out && e.code() != error_code_dd_not_found)
 				throw ;
 			nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
 			nextReply = Never();
@@ -1091,6 +1091,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					double mul = std::max(1.0, totalCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST));
 					ASSERT(totalCosts > 0);
 					double prob = mul * cost / totalCosts;
+
 					if(deterministicRandom()->random01() < prob) {
 						for(const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
 							auto id = ssInfo->interf.id();
@@ -1127,12 +1128,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
+
 					// check whether clear is sampled
-					if(checkSample && trCost->get().clearIdxCosts.count(mutationNum) > 0){
+					if(checkSample && !trCost->get().clearIdxCosts.empty() && trCost->get().clearIdxCosts[0].first == mutationNum) {
 						for(const auto& ssInfo : ranges.begin().value().src_info) {
 							auto id = ssInfo->interf.id();
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[mutationNum]);
+							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
 						}
+						trCost->get().clearIdxCosts.pop_front();
 					}
 				}
 				else {
@@ -1141,12 +1144,14 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					for (auto r : ranges) {
 						r.value().populateTags();
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
+
 						// check whether clear is sampled
-						if(checkSample && trCost->get().clearIdxCosts.count(mutationNum) > 0){
+						if(checkSample && !trCost->get().clearIdxCosts.empty() && trCost->get().clearIdxCosts[0].first == mutationNum) {
 							for(const auto& ssInfo : r.value().src_info) {
 								auto id = ssInfo->interf.id();
-								pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[mutationNum]);
+								pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
 							}
+							trCost->get().clearIdxCosts.pop_front();
 						}
 					}
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", allSources).detail("Mutation", m);
@@ -1666,7 +1671,7 @@ ACTOR static Future<Void> transactionStarter(
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
 	// FIXME: There's weird RYWIterator reference problem occurs
-	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
+	// addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,

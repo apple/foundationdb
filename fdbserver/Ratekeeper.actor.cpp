@@ -912,7 +912,8 @@ void tryAutoThrottleTag(RatekeeperData* self, StorageQueueInfo& ss, int64_t stor
 		// write-saturated
 		tryAutoThrottleTag(self, ss.busiestWriteTag.get(), ss.busiestWriteTagRate, ss.busiestWriteTagFractionalBusyness);
 	} else if (ss.busiestReadTag.present() &&
-	           storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+	           (SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
+	           storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
 		// read saturated
 		tryAutoThrottleTag(self, ss.busiestReadTag.get(), ss.busiestReadTagRate, ss.busiestReadTagFractionalBusyness);
 	}
@@ -1278,6 +1279,7 @@ static void updateCommitCostEstimation(RatekeeperData* self, UIDTransactionTagMa
 		}
 	}
 }
+
 ACTOR Future<Void> configurationMonitor(RatekeeperData *self) {
 	loop {
 		state ReadYourWritesTransaction tr(self->db);
