@@ -137,6 +137,55 @@ struct ProxyStats {
 	}
 };
 
+struct TxnStateStoreWrapper : IKeyValueStore {
+	/* begin IKeyValueStore interface */
+	KeyValueStoreType getType() const override { return txnStateStore->getType(); }
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
+		TraceEvent(SevDebug, "TxnStateStoreSet", debugID).detail("Key", keyValue.key).detail("Value", keyValue.value);
+		++mutationsApplied;
+		txnStateStore->set(keyValue, arena);
+	}
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
+		TraceEvent(SevDebug, "TxnStateStoreClear", debugID).detail("Begin", range.begin).detail("End", range.end);
+		++mutationsApplied;
+		txnStateStore->clear(range, arena);
+	}
+	Future<Void> commit(bool sequential = false) override { return txnStateStore->commit(sequential); }
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+		return txnStateStore->readValue(key, debugID);
+	}
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	                                        Optional<UID> debugID = Optional<UID>()) override {
+		return txnStateStore->readValuePrefix(key, maxLength, debugID);
+	}
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                             int byteLimit = 1 << 30) override {
+		return txnStateStore->readRange(keys, rowLimit, byteLimit);
+	}
+	std::tuple<size_t, size_t, size_t> getSize() const override { return txnStateStore->getSize(); }
+	StorageBytes getStorageBytes() const override { return txnStateStore->getStorageBytes(); }
+	void resyncLog() override { txnStateStore->resyncLog(); }
+	void enableSnapshot() override { txnStateStore->enableSnapshot(); }
+	Future<Void> init() override { return txnStateStore->init(); }
+	/* end IKeyValueStore interface */
+
+	/* begin ICloseable interface */
+	Future<Void> getError() override { return txnStateStore->getError(); }
+	Future<Void> onClosed() override { return txnStateStore->onClosed(); }
+	void dispose() override { txnStateStore->dispose(); }
+	void close() override { txnStateStore->close(); }
+	/* end ICloseable interface */
+
+	int getMutationsAppliedCount() const { return mutationsApplied; }
+	void setTxnStateStore(IKeyValueStore* txnStateStore) { this->txnStateStore = txnStateStore; }
+	void setDebugID(UID debugID) { this->debugID = debugID; }
+
+private:
+	UID debugID;
+	int64_t mutationsApplied = 0;
+	IKeyValueStore* txnStateStore = nullptr;
+};
+
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
@@ -145,7 +194,8 @@ struct ProxyCommitData {
 	vector<ResolverInterface> resolvers;
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
-	IKeyValueStore* txnStateStore;
+	TxnStateStoreWrapper txnStateStoreWrapper;
+	IKeyValueStore* txnStateStore = &txnStateStoreWrapper;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)
 	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version

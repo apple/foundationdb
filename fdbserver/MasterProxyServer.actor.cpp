@@ -2117,7 +2117,9 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
+	commitData.txnStateStoreWrapper.setTxnStateStore(
+	    keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true));
+	commitData.txnStateStoreWrapper.setDebugID(proxy.id());
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
