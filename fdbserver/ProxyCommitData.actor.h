@@ -195,7 +195,7 @@ struct ProxyCommitData {
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
 	TxnStateStoreWrapper txnStateStoreWrapper;
-	IKeyValueStore* txnStateStore = &txnStateStoreWrapper;
+	IKeyValueStore* txnStateStore;
 	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is
 	                                  // fully committed (durable)
 	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version
@@ -303,10 +303,11 @@ struct ProxyCommitData {
 	                Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-	    logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
-	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
-	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
+	    logAdapter(NULL), txnStateStore(&txnStateStoreWrapper), popRemoteTxs(false),
+	    committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0), lastVersionTime(0),
+	    commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
+	    getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
+	    localCommitBatchesStarted(0), locked(false),
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),
