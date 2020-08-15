@@ -137,6 +137,10 @@ struct ProxyStats {
 	}
 };
 
+/*
+ * The purpose of this class is to instrument operations on the txnStateStore to be used for assertions and debug
+ * traces.
+ */
 struct TxnStateStoreWrapper : IKeyValueStore {
 	/* begin IKeyValueStore interface */
 	KeyValueStoreType getType() const override { return txnStateStore->getType(); }
