@@ -5285,6 +5285,8 @@ public:
 		                      const RedwoodRecordRef& upperBound) {
 			Reference<const IPage>& page = pages[id.front()];
 			if (page.isValid()) {
+				// The pager won't see this access so count it as a cache hit
+				++g_redwoodMetrics.pagerCacheHit;
 				path.push_back(arena, { (BTreePage*)page->begin(), getCursor(page) });
 				return Void();
 			}
@@ -7290,6 +7292,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state PromiseStream<Version> committedVersions;
 	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount, serialTest);
 	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree) || btree->getError());
+	committedVersions.send(lastVer);
 
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
@@ -7463,6 +7466,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 				committedVersions = PromiseStream<Version>();
 				verifyTask = verify(btree, committedVersions.getFuture(), &written, &errorCount, serialTest);
 				randomTask = randomReader(btree) || btree->getError();
+				committedVersions.send(v);
 			}
 
 			version += versionIncrement;
