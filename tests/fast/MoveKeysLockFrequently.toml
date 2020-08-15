@@ -1,0 +1,17 @@
+[[test]]
+testTitle = 'MoveKeysLockFrequently'
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'LockDatabaseFrequently'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 1
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
