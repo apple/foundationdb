@@ -141,12 +141,18 @@ struct TxnStateStoreWrapper : IKeyValueStore {
 	/* begin IKeyValueStore interface */
 	KeyValueStoreType getType() const override { return txnStateStore->getType(); }
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
-		TraceEvent(SevDebug, "TxnStateStoreSet", debugID).detail("Key", keyValue.key).detail("Value", keyValue.value);
+		TraceEvent(SevDebug, "TxnStateStoreMutation", debugID)
+		    .detail("Key", keyValue.key)
+		    .detail("Value", keyValue.value)
+		    .detail("Mutation", "Set");
 		++mutationsApplied;
 		txnStateStore->set(keyValue, arena);
 	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
-		TraceEvent(SevDebug, "TxnStateStoreClear", debugID).detail("Begin", range.begin).detail("End", range.end);
+		TraceEvent(SevDebug, "TxnStateStoreMutation", debugID)
+		    .detail("Begin", range.begin)
+		    .detail("End", range.end)
+		    .detail("Mutation", "Clear");
 		++mutationsApplied;
 		txnStateStore->clear(range, arena);
 	}
