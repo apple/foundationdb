@@ -70,7 +70,8 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			while (!self->sendingQueue.empty()) {
 				const RestoreSendMutationsToAppliersRequest& req = self->sendingQueue.top();
 				// Dispatch the request if it is the next version batch to process or if cpu usage is low
-				if (req.batchIndex - 1 == self->finishedSendingVB || self->cpuUsage < 70) {
+				if (req.batchIndex - 1 == self->finishedSendingVB ||
+				    self->cpuUsage < SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
 					self->addActor.send(handleSendMutationsRequest(req, self));
 					self->sendingQueue.pop();
 				}
@@ -78,29 +79,30 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				       // and it takes large amount of resource
 			}
 			// When shall the node pause the process of more loading file requests
-			if (self->inflightSendingReqs >= 3 || (self->inflightSendingReqs >= 1 && self->cpuUsage >= 70) ||
-			    self->cpuUsage >= 90) {
-				if (self->inflightSendingReqs >= 3) {
+			if ((self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
+			     (self->inflightSendingReqs >= 1 &&
+			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
+			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) &&
+			    (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)) {
+				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
 					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightSendingMutationRequests")
 					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
 					    .detail("Reason", "Sending mutations is too slow");
 				}
-				wait(delay(0.5)); // TODO: Knob
+				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
 				updateProcessStats(self);
 				continue;
 			}
 			// Dispatch loading backup file requests
-			int releasedReq = 0;
 			while (!self->loadingQueue.empty()) {
-				const RestoreLoadFileRequest& req = self->loadingQueue.top();
-				self->addActor.send(handleLoadFileRequest(req, self));
-				++releasedReq;
-				self->loadingQueue.pop();
-				if (releasedReq > 10) { // TODO: Knob
+				if (self->inflightLoadingReqs > SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) {
 					break;
 				}
+				const RestoreLoadFileRequest& req = self->loadingQueue.top();
+				self->addActor.send(handleLoadFileRequest(req, self));
+				self->loadingQueue.pop();
 			}
-			if (self->cpuUsage >= 70) {
+			if (self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
 				wait(delay(0.1));
 				updateProcessStats(self);
 			}
@@ -439,6 +441,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] =
 		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
+		self->inflightLoadingReqs++;
 		isDuplicated = false;
 	} else {
 		TraceEvent(SevFRDebugInfo, "FastRestoreLoadFile", self->id())
@@ -483,6 +486,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	}
 
 	// Ack restore controller the param is processed
+	self->inflightLoadingReqs--;
 	req.reply.send(RestoreLoadFileReply(req.param, isDuplicated));
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)

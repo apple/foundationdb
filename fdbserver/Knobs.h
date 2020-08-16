@@ -575,6 +575,11 @@ public:
 	bool FASTRESTORE_USE_RANGE_FILE; // use range file in backup
 	bool FASTRESTORE_USE_LOG_FILE; // use log file in backup
 	int64_t FASTRESTORE_SAMPLE_MSG_BYTES; // sample message desired size
+	double FASTRESTORE_SCHED_UPDATE_DELAY; // delay in seconds in updating process metrics
+	int FASTRESTORE_SCHED_TARGET_CPU_PERCENT; // release as many requests as possible when cpu usage is below the knob
+	int FASTRESTORE_SCHED_MAX_CPU_PERCENT; // max cpu percent when scheduler shall not release non-urgent requests
+	int FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS; // number of inflight requests to load backup files
+	int FASTRESTORE_SCHED_INFLIGHT_SEND_REQS; // number of infligth requests for loaders to  send mutations to appliers
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.

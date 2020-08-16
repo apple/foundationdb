@@ -146,6 +146,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	int finishedLoadingVB; // the max version batch index that finished loading file phase
 	int finishedSendingVB; // the max version batch index that finished sending mutations phase
 	int inflightSendingReqs; // number of sendingMutations requests released
+	int inflightLoadingReqs; // number of load backup file requests release
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the RestoreController is created
@@ -155,7 +156,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
 	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci)
-	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0) {
+	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0), inflightSendingReqs(0), inflightLoadingReqs(0) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
