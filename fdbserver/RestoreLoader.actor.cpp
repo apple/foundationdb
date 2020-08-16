@@ -121,7 +121,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
 				if (curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD ||
 				    sendLoadParams >= SERVER_KNOBS->FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH) {
-					// too many future VB requests are released
+					// Too many future VB requests are released
 					break;
 				} else {
 					req.toSched.send(Void());

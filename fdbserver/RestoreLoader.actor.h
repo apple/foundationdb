@@ -134,11 +134,11 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 	Promise<Void> toSched;
 	double start;
 
-	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched)
+	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched, double start)
 	  : batchIndex(batchIndex), toSched(toSched), start(start){};
 	RestoreLoaderSchedSendLoadParamRequest() = default;
 
-	operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) {
+	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) {
 		return batchIndex > rhs.batchIndex || (batchIndex == rhs.batchIndex && start > rhs.start);
 	}
 };
@@ -175,8 +175,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
 	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci)
-	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0), inflightSendingReqs(0), inflightLoadingReqs(0),
-	    inflightSendLoadParamReqs(0) {
+	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0), inflightSendingReqs(0), inflightLoadingReqs(0) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
