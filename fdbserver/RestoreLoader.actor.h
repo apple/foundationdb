@@ -138,7 +138,7 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 	  : batchIndex(batchIndex), toSched(toSched), start(start){};
 	RestoreLoaderSchedSendLoadParamRequest() = default;
 
-	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) {
+	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {
 		return batchIndex > rhs.batchIndex || (batchIndex == rhs.batchIndex && start > rhs.start);
 	}
 };

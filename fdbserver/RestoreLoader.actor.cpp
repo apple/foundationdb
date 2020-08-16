@@ -659,12 +659,6 @@ ACTOR Future<Void> sendMutationsToApplier(
     std::priority_queue<RestoreLoaderSchedSendLoadParamRequest>* sendLoadParamQueue,
     std::map<int, int>* inflightSendLoadParamReqs, VersionedMutationsMap* pkvOps, int batchIndex, RestoreAsset asset,
     bool isRangeFile, std::map<Key, UID>* pRangeToApplier, std::map<UID, RestoreApplierInterface>* pApplierInterfaces) {
-	// Wait for scheduler to kick it off
-	Promise<Void> toSched;
-	sendLoadParamQueue->push(RestoreLoaderSchedSendLoadParamRequest(batchIndex, toSched, now()));
-	wait(toSched.getFuture());
-	(*inflightSendLoadParamReqs)[batchIndex]++;
-
 	state VersionedMutationsMap& kvOps = *pkvOps;
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
@@ -672,6 +666,12 @@ ACTOR Future<Void> sendMutationsToApplier(
 	state Version msgIndex = 1; // Monotonically increased index for send message, must start at 1
 	state std::vector<UID> applierIDs = getApplierIDs(*pRangeToApplier);
 	state double msgSize = 0; // size of mutations in the message
+
+	// Wait for scheduler to kick it off
+	Promise<Void> toSched;
+	sendLoadParamQueue->push(RestoreLoaderSchedSendLoadParamRequest(batchIndex, toSched, now()));
+	wait(toSched.getFuture());
+	(*inflightSendLoadParamReqs)[batchIndex]++;
 
 	TraceEvent("FastRestoreLoaderSendMutationToApplier")
 	    .detail("IsRangeFile", isRangeFile)
