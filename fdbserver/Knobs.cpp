@@ -649,6 +649,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS,                   20 ); if( randomize && BUGGIFY ) { FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS = deterministicRandom()->random01() * 30;}
 	init( FASTRESTORE_SCHED_INFLIGHT_SEND_REQS,                    3 ); if( randomize && BUGGIFY ) { FASTRESTORE_SCHED_INFLIGHT_SEND_REQS = deterministicRandom()->random01() < 0.2 ? 1 : deterministicRandom()->random01() * 5 + 1;}
 	init( FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE,                    5 ); if( randomize && BUGGIFY ) { FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE = deterministicRandom()->random01() < 0.2 ? 1 : deterministicRandom()->random01() * 20 + 1;}
+	init( FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD,         10 ); if( randomize && BUGGIFY ) { FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD = deterministicRandom()->random01() < 0.2 ? 1 : deterministicRandom()->random01() * 30 + 1;}
+	init( FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH,             2 ); if( randomize && BUGGIFY ) { FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH = deterministicRandom()->random01() < 0.2 ? 1 : deterministicRandom()->random01() * 30 + 1;}
 
 	init( REDWOOD_DEFAULT_PAGE_SIZE,                            4096 );
 	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );

@@ -581,6 +581,8 @@ public:
 	int FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS; // number of inflight requests to load backup files
 	int FASTRESTORE_SCHED_INFLIGHT_SEND_REQS; // number of inflight requests for loaders to  send mutations to appliers
 	int FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE; // number of load request to release at once
+	int FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD; // we can send future VB requests if it is less than this knob
+	int FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH; // number of future VB sendLoadingParam requests to process at once
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.

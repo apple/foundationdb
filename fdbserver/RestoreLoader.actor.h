@@ -128,6 +128,21 @@ struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
 	}
 };
 
+// Each request for each loadingParam, so that scheduler can control which requests in which version batch to send first
+struct RestoreLoaderSchedSendLoadParamRequest {
+	int batchIndex;
+	Promise<Void> toSched;
+	double start;
+
+	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched)
+	  : batchIndex(batchIndex), toSched(toSched), start(start){};
+	RestoreLoaderSchedSendLoadParamRequest() = default;
+
+	operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) {
+		return batchIndex > rhs.batchIndex || (batchIndex == rhs.batchIndex && start > rhs.start);
+	}
+};
+
 struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoaderData> {
 	// buffered data per version batch
 	std::map<int, Reference<LoaderBatchData>> batch;
@@ -143,10 +158,12 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	std::priority_queue<RestoreLoadFileRequest> loadingQueue; // request queue of loading files
 	std::priority_queue<RestoreSendMutationsToAppliersRequest>
 	    sendingQueue; // request queue of sending mutations to appliers
+	std::priority_queue<RestoreLoaderSchedSendLoadParamRequest> sendLoadParamQueue;
 	int finishedLoadingVB; // the max version batch index that finished loading file phase
 	int finishedSendingVB; // the max version batch index that finished sending mutations phase
 	int inflightSendingReqs; // number of sendingMutations requests released
-	int inflightLoadingReqs; // number of load backup file requests release
+	int inflightLoadingReqs; // number of load backup file requests released
+	std::map<int, int> inflightSendLoadParamReqs; // key: batchIndex, value: inflightSendLoadParamReqs
 
 	Reference<AsyncVar<bool>> hasPendingRequests; // is there pending requests for loader
 
@@ -158,7 +175,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
 	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci)
-	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0), inflightSendingReqs(0), inflightLoadingReqs(0) {
+	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0), inflightSendingReqs(0), inflightLoadingReqs(0),
+	    inflightSendLoadParamReqs(0) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
