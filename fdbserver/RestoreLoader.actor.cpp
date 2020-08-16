@@ -80,6 +80,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			}
 			// When shall the node pause the process of more loading file requests
 			if ((self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
+			     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS ||
 			     (self->inflightSendingReqs >= 1 &&
 			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
 			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) &&
@@ -94,10 +95,12 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				continue;
 			}
 			// Dispatch loading backup file requests
+			int loadReqs = 0;
 			while (!self->loadingQueue.empty()) {
-				if (self->inflightLoadingReqs > SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) {
+				if (loadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
 					break;
 				}
+				loadReqs++;
 				const RestoreLoadFileRequest& req = self->loadingQueue.top();
 				self->addActor.send(handleLoadFileRequest(req, self));
 				self->loadingQueue.pop();
@@ -107,7 +110,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				updateProcessStats(self);
 			}
 			if (self->loadingQueue.empty() && self->sendingQueue.empty()) {
-				self->hasPendingRequests.set(false);
+				self->hasPendingRequests->set(false);
 				wait(self->hasPendingRequests->onChange()); // CAREFUL: may stuck here
 			}
 		}
