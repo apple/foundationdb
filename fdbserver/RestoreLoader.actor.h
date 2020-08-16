@@ -148,6 +148,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	int inflightSendingReqs; // number of sendingMutations requests released
 	int inflightLoadingReqs; // number of load backup file requests release
 
+	Reference<AsyncVar<bool>> hasPendingRequests; // is there pending requests for loader
+
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the RestoreController is created
 	PromiseStream<Future<Void>> addActor;
@@ -160,6 +162,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
+		hasPendingRequests = Reference<AsyncVar<bool>>(new AsyncVar<bool>(false));
 	}
 
 	~RestoreLoaderData() = default;

@@ -106,6 +106,10 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				wait(delay(0.1));
 				updateProcessStats(self);
 			}
+			if (self->loadingQueue.empty() && self->sendingQueue.empty()) {
+				self->hasPendingRequests.set(false);
+				wait(self->hasPendingRequests->onChange()); // CAREFUL: may stuck here
+			}
 		}
 
 	} catch (Error& e) {
@@ -124,6 +128,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 	state Future<Void> error = actorCollection(self->addActor.getFuture());
 	state ActorCollection actors(false); // actors whose errors can be ignored
 	state Future<Void> exitRole = Never();
+	state bool hasQueuedRequests = false;
 
 	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreLoader"));
@@ -132,6 +137,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
+		hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
 
 		try {
 			choose {
@@ -147,12 +153,16 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					requestTypeStr = "loadFile";
 					self->initBackupContainer(req.param.url);
 					self->loadingQueue.push(req);
-					// actors.add(handleLoadFileRequest(req, self));
+					if (!hasQueuedRequests) {
+						self->hasPendingRequests->set(true);
+					}
 				}
 				when(RestoreSendMutationsToAppliersRequest req = waitNext(loaderInterf.sendMutations.getFuture())) {
 					requestTypeStr = "sendMutations";
 					self->sendingQueue.push(req);
-					// actors.add(handleSendMutationsRequest(req, self));
+					if (!hasQueuedRequests) {
+						self->hasPendingRequests->set(true);
+					}
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
