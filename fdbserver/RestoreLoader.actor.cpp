@@ -67,14 +67,19 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 // sendMuttionsRequests are preferred than loadingFileRequests
 ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 	try {
+		state int curVBInflightReqs = 0;
+		state int sendLoadParams = 0;
 		loop {
 			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
 			    .detail("LoadingQueue", self->loadingQueue.size())
+			    .detail("SendingLoadParamQueue", self->sendLoadParamQueue.size())
 			    .detail("InflightSendingReqs", self->inflightSendingReqs)
 			    .detail("InflightSendingReqsThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS)
 			    .detail("InflightLoadingReqs", self->inflightLoadingReqs)
 			    .detail("InflightLoadingReqsThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS)
+			    .detail("LastDispatchSendLoadParamReqsForCurrentVB", curVBInflightReqs)
+			    .detail("LastDispatchSendLoadParamReqsForFutureVB", sendLoadParams)
 			    .detail("CpuUsage", self->cpuUsage)
 			    .detail("TargetCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT)
 			    .detail("MaxCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT);
@@ -89,7 +94,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				break; // Only release one sendMutationRequest at a time because it sends all data for a version batch
 				       // and it takes large amount of resource
 			}
-			// When shall the node pause the process of more loading file requests
+			// When shall the node pause the process of other requests, e.g., load file requests
 			if ((self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
 			     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS ||
 			     (self->inflightSendingReqs >= 1 &&
@@ -115,8 +120,8 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 					self->sendLoadParamQueue.pop();
 				}
 			}
-			int sendLoadParams = 0;
-			int curVBInflightReqs = self->inflightSendLoadParamReqs[self->finishedSendingVB + 1];
+			sendLoadParams = 0;
+			curVBInflightReqs = self->inflightSendLoadParamReqs[self->finishedSendingVB + 1];
 			while (!self->sendLoadParamQueue.empty()) {
 				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
 				if (curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD ||
@@ -143,15 +148,15 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			}
 
 			if (self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
-				wait(delay(0.1));
+				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
 			}
 			updateProcessStats(self);
 
-			if (self->loadingQueue.empty() && self->sendingQueue.empty()) {
+			if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
 				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
-				wait(self->hasPendingRequests->onChange()); // CAREFUL: may stuck here
+				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
 			}
 		}
 	} catch (Error& e) {
@@ -560,7 +565,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
-	// the VB must finish loading phase before it can send mutations; update finishedLoadingVB for scheduler
+	// The VB must finish loading phase before it can send mutations; update finishedLoadingVB for scheduler
 	self->finishedLoadingVB = std::max(self->finishedLoadingVB, req.batchIndex);
 	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
 	ASSERT(self->finishedBatch.get() < req.batchIndex);
