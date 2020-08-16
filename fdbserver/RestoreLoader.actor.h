@@ -139,10 +139,23 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	Reference<IBackupContainer> bc; // Backup container is used to read backup files
 	Key bcUrl; // The url used to get the bc
 
+	// Request scheduler
+	std::priority_queue<RestoreLoadFileRequest> loadingQueue; // request queue of loading files
+	std::priority_queue<RestoreSendMutationsToAppliersRequest>
+	    sendingQueue; // request queue of sending mutations to appliers
+	int finishedLoadingVB; // the max version batch index that finished loading file phase
+	int finishedSendingVB; // the max version batch index that finished sending mutations phase
+	int inflightSendingReqs; // number of sendingMutations requests released
+
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the RestoreController is created
+	PromiseStream<Future<Void>> addActor;
+
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
-	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci) : ci(ci) {
+	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci)
+	  : ci(ci), finishedLoadingVB(0), finishedSendingVB(0) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;

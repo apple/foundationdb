@@ -61,15 +61,72 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     Reference<IBackupContainer> bc, Version version, RestoreAsset asset);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
+// Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
+// Requests for earlier version batches are preferred; which is equivalent to
+// sendMuttionsRequests are preferred than loadingFileRequests
+ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
+	try {
+		loop {
+			while (!self->sendingQueue.empty()) {
+				const RestoreSendMutationsToAppliersRequest& req = self->sendingQueue.top();
+				// Dispatch the request if it is the next version batch to process or if cpu usage is low
+				if (req.batchIndex - 1 == self->finishedSendingVB || self->cpuUsage < 70) {
+					self->addActor.send(handleSendMutationsRequest(req, self));
+					self->sendingQueue.pop();
+				}
+				break; // Only release one sendMutationRequest at a time because it sends all data for a version batch
+				       // and it takes large amount of resource
+			}
+			// When shall the node pause the process of more loading file requests
+			if (self->inflightSendingReqs >= 3 || (self->inflightSendingReqs >= 1 && self->cpuUsage >= 70) ||
+			    self->cpuUsage >= 90) {
+				if (self->inflightSendingReqs >= 3) {
+					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightSendingMutationRequests")
+					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
+					    .detail("Reason", "Sending mutations is too slow");
+				}
+				wait(delay(0.5)); // TODO: Knob
+				updateProcessStats(self);
+				continue;
+			}
+			// Dispatch loading backup file requests
+			int releasedReq = 0;
+			while (!self->loadingQueue.empty()) {
+				const RestoreLoadFileRequest& req = self->loadingQueue.top();
+				self->addActor.send(handleLoadFileRequest(req, self));
+				++releasedReq;
+				self->loadingQueue.pop();
+				if (releasedReq > 10) { // TODO: Knob
+					break;
+				}
+			}
+			if (self->cpuUsage >= 70) {
+				wait(delay(0.1));
+				updateProcessStats(self);
+			}
+		}
+
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "FastRestoreLoaderDispatchRequests").error(e, true);
+			throw e;
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
                                      RestoreControllerInterface ci) {
 	state Reference<RestoreLoaderData> self =
 	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex, ci));
-	state ActorCollection actors(false);
+	state Future<Void> error = actorCollection(self->addActor.getFuture());
+	state ActorCollection actors(false); // actors whose errors can be ignored
 	state Future<Void> exitRole = Never();
 
 	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreLoader"));
+
+	self->addActor.send(dispatchRequests(self));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -87,11 +144,13 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				when(RestoreLoadFileRequest req = waitNext(loaderInterf.loadFile.getFuture())) {
 					requestTypeStr = "loadFile";
 					self->initBackupContainer(req.param.url);
-					actors.add(handleLoadFileRequest(req, self));
+					self->loadingQueue.push(req);
+					// actors.add(handleLoadFileRequest(req, self));
 				}
 				when(RestoreSendMutationsToAppliersRequest req = waitNext(loaderInterf.sendMutations.getFuture())) {
 					requestTypeStr = "sendMutations";
-					actors.add(handleSendMutationsRequest(req, self));
+					self->sendingQueue.push(req);
+					// actors.add(handleSendMutationsRequest(req, self));
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
@@ -113,6 +172,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
+				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
 			}
 		} catch (Error& e) {
 			TraceEvent(e.code() == error_code_broken_promise ? SevError : SevWarnAlways, "FastRestoreLoaderError",
@@ -484,6 +544,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	}
 
 	if (!isDuplicated) {
+		self->inflightSendingReqs++;
 		vector<Future<Void>> fSendMutations;
 		batchData->rangeToApplier = req.rangeToApplier;
 		for (auto& [loadParam, kvOps] : batchData->kvOpsPerLP) {
@@ -495,6 +556,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 			}
 		}
 		wait(waitForAll(fSendMutations));
+		self->inflightSendingReqs--;
 		if (req.useRangeFile) {
 			batchStatus->sendAllRanges = Void(); // Finish sending kvs parsed from range files
 		} else {

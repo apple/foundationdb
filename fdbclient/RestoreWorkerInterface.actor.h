@@ -496,6 +496,8 @@ struct RestoreLoadFileRequest : TimedRequest {
 	RestoreLoadFileRequest() = default;
 	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
 
+	bool operator<(RestoreLoadFileRequest const& rhs) const { return batchIndex > rhs.batchIndex; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, batchIndex, param, reply);
@@ -520,6 +522,8 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 	RestoreSendMutationsToAppliersRequest() = default;
 	explicit RestoreSendMutationsToAppliersRequest(int batchIndex, std::map<Key, UID> rangeToApplier, bool useRangeFile)
 	  : batchIndex(batchIndex), rangeToApplier(rangeToApplier), useRangeFile(useRangeFile) {}
+
+	bool operator<(RestoreSendMutationsToAppliersRequest const& rhs) const { return batchIndex > rhs.batchIndex; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -81,7 +81,7 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 	if (g_network->isSimulated()) {
 		// memUsage and cpuUsage are not relevant in the simulator,
 		// and relying on the actual values could break seed determinism
-		self->cpuUsage = 100.0;
+		self->cpuUsage = deterministicRandom()->random01() * 100;
 		self->memory = 100.0;
 		self->residentMemory = 100.0;
 		return;
