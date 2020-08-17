@@ -557,6 +557,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( WAIT_METRICS_WRONG_SHARD_CHANCE,   isSimulated ? 1.0 : 0.1 );
 	init( MIN_TAG_PAGES_RATE,                             1.0e4 ); if( randomize && BUGGIFY ) MIN_TAG_PAGES_RATE = 0;
 	init( TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 1.0;
+	init( READ_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
 
 	//Wait Failure

@@ -3313,15 +3313,15 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 
 		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
 			trCommitCosts.opsCount++;
-			trCommitCosts.writeCosts += getOperationCost(it->expectedSize());
+			trCommitCosts.writeCosts += getWriteOperationCost(it->expectedSize());
 		}
 		else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
 			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
 			if (self->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(self->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
-				trCommitCosts.clearIdxCosts.emplace_back(i, getOperationCost(m.bytes));
-				trCommitCosts.writeCosts += getOperationCost(m.bytes);
+				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
+				trCommitCosts.writeCosts += getWriteOperationCost(m.bytes);
 			}
 			else {
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
@@ -3339,8 +3339,8 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 +
 					        (locations.size() - 2) * (int64_t)self->getDatabase()->smoothMidShardSize.smoothTotal();
 
-				trCommitCosts.clearIdxCosts.emplace_back(i, getOperationCost(bytes));
-				trCommitCosts.writeCosts += getOperationCost(bytes);
+				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(bytes));
+				trCommitCosts.writeCosts += getWriteOperationCost(bytes);
 			}
 		}
 	}

@@ -477,7 +477,7 @@ public:
 		Optional<TagInfo> previousBusiestTag;
 
 		int64_t costFunction(int64_t bytes) {
-			return bytes / CLIENT_KNOBS->OPERATION_COST_BYTE_FACTOR + 1;
+			return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1;
 		}
 
 		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {

@@ -1087,7 +1087,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				// the expectation of sampling is every COMMIT_SAMPLE_COST sample once
 				if (checkSample) {
 					double totalCosts = trCost->get().writeCosts;
-					double cost = getOperationCost(m.expectedSize());
+					double cost = getWriteOperationCost(m.expectedSize());
 					double mul = std::max(1.0, totalCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST));
 					ASSERT(totalCosts > 0);
 					double prob = mul * cost / totalCosts;
