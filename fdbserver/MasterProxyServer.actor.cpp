@@ -513,7 +513,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
-	// TODO: Add transaction info here
+	toCommit->addTransactionInfo(SpanID());
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
@@ -1023,7 +1023,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state int mutationNum = 0;
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
 
-		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext, pMutations->size());
+		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
 
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			if(self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
@@ -1222,7 +1222,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// txnState (transaction subsystem state) tag: message extracted from log adapter
 	bool firstMessage = true;
 	// TODO: Revisit this, not sure what Span to pass yet
-	self->toCommit.addTransactionInfo(SpanID(), self->msg.messages.size());
+	self->toCommit.addTransactionInfo(SpanID());
 	for(auto m : self->msg.messages) {
 		if(firstMessage) {
 			self->toCommit.addTxsTag();

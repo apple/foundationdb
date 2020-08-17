@@ -499,8 +499,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	Future<Version> push(Version prevVersion, Version version, Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion, LogPushData& data, SpanID spanContext,
-	                     Optional<UID> debugID) final {
+	                     Version minKnownCommittedVersion, LogPushData& data,
+	                     SpanID const& spanContext, Optional<UID> debugID) final {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;

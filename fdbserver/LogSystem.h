@@ -413,6 +413,10 @@ struct ILogSystem {
 		int fastReplies;
 		int unknownReplies;
 
+		// Metadata used to keep track of the remaining number of mutations for
+		// the current transaction.
+		uint16_t mutationsRemaining;
+
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag );
 
@@ -668,7 +672,7 @@ struct ILogSystem {
 		// Never returns normally, but throws an error if the subsystem stops working
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, SpanID spanContext, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, SpanID const& spanContext, Optional<UID> debugID = Optional<UID>() ) = 0;
 		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
 		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
 		// Changes the version number of the bundle to be version (unblocking the next push)
@@ -822,7 +826,7 @@ struct CompareFirst {
 // transaction logs. The serialization repeats with the following format:
 //
 // +----------------------------+ +----------+
-// |        Span Context        | | # of mut |
+// |        Span context        | | # of mut |
 // +----------------------------+ +----------+
 // <--------- 128 bits ---------> <- 16 bits->
 //
@@ -837,7 +841,7 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
 	explicit LogPushData(Reference<ILogSystem> logSystem)
-			: logSystem(logSystem), subsequence(1), numTransactions(0), wroteTransactionInfo(false) {
+			: logSystem(logSystem), subsequence(1) {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
 				for(int i = 0; i < log.tLogs.size(); i++) {
@@ -865,11 +869,10 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	// Add transaction info to be written by the first mutation in the transaction
-	void addTransactionInfo(SpanID context, uint16_t transactions) {
+	// Add transaction info to be written by the first mutation in the transaction.
+	void addTransactionInfo(SpanID const& context) {
 		spanContext = context;
-		numTransactions = transactions;
-		wroteTransactionInfo = false;
+		transactionSize.clear();
 	}
 
 	void writeMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
@@ -888,18 +891,29 @@ struct LogPushData : NonCopyable {
 		uint32_t subseq = this->subsequence++;
 		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
-			if (!wroteTransactionInfo) {
-				messagesWriter[loc] << spanContext << numTransactions;
+			BinaryWriter& wr = messagesWriter[loc];
+			if (transactionSize.find(loc) == transactionSize.end()) {
+				int offset = wr.getLength();
+				// Write transaction info to message stream. See comment in
+				// writeTypedMessage for more info.
+				wr << spanContext << uint16_t(0);
+				transactionSize[loc] = wr.getLength() - offset;
 			}
-			messagesWriter[loc] << msgsize << subseq << uint16_t(prev_tags.size());
-			for(auto& tag : prev_tags)
-				messagesWriter[loc] << tag;
-			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
-		}
 
-		spanContext = SpanID();
-		numTransactions = 0;
-		wroteTransactionInfo = true;
+			// Add one to number of mutations for the transaction.
+			uint16_t* mutationsPtr = (uint16_t*) ((uint8_t*) wr.getData() + wr.getLength() - transactionSize[loc] + sizeof(SpanID));
+			*((uint16_t*) mutationsPtr) = *mutationsPtr + 1;
+
+			wr << msgsize << subseq << uint16_t(prev_tags.size());
+			for(auto& tag : prev_tags)
+				wr << tag;
+			wr.serializeBytes(rawMessageWithoutLength);
+
+			// msgsize doesn't include it's own size, so include it here when
+			// recording the number of bytes written for the current
+			// transaction.
+			transactionSize[loc] += msgsize + sizeof(uint32_t);
+		}
 	}
 
 	template <class T>
@@ -919,11 +933,25 @@ struct LogPushData : NonCopyable {
 		bool first = true;
 		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
+			BinaryWriter& wr = messagesWriter[loc];
+			if (transactionSize.find(loc) == transactionSize.end()) {
+				int offset = wr.getLength();
+				// Write transaction info to message stream. Transaction info
+				// consists of an ID representing context information for the
+				// transaction and a two byte value representing the number of
+				// mutations in the transaction.
+				wr << spanContext << uint16_t(0);
+				// Track number of bytes written for current transaction. This
+				// is used to update the number of mutations contained in this
+				// transaction as each mutation is written.
+				transactionSize[loc] = wr.getLength() - offset;
+			}
+
+			// Add one to number of mutations for the transaction.
+			uint16_t* mutationsPtr = (uint16_t*) ((uint8_t*) wr.getData() + wr.getLength() - transactionSize[loc] + sizeof(SpanID));
+			*((uint16_t*) mutationsPtr) = *mutationsPtr + 1;
+
 			if (first) {
-				BinaryWriter& wr = messagesWriter[loc];
-				if (!wroteTransactionInfo) {
-					wr << spanContext << numTransactions;
-				}
 				firstOffset = wr.getLength();
 				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 				for(auto& tag : prev_tags)
@@ -934,17 +962,11 @@ struct LogPushData : NonCopyable {
 				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
 				first = false;
 			} else {
-				BinaryWriter& wr = messagesWriter[loc];
 				BinaryWriter& from = messagesWriter[msg_locations[0]];
 				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
 			}
+			transactionSize[loc] += firstLength;
 		}
-		// Reset transaction information after first message in transaction is
-		// written. Future transactions should reset this state by calling
-		// addTransactionInfo.
-		spanContext = SpanID();
-		numTransactions = 0;
-		wroteTransactionInfo = true;
 		next_message_tags.clear();
 	}
 
@@ -958,10 +980,13 @@ private:
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
+	// Map of message location -> number of bytes serialized so far (including
+	// initial span context and number of mutations). Used to update the number
+	// of mutations field included at the beginning of each set of mutations for
+	// a transaction.
+	std::unordered_map<int, uint32_t> transactionSize;
 	uint32_t subsequence;
 	SpanID spanContext;
-	uint16_t numTransactions;
-	bool wroteTransactionInfo;
 };
 
 #endif
