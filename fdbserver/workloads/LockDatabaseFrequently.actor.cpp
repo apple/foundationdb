@@ -27,6 +27,7 @@
 struct LockDatabaseFrequentlyWorkload : TestWorkload {
 	double delayBetweenLocks;
 	double testDuration;
+	PerfIntCounter lockCount{ "LockCount" };
 
 	LockDatabaseFrequentlyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		delayBetweenLocks = getOption(options, LiteralStringRef("delayBetweenLocks"), 0.1);
@@ -41,22 +42,30 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(vector<PerfMetric>& m) override {
+		if (clientId == 0) {
+			m.push_back(lockCount.getMetric());
+		}
+	}
 
 	ACTOR static Future<Void> worker(LockDatabaseFrequentlyWorkload* self, Database cx) {
 		state Future<Void> end = delay(self->testDuration);
+		state double lastLock = g_network->now();
+		state double lastUnlock = g_network->now() + self->delayBetweenLocks / 2;
 		loop {
-			wait(lockAndUnlock(self, cx));
+			wait(lockAndUnlock(self, cx, &lastLock, &lastUnlock));
+			++self->lockCount;
 			if (end.isReady()) {
 				return Void();
 			}
 		}
 	}
 
-	ACTOR static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self, Database cx) {
+	ACTOR static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self, Database cx, double* lastLock,
+	                                        double* lastUnlock) {
 		state UID uid = deterministicRandom()->randomUniqueID();
-		wait(lockDatabase(cx, uid) && success(delay(self->delayBetweenLocks)));
-		wait(unlockDatabase(cx, uid) && success(delay(self->delayBetweenLocks)));
+		wait(lockDatabase(cx, uid) && poisson(lastLock, self->delayBetweenLocks));
+		wait(unlockDatabase(cx, uid) && poisson(lastUnlock, self->delayBetweenLocks));
 		return Void();
 	}
 };
