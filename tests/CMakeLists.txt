@@ -167,11 +167,11 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
                restarting/from_7.0.0/ConfigureTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/CycleTestRestart-1.txt
-               restarting/CycleTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0/CycleTestRestart-1.txt
+               restarting/from_5.0.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/StorefrontTestRestart-1.txt
-               restarting/StorefrontTestRestart-2.txt)
+    TEST_FILES restarting/from_5.0.0/StorefrontTestRestart-1.txt
+               restarting/from_5.0.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_6.2.0/SnapTestAttrition-1.txt
                restarting/from_6.2.0/SnapTestAttrition-2.txt)
