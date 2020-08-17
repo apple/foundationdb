@@ -27,7 +27,7 @@
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
 			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(deterministicRandom()->randomUniqueID()), poppedVersion(0),
-			  returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false), parallelGetMore(parallelGetMore), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void())
+			  returnIfBlocked(returnIfBlocked), sequence(0), onlySpilled(false), parallelGetMore(parallelGetMore), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()), mutationsRemaining(0)
 {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
@@ -36,7 +36,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInter
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag )
 			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message), hasMsg(hasMsg), 
-			  randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void())
+			  randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void()), mutationsRemaining(0)
 {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
@@ -93,7 +93,14 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		ASSERT(!rd.empty());
 	}
 
-	// TODO: Handle span context header
+	// TraceEvent("LUKAS_ServerPeekCursor::nextMessage");
+	/*
+	if (mutationsRemaining == 0) {
+		SpanID spanContext;
+		TagsAndMessage::loadTransactionInfoFromArena(&rd, &spanContext, &mutationsRemaining);
+	}
+	*/
+
 	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
 	DEBUG_TAGS_AND_MESSAGE("ServerPeekCursor", messageVersion.version, messageAndTags.getRawMessage()).detail("CursorID", this->randomID);
 	// Rewind and consume the header so that reader() starts from the message.
@@ -101,6 +108,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 	rd.readBytes(messageAndTags.getHeaderSize());
 	hasMsg = true;
 	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
+	// --mutationsRemaining;
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessage() {

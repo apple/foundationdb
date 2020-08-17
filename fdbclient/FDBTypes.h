@@ -136,20 +136,21 @@ struct TagsAndMessage {
 	TagsAndMessage(SpanID spanContext) : spanContext(spanContext) {}
 	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 
-	// Reads transaction info from the buffer rd. Returns SpanID and number of
-	// transactions in output parameters. T can be ArenaReader or BinaryReader.
+	// Reads transaction info from the buffer rd. Returns the SpanID and the number
+	// of mutations in the transaction as output parameters. T can be ArenaReader
+	// or BinaryReader.
 	template <class T>
-	static void loadTransactionInfoFromArena(T* rd, SpanID *context, uint16_t* transactions) {
+	static void loadTransactionInfoFromArena(T* rd, SpanID* context, uint16_t* mutations) {
 		SpanID spanContext;
-		uint16_t numTransactions;
+		uint16_t numMutations;
 
-		*rd >> spanContext >> numTransactions;
+		*rd >> spanContext >> numMutations;
 
 		if (context) {
 			*context = spanContext;
 		}
-		if (transactions) {
-			*transactions = numTransactions;
+		if (mutations) {
+			*mutations = numMutations;
 		}
 	}
 

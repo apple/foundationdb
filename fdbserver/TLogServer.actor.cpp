@@ -85,6 +85,7 @@ struct AlternativeTLogQueueEntryRef {
 		uint32_t msgSize = expectedSize();
 		serializer(ar, version, msgSize);
 		for(auto& msg : *alternativeMessages) {
+			serializer(ar, msg.spanContext, (uint16_t) 1);
 			ar.serializeBytes( msg.message );
 		}
 		serializer(ar, knownCommittedVersion, id);
@@ -93,7 +94,7 @@ struct AlternativeTLogQueueEntryRef {
 	uint32_t expectedSize() const {
 		uint32_t msgSize = 0;
 		for(auto& msg : *alternativeMessages) {
-			msgSize += msg.message.size();
+			msgSize += msg.message.size() + sizeof(SpanID) + sizeof(uint16_t);
 		}
 		return msgSize;
 	}
@@ -1267,6 +1268,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 		}
 
 		DEBUG_TAGS_AND_MESSAGE("TLogCommitMessages", version, msg.getRawMessage()).detail("UID", self->dbgid).detail("LogId", logData->logId);
+		// TODO: Write span context to in memory store too?
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
 			if(logData->locality == tagLocalitySatellite) {
@@ -1333,9 +1335,9 @@ void commitMessages( TLogData *self, Reference<LogData> logData, Version version
 	self->tempTagMessages.clear();
 	while(!rd.empty()) {
 		SpanID spanContext;
-		uint16_t numTransactions = 0;
-		TagsAndMessage::loadTransactionInfoFromArena(&rd, &spanContext, &numTransactions);
-		for (uint16_t i = 0; i < numTransactions; ++i) {
+		uint16_t numMutations = 0;
+		TagsAndMessage::loadTransactionInfoFromArena(&rd, &spanContext, &numMutations);
+		for (uint16_t i = 0; i < numMutations; ++i) {
 			TagsAndMessage tagsAndMsg(spanContext);
 			tagsAndMsg.loadFromArena(&rd, nullptr);
 			self->tempTagMessages.push_back(std::move(tagsAndMsg));
@@ -1388,6 +1390,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 
 		// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of StringRef serialization.
 		int offset = messages.getLength();
+		// TODO: Read span context from in memory store too?
 		messages << it->second.toStringRef();
 		void* data = messages.getData();
 		DEBUG_TAGS_AND_MESSAGE("TLogPeek", currentVersion, StringRef((uint8_t*)data+offset, messages.getLength()-offset))
@@ -1400,10 +1403,11 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, 
 	state std::vector<StringRef> relevantMessages;
 	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rd.empty()) {
-		state uint16_t numTransactions = 0;
-		TagsAndMessage::loadTransactionInfoFromArena(&rd, nullptr, &numTransactions);
+		state uint16_t numMutations = 0;
+		// TODO: Read spanContext and construct TagsAndMessage with it
+		TagsAndMessage::loadTransactionInfoFromArena(&rd, nullptr, &numMutations);
 		state uint16_t i;
-		for (i = 0; i < numTransactions; ++i) {
+		for (i = 0; i < numMutations; ++i) {
 			TagsAndMessage tagsAndMessage;
 			tagsAndMessage.loadFromArena(&rd, nullptr);
 			for (Tag t : tagsAndMessage.tags) {
@@ -2663,9 +2667,6 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 							logData = Reference<LogData>();
 						}
 					}
-
-					//TraceEvent("TLogRecoveredQE", self->dbgid).detail("LogId", qe.id).detail("Ver", qe.version).detail("MessageBytes", qe.messages.size()).detail("Tags", qe.tags.size())
-					//	.detail("Tag0", qe.tags.size() ? qe.tags[0].tag : invalidTag).detail("Version", logData->version.get());
 
 					if(logData) {
 						if(!self->spillOrder.size() || self->spillOrder.back() != qe.id) {

@@ -53,10 +53,10 @@ TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, Str
 	BinaryReader rdr(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rdr.empty()) {
 		SpanID spanContext;
-		uint16_t numTransactions = 0;
-		TagsAndMessage::loadTransactionInfoFromArena(&rdr, &spanContext, &numTransactions);
+		uint16_t numMutations = 0;
+		TagsAndMessage::loadTransactionInfoFromArena(&rdr, &spanContext, &numMutations);
 
-		for (uint16_t i = 0; i < numTransactions; ++i) {
+		for (uint16_t i = 0; i < numMutations; ++i) {
 			if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
 				int32_t dummy;
 				rdr >> dummy >> version;
