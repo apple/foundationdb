@@ -891,19 +891,9 @@ struct LogPushData : NonCopyable {
 		uint32_t subseq = this->subsequence++;
 		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
+			writeTransactionInfo(loc);
+
 			BinaryWriter& wr = messagesWriter[loc];
-			if (transactionSize.find(loc) == transactionSize.end()) {
-				int offset = wr.getLength();
-				// Write transaction info to message stream. See comment in
-				// writeTypedMessage for more info.
-				wr << spanContext << uint16_t(0);
-				transactionSize[loc] = wr.getLength() - offset;
-			}
-
-			// Add one to number of mutations for the transaction.
-			uint16_t* mutationsPtr = (uint16_t*) ((uint8_t*) wr.getData() + wr.getLength() - transactionSize[loc] + sizeof(SpanID));
-			*((uint16_t*) mutationsPtr) = *mutationsPtr + 1;
-
 			wr << msgsize << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
 				wr << tag;
@@ -933,23 +923,8 @@ struct LogPushData : NonCopyable {
 		bool first = true;
 		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
+			writeTransactionInfo(loc);
 			BinaryWriter& wr = messagesWriter[loc];
-			if (transactionSize.find(loc) == transactionSize.end()) {
-				int offset = wr.getLength();
-				// Write transaction info to message stream. Transaction info
-				// consists of an ID representing context information for the
-				// transaction and a two byte value representing the number of
-				// mutations in the transaction.
-				wr << spanContext << uint16_t(0);
-				// Track number of bytes written for current transaction. This
-				// is used to update the number of mutations contained in this
-				// transaction as each mutation is written.
-				transactionSize[loc] = wr.getLength() - offset;
-			}
-
-			// Add one to number of mutations for the transaction.
-			uint16_t* mutationsPtr = (uint16_t*) ((uint8_t*) wr.getData() + wr.getLength() - transactionSize[loc] + sizeof(SpanID));
-			*((uint16_t*) mutationsPtr) = *mutationsPtr + 1;
 
 			if (first) {
 				firstOffset = wr.getLength();
@@ -987,6 +962,28 @@ private:
 	std::unordered_map<int, uint32_t> transactionSize;
 	uint32_t subsequence;
 	SpanID spanContext;
+
+	// Writes transaction info to the message stream for the given location if
+	// it has not already been written. Transaction info consists of an ID
+	// representing context information for the transaction and a two byte
+	// value representing the number of mutations in the transaction.
+	void writeTransactionInfo(int location) {
+		BinaryWriter& wr = messagesWriter[location];
+		if (transactionSize.find(location) == transactionSize.end()) {
+			int offset = wr.getLength();
+			wr << spanContext << uint16_t(0);
+			// Track number of bytes written for current transaction. This
+			// is used to update the number of mutations contained in this
+			// transaction as each mutation is written.
+			transactionSize[location] = wr.getLength() - offset;
+		}
+
+		// Add one to number of mutations for the transaction and write to
+		// correct place in serialized data.
+		uint16_t* mutationsPtr = (uint16_t*) ((uint8_t*) wr.getData() + wr.getLength() - transactionSize[location] + sizeof(SpanID));
+		*((uint16_t*) mutationsPtr) = *mutationsPtr + 1;
+	}
+
 };
 
 #endif
