@@ -119,7 +119,7 @@ struct LoaderBatchStatus : public ReferenceCounted<LoaderBatchStatus> {
 	void addref() { return ReferenceCounted<LoaderBatchStatus>::addref(); }
 	void delref() { return ReferenceCounted<LoaderBatchStatus>::delref(); }
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "sendAllRanges: "
 		   << (!sendAllRanges.present() ? "invalid" : (sendAllRanges.get().isReady() ? "ready" : "notReady"))
@@ -141,6 +141,14 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 
 	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {
 		return batchIndex > rhs.batchIndex || (batchIndex == rhs.batchIndex && start > rhs.start);
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "RestoreLoaderSchedSendLoadParamRequest: "
+		   << " batchIndex:" << batchIndex << " toSchedFutureIsReady:" << toSched.getFuture().isReady()
+		   << " start:" << start;
+		return ss.str();
 	}
 };
 

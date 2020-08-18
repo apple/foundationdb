@@ -112,7 +112,7 @@ struct RestoreRoleInterface {
 
 	UID id() const { return nodeID; }
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "Role:" << getRoleStr(role) << " interfID:" << nodeID.toString();
 		return ss.str();
@@ -201,7 +201,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 		           collectRestoreRoleInterfaces, finishRestore);
 	}
 
-	std::string toString() { return nodeID.toString(); }
+	std::string toString() const { return nodeID.toString(); }
 };
 
 struct RestoreControllerInterface : RestoreRoleInterface {
@@ -226,7 +226,7 @@ struct RestoreControllerInterface : RestoreRoleInterface {
 		serializer(ar, *(RestoreRoleInterface*)this, samples);
 	}
 
-	std::string toString() { return nodeID.toString(); }
+	std::string toString() const { return nodeID.toString(); }
 };
 
 // RestoreAsset uniquely identifies the work unit done by restore roles;
@@ -342,7 +342,7 @@ struct LoadingParam {
 		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
 		    << " rangeVersion:" << (rangeVersion.present() ? rangeVersion.get() : -1) << " blockSize:" << blockSize
@@ -370,7 +370,7 @@ struct RestoreRecruitRoleReply : TimedRequest {
 		serializer(ar, id, role, loader, applier);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "roleInterf role:" << getRoleStr(role) << " replyID:" << id.toString();
 		if (loader.present()) {
@@ -402,14 +402,14 @@ struct RestoreRecruitRoleRequest : TimedRequest {
 		serializer(ar, ci, role, nodeIndex, reply);
 	}
 
-	std::string printable() {
+	std::string printable() const {
 		std::stringstream ss;
 		ss << "RestoreRecruitRoleRequest Role:" << getRoleStr(role) << " NodeIndex:" << nodeIndex
 		   << " RestoreController:" << ci.id().toString();
 		return ss.str();
 	}
 
-	std::string toString() { return printable(); }
+	std::string toString() const { return printable(); }
 };
 
 // Static info. across version batches
@@ -431,7 +431,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 		serializer(ar, sysInfo, rangeVersions, reply);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "RestoreSysInfoRequest "
 		   << "rangeVersions.size:" << rangeVersions.size();
@@ -456,7 +456,7 @@ struct RestoreSamplesRequest : TimedRequest {
 		serializer(ar, id, batchIndex, samples, reply);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "ID:" << id.toString() << " BatchIndex:" << batchIndex << " samples:" << samples.size();
 		return ss.str();
@@ -477,7 +477,7 @@ struct RestoreLoadFileReply : TimedRequest {
 		serializer(ar, param, isDuplicated);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "LoadingParam:" << param.toString() << " isDuplicated:" << isDuplicated;
 		return ss.str();
@@ -503,7 +503,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 		serializer(ar, batchIndex, param, reply);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "RestoreLoadFileRequest batchIndex:" << batchIndex << " param:" << param.toString();
 		return ss.str();
@@ -530,7 +530,7 @@ struct RestoreSendMutationsToAppliersRequest : TimedRequest {
 		serializer(ar, batchIndex, rangeToApplier, useRangeFile, reply);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "RestoreSendMutationsToAppliersRequest batchIndex:" << batchIndex
 		   << " keyToAppliers.size:" << rangeToApplier.size() << " useRangeFile:" << useRangeFile;
@@ -556,7 +556,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 	  : batchIndex(batchIndex), asset(asset), msgIndex(msgIndex), isRangeFile(isRangeFile),
 	    versionedMutations(versionedMutations) {}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "VersionBatchIndex:" << batchIndex << " msgIndex:" << msgIndex << " isRangeFile:" << isRangeFile
 		   << " versionedMutations.size:" << versionedMutations.size() << " RestoreAsset:" << asset.toString();
@@ -584,7 +584,7 @@ struct RestoreVersionBatchRequest : TimedRequest {
 		serializer(ar, batchIndex, reply);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "RestoreVersionBatchRequest batchIndex:" << batchIndex;
 		return ss.str();
@@ -606,7 +606,7 @@ struct RestoreFinishRequest : TimedRequest {
 		serializer(ar, terminate, reply);
 	}
 
-	std::string toString() {
+	std::string toString() const {
 		std::stringstream ss;
 		ss << "RestoreFinishRequest terminate:" << terminate;
 		return ss.str();
