@@ -103,9 +103,13 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) &&
 			    (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)) {
 				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
-					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightSendingMutationRequests")
+					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightRequests")
 					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
-					    .detail("Reason", "Sending mutations is too slow");
+					    .detail("CpuUsage", self->cpuUsage)
+					    .detail("InflightSendingReq", self->inflightSendingReqs)
+					    .detail("InflightSendingReqThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS)
+					    .detail("InflightLoadingReq", self->inflightLoadingReqs)
+					    .detail("InflightLoadingReqThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS);
 				}
 				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
 				updateProcessStats(self);
@@ -1166,6 +1170,22 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	    .detail("RequestedBatchIndex", req.batchIndex);
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
+		// Sanity check: All requests before and in this batchIndex must have been processed; otherwise,
+		// those requests may cause segmentation fault after applier remove the batch data
+		if (!self->loadingQueue.empty() && self->loadingQueue.top().batchIndex <= req.batchIndex) {
+			// Still has pending requests from earlier batchIndex  and current batchIndex, which should not happen
+			TraceEvent(SevError, "FastRestoreLoaderHasPendingLoadFileRequests")
+			    .detail("PendingRequest", self->loadingQueue.top().toString());
+		}
+		if (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= req.batchIndex) {
+			TraceEvent(SevError, "FastRestoreLoaderHasPendingSendRequests")
+			    .detail("PendingRequest", self->sendingQueue.top().toString());
+		}
+		if (!self->sendLoadParamQueue() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
+			TraceEvent(SevError, "FastRestoreLoaderHasPendingSendLoadParamRequests")
+			    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
+		}
+
 		self->finishedBatch.set(req.batchIndex);
 		// Clean up batchData
 		self->batch.erase(req.batchIndex);

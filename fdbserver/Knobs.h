@@ -584,6 +584,7 @@ public:
 	int FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD; // we can send future VB requests if it is less than this knob
 	int FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH; // number of future VB sendLoadingParam requests to process at once
 	int FASTRESTORE_NUM_TRACE_EVENTS;
+	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
