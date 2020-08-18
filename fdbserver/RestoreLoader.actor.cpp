@@ -776,7 +776,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 					    applierID, RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
 					                                                    applierVersionedMutationsBuffer[applierID]));
 				}
-				TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+				TraceEvent(SevInfo, "FastRestoreLoaderSendMutationToApplier")
 				    .detail("MessageIndex", msgIndex)
 				    .detail("RestoreAsset", asset.toString())
 				    .detail("Requests", requests.size());
@@ -800,7 +800,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 			                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
 			                                                           applierVersionedMutationsBuffer[applierID]));
 		}
-		TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+		TraceEvent(SevInfo, "FastRestoreLoaderSendMutationToApplier")
 		    .detail("MessageIndex", msgIndex)
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("Requests", requests.size());

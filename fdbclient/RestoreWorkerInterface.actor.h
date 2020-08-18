@@ -558,8 +558,8 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 
 	std::string toString() {
 		std::stringstream ss;
-		ss << "VersionBatchIndex:" << batchIndex << "RestoreAsset:" << asset.toString() << " msgIndex:" << msgIndex
-		   << " isRangeFile:" << isRangeFile << " versionedMutations.size:" << versionedMutations.size();
+		ss << "VersionBatchIndex:" << batchIndex << " msgIndex:" << msgIndex << " isRangeFile:" << isRangeFile
+		   << " versionedMutations.size:" << versionedMutations.size() << " RestoreAsset:" << asset.toString();
 		return ss.str();
 	}
 

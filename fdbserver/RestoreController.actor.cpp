@@ -164,7 +164,10 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 			break;
 		}
 
-		TraceEvent("FastRestoreController", controllerData->id()).detail("WorkerNode", workerInterf.first);
+		TraceEvent("FastRestoreController", controllerData->id())
+		    .detail("WorkerNode", workerInterf.first)
+		    .detail("NodeRole", role)
+		    .detail("NodeIndex", nodeIndex);
 		requests.emplace_back(workerInterf.first,
 		                      RestoreRecruitRoleRequest(controllerWorker->controllerInterf.get(), role, nodeIndex));
 		nodeIndex++;

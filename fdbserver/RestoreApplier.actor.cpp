@@ -88,6 +88,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					break;
 				}
 			}
+			TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
 			    .detail("RequestType", requestTypeStr)
@@ -121,7 +122,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	// Trace when the receive phase starts at a VB and when it finishes.
 	// This can help check if receiveMutations block applyMutation phase.
 	// If so, we need more sophisticated scheduler to ensure priority execution
-	printTrace = (batchData->receiveMutationReqs % 100 == 1);
+	printTrace = (batchData->receiveMutationReqs % SERVER_KNOBS->FASTRESTORE_NUM_TRACE_EVENTS == 0);
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
@@ -398,6 +399,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
+	int numGetTxns = 0;
 	double delayTime = 0; // Start transactions at different time to avoid overwhelming FDB.
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
 		if (!stagingKeyIter->second.hasBaseValue()) {
@@ -407,12 +409,14 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
 			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
 			                                                      batchIndex, &batchData->counters));
+			numGetTxns++;
 			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
 			numKeysInBatch = 0;
 			incompleteStagingKeys.clear();
 		}
 	}
 	if (numKeysInBatch > 0) {
+		numGetTxns++;
 		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
 		                                                      batchIndex, &batchData->counters));
 	}
@@ -420,7 +424,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Compute the other staging keys")
-	    .detail("StagingKeys", batchData->stagingKeys.size());
+	    .detail("StagingKeys", batchData->stagingKeys.size())
+	    .detail("GetStagingKeyBatchTxns", numGetTxns);
 	// Pre-compute pendingMutations to other keys in stagingKeys that has base value
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
