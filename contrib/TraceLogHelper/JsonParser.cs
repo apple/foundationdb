@@ -43,6 +43,33 @@ namespace Magnesium
 				string line;
 				while((line = reader.ReadLine()) != null)
 				{
+					// Remove invalid characters only if it exists in the key
+					HashSet<char> invalidChars = new HashSet<char>(":()");
+					bool inQuotes = false;
+					bool isKey = true;
+					StringBuilder newLine = new StringBuilder();
+					foreach (char c in line)
+					{
+						if (c == '"') {
+							inQuotes = !inQuotes;
+						}
+						// if not in the quotes, the colon is the beginning of the value part
+						if (!inQuotes && c == ':') {
+							isKey = false;
+						}
+						// if not in the quotes, the comma is the begiining of the next key
+						if (!inQuotes && c == ',') {
+							isKey = true;
+						}
+						// remove invalid characters in the key name
+						if (isKey && inQuotes && invalidChars.Contains(c)) {
+							continue;
+						} else {
+							newLine.Append(c);
+						}
+					}
+					line = newLine.ToString();
+
 					XElement root = XElement.Load(JsonReaderWriterFactory.CreateJsonReader(new MemoryStream(Encoding.UTF8.GetBytes(line)), new XmlDictionaryReaderQuotas()));
 					Event ev = null;
 					try
@@ -80,8 +107,7 @@ namespace Magnesium
 				TraceFile = file,
 				DDetails = xEvent.Elements()
 					.Where(a=>a.Name != "Type" && a.Name != "Time" && a.Name != "Machine" && a.Name != "ID" && a.Name != "Severity" && (!rolledEvent || a.Name != "OriginalTime"))
-					// When the key contains a colon character, it gets parsed as a:item
-					.ToDictionary(a=>a.Name.LocalName == "item" ? a.Attribute("item").Value : string.Intern(a.Name.LocalName), a=>(object)a.Value),
+					.ToDictionary(a=>string.Intern(a.Name.LocalName), a=>(object)a.Value),
 				original = keepOriginalElement ? xEvent : null
 			};
 		}
