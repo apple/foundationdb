@@ -115,7 +115,7 @@ public:
 		}
 
 		//Do not update probabilities if the average proxy busyness is less than 5%
-		if(totalBusyTime < 50000*alternatives.size()) {
+		if(totalBusyTime < FLOW_KNOBS->BASIC_LOAD_BALANCE_MIN_AMOUNT*alternatives.size()) {
 			return;
 		}
 		
