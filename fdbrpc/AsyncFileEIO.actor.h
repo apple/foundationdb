@@ -46,7 +46,7 @@ class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 public:
 	static void init() {
 		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
-		if (eio_init( &eio_want_poll, NULL )) {
+		if (eio_init( &eio_want_poll, nullptr )) {
 			TraceEvent("EioInitError").detail("ErrorNo", errno);
 			throw platform_error(); 
 		}
@@ -423,8 +423,8 @@ private:
 
 	static void eio_want_poll() {
 		want_poll = 1;
-		// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
-		onMainThreadVoid([](){ poll_eio(); }, NULL, TaskPriority::PollEIO);
+		// SOMEDAY: nullptr for deferred error, no analysis of correctness (itp)
+		onMainThreadVoid([](){ poll_eio(); }, nullptr, TaskPriority::PollEIO);
 	}
 
 	static int eio_callback( eio_req* req ) {
