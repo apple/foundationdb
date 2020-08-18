@@ -111,6 +111,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
                                                           Reference<RestoreApplierData> self) {
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 	state bool printTrace = false;
+	state NotifiedVersion* curMsgIndex = nullptr;
 
 	ASSERT(batchData.isValid());
 	ASSERT(self->finishedBatch.get() < req.batchIndex);
@@ -134,14 +135,15 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
 	ASSERT(batchData.isValid());
+	ASSERT(req.batchIndex > self->finishedBatch.get());
 	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
-	wait(curMsgIndex.whenAtLeast(req.msgIndex - 1));
+	curMsgIndex = &batchData->processedFileState[req.asset];
+	wait(curMsgIndex->whenAtLeast(req.msgIndex - 1));
 	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
 	state bool isDuplicated = true;
-	if (curMsgIndex.get() == req.msgIndex - 1) {
+	if (curMsgIndex->get() == req.msgIndex - 1) {
 		isDuplicated = false;
 
 		for (int mIndex = 0; mIndex < req.versionedMutations.size(); mIndex++) {
@@ -169,14 +171,14 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			ASSERT(versionedMutation.mutation.type != MutationRef::SetVersionstampedKey &&
 			       versionedMutation.mutation.type != MutationRef::SetVersionstampedValue);
 		}
-		curMsgIndex.set(req.msgIndex);
+		curMsgIndex->set(req.msgIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedMessageIndex", curMsgIndex.get())
+	    .detail("ProcessedMessageIndex", curMsgIndex->get())
 	    .detail("Request", req.toString());
 	return Void();
 }

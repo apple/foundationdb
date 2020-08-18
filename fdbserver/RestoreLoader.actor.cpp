@@ -476,6 +476,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	state bool isDuplicated = true;
 	state bool printTrace = false;
 	ASSERT(batchData.isValid());
+	ASSERT(req.batchIndex > self->finishedBatch.get());
 	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
 	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
@@ -563,6 +564,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	state bool isDuplicated = true;
 
 	ASSERT(batchData.isValid() && batchStatus.isValid());
+	ASSERT(req.batchIndex > self->finishedBatch.get());
 	TraceEvent("FastRestoreLoaderPhaseSendMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)

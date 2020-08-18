@@ -93,7 +93,8 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 		    oldLogMutations("OldLogMutations", cc) {}
 	} counters;
 
-	explicit LoaderBatchData(UID nodeID, int batchIndex) : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT) {
+	explicit LoaderBatchData(UID nodeID, int batchIndex)
+	  : counters(this, nodeID, batchIndex), vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0) {
 		pollMetrics = traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex), nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                            nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));
