@@ -110,6 +110,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+	ASSERT(batchData.isValid());
 	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
 	// Note: Insert new items into processedFileState will not invalidate the reference.
 	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
@@ -584,6 +585,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	state bool isDuplicated = true;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		ASSERT(batchData.isValid());
 		TraceEvent("FastRestoreApplierPhaseHandleApplyToDBRunning", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("FinishedBatch", self->finishedBatch.get())
@@ -609,7 +611,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
 		if (self->finishedBatch.get() == req.batchIndex - 1) {
 			self->finishedBatch.set(req.batchIndex);
-			self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
+			// self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
 			// Free memory for the version batch
 			self->batch.erase(req.batchIndex);
 			if (self->delayedActors > 0) {
