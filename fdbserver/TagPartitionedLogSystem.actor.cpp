@@ -190,7 +190,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<OldLogData> oldLogData;
 	AsyncTrigger logSystemConfigChanged;
 
-	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality), addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(LogSystemType::empty), logRouterTags(0), txsTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false), repopulateRegionAntiQuorum(0) {}
+	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality),
+	 addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(LogSystemType::empty), logRouterTags(0),
+	 txsTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false), repopulateRegionAntiQuorum(0) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -426,6 +428,34 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	ACTOR static Future<Void> pushResetChecker( ConnectionResetInfo* self, NetworkAddress addr ) {
+		self->slowReplies = 0;
+		self->fastReplies = 0;
+		wait(delay(SERVER_KNOBS->PUSH_STATS_INTERVAL));
+		TraceEvent("SlowPushStats").detail("SlowReplies", self->slowReplies).detail("FastReplies", self->fastReplies);
+		if(self->slowReplies >= SERVER_KNOBS->PUSH_STATS_SLOW_AMOUNT && self->slowReplies/double(self->slowReplies+self->fastReplies) >= SERVER_KNOBS->PUSH_STATS_SLOW_RATIO) {
+			FlowTransport::transport().resetConnection(addr);
+			self->lastReset = now();
+		}
+		return Void();
+	}
+
+	ACTOR static Future<TLogCommitReply> recordPushMetrics( ConnectionResetInfo* self, NetworkAddress addr, Future<TLogCommitReply> in ) {
+		state double startTime = now();
+		TLogCommitReply t = wait(in);
+		if(now()-self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
+			if(now()-startTime > SERVER_KNOBS->PUSH_MAX_LATENCY) {
+				if(self->resetCheck.isReady()) {
+					self->resetCheck = pushResetChecker(self, addr);
+				}
+				self->slowReplies++;
+			} else {
+				self->fastReplies++;
+			}
+		}
+		return t;
+	}
+
 	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID ) {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
@@ -433,10 +463,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		int location = 0;
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
+				if(it->connectionResetTrackers.size() == 0) {
+					it->connectionResetTrackers.resize(it->logServers.size());
+				}
 				vector<Future<Void>> tLogCommitResults;
 				for(int loc=0; loc< it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
-					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, debugID ), TaskPriority::ProxyTLogCommitReply ) );
+					allReplies.push_back( recordPushMetrics( &it->connectionResetTrackers[loc], it->logServers[loc]->get().interf().address(), it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, debugID ), TaskPriority::ProxyTLogCommitReply ) ) );
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);
