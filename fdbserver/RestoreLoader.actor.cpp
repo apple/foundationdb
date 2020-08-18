@@ -1181,7 +1181,7 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 			TraceEvent(SevError, "FastRestoreLoaderHasPendingSendRequests")
 			    .detail("PendingRequest", self->sendingQueue.top().toString());
 		}
-		if (!self->sendLoadParamQueue() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
+		if (!self->sendLoadParamQueue.empty() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevError, "FastRestoreLoaderHasPendingSendLoadParamRequests")
 			    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
 		}
