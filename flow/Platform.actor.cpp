@@ -1460,7 +1460,7 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 		initPdhStrings(*statState, dataFolder);
 
 		TraceEvent("SetupQuery");
-		handlePdhStatus( PdhOpenQuery(nullptr, nullptr, &(*statState)->Query), "PdhOpenQuery" );
+		handlePdhStatus( PdhOpenQuery(nullptr, NULL, &(*statState)->Query), "PdhOpenQuery" );
 
 		if( !(*statState)->pdhStrings.diskDevice.empty() ) {
 			handlePdhStatus(PdhAddCounter((*statState)->Query, ("\\" + (*statState)->pdhStrings.physicalDisk + "(" + (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.pctIdle).c_str(), 0, &(*statState)->DiskTimeCounter), "PdhAddCounter");
@@ -2061,7 +2061,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		}
 		f = 0;
 
-		if(!ReplaceFile( path.c_str(), tempfilename.c_str(), nullptr, nullptr, nullptr, nullptr ))
+		if(!ReplaceFile( path.c_str(), tempfilename.c_str(), nullptr, NULL, nullptr, nullptr ))
 			throw io_error();
 	#elif defined(__unixish__)
 		if(!g_network->isSimulated()) {
