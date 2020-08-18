@@ -32,8 +32,10 @@
 
 inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by applyMetadataMutations
-	return (m.type == MutationRef::SetValue && m.param1.size() && m.param1[0] == systemKeys.begin[0] && !m.param1.startsWith(nonMetadataSystemKeys.begin)) ||
-		(m.type == MutationRef::ClearRange && m.param2.size() && m.param2[0] == systemKeys.begin[0] && !nonMetadataSystemKeys.contains(KeyRangeRef(m.param1, m.param2)) );
+	return (m.type == MutationRef::SetValue && m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
+	        !m.param1.startsWith(nonMetadataSystemKeys.begin)) ||
+	       (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(systemKeys) &&
+	        !nonMetadataSystemKeys.contains(KeyRangeRef(m.param1, m.param2)));
 }
 
 struct applyMutationsData {
