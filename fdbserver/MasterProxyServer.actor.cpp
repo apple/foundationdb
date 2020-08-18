@@ -508,6 +508,19 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
+static void inspectTransaction(const CommitTransactionRequest& tr, bool* hasMetadataMutations,
+                               bool* hasNormalMutations) {
+	for (const auto& m : tr.transaction.mutations) {
+		if (isMetadataMutation(m)) {
+			*hasMetadataMutations = true;
+		}
+		if ((isSingleKeyMutation(MutationRef::Type(m.type)) && normalKeys.contains(m.param1)) ||
+		    (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(normalKeys))) {
+			*hasNormalMutations = true;
+		}
+	}
+}
+
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -533,6 +546,36 @@ ACTOR Future<Void> commitBatch(
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches) so we need to downgrade here
 	wait(delay(0, TaskPriority::ProxyCommit));
+
+	// Preliminary checks to address https://github.com/apple/foundationdb/issues/3647
+	for (int i = 0; i < trs.size();) {
+		bool hasMetadataMutations = false;
+		bool hasNormalMutations = false;
+		inspectTransaction(trs[i], &hasMetadataMutations, &hasNormalMutations);
+		if (hasMetadataMutations) {
+			if (hasNormalMutations) {
+				if (!trs[i].isLockAware()) {
+					// This transaction has metadata mutations, normal
+					// mutations, and is not lock aware. We can't make it
+					// lock-aware implicitly, since it has normal mutations. We
+					// can't let it commit either, since it has metadata
+					// mutations and isn't lock aware. Just reject it.
+					using std::swap;
+					swap(trs[i], trs.back());
+					trs.back().reply.sendError(not_committed());
+					trs.pop_back();
+					continue; // Avoid incrementing i
+				}
+			} else {
+				// Metadata mutations and no normal mutations are now implicitly
+				// lock-aware. This is to avoid corrupting the txnStateStore if
+				// something accidentally commits a transaction that has
+				// metadataMutations but isn't lock aware.
+				trs[i].flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+			}
+		}
+		++i;
+	}
 
 	self->lastVersionTime = t1;
 
