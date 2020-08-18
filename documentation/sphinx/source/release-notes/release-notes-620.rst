@@ -4,6 +4,11 @@
 Release Notes
 #############
 
+6.2.25
+======
+
+* Fix an issue where a non-lockaware transaction that changes certain ``\xff`` "metadata" keys, committed concurrently with locking the database, can cause corruption. As a side effect of this fix, non-lockaware transactions that write to both the normal keyspace and the ``\xff`` keyspace are now disallowed, and transactions that touch metadata keys are implicitly lock-aware. This should not affect most users. `(PR #3663) <https://github.com/apple/foundationdb/pull/3663>`_
+
 6.2.24
 ======
 
