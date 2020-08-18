@@ -1388,6 +1388,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
+        if (result.more)
+		TraceEvent(SevDebug, "SSReadRangeMoreSet").detail("Limit",limit).detail("PLimitBytes", *pLimitBytes);
 	result.version = version;
 	return result;
 }
@@ -2764,7 +2766,7 @@ private:
 					data->cachedRangeMap.insert(intersectingRange, true);
 				}
 			}
-			processedStartKey = false;
+			processedCacheStartKey = false;
 		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
 			cacheStartKey = m.param1;

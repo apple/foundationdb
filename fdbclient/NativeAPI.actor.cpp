@@ -2393,6 +2393,11 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 		loop {
 			if( end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual()) ) {
 				getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+				TraceEvent(SevDebug, "TransactionGetRangeFinished")
+					.detail("ReqBeginKey", begin.getKey())
+					.detail("ReqEndKey", end.getKey())
+					.detail("More", output.more)
+					.detail("ReqVersion", version);
 				return output;
 			}
 
@@ -2427,6 +2432,12 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			req.debugID = info.debugID;
 			req.spanContext = span.context;
 			try {
+				TraceEvent(SevDebug, "TransactionGetRangeInfo")
+					.detail("ReqBeginKey", req.begin.getKey())
+					.detail("ReqEndKey", req.end.getKey())
+					.detail("ReqLimit", req.limit)
+					.detail("ReqLimitBytes", req.limitBytes)
+					.detail("ReqVersion", req.version);
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
 					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
@@ -2474,6 +2485,12 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						.detail("VersionReturned", rep.version)
 						.detail("RowsReturned", rep.data.size());*/
 				}
+				TraceEvent(SevDebug, "TransactionGetRangeDone")
+					.detail("ReqBeginKey", req.begin.getKey())
+					.detail("ReqEndKey", req.end.getKey())
+					.detail("RepIsMore", rep.more)
+					.detail("VersionReturned", rep.version)
+					.detail("RowsReturned", rep.data.size());
 
 				ASSERT( !rep.more || rep.data.size() );
 				ASSERT( !limits.hasRowLimit() || rep.data.size() <= limits.rows );
