@@ -611,7 +611,7 @@ public:
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs();
-	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
+	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

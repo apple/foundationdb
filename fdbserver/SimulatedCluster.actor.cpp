@@ -172,7 +172,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("DataFolder", *dataFolder)
 				.detail("ConnectionString", connFile ? connFile->getConnectionString().toString() : "")
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 				.detail("CommandLine", "fdbserver -r simulation")
 				.detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
 				.detail("Simulated", true)
@@ -558,7 +558,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
 		int listenersPerProcess = 1;
 		auto listenersPerProcessStr = ini.GetValue("META", "listenersPerProcess");
-		if(listenersPerProcessStr != NULL) {
+		if(listenersPerProcessStr != nullptr) {
 			listenersPerProcess = atoi(listenersPerProcessStr);
 		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
@@ -585,7 +585,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 			}
 
 			auto zoneIDini = ini.GetValue(machineIdString.c_str(), "zoneId");
-			if( zoneIDini == NULL ) {
+			if( zoneIDini == nullptr ) {
 				zoneId = machineId;
 			} else {
 				zoneId = StringRef(zoneIDini);
@@ -609,11 +609,11 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 				if (parsedIp.present()) {
 					return parsedIp.get();
 				} else {
-					return IPAddress(strtoul(ipStr, NULL, 10));
+					return IPAddress(strtoul(ipStr, nullptr, 10));
 				}
 			};
 
-			if( ip == NULL ) {
+			if( ip == nullptr ) {
 				for (int i = 0; i < processes; i++) {
 					const char* val =
 					    ini.GetValue(machineIdString.c_str(), format("ipAddr%d", i * listenersPerProcess).c_str());

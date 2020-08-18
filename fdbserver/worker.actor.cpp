@@ -570,7 +570,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 			const char *path = (const char*)req.outputFile.begin();
 			ProfilerOptions *options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
-			options->filter_in_thread_arg = NULL;
+			options->filter_in_thread_arg = nullptr;
 			ProfilerStartWithOptions(path, options);
 			break;
 		}
