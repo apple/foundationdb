@@ -110,12 +110,10 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
 	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
-	ASSERT(batchData.isValid());
-	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
-	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 	state bool printTrace = false;
 
+	ASSERT(batchData.isValid());
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
 	// wait(delay(0.0, TaskPriority::RestoreApplierReceiveMutations)); // This hurts performance from 100MB/s to 60MB/s
 	// on circus
 
@@ -127,7 +125,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
+	    .detail("RestoreAssetMesssageIndex", batchData->processedFileState[req.asset].get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
 	    .detail("PreviousVersionBatchState", batchData->vbState.get())
@@ -135,6 +133,10 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
+	ASSERT(batchData.isValid());
+	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
+	// Note: Insert new items into processedFileState will not invalidate the reference.
+	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
 	wait(curMsgIndex.whenAtLeast(req.msgIndex - 1));
 	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
