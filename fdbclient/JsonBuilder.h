@@ -17,12 +17,12 @@ template <typename T> class JsonBuilderObjectSetter;
 // Default value is null, as in the JSON type
 class JsonBuilder {
 protected:
-	enum EType { nullptrVALUE, OBJECT, ARRAY };
+	enum EType { NULLVALUE, OBJECT, ARRAY };
 
 	typedef VectorRef<char> VString;
 public:
 	// Default value is null, which will be considered "empty"
-	JsonBuilder() : type(nullptrVALUE), elements(0), bytes(0) {
+	JsonBuilder() : type(NULLVALUE), elements(0), bytes(0) {
 		jsonText.resize(arena, 1);
 	}
 
@@ -240,7 +240,7 @@ protected:
 	// Get the text necessary to finish the JSON string
 	const char * getEnd() const {
 		switch(type) {
-			case nullptrVALUE:
+			case NULLVALUE:
 				return "null";
 			case OBJECT:
 				return "}";
