@@ -109,7 +109,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file.
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	state Reference<ApplierBatchData> batchData; // initiallized as nullptr
+	state Reference<ApplierBatchData> batchData; // initialized as nullptr
 	state bool printTrace = false;
 	state NotifiedVersion* curMsgIndex = nullptr;
 

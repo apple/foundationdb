@@ -834,11 +834,21 @@ ACTOR Future<Void> sendMutationsToApplier(
 	wait(waitForAll(fSends));
 
 	(*inflightSendLoadParamReqs)[batchIndex]--;
-	kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
-	TraceEvent("FastRestoreLoaderSendMutationToApplierDone")
-	    .detail("BatchIndex", batchIndex)
-	    .detail("RestoreAsset", asset.toString())
-	    .detail("Mutations", kvCount);
+
+	if (batchIndex < finishedBatch->get()) {
+		kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
+		TraceEvent("FastRestoreLoaderSendMutationToApplierDone")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("RestoreAsset", asset.toString())
+		    .detail("Mutations", kvCount);
+	} else {
+		TraceEvent(SevWarnAlways, "FastRestoreLoaderSendMutationToApplierDoneTooLate")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("FinishedBatchIndex", finishedBatch->get())
+		    .detail("RestoreAsset", asset.toString())
+		    .detail("Mutations", kvCount);
+	}
+
 	return Void();
 }
 
