@@ -1745,6 +1745,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
 		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
 
+		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
 		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
@@ -1779,9 +1780,11 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
 
 		JsonBuilderObject throttledTagsObj;
-		JsonBuilderObject autoThrottledTagsObj;
-		autoThrottledTagsObj["count"] = autoThrottledTags;
+		JsonBuilderObject autoThrottledTagsObj, recommendThrottleTagsObj;
+		autoThrottledTagsObj["count"] = autoThrottlingEnabled ? autoThrottledTags : 0;
+		recommendThrottleTagsObj["count"] = autoThrottlingEnabled ? 0 : autoThrottlingEnabled;
 		throttledTagsObj["auto"] = autoThrottledTagsObj;
+		throttledTagsObj["recommend"] = recommendThrottleTagsObj;
 
 		JsonBuilderObject manualThrottledTagsObj;
 		manualThrottledTagsObj["count"] = manualThrottledTags;

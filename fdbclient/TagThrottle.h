@@ -166,7 +166,7 @@ struct TagThrottleInfo {
 };
 
 namespace ThrottleApi {
-	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit);
+	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit, bool const& containsRecommend = false);
 	Future<std::vector<TagThrottleInfo>> getRecommendedTags(Database const& db, int limit);
 
 	Future<Void> throttleTags(Database const& db, TagSet const& tags, double const& tpsRate, double const& initialDuration, 
