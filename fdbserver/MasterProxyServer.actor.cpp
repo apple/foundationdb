@@ -1058,8 +1058,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted && (!self->locked || trs[self->transactionNum].isLockAware()))) {
 			continue;
 		}
-		ASSERT(trs[self->transactionNum].commitCostEstimation.present() == trs[self->transactionNum].tagSet.present());
-		state bool checkSample = trs[self->transactionNum].tagSet.present();
+
+		state bool checkSample = trs[self->transactionNum].commitCostEstimation.present();
 		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
 		state int mutationNum = 0;
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;

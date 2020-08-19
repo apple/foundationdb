@@ -76,28 +76,20 @@ struct ClientTagThrottleLimits {
 };
 
 struct TransactionCommitCostEstimation {
-	int numWrite = 0;
-	int numAtomicWrite = 0;
-	int numClear = 0;
-	uint64_t costWrite = 0;
-	uint64_t costAtomicWrite = 0;
-	uint64_t costClearEst = 0;
+	int opsSum = 0;
+	uint64_t costSum = 0;
 
-	uint64_t getCostSum() const { return costClearEst + costAtomicWrite + costWrite; }
-	int getOpsSum() const { return numWrite + numAtomicWrite + numClear; }
+	uint64_t getCostSum() const { return costSum; }
+	int getOpsSum() const { return opsSum; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, costWrite, costClearEst, costAtomicWrite, numWrite, numAtomicWrite, numClear);
+		serializer(ar, opsSum, costSum);
 	}
 
 	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
-		numWrite += other.numWrite;
-		numAtomicWrite += other.numAtomicWrite;
-		numClear += other.numClear;
-		costWrite += other.costWrite;
-		costAtomicWrite += other.numAtomicWrite;
-		costClearEst += other.costClearEst;
+		opsSum += other.opsSum;
+		costSum += other.costSum;
 		return *this;
 	}
 };

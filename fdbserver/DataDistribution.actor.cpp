@@ -512,10 +512,10 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				beginKey = keyServers.end()[-1].key;
 				break;
 			} catch (Error& e) {
-				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
 				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
 
 				wait( tr.onError(e) );
+				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
 			}
 		}
 
@@ -4975,6 +4975,14 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 	}
 }
 
+static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
+	std::nth_element(metricVec.begin(), metricVec.begin() + metricVec.size() / 2,
+	                 metricVec.end(), [](const DDMetricsRef& d1, const DDMetricsRef& d2) {
+						  return d1.shardBytes < d2.shardBytes;
+						});
+	return metricVec[metricVec.size() / 2].shardBytes;
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
@@ -5014,14 +5022,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 						auto& metricVec = result.get();
 						if(metricVec.empty()) rep.midShardSize = 0;
 						else {
-							std::vector<int64_t> shardSizes(metricVec.size());
-							for (int i = 0; i < shardSizes.size(); ++ i)
-							{
-								shardSizes[i] = metricVec[i].shardBytes;
-								// TraceEvent("DDMetricsReply").detail("Value", metricVec[i].shardBytes).detail("BeginKey", metricVec[i].beginKey);
-							}
-							std::nth_element(shardSizes.begin(), shardSizes.begin() + shardSizes.size()/2, shardSizes.end());
-							rep.midShardSize = shardSizes[shardSizes.size()/2];
+							rep.midShardSize = getMedianShardSize(metricVec.contents());
 						}
 					}
 					req.reply.send(rep);

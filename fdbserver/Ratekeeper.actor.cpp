@@ -917,7 +917,7 @@ void tryAutoThrottleTag(RatekeeperData* self, StorageQueueInfo& ss, int64_t stor
 //		tryAutoThrottleTag(self, ss.busiestWriteTag.get(), ss.busiestWriteTagRate, ss.busiestWriteTagFractionalBusyness);
 //	} else
     if (ss.busiestReadTag.present() &&
-	           (SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
+	           (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 	           storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
 		// read saturated
 		tryAutoThrottleTag(self, ss.busiestReadTag.get(), ss.busiestReadTagRate, ss.busiestReadTagFractionalBusyness);

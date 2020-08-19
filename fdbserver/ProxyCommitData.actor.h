@@ -244,22 +244,13 @@ struct ProxyCommitData {
 	}
 
 	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int cost){
-		if(ssTagCommitCost.count(id) == 0) {
-			ssTagCommitCost[id] = TransactionTagMap<TransactionCommitCostEstimation>();
-		}
+		auto [it, _] = ssTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
+
 		for(auto& tag: tagSet) {
-			auto& costItem = ssTagCommitCost[id][tag];
-			if(m.isAtomicOp()) {
-				costItem.numAtomicWrite ++;
-				costItem.costAtomicWrite += cost;
-			}
-			else if (m.type == MutationRef::Type::SetValue){
-				costItem.numWrite ++;
-				costItem.costWrite += cost;
-			}
-			else if (m.type == MutationRef::Type::ClearRange){
-				costItem.numClear ++;
-				costItem.costClearEst += cost;
+			auto& costItem = it->second[tag];
+			if(m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
+				costItem.opsSum ++;
+				costItem.costSum += cost;
 			}
 		}
 	}
