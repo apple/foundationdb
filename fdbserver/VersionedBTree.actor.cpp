@@ -3095,8 +3095,8 @@ public:
 	// durable once the following call to commit() returns
 	void set(KeyValueRef keyValue) {
 		++g_redwoodMetrics.opSet;
-		++g_redwoodMetrics.opSetKeyBytes += keyValue.key.size();
-		++g_redwoodMetrics.opSetValueBytes += keyValue.value.size();
+		g_redwoodMetrics.opSetKeyBytes += keyValue.key.size();
+		g_redwoodMetrics.opSetValueBytes += keyValue.value.size();
 		m_pBuffer->insert(keyValue.key).mutation().setBoundaryValue(m_pBuffer->copyToArena(keyValue.value));
 	}
 
