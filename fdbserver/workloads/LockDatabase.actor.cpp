@@ -117,7 +117,24 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> assertRejected(Database cx) {
+		state Transaction tr(cx);
+		ASSERT(!tr.options.lockAware);
+		wait(success(tr.getReadVersion()));
+		tr.clear(allKeys);
+		try {
+			wait(tr.commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			// A transaction that touches normal keys, metadata keys, and is not lock aware should be rejected.
+			TEST(e.code() == error_code_not_committed);
+			wait(tr.onError(e));
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> lockWorker( Database cx, LockDatabaseWorkload* self ) {
+		wait(assertRejected(cx));
 		state UID lockID = deterministicRandom()->randomUniqueID();
 		wait(delay(self->lockAfter));
 		state Standalone<RangeResultRef> data = wait(lockAndSave(cx, self, lockID));

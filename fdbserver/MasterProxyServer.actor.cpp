@@ -48,6 +48,8 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+using std::swap;
+
 struct ProxyStats {
 	CounterCollection cc;
 	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
@@ -320,6 +322,11 @@ struct ProxyCommitData {
 	}
 };
 
+static bool isNormalMutation(const MutationRef& m) {
+	return (isSingleKeyMutation(MutationRef::Type(m.type)) && normalKeys.contains(m.param1)) ||
+	       (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(normalKeys));
+}
+
 struct ResolutionRequestBuilder {
 	ProxyCommitData* self;
 	vector<ResolveTransactionBatchRequest> requests;
@@ -345,12 +352,21 @@ struct ResolutionRequestBuilder {
 		return *out;
 	}
 
-	void addTransaction(CommitTransactionRef& trIn, int transactionNumberInBatch) {
+	enum class Instruction {
+		Accept,
+		MakeLockAware,
+		Reject,
+	};
+
+	[[nodiscard]] Instruction addTransaction(CommitTransactionRef& trIn, int transactionNumberInBatch, bool lockAware) {
 		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
 		outTr.assign(requests.size(), NULL);
 		ASSERT( transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768 );
 
 		bool isTXNStateTransaction = false;
+		bool isNormalTransaction = false;
+		Arena localArena;
+		VectorRef<MutationRef> txnStateStoreMutations;
 		for (auto & m : trIn.mutations) {
 			if (m.type == MutationRef::SetVersionstampedKey) {
 				transformVersionstampMutation( m, &MutationRef::param1, requests[0].version, transactionNumberInBatch );
@@ -360,9 +376,18 @@ struct ResolutionRequestBuilder {
 			}
 			if (isMetadataMutation(m)) {
 				isTXNStateTransaction = true;
-				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
+				txnStateStoreMutations.push_back(localArena, m);
+			}
+			if (isNormalMutation(m)) {
+				isNormalTransaction = true;
 			}
 		}
+		if (isTXNStateTransaction && isNormalTransaction && !lockAware) {
+			return Instruction::Reject;
+		}
+		getOutTransaction(0, trIn.read_snapshot)
+		    .mutations.append(requests[0].arena, txnStateStoreMutations.begin(), txnStateStoreMutations.size());
+
 		for(auto& r : trIn.read_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges( r );
 			std::set<int> resolvers;
@@ -398,6 +423,11 @@ struct ResolutionRequestBuilder {
 			if (outTr[r])
 				resolversUsed.push_back(r);
 		transactionResolverMap.push_back(std::move(resolversUsed));
+
+		if (isTXNStateTransaction && !lockAware) {
+			return Instruction::MakeLockAware;
+		}
+		return Instruction::Accept;
 	}
 };
 
@@ -508,19 +538,6 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
-static void inspectTransaction(const CommitTransactionRequest& tr, bool* hasMetadataMutations,
-                               bool* hasNormalMutations) {
-	for (const auto& m : tr.transaction.mutations) {
-		if (isMetadataMutation(m)) {
-			*hasMetadataMutations = true;
-		}
-		if ((isSingleKeyMutation(MutationRef::Type(m.type)) && normalKeys.contains(m.param1)) ||
-		    (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(normalKeys))) {
-			*hasNormalMutations = true;
-		}
-	}
-}
-
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -546,36 +563,6 @@ ACTOR Future<Void> commitBatch(
 
 	// Active load balancing runs at a very high priority (to obtain accurate estimate of memory used by commit batches) so we need to downgrade here
 	wait(delay(0, TaskPriority::ProxyCommit));
-
-	// Preliminary checks to address https://github.com/apple/foundationdb/issues/3647
-	for (int i = 0; i < trs.size();) {
-		bool hasMetadataMutations = false;
-		bool hasNormalMutations = false;
-		inspectTransaction(trs[i], &hasMetadataMutations, &hasNormalMutations);
-		if (hasMetadataMutations) {
-			if (hasNormalMutations) {
-				if (!trs[i].isLockAware()) {
-					// This transaction has metadata mutations, normal
-					// mutations, and is not lock aware. We can't make it
-					// lock-aware implicitly, since it has normal mutations. We
-					// can't let it commit either, since it has metadata
-					// mutations and isn't lock aware. Just reject it.
-					using std::swap;
-					swap(trs[i], trs.back());
-					trs.back().reply.sendError(not_committed());
-					trs.pop_back();
-					continue; // Avoid incrementing i
-				}
-			} else {
-				// Metadata mutations and no normal mutations are now implicitly
-				// lock-aware. This is to avoid corrupting the txnStateStore if
-				// something accidentally commits a transaction that has
-				// metadataMutations but isn't lock aware.
-				trs[i].flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
-			}
-		}
-		++i;
-	}
 
 	self->lastVersionTime = t1;
 
@@ -626,16 +613,33 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GotCommitVersion");
 
-	ResolutionRequestBuilder requests( self, commitVersion, prevVersion, self->version );
+	ResolutionRequestBuilder requests(self, commitVersion, prevVersion, self->version);
 	int conflictRangeCount = 0;
 	state int64_t maxTransactionBytes = 0;
-	for (int t = 0; t<trs.size(); t++) {
-		requests.addTransaction(trs[t].transaction, t);
-		conflictRangeCount += trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
+	for (int t = 0; t < trs.size();) {
+		auto instruction = requests.addTransaction(trs[t].transaction, t, trs[t].isLockAware());
+		if (instruction == ResolutionRequestBuilder::Instruction::Accept) {
+			TEST(true);
+		} else if (instruction == ResolutionRequestBuilder::Instruction::MakeLockAware) {
+			TEST(true);
+			trs[t].flags |= CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+		} else {
+			ASSERT(instruction == ResolutionRequestBuilder::Instruction::Reject);
+			TEST(true);
+			trs[t].reply.sendError(not_committed());
+			if (t != trs.size() - 1) {
+				swap(trs[t], trs.back());
+			}
+			trs.pop_back();
+			continue; // Avoid incrementing t!
+		}
+		conflictRangeCount +=
+		    trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
 		//TraceEvent("MPTransactionDump", self->dbgid).detail("Snapshot", trs[t].transaction.read_snapshot);
-		//for(auto& m : trs[t].transaction.mutations)
+		// for(auto& m : trs[t].transaction.mutations)
 		maxTransactionBytes = std::max<int64_t>(maxTransactionBytes, trs[t].transaction.expectedSize());
 		//	TraceEvent("MPTransactionsDump", self->dbgid).detail("Mutation", m.toString());
+		++t;
 	}
 	self->stats.conflictRanges += conflictRangeCount;
 
