@@ -1013,8 +1013,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 remove mutations for it. By default this is set to one hour.\n");
 	printf("  --delete_data\n"
 		   "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
-	printf("  --incremental\n"
-	       "                 Performs incremental backup without the base backup.\n");
+	// TODO: Enable this command-line argument once atomics are supported
+	// printf("  --incremental\n"
+	//        "                 Performs incremental backup without the base backup.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1072,8 +1073,9 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
-	printf("  --incremental\n"
-	       "                 Performs incremental restore without the base backup.\n");
+	// TODO: Enable this command-line argument once atomics are supported
+	// printf("  --incremental\n"
+	//        "                 Performs incremental restore without the base backup.\n");
 #ifndef TLS_DISABLED
 	    printf(TLS_HELP);
 #endif
@@ -3244,7 +3246,8 @@ int main(int argc, char* argv[]) {
 					usePartitionedLog = true;
 					break;
 				case OPT_INCREMENTALONLY:
-					incrementalBackupOnly = true;
+					// TODO: Enable this command-line argument once atomics are supported
+					// incrementalBackupOnly = true;
 					break;
 				case OPT_RESTORECONTAINER:
 					restoreContainer = args->OptionArg();
