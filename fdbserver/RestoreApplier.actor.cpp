@@ -109,9 +109,20 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file.
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+	state Reference<ApplierBatchData> batchData; // initiallized as nullptr
 	state bool printTrace = false;
 	state NotifiedVersion* curMsgIndex = nullptr;
+
+	if (req.batchIndex <= self->finishedBatch.get()) { // Handle duplicate request from batchIndex that has finished
+		TraceEvent(SevWarn, "FastRestoreApplierRestoreSendVersionedMutationsRequestTooLate")
+		    .detail("RequestBatchIndex", req.batchIndex)
+		    .detail("FinishedBatchIndex", self->finishedBatch.get());
+		ASSERT(false); // Test to see if simulation can reproduce this
+		req.reply.send(RestoreCommonReply(self->id(), true));
+		return Void();
+	}
+
+	batchData = self->batch[req.batchIndex];
 
 	ASSERT(batchData.isValid());
 	ASSERT(self->finishedBatch.get() < req.batchIndex);
@@ -587,7 +598,8 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 
 	state bool isDuplicated = true;
-	if (self->finishedBatch.get() == req.batchIndex - 1) {
+	if (self->finishedBatch.get() ==
+	    req.batchIndex - 1) { // duplicate request from earlier version batch will be ignored
 		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 		ASSERT(batchData.isValid());
 		TraceEvent("FastRestoreApplierPhaseHandleApplyToDBRunning", self->id())
