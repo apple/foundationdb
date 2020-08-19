@@ -519,7 +519,7 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 			++data->counters.rowsQueried;
 			resultSize = v.get().size();
 			data->counters.bytesQueried += resultSize;
-			//TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
+			TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
 		}
 
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
@@ -536,8 +536,8 @@ ACTOR Future<Void> getValueQ( StorageCacheData* data, GetValueRequest req ) {
 		GetValueReply reply(v, true);
 		req.reply.send(reply);
 	} catch (Error& e) {
-		//TraceEvent(SevWarn, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key)
-		//	.detail("ReqVersion", req.version).detail("DataVersion", data->version.get());
+		TraceEvent(SevWarn, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key)
+			.detail("ReqVersion", req.version).detail("DataVersion", data->version.get());
 		if(!canReplyWith(e))
 			throw;
 		req.reply.sendError(e);
@@ -619,6 +619,8 @@ GetKeyValuesReply readRange(StorageCacheData* data, Version version, KeyRangeRef
 	*pLimitBytes -= accumulatedBytes;
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
+	if (result.more)
+		TraceEvent(SevDebug, "SCReadRangeMoreSet").detail("Limit",limit).detail("PLimitBytes", *pLimitBytes);
 	result.version = version;
 	result.cached = true;
 	return result;
@@ -1173,6 +1175,11 @@ ACTOR Future<Standalone<RangeResultRef>> tryFetchRange( Database cx, Version ver
 
 	try {
 		loop {
+			//TraceEvent(SevDebug, "SCTryFetchRange")
+			//	.detail("ReqBeginKey", begin.getKey())
+			//	.detail("ReqEndKey", end.getKey())
+			//	.detail("ReqLimit", limits.rows)
+			//	.detail("ReqVersion", version);
 			Standalone<RangeResultRef> rep = wait( tr.getRange( begin, end, limits, true ) );
 			limits.decrement( rep );
 
@@ -1187,6 +1194,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryFetchRange( Database cx, Version ver
 				}
 
 				output.more = limits.isReached();
+				//TraceEvent(SevDebug, "SCTryFetchKeys").detail("Size", output.size()).detail("ReadThrough", output.readThrough).detail("More", output.more);
 
 				return output;
 			} else if( rep.readThrough.present() ) {
@@ -1268,6 +1276,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated until all mutations for a version
 		// have been processed. We need to take the updateVersionLock to ensure data->version is greater than the version of the mutation which caused
 		// the fetch to be initiated.
+		TraceEvent(SevDebug, "SCFetchKeysTakeLock", data->thisServerID).detail("FKID", interval.pairID).detail("Version", fetchVersion);
 		wait( data->updateVersionLock.take() );
 
 		cacheRange->phase = AddingCacheRange::Fetching;
@@ -1747,11 +1756,13 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 		// Call the compaction routine that does the actual work,
 		//TraceEvent(SevDebug, "SCCompactCache", data->thisServerID).detail("DesiredVersion", desiredVersion);
 		// TODO It's a synchronous function call as of now. Should it asynch?
+		//wait( data->updateVersionLock.take() );
 		data->mutableData().compact(desiredVersion);
 		Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( desiredVersion,
 																						 TaskPriority::CompactCache );
 		data->oldestVersion.set( desiredVersion );
 		wait( finishedForgetting );
+		//data->updateVersionLock.release();
 		// TODO how do we yield here? This may not be enough, because compact() does the heavy lifting
 		// of compating the VersionedMap. We should probably look into per version compaction and then
 		// we can yield after compacting one version
@@ -1795,9 +1806,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 			data->lastTLogVersion = cursor->getMaxKnownVersion();
 			data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
 
+			//TraceEvent(SevDebug, "SCPullAsyncTakeLock", data->thisServerID).detail("Version", data->version.get());
 			start = now();
 			wait( data->updateVersionLock.take(TaskPriority::TLogPeekReply,1) );
-			// state FlowLock::Releaser holdingDVL( data->updateVersionLock );
+			//state std::unique_ptr<FlowLock::Releaser> holdingUVL = std::make_unique<FlowLock::Releaser>(data->updateVersionLock);
 			if(now() - start > 0.1)
 				TraceEvent("SCSlowTakeLock1", data->thisServerID).detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken).detail("Duration", now() - start).detail("Version", data->version.get());
 
@@ -1949,8 +1961,8 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			data->debug_inApplyUpdate = false;
 
-		if(ver != invalidVersion && ver > data->version.get()) {
-			DEBUG_KEY_RANGE("SCUpdate", ver, allKeys);
+			if(ver != invalidVersion && ver > data->version.get()) {
+				DEBUG_KEY_RANGE("SCUpdate", ver, allKeys);
 
 				data->mutableData().createNewVersion(ver);
 
@@ -1998,6 +2010,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 		}
 
 		tagAt = std::max( tagAt, cursor->version().version);
+		data->updateVersionLock.release();
+		//TODO: NEELAM: Not sure why the following release doesn't seem to work
+		//holdingUVL.release();
+		//TraceEvent(SevDebug, "SCPullAsyncUnblocked", data->thisServerID).detail("Version", data->version.get());
 	}
 }
 
@@ -2134,7 +2150,7 @@ void StorageCacheData::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 												   BinaryWriter::toValue( sampleInfo.sampledSize, Unversioned() )) );
 	} else {
 		bool any = old != byteSample.end();
-		TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Any", any);
+		//TraceEvent(SevDebug, "SCByteSampleApplySet", this->thisServerID).detail("Any", any);
 		if(false && !byteSampleClears.rangeContaining(key).value()) {
 			byteSampleClears.insert(key, true);
 			byteSampleClearsTooLarge.set(byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
@@ -2169,8 +2185,8 @@ void StorageCacheData::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
 			metrics.notifyBytes(shard, -bytes);
 			any = any || bytes > 0;
-			TraceEvent(SevDebug, "SCByteSampleApplyClear", this->thisServerID).detail("Any", any).
-				detail("Bytes", bytes);
+			//TraceEvent(SevDebug, "SCByteSampleApplyClear", this->thisServerID).detail("Any", any).
+			//	detail("Bytes", bytes);
 		}
 	}
 
@@ -2351,10 +2367,10 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi, uint16_t id, R
 	self.ck = cacheKeysPrefixFor( id ).withPrefix(systemKeys.begin);  // FFFF/02cacheKeys/[this server]/
 
 	self.actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	//self.actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
+	self.actors.add(traceCounters("CacheMetrics", self.thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self.counters.cc, self.thisServerID.toString() + "/CacheMetrics"));
 	self.actors.add(metricsCore(&self, ssi));
 
-	// fetch already cached ranges from the database and apply them before proceeding
+	//fetch already cached ranges from the database and apply them before proceeding
 	wait( storageCacheStartUpWarmup(&self) );
 
 	//compactCache actor will periodically compact the cache when certain version condition is met

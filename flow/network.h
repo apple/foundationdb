@@ -328,6 +328,9 @@ struct NetworkMetrics {
 
 	double secSquaredSubmit = 0;
 	double secSquaredDiskStall = 0;
+	//double cacheHitRatio = 0;
+	uint64_t countReqs = 0;
+	uint64_t countCacheHits = 0;
 
 	struct PriorityStats {
 		TaskPriority priority;

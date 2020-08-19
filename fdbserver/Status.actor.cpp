@@ -780,7 +780,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::vector<std::pair<StorageServerInterface, EventMap>>::iterator sc;
 	state std::map<NetworkAddress, double> scLag;
 	state double lagSecs;
-	TraceEvent(SevDebug, "SCCacheServersList").detail("Size", cacheServers.size());
+	//TraceEvent(SevDebug, "SCCacheServersList").detail("Size", cacheServers.size());
 	for(sc = cacheServers.begin(); sc != cacheServers.end(); ++sc) {
 		roles.addCacheRole( "storage_cache", sc->first, sc->second, maxTLogVersion, &lagSecs );
 		if (lagSecs != -1.0) {

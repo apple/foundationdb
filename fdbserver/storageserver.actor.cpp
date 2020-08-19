@@ -1388,6 +1388,8 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 	// all but the last item are less than *pLimitBytes
 	ASSERT(result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0);
 	result.more = limit == 0 || *pLimitBytes<=0;  // FIXME: Does this have to be exact?
+        if (result.more)
+		TraceEvent(SevDebug, "SSReadRangeMoreSet").detail("Limit",limit).detail("PLimitBytes", *pLimitBytes);
 	result.version = version;
 	return result;
 }
@@ -2764,7 +2766,7 @@ private:
 					data->cachedRangeMap.insert(intersectingRange, true);
 				}
 			}
-			processedStartKey = false;
+			processedCacheStartKey = false;
 		} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
 			cacheStartKey = m.param1;
@@ -3485,13 +3487,12 @@ void StorageServer::byteSampleApplySet( KeyValueRef kv, Version ver ) {
 		addMutationToMutationLogOrStorage( ver, MutationRef(MutationRef::SetValue, key.withPrefix(persistByteSampleKeys.begin), BinaryWriter::toValue( sampleInfo.sampledSize, Unversioned() )) );
 	} else {
 		bool any = old != byteSample.end();
-		TraceEvent(SevDebug, "SSByteSampleApplySet", this->thisServerID).detail("Any", any);
+		//TraceEvent(SevDebug, "SSByteSampleApplySet", this->thisServerID).detail("Any", any);
 		if(!byteSampleRecovery.isReady() ) {
 			if(!byteSampleClears.rangeContaining(key).value()) {
 				byteSampleClears.insert(key, true);
 				byteSampleClearsTooLarge.set(byteSampleClears.size() > SERVER_KNOBS->MAX_BYTE_SAMPLE_CLEAR_MAP_SIZE);
 				any = true;
-				TraceEvent(SevDebug, "SSByteSampleApplySetInside", this->thisServerID).detail("Any", any);
 			}
 		}
 		if (any) {
@@ -3522,8 +3523,8 @@ void StorageServer::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 			int64_t bytes = byteSample.sumRange(intersectingRange.begin, intersectingRange.end);
 			metrics.notifyBytes(shard, -bytes);
 			any = any || bytes > 0;
-			TraceEvent(SevDebug, "SSByteSampleApplyClear", this->thisServerID).detail("Any", any).
-				detail("Bytes", bytes);
+			//TraceEvent(SevDebug, "SSByteSampleApplyClear", this->thisServerID).detail("Any", any).
+			//	detail("Bytes", bytes);
 		}
 	}
 
@@ -3540,7 +3541,7 @@ void StorageServer::byteSampleApplyClear( KeyRangeRef range, Version ver ) {
 				break;
 			}
 		}
-		TraceEvent(SevDebug, "SSByteSampleApplyClearInside", this->thisServerID).detail("Any", any);
+		//TraceEvent(SevDebug, "SSByteSampleApplyClearInside", this->thisServerID).detail("Any", any);
 	}
 
 	if (any) {

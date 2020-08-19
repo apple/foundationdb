@@ -270,7 +270,7 @@ ACTOR Future<vector<WorkerInterface>> getStorageWorkers( Database cx, Reference<
 }
 
 ACTOR Future<vector<StorageServerInterface>> getStorageCacheServers( Database cx, bool use_system_priority = false) {
-	TraceEvent("SCGetStorageCacheServers").detail("Stage", "ContactingStorageCacheServers");
+	//TraceEvent("SCGetStorageCacheServers").detail("Stage", "ContactingStorageCacheServers");
 	state Transaction tr( cx );
 	loop {
 		if (use_system_priority) {
@@ -281,7 +281,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageCacheServers( Database cx
 			Standalone<RangeResultRef> serverList = wait( tr.getRange( storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY ) );
 			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
 
-			TraceEvent("SCGetStorageCacheServersSize").detail("Size", serverList.size());
+			//TraceEvent("SCGetStorageCacheServersSize").detail("Size", serverList.size());
 			vector<StorageServerInterface> servers;
 			for( int i = 0; i < serverList.size(); i++ )
 				servers.push_back( decodeCacheServerListValue( serverList[i].value ) );

@@ -628,6 +628,7 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 				std::map<UID, StorageServerInterface> allCacheServers;
 				for (auto kv : cacheList) {
 					auto ssi = BinaryReader::fromStringRef<StorageServerInterface>(kv.value, IncludeVersion());
+					ssi.isCacheServer = true;
 					allCacheServers.emplace(ssi.id(), ssi);
 				}
 				std::map<UID, StorageServerInterface> newCacheServers;
