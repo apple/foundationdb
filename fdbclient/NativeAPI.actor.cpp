@@ -3348,17 +3348,24 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 	if (!self->getDatabase()->sampleOnCost(trCommitCosts.writeCosts))
 		return Optional<ClientTrCommitCostEstimation>();
 
-	// sample clear op: the expectation of sampling is every COMMIT_SAMPLE_COST sample once
+	// sample clear op: the expectation of #sampledOp is every COMMIT_SAMPLE_COST sample once
+	// we also scale the cost of mutations whose cost is less than COMMIT_SAMPLE_COST as scaledCost = min(COMMIT_SAMPLE_COST, cost)
+	// If we have 4 transactions:
+	// A - 100 1-cost mutations: E[sampled ops] = 1, E[sampled cost] = 100
+	// B - 1 100-cost mutation: E[sampled ops] = 1, E[sampled cost] = 100
+	// C - 50 2-cost mutations: E[sampled ops] = 1, E[sampled cost] = 100
+	// D - 1 150-cost mutation and 150 1-cost mutations: E[sampled ops] = 3, E[sampled cost] = 150cost * 1 + 150 * 100cost * 0.01 = 300
 	ASSERT(trCommitCosts.writeCosts > 0);
 	std::deque<std::pair<int, uint64_t>> newClearIdxCosts;
 	for (const auto& [idx, cost] : trCommitCosts.clearIdxCosts) {
 		if(trCommitCosts.writeCosts >= CLIENT_KNOBS->COMMIT_SAMPLE_COST){
 			double mul = trCommitCosts.writeCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST);
-			if(deterministicRandom()->random01() < cost * mul / trCommitCosts.writeCosts)
-				newClearIdxCosts.emplace_back(idx, cost);
+			if(deterministicRandom()->random01() < cost * mul / trCommitCosts.writeCosts) {
+				newClearIdxCosts.emplace_back(idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
+			}
 		}
 		else if(deterministicRandom()->random01() < (double)cost / trCommitCosts.writeCosts){
-			newClearIdxCosts.emplace_back(idx, cost);
+			newClearIdxCosts.emplace_back(idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
 		}
 	}
 
