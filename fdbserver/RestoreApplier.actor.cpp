@@ -117,8 +117,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		TraceEvent(SevWarn, "FastRestoreApplierRestoreSendVersionedMutationsRequestTooLate")
 		    .detail("RequestBatchIndex", req.batchIndex)
 		    .detail("FinishedBatchIndex", self->finishedBatch.get());
-		ASSERT(false); // Test to see if simulation can reproduce this
 		req.reply.send(RestoreCommonReply(self->id(), true));
+		ASSERT(false); // Test to see if simulation can reproduce this
 		return Void();
 	}
 
