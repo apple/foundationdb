@@ -51,7 +51,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
                                               Reference<RestoreLoaderData> self);
 ACTOR Future<Void> sendMutationsToApplier(
     std::priority_queue<RestoreLoaderSchedSendLoadParamRequest>* sendLoadParamQueue,
-    std::map<int, int>* inflightSendLoadParamReqs, int* finishedSendingVB, VersionedMutationsMap* pkvOps,
+    std::map<int, int>* inflightSendLoadParamReqs, NotifiedVersion* finishedBatch, VersionedMutationsMap* pkvOps,
     int batchIndex, RestoreAsset asset, bool isRangeFile, std::map<Key, UID>* pRangeToApplier,
     std::map<UID, RestoreApplierInterface>* pApplierInterfaces);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
@@ -624,7 +624,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 				// Send the parsed mutation to applier who will apply the mutation to DB
 				fSendMutations.push_back(
 				    sendMutationsToApplier(&self->sendLoadParamQueue, &self->inflightSendLoadParamReqs,
-				                           &self->finishedSendingVB, &kvOps, req.batchIndex, loadParam.asset,
+				                           &self->finishedBatch, &kvOps, req.batchIndex, loadParam.asset,
 				                           loadParam.isRangeFile, &batchData->rangeToApplier, &self->appliersInterf));
 			}
 		}
@@ -671,7 +671,7 @@ void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToA
 //   pApplierInterfaces: applier interfaces to send the mutations to
 ACTOR Future<Void> sendMutationsToApplier(
     std::priority_queue<RestoreLoaderSchedSendLoadParamRequest>* sendLoadParamQueue,
-    std::map<int, int>* inflightSendLoadParamReqs, int* finishedSendingVB, VersionedMutationsMap* pkvOps,
+    std::map<int, int>* inflightSendLoadParamReqs, NotifiedVersion* finishedBatch, VersionedMutationsMap* pkvOps,
     int batchIndex, RestoreAsset asset, bool isRangeFile, std::map<Key, UID>* pRangeToApplier,
     std::map<UID, RestoreApplierInterface>* pApplierInterfaces) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
@@ -686,13 +686,20 @@ ACTOR Future<Void> sendMutationsToApplier(
 	Promise<Void> toSched;
 	sendLoadParamQueue->push(RestoreLoaderSchedSendLoadParamRequest(batchIndex, toSched, now()));
 	wait(toSched.getFuture());
-	if (*finishedSendingVB >= batchIndex) {
-		TraceEvent(SevWarnAlways, "FastRestoreLoaderSendMutationToApplierLateRequest")
-		    .detail("IsRangeFile", isRangeFile)
-		    .detail("EndVersion", asset.endVersion)
-		    .detail("RestoreAsset", asset.toString());
-		return Void();
+	if (finishedBatch->get() >= batchIndex) {
+		TraceEvent(SevError, "FastRestoreLoaderSendMutationToApplierLateRequest")
+		    .detail("FinishedBatchIndex", finishedBatch->get())
+		    .detail("RequestBatchIndex", batchIndex);
+		ASSERT(false);
+		flushAndExit(FDB_EXIT_ERROR);
 	}
+	// if (*finishedSendingVB >= batchIndex) {
+	// 	TraceEvent(SevWarnAlways, "FastRestoreLoaderSendMutationToApplierLateRequest")
+	// 	    .detail("IsRangeFile", isRangeFile)
+	// 	    .detail("EndVersion", asset.endVersion)
+	// 	    .detail("RestoreAsset", asset.toString());
+	// 	return Void();
+	// }
 	(*inflightSendLoadParamReqs)[batchIndex]++;
 
 	TraceEvent("FastRestoreLoaderSendMutationToApplier")
@@ -828,7 +835,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 
 	(*inflightSendLoadParamReqs)[batchIndex]--;
 	kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
-	TraceEvent("FastRestoreLoaderSendMutationToAppliers")
+	TraceEvent("FastRestoreLoaderSendMutationToApplierDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("RestoreAsset", asset.toString())
 	    .detail("Mutations", kvCount);
