@@ -4497,7 +4497,7 @@ public:
 			targetVersion = desc.maxRestorableVersion.get();
 
 		if (targetVersion == invalidVersion && incrementalBackupOnly && desc.maxLogEnd.present()) {
-			targetVersion = desc.maxLogEnd.get() - 1;
+			targetVersion = desc.maxLogEnd.get();
 		}
 
 		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly));
