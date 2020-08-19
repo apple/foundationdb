@@ -215,6 +215,9 @@ else()
   if (USE_AVX512F)
     if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
       add_compile_options(-mavx512f)
+    elseif(USE_VALGRIND)
+      message(STATUS "USE_VALGRIND=ON make USE_AVX OFF to satisfy valgrind analysis requirement")
+      set(USE_AVX512F OFF)
     else()
       message(STATUS "USE_AVX512F is supported on x86 or x86_64 only")
       set(USE_AVX512F OFF)
@@ -224,6 +227,9 @@ else()
   if (USE_AVX)
     if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
       add_compile_options(-mavx)
+    elseif(USE_VALGRIND)
+      message(STATUS "USE_VALGRIND=ON make USE_AVX OFF to satisfy valgrind analysis requirement")
+      set(USE_AVX OFF)
     else()
       message(STATUS "USE_AVX is supported on x86 or x86_64 only")
       set(USE_AVX OFF)
@@ -266,18 +272,31 @@ else()
         -Wno-unknown-attributes)
     endif()
     add_compile_options(
-      -Wno-unknown-warning-option
-      -Wno-dangling-else
-      -Wno-sign-compare
+      -Wall -Wextra
+      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
       -Wno-comment
-      -Wno-unknown-pragmas
+      -Wno-dangling-else
       -Wno-delete-non-virtual-dtor
+      -Wno-format
+      -Wno-mismatched-tags
+      -Wno-missing-field-initializers
+      -Wno-overloaded-virtual
+      -Wno-reorder
+      -Wno-reorder-ctor
+      -Wno-sign-compare
+      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
-      -Wno-format
       -Wredundant-move
       -Wpessimizing-move
       -Woverloaded-virtual
+      -Wno-unknown-pragmas
+      -Wno-unknown-warning-option
+      -Wno-unused-function
+      -Wno-unused-local-typedef
+      -Wno-unused-parameter
+      -Wno-unused-value
+      -Wno-self-assign
       )
     if (USE_CCACHE)
       add_compile_options(

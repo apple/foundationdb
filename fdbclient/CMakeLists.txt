@@ -67,7 +67,7 @@ set(FDBCLIENT_SRCS
   TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
-  ThreadSafeTransaction.actor.cpp
+  ThreadSafeTransaction.cpp
   ThreadSafeTransaction.h
   Tuple.cpp
   Tuple.h

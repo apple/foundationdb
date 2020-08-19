@@ -57,6 +57,7 @@ set(FDBSERVER_SRCS
   OldTLogServer_6_0.actor.cpp
   OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
+  ProxyCommitData.actor.h
   pubsub.actor.cpp
   pubsub.h
   QuietDatabase.actor.cpp
@@ -142,6 +143,7 @@ set(FDBSERVER_SRCS
   workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
+  workloads/Downgrade.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp

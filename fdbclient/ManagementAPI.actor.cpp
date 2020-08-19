@@ -38,7 +38,6 @@
 #include "fdbrpc/Replication.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR static Future<vector<AddressExclusion>> getExcludedServers(Transaction* tr);
 
 bool isInteger(const std::string& s) {
 	if( s.empty() ) return false;
@@ -1264,93 +1263,152 @@ struct AutoQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuorumChange>(new AutoQuorumChange(desired)); }
 
+void excludeServers(Transaction& tr, vector<AddressExclusion>& servers, bool failed) {
+	tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+	tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+	tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+	tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+	std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
+	auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
+	tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
+	tr.set( serversVersionKey, excludeVersionKey );
+	for(auto& s : servers) {
+		if (failed) {
+			tr.set( encodeFailedServersKey(s), StringRef() );
+		} else {
+			tr.set( encodeExcludedServersKey(s), StringRef() );
+		}
+	}
+	TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
+}
+
 ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
-	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-
-	loop {
-		try {
-			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
-			auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
-			tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
-			tr.set( serversVersionKey, excludeVersionKey );
-			for(auto& s : servers) {
-				if (failed) {
-					tr.set( encodeFailedServersKey(s), StringRef() );
-				} else {
-					tr.set( encodeExcludedServersKey(s), StringRef() );
+	if (cx->apiVersionAtLeast(700)) {
+		state ReadYourWritesTransaction ryw(cx);
+		loop {
+			try{
+				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"), ValueRef());
+				for(auto& s : servers) {
+					Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
+									  : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
+					ryw.set(addr, ValueRef());
 				}
+				TraceEvent("ExcludeServersSpecialKeySpaceCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
+				wait(ryw.commit());
+				return Void();
+			} catch (Error& e) {
+				wait( ryw.onError(e) );
 			}
-
-			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
-
-			wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			wait( tr.onError(e) );
+		}
+	} else {
+		state Transaction tr(cx);
+		loop {
+			try {
+				excludeServers(tr, servers, failed);
+				wait( tr.commit() );
+				return Void();
+			} catch (Error& e) {
+				wait( tr.onError(e) );
+			}
 		}
 	}
 }
 
 ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
-	state Transaction tr(cx);
 	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-	loop {
-		try {
-			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
-
-			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
-			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
-			if (failed) {
-				tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
-				tr.set(failedServersVersionKey, versionKey);
-			} else {
-				tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
-				tr.set(excludedServersVersionKey, versionKey);
-			}
-
-			for(auto& s : servers ) {
-				if (!s.isValid()) {
-					if (failed) {
-						tr.clear(failedServersKeys);
+	if (cx->apiVersionAtLeast(700)) {
+		state ReadYourWritesTransaction ryw(cx);
+		loop {
+			try {
+				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				for (auto& s : servers) {
+					if (!s.isValid()) {
+						if (failed) {
+							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failed"));
+						} else {
+							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("exclude"));
+						}
 					} else {
-						tr.clear(excludedServersKeys);
-					}
-				} else if (s.isWholeMachine()) {
-					// Eliminate both any ip-level exclusion (1.2.3.4) and any
-					// port-level exclusions (1.2.3.4:5)
-					// The range ['IP', 'IP;'] was originally deleted. ';' is
-					// char(':' + 1). This does not work, as other for all
-					// x between 0 and 9, 'IPx' will also be in this range.
-					//
-					// This is why we now make two clears: first only of the ip
-					// address, the second will delete all ports.
-					auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
-					tr.clear(singleKeyRange(addr));
-					tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
-				} else {
-					if (failed) {
-						tr.clear(encodeFailedServersKey(s));
-					} else {
-						tr.clear(encodeExcludedServersKey(s));
+						Key addr = failed ? SpecialKeySpace::getManagementApiCommandPrefix("failed").withSuffix(s.toString())
+										  : SpecialKeySpace::getManagementApiCommandPrefix("exclude").withSuffix(s.toString());
+						ryw.clear(addr);
+						// Eliminate both any ip-level exclusion (1.2.3.4) and any
+						// port-level exclusions (1.2.3.4:5)
+						// The range ['IP', 'IP;'] was originally deleted. ';' is
+						// char(':' + 1). This does not work, as other for all
+						// x between 0 and 9, 'IPx' will also be in this range.
+						//
+						// This is why we now make two clears: first only of the ip
+						// address, the second will delete all ports.
+						if (s.isWholeMachine())
+							ryw.clear(KeyRangeRef(addr.withSuffix(LiteralStringRef(":")), addr.withSuffix(LiteralStringRef(";"))));
 					}
 				}
+				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+
+				wait( ryw.commit() );
+				return Void();
+			} catch (Error& e) {
+				TraceEvent("IncludeServersError").error(e, true);
+				wait( ryw.onError(e) );
 			}
+		}
+	} else {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+				tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
 
-			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+				// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
+				tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
+				if (failed) {
+					tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+					tr.set(failedServersVersionKey, versionKey);
+				} else {
+					tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+					tr.set(excludedServersVersionKey, versionKey);
+				}
 
-			wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			TraceEvent("IncludeServersError").error(e, true);
-			wait( tr.onError(e) );
+				for(auto& s : servers ) {
+					if (!s.isValid()) {
+						if (failed) {
+							tr.clear(failedServersKeys);
+						} else {
+							tr.clear(excludedServersKeys);
+						}
+					} else if (s.isWholeMachine()) {
+						// Eliminate both any ip-level exclusion (1.2.3.4) and any
+						// port-level exclusions (1.2.3.4:5)
+						// The range ['IP', 'IP;'] was originally deleted. ';' is
+						// char(':' + 1). This does not work, as other for all
+						// x between 0 and 9, 'IPx' will also be in this range.
+						//
+						// This is why we now make two clears: first only of the ip
+						// address, the second will delete all ports.
+						auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
+						tr.clear(singleKeyRange(addr));
+						tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
+					} else {
+						if (failed) {
+							tr.clear(encodeFailedServersKey(s));
+						} else {
+							tr.clear(encodeExcludedServersKey(s));
+						}
+					}
+				}
+				
+				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
+
+				wait( tr.commit() );
+				return Void();
+			} catch (Error& e) {
+				TraceEvent("IncludeServersError").error(e, true);
+				wait( tr.onError(e) );
+			}
 		}
 	}
 }
@@ -1389,7 +1447,7 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 	}
 }
 
-ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
+ACTOR Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
 	state Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
 	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
 	state Standalone<RangeResultRef> r2 = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
@@ -1559,59 +1617,67 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 	}
 }
 
+ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
+                                                   std::set<AddressExclusion>* exclusions,
+                                                   std::set<NetworkAddress>* inProgressExclusion) {
+	// TODO : replace using ExclusionInProgressRangeImpl in special key space
+	ASSERT(inProgressExclusion->size() == 0); //  Make sure every time it is cleared beforehand
+	if (!exclusions->size()) return true;
+
+	tr->setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
+	tr->setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
+	tr->setOption( FDBTransactionOptions::LOCK_AWARE );
+
+	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed recovery
+
+	// Check that there aren't any storage servers with addresses violating the exclusions
+	Standalone<RangeResultRef> serverList = wait( tr->getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
+	ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
+
+	state bool ok = true;
+	for(auto& s : serverList) {
+		auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
+		if ( addressExcluded(*exclusions, addresses.address) ) {
+			ok = false;
+			inProgressExclusion->insert(addresses.address);
+		}
+		if ( addresses.secondaryAddress.present() && addressExcluded(*exclusions, addresses.secondaryAddress.get()) ) {
+			ok = false;
+			inProgressExclusion->insert(addresses.secondaryAddress.get());
+		}
+	}
+
+	if (ok) {
+		Optional<Standalone<StringRef>> value = wait( tr->get(logsKey) );
+		ASSERT(value.present());
+		auto logs = decodeLogsValue(value.get());
+		for( auto const& log : logs.first ) {
+			if (log.second == NetworkAddress() || addressExcluded(*exclusions, log.second)) {
+				ok = false;
+				inProgressExclusion->insert(log.second);
+			}
+		}
+		for( auto const& log : logs.second ) {
+			if (log.second == NetworkAddress() || addressExcluded(*exclusions, log.second)) {
+				ok = false;
+				inProgressExclusion->insert(log.second);
+			}
+		}
+	}
+
+	return ok;
+}
+
 ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vector<AddressExclusion> excl,
                                                                 bool waitForAllExcluded) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
 	state std::set<NetworkAddress> inProgressExclusion;
 
-	if (!excl.size()) return inProgressExclusion;
-
 	loop {
-		state Transaction tr(cx);
-
+		state ReadYourWritesTransaction tr(cx);
+		inProgressExclusion.clear();
 		try {
-			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );  // necessary?
-			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-
-			// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed recovery
-
-			// Check that there aren't any storage servers with addresses violating the exclusions
-			Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
-			ASSERT( !serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY );
-
-			state bool ok = true;
-			inProgressExclusion.clear();
-			for(auto& s : serverList) {
-				auto addresses = decodeServerListValue( s.value ).getKeyValues.getEndpoint().addresses;
-				if ( addressExcluded(exclusions, addresses.address) ) {
-					ok = false;
-					inProgressExclusion.insert(addresses.address);
-				}
-				if ( addresses.secondaryAddress.present() && addressExcluded(exclusions, addresses.secondaryAddress.get()) ) {
-					ok = false;
-					inProgressExclusion.insert(addresses.secondaryAddress.get());
-				}
-			}
-
-			if (ok) {
-				Optional<Standalone<StringRef>> value = wait( tr.get(logsKey) );
-				ASSERT(value.present());
-				auto logs = decodeLogsValue(value.get());
-				for( auto const& log : logs.first ) {
-					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
-						ok = false;
-						inProgressExclusion.insert(log.second);
-					}
-				}
-				for( auto const& log : logs.second ) {
-					if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
-						ok = false;
-						inProgressExclusion.insert(log.second);
-					}
-				}
-			}
-
+			bool ok = wait(checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion));
 			if (ok) return inProgressExclusion;
 			if (!waitForAllExcluded) break;
 
@@ -1620,7 +1686,6 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 			wait( tr.onError(e) );
 		}
 	}
-
 	return inProgressExclusion;
 }
 
