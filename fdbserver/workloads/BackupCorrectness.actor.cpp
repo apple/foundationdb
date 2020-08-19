@@ -60,7 +60,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 		prefixesMandatory = getOption(options, LiteralStringRef("prefixesMandatory"), std::vector<std::string>());
-		shouldSkipRestoreRanges = false;
+		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
@@ -226,8 +226,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		try {
 			wait(backupAgent->submitBackup(cx, StringRef(backupContainer), deterministicRandom()->randomInt(0, 100),
-			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true, false,
-			                               true));
+			                               tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}
 		catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
@@ -316,7 +315,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), false));
+		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
 
 		state std::string statusText;
 
@@ -351,7 +350,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		if (rowCount > 0) {
 			try {
 				wait(success(backupAgent->restore(cx, cx, self->backupTag, KeyRef(lastBackupContainer), true, -1, true,
-				                                  normalKeys, Key(), Key(), self->locked, true)));
+				                                  normalKeys, Key(), Key(), self->locked)));
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID);
 				ASSERT(false);
 			}
@@ -423,7 +422,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					extraBackup = backupAgent.submitBackup(
 					    cx, LiteralStringRef("file://simfdb/backups/"), deterministicRandom()->randomInt(0, 100),
-					    self->backupTag.toString(), self->backupRanges, false, false, true);
+					    self->backupTag.toString(), self->backupRanges, true);
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID).error(e).detail("BackupTag", printable(self->backupTag));
@@ -480,7 +479,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						       restoreIndex, range.toString().c_str(), restoreTag.toString().c_str());
 						restores.push_back(
 						    backupAgent.restore(cx, cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true,
-						                        targetVersion, true, range, Key(), Key(), self->locked, true));
+						                        targetVersion, true, range, Key(), Key(), self->locked));
 					}
 				}
 				else {
@@ -491,7 +490,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					       restoreIndex, restoreTag.toString().c_str());
 					restores.push_back(backupAgent.restore(cx, cx, restoreTag, KeyRef(lastBackupContainer->getURL()),
 					                                       self->restoreRanges, true, targetVersion, true, Key(), Key(),
-					                                       self->locked, true));
+					                                       self->locked));
 				}
 
 				// Sometimes kill and restart the restore
@@ -509,7 +508,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							}));
 							restores[restoreIndex] = backupAgent.restore(
 							    cx, cx, restoreTags[restoreIndex], KeyRef(lastBackupContainer->getURL()),
-							    self->restoreRanges, true, -1, true, Key(), Key(), self->locked, true);
+							    self->restoreRanges, true, -1, true, Key(), Key(), self->locked);
 						}
 					}
 					else {
