@@ -22,6 +22,8 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`api-version-upgrade-guide` contains information about upgrading client code to a new API version.
 
+* :doc:`transaction-profiler-analyzer` contains information about enabling transaction profiling and analyzing.
+
 * :doc:`known-limitations` describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.
 
 .. toctree::
@@ -38,4 +40,5 @@ FoundationDB supports language bindings for application development using the or
     api-general
     transaction-tagging
     known-limitations
+    transaction-profiler-analyzer
     api-version-upgrade-guide
