@@ -120,7 +120,6 @@ struct LockDatabaseWorkload : TestWorkload {
 	ACTOR static Future<Void> assertRejected(Database cx) {
 		state Transaction tr(cx);
 		ASSERT(!tr.options.lockAware);
-		wait(success(tr.getReadVersion()));
 		tr.clear(allKeys);
 		try {
 			wait(tr.commit());
