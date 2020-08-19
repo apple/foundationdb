@@ -351,6 +351,7 @@ struct TLogOptions {
 				"_LS_" + boost::lexical_cast<std::string>(spillType);
 			break;
 		case TLogVersion::V5:
+		case TLogVersion::V6:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
@@ -372,6 +373,7 @@ TLogFn tLogFnForOptions( TLogOptions options ) {
 			else
 				return oldTLog_6_2::tLog;
 		case TLogVersion::V5:
+		case TLogVersion::V6:
 			return tLog;
 		default:
 			ASSERT(false);

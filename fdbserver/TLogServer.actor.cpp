@@ -1332,6 +1332,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 
 void commitMessages( TLogData *self, Reference<LogData> logData, Version version, Arena arena, StringRef messages ) {
 	ArenaReader rd( arena, messages, Unversioned() );
+	rd.setProtocolVersion(logData->protocolVersion);
 	self->tempTagMessages.clear();
 	while(!rd.empty()) {
 		SpanID spanContext;
@@ -1402,6 +1403,7 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, 
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	state std::vector<StringRef> relevantMessages;
 	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
+	rd.setProtocolVersion(currentProtocolVersion);
 	while (!rd.empty()) {
 		state uint16_t numMutations = 0;
 		// TODO: Read spanContext and construct TagsAndMessage with it

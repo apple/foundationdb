@@ -51,6 +51,7 @@ TraceEvent debugKeyRangeEnabled( const char* context, Version version, KeyRangeR
 
 TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, StringRef commitBlob ) {
 	BinaryReader rdr(commitBlob, AssumeVersion(currentProtocolVersion));
+	rdr.setProtocolVersion(currentProtocolVersion);
 	while (!rdr.empty()) {
 		SpanID spanContext;
 		uint16_t numMutations = 0;
