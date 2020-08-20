@@ -1083,7 +1083,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			if (isSingleKeyMutation((MutationRef::Type) m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 
-				// sample single key mutation based on byte
+				// sample single key mutation based on cost
 				// the expectation of sampling is every COMMIT_SAMPLE_COST sample once
 				if (checkSample) {
 					double totalCosts = trCost->get().writeCosts;
@@ -1202,6 +1202,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					}
 				}
 			}
+		}
+
+		if(checkSample) {
+			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
+			    trs[self->transactionNum].commitCostEstimation.get().expensiveCostEstCount;
 		}
 	}
 
