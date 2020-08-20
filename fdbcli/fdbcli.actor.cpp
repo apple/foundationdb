@@ -4109,9 +4109,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								reportThrottled = true; reportRecommended = true;
 							}
 							else if(!tokencmp(tokens[2], "throttled")){
-                                printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
-                                is_error = true;
-                                continue;
+								printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
+								is_error = true;
+								continue;
 							}
 						}
 
@@ -4131,11 +4131,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
 						}
 						else if(reportThrottled) {
-                            wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
-                        }
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
+						}
 						else if(reportRecommended) {
-                            wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
-                        }
+							wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
+						}
 
 						bool anyLogged = false;
 						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {

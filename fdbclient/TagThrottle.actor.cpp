@@ -223,9 +223,9 @@ namespace ThrottleApi {
 
 		ASSERT(initialDuration > 0);
 
-	    if(throttleType == TagThrottleType::MANUAL) {
-		    reason = TagThrottledReason::MANUAL;
-	    }
+		if(throttleType == TagThrottleType::MANUAL) {
+			reason = TagThrottledReason::MANUAL;
+		}
 		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration,
 	                              reason.present() ? reason.get() : TagThrottledReason::UNSET);
 		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
