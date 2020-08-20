@@ -649,7 +649,7 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw, bool failed, std::
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
 		// only check for exclude(set) operation, include(clear) are not checked
-		TraceEvent(SevInfo, "ParseNetworkAddress") // TODO : change to SevDebug
+		TraceEvent(SevDebug, "ParseNetworkAddress")
 		    .detail("Valid", entry.first)
 		    .detail("Set", entry.second.present())
 		    .detail("Key", iter->begin().toString());
@@ -996,7 +996,7 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 	auto iter = ranges.begin();
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
-		// only check for setclass(set) operation, (clear) are not checked
+		// only check for setclass(set) operation, (clear) are forbidden thus not exist
 		if (entry.first && entry.second.present()) {
 			// validate network address
 			Key address = iter->begin().removePrefix(range.begin);
