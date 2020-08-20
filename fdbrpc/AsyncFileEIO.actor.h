@@ -115,7 +115,7 @@ public:
 	virtual void addref() { ReferenceCounted<AsyncFileEIO>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileEIO>::delref(); }
 
-	virtual int64_t debugFD() { return fd; }
+	int64_t debugFD() const override { return fd; }
 
 	virtual Future<int> read( void* data, int length, int64_t offset ) {
 		++countFileLogicalReads;
@@ -147,14 +147,12 @@ public:
 
 		return fsync;
 	}
-	virtual Future<int64_t> size() {
+	Future<int64_t> size() const override {
 		++countFileLogicalReads;
 		++countLogicalReads;
 		return size_impl(fd);
 	}
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
 	ACTOR static Future<Void> async_fsync_parent( std::string filename ) {
 		std::string folder = parentDirectory( filename );
@@ -227,11 +225,11 @@ private:
 	int fd, flags;
 	Reference<ErrorInfo> err;
 	std::string filename;
-	Int64MetricHandle countFileLogicalWrites;
-	Int64MetricHandle countFileLogicalReads;
+	mutable Int64MetricHandle countFileLogicalWrites;
+	mutable Int64MetricHandle countFileLogicalReads;
 
-	Int64MetricHandle countLogicalWrites;
-	Int64MetricHandle countLogicalReads;
+	mutable Int64MetricHandle countLogicalWrites;
+	mutable Int64MetricHandle countLogicalReads;
 
 	AsyncFileEIO( int fd, int flags, std::string const& filename ) : fd(fd), flags(flags), filename(filename), err(new ErrorInfo) {
 		if( !g_network->isSimulated() ) {

@@ -165,7 +165,7 @@ public:
 	virtual Future<Void> sync() { return Void(); }
 	virtual Future<Void> flush() { return Void(); }
 
-	virtual Future<int64_t> size() { return m_f->size(); }
+	Future<int64_t> size() const override { return m_f->size(); }
 
 	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
 		TraceEvent(SevError, "ReadZeroCopyNotSupported").detail("FileType", "ReadAheadCache");
@@ -173,9 +173,9 @@ public:
 	}
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
 
-	virtual int64_t debugFD() { return -1; }
+	int64_t debugFD() const override { return -1; }
 
-	virtual std::string getFilename() { return m_f->getFilename(); }
+	virtual std::string getFilename() const override { return m_f->getFilename(); }
 
 	virtual ~AsyncFileReadAheadCache() {
 		for(auto &it : m_blocks) {

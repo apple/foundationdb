@@ -219,17 +219,11 @@ public:
 		return waitAndSync( this, flush() );
 	}
 
-	virtual Future<int64_t> size() {
-		return length;
-	}
+	Future<int64_t> size() const override { return length; }
 
-	virtual int64_t debugFD() {
-		return uncached->debugFD();
-	}
+	int64_t debugFD() const override { return uncached->debugFD(); }
 
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
 	virtual void addref() { 
 		ReferenceCounted<AsyncFileCached>::addref(); 

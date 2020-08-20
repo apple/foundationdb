@@ -478,7 +478,7 @@ public:
 	virtual void addref() { ReferenceCounted<SimpleFile>::addref(); }
 	virtual void delref() { ReferenceCounted<SimpleFile>::delref(); }
 
-	virtual int64_t debugFD() { return (int64_t)h; }
+	int64_t debugFD() const override { return (int64_t)h; }
 
 	virtual Future<int> read( void* data, int length, int64_t offset ) {
 		return read_impl( this, data, length, offset );
@@ -496,13 +496,9 @@ public:
 		return sync_impl( this );
 	}
 
-	virtual Future<int64_t> size() {
-		return size_impl( this );
-	}
+	Future<int64_t> size() const override { return size_impl(this); }
 
-	virtual std::string getFilename() {
-		return actualFilename;
-	}
+	virtual std::string getFilename() const override { return actualFilename; }
 
 	~SimpleFile() {
 		_close( h );
@@ -667,7 +663,7 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> size_impl( SimpleFile* self ) {
+	ACTOR static Future<int64_t> size_impl(SimpleFile const* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());

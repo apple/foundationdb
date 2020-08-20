@@ -159,14 +159,12 @@ public:
 
 		return Void();
 	}
-	virtual Future<int64_t> size() {
+	Future<int64_t> size() const override {
 		LARGE_INTEGER s;
 		if (!GetFileSizeEx(file.native_handle(), &s)) throw io_error();
 		return *(int64_t*)&s;
 	}
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
 	~AsyncFileWinASIO() { }
 
