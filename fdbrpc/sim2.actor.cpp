@@ -480,25 +480,19 @@ public:
 
 	int64_t debugFD() const override { return (int64_t)h; }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
-		return read_impl( this, data, length, offset );
-	}
+	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl( this, StringRef((const uint8_t*)data, length), offset );
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl( this, size );
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
-	virtual Future<Void> sync() {
-		return sync_impl( this );
-	}
+	Future<Void> sync() override { return sync_impl(this); }
 
 	Future<int64_t> size() const override { return size_impl(this); }
 
-	virtual std::string getFilename() const override { return actualFilename; }
+	std::string getFilename() const override { return actualFilename; }
 
 	~SimpleFile() {
 		_close( h );

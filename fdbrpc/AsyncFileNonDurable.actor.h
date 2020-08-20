@@ -87,25 +87,25 @@ public:
 		ReferenceCounted<AsyncFileDetachable>::delref();
 	}
 
-	Future<int> read(void *data, int length, int64_t offset) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->read( data, length, offset ) );
 	}
 
-	Future<Void> write(void const *data, int length, int64_t offset) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->write( data, length, offset ) );
 	}
-	
-	Future<Void> truncate(int64_t size) {
+
+	Future<Void> truncate(int64_t size) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->truncate( size ) );
 	}
 
-	Future<Void> sync() {
+	Future<Void> sync() override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->sync() );
@@ -263,13 +263,11 @@ public:
 	}
 
 	//Passes along reads straight to the underlying file, waiting for any outstanding changes that could affect the results
-	Future<int> read(void *data, int length, int64_t offset) {
-		return read(this, data, length, offset);
-	}
+	Future<int> read(void* data, int length, int64_t offset) override { return read(this, data, length, offset); }
 
 	//Writes data to the file.  Writes are delayed a random amount of time before being
 	//passed to the underlying file
-	Future<Void> write(void const *data, int length, int64_t offset) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		//TraceEvent("AsyncFileNonDurable_Write", id).detail("Filename", filename).detail("Offset", offset).detail("Length", length);
 		if(length == 0) {
 			TraceEvent(SevWarnAlways, "AsyncFileNonDurable_EmptyModification", id).detail("Filename", filename);
@@ -283,10 +281,10 @@ public:
 		writeEnded.send(write(this, writeStarted, writeEnded.getFuture(), data, length, offset));
 		return writeStarted.getFuture();
 	}
-	
+
 	//Truncates the file.  Truncates are delayed a random amount of time before being
 	//passed to the underlying file
-	Future<Void> truncate(int64_t size) {
+	Future<Void> truncate(int64_t size) override {
 		//TraceEvent("AsyncFileNonDurable_Truncate", id).detail("Filename", filename).detail("Offset", size);
 		debugFileTruncate("AsyncFileNonDurableTruncate", filename, size);
 

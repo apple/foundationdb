@@ -117,24 +117,24 @@ public:
 
 	int64_t debugFD() const override { return fd; }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
 		++countLogicalReads;
 		return read_impl(fd, data, length, offset);
 	}
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) // Copies data synchronously
+	Future<Void> write(void const* data, int length, int64_t offset) override // Copies data synchronously
 	{
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 		//Standalone<StringRef> copy = StringRef((const uint8_t*)data, length);
 		return write_impl( fd, err, StringRef((const uint8_t*)data, length), offset );
 	}
-	virtual Future<Void> truncate( int64_t size ) {
+	Future<Void> truncate(int64_t size) override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 		return truncate_impl( fd, err, size );
 	}
-	virtual Future<Void> sync() {
+	Future<Void> sync() override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 		auto fsync = sync_impl( fd, err );

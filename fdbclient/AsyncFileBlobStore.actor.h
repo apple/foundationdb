@@ -165,7 +165,7 @@ public:
 	}
 
 	// Ready once all data has been sent AND acknowledged from the remote side
-	virtual Future<Void> sync() {
+	Future<Void> sync() override {
 		// Only initiate the finish operation once, and also prevent further writing.
 		if(!m_finished.isValid()) {
 			m_finished = doFinishUpload(this);
@@ -259,23 +259,23 @@ public:
 	virtual void addref() { ReferenceCounted<AsyncFileBlobStoreRead>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileBlobStoreRead>::delref(); }
 
-	virtual Future<int> read( void *data, int length, int64_t offset );
+	Future<int> read(void* data, int length, int64_t offset) override;
 
-	virtual Future<Void> write( void const *data, int length, int64_t offset ) { throw file_not_writable(); }
-	virtual Future<Void> truncate( int64_t size ) { throw file_not_writable(); }
+	Future<Void> write(void const* data, int length, int64_t offset) override { throw file_not_writable(); }
+	Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 
-	virtual Future<Void> sync() { return Void(); }
-	virtual Future<Void> flush() { return Void(); }
+	Future<Void> sync() override { return Void(); }
+	Future<Void> flush() override { return Void(); }
 
 	Future<int64_t> size() const override;
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
 		TraceEvent(SevError, "ReadZeroCopyNotSupported").detail("FileType", "BlobStoreRead");
 		return platform_error();
 	}
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
+	void releaseZeroCopy(void* data, int length, int64_t offset) override {}
 
-	virtual int64_t debugFD() const override { return -1; }
+	int64_t debugFD() const override { return -1; }
 
 	std::string getFilename() const override { return m_object; }
 
