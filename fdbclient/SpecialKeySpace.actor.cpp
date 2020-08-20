@@ -1049,10 +1049,17 @@ Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransa
 	return processClassCommitActor(ryw, getKeyRange());
 }
 
-void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override {
+void throwNotAllowedError(ReadYourWritesTransaction* ryw) {
+	auto msg = ManagementAPIError::toJsonString(
+				    false, "setclass", "Clear operation is meaningless thus forbidden for setclass");
+	ryw->setSpecialKeySpaceErrorMsg(msg);
 	throw special_keys_api_failure();
 }
 
+void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override {
+	return throwNotAllowedError(ryw);
+}
+
 void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override {
-	throw special_keys_api_failure();
+	return throwNotAllowedError(ryw);
 }
