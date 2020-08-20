@@ -572,61 +572,9 @@ void ManagementCommandsOptionsImpl::clear(ReadYourWritesTransaction* ryw, const 
 	}
 }
 
-Key ManagementCommandsOptionsImpl::decode(const KeyRef& key) const {
-	// Should never be used
-	ASSERT(false);
-	return key;
-}
-
-Key ManagementCommandsOptionsImpl::encode(const KeyRef& key) const {
-	// Should never be used
-	ASSERT(false);
-	return key;
-}
-
 Future<Optional<std::string>> ManagementCommandsOptionsImpl::commit(ReadYourWritesTransaction* ryw) {
 	// Nothing to do, keys should be used by other impls' commit callback
 	return Optional<std::string>();
-}
-
-Standalone<RangeResultRef> rywModuleGetRange(ReadYourWritesTransaction* ryw, Standalone<RangeResultRef>* res,
-                                             KeyRangeRef kr) {
-	// res is read from database, if ryw enabled, we update it with writes in the transaction
-	if (ryw->readYourWritesDisabled()) {
-		return *res;
-	} else {
-		Standalone<RangeResultRef> result;
-		result.arena().dependsOn(res->arena());
-		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
-		    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
-		RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
-		int index = 0;
-		while (iter != ranges.end()) {
-			// add all previous entries into result
-			KeyRef rk = (*res)[index].key;
-			while (index < res->size() && rk < iter->begin()) {
-				result.push_back(result.arena(), KeyValueRef(rk, (*res)[index].value));
-				++index;
-			}
-			std::pair<bool, Optional<Value>> entry = iter->value();
-			if (entry.first) {
-				// add the writen entries if exists
-				if (entry.second.present()) {
-					result.push_back(result.arena(), KeyValueRef(iter->begin(), entry.second.get()));
-				}
-				// move index to skip all entries in the iter->range
-				while (index < res->size() && iter->range().contains((*res)[index].key)) ++index;
-			}
-			++iter;
-		}
-		// add all remaining entries into result
-		while (index < res->size()) {
-			const KeyValueRef& kv = (*res)[index];
-			result.push_back(result.arena(), KeyValueRef(kv.key, kv.value));
-			++index;
-		}
-		return result;
-	}
 }
 
 // read from rwModule
@@ -1002,37 +950,60 @@ Future<Standalone<RangeResultRef>> ExclusionInProgressRangeImpl::getRange(ReadYo
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
 }
 
+Standalone<RangeResultRef> rywModuleGetRange(ReadYourWritesTransaction* ryw, Standalone<RangeResultRef> res,
+                                             KeyRangeRef kr) {
+	// res is read from database, if ryw enabled, we update it with writes in the transaction
+	Standalone<RangeResultRef> result;
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	int index = 0;
+	while (iter != ranges.end()) {
+		// add all previous entries into result
+		while (index < res.size() && res[index].key < iter->begin()) {
+			result.push_back(result.arena(), KeyValueRef(res[index].key, res[index].value));
+			result.arena().dependsOn(res.arena());
+			++index;
+		}
+		std::pair<bool, Optional<Value>> entry = iter->value();
+		if (entry.first) {
+			// add the writen entries if exists
+			if (entry.second.present()) {
+				result.push_back_deep(result.arena(), KeyValueRef(iter->begin(), entry.second.get()));
+			}
+			// move index to skip all entries in the iter->range
+			while (index < res.size() && iter->range().contains(res[index].key)) ++index;
+		}
+		++iter;
+	}
+	// add all remaining entries into result
+	while (index < res.size()) {
+		const KeyValueRef& kv = res[index];
+		result.push_back(result.arena(), KeyValueRef(kv.key, kv.value));
+		result.arena().dependsOn(res.arena());
+		++index;
+	}
+	return result;
+}
+
 ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
                                                               KeyRangeRef kr) {
-	state Future<Standalone<RangeResultRef>> processClasses = ryw->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<Standalone<RangeResultRef>> processData = ryw->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
-
-	wait(success(processClasses) && success(processData));
-	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-	std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-	for (int i = 0; i < processClasses.get().size(); i++) {
-		id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-		    decodeProcessClassValue(processClasses.get()[i].value);
-	}
-
+	vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
+	auto workers = _workers; // strip const
+	std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
 	Standalone<RangeResultRef> result;
-
-	for (int i = 0; i < processData.get().size(); i++) {
-		ProcessData data = decodeWorkerListValue(processData.get()[i].value);
-		ProcessClass processClass = id_class[data.locality.processId()];
-
-		if (processClass.classSource() == ProcessClass::DBSource ||
-		    data.processClass.classType() == ProcessClass::UnsetClass)
-			data.processClass = processClass;
-
-		if (data.processClass.classType() != ProcessClass::TesterClass) {
-			result.push_back_deep(result.arena(), KeyValueRef(prefix.withSuffix(data.address.toString()),
-			                                                  Value(data.processClass.toString())));
+	for (auto& w : workers) {
+		// exclude :tls in keys even the network addresss is TLS
+		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
+		if (kr.contains(k)) {
+			Value v(w.processClass.toString());
+			result.push_back(result.arena(), KeyValueRef(k, v));
+			result.arena().dependsOn(k.arena());
+			result.arena().dependsOn(v.arena());
 		}
 	}
-	return rywModuleGetRange(ryw, &result, kr);
+	if (ryw->readYourWritesDisabled()) return result;
+	return rywModuleGetRange(ryw, result, kr);
 }
 
 ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef range) {

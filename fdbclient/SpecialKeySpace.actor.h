@@ -79,9 +79,17 @@ public:
 	virtual Future<Optional<std::string>> commit(
 	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 	// Given the special key to write, return the real key that needs to be modified
-	virtual Key decode(const KeyRef& key) const = 0;
+	virtual Key decode(const KeyRef& key) const {
+		// Default implementation should never be used
+		ASSERT(false);
+		return key;
+	}
 	// Given the read key, return the corresponding special key
-	virtual Key encode(const KeyRef& key) const = 0;
+	virtual Key encode(const KeyRef& key) const {
+		// Default implementation should never be used
+		ASSERT(false);
+		return key;
+	};
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
@@ -245,8 +253,6 @@ public:
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
-	Key decode(const KeyRef& key) const override;
-	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -284,8 +290,6 @@ class ProcessClassRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ProcessClassRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
-	Key decode(const KeyRef& key) const override { return Key(); }
-	Key encode(const KeyRef& key) const override { return Key(); }
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;

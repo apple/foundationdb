@@ -36,7 +36,7 @@ public:
 		// all keys are written to RYW, since GRV is set, the read should happen locally
 		ASSERT(resultFuture.isReady());
 		auto result = resultFuture.getValue();
-		ASSERT(!result.more);
+		ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 		// To make the test more complext, instead of simply returning the k-v pairs, we reverse all the value strings
 		auto kvs = resultFuture.getValue();
 		for (int i = 0; i < kvs.size(); ++i) {
@@ -523,6 +523,19 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
+	bool getRangeResultInOrder(const Standalone<RangeResultRef>& result) {
+		for (int i = 0; i < result.size() - 1; ++i) {
+			if (result[i].key >= result[i + 1].key) {
+				TraceEvent(SevDebug, "GetRangeResultNotInOrder")
+				    .detail("Index", i)
+				    .detail("Key1", result[i].key)
+				    .detail("Key2", result[i + 1].key);
+				return false;
+			}
+		}
+		return true;
+	}
+
 	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		// All management api related tests
 		Database cx = cx_->clone();
@@ -536,12 +549,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				            .withSuffix(option),
 				        ValueRef());
 			}
-			Standalone<RangeResultRef> res = wait(tx->getRange(
+			Standalone<RangeResultRef> result = wait(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
 			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
 			    CLIENT_KNOBS->TOO_MANY));
-			ASSERT(res.size() == SpecialKeySpace::getManagementApiOptionsSet().size());
-			for (int i = 0; i < res.size() - 1; ++i) ASSERT(res[i].key < res[i + 1].key);
+			ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+			ASSERT(result.size() == SpecialKeySpace::getManagementApiOptionsSet().size());
+			ASSERT(self->getRangeResultInOrder(result));
 			tx->reset();
 		}
 		// "exclude" error message shema check
@@ -569,17 +583,45 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		{
 			try {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// test getRange
+				state Standalone<RangeResultRef> result = wait(tx->getRange(
+				    KeyRangeRef(LiteralStringRef("class/"), LiteralStringRef("class0"))
+				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
+				    CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+				ASSERT(self->getRangeResultInOrder(result));
+				// check correctness of classType of each process
 				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				auto worker = deterministicRandom()->randomChoice(workers);
-				std::string addr = worker.address.toString();
-				std::string suffix = ":tls";
-				// remove :tls suffix if needed
-				if ((addr.size() >= suffix.size()) && (addr.rfind(suffix) == addr.size() - suffix.size()))
-					addr = addr.substr(0, addr.size() - suffix.size());
-				tx->set(Key("class/" + addr)
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-				        LiteralStringRef("InvalidProcessType"));
+				for (const auto& worker : workers ) {
+					// TODO : test here
+					// ASSERT(!worker.address.isTLS());
+					Key addr = Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
+				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+					bool found = false;
+					for (const auto& kv : result) {
+						if (kv.key == addr) {
+							ASSERT(kv.value.toString() == worker.processClass.toString());
+							found = true;
+							break;
+						}
+					}
+					// Each process should find its corresponding element
+					ASSERT(found);
+				}
+				state ProcessData worker = deterministicRandom()->randomChoice(workers);
+				state Key addr = Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
+				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+				tx->set(addr, LiteralStringRef("InvalidProcessType"));
+				// test ryw
+				Optional<Value> processType = wait(tx->get(addr));
+				ASSERT(processType.present() && processType.get() == LiteralStringRef("InvalidProcessType"));
+				// test ryw disabled
+				tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				Optional<Value> originalProcessType = wait(tx->get(addr));
+				ASSERT(originalProcessType.present() && originalProcessType.get() == worker.processClass.toString());
+				// test error handling (invalid value type)
 				wait(tx->commit());
+				ASSERT(false);
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
 				ASSERT(e.code() == error_code_special_keys_api_failure);
