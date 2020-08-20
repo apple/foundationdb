@@ -592,11 +592,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(self->getRangeResultInOrder(result));
 				// check correctness of classType of each process
 				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				for (const auto& worker : workers ) {
+				for (const auto& worker : workers) {
 					// TODO : test here
 					// ASSERT(!worker.address.isTLS());
-					Key addr = Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+					Key addr =
+					    Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
+					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 					bool found = false;
 					for (const auto& kv : result) {
 						if (kv.key == addr) {
@@ -609,8 +610,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(found);
 				}
 				state ProcessData worker = deterministicRandom()->randomChoice(workers);
-				state Key addr = Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+				state Key addr =
+				    Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
+				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 				tx->set(addr, LiteralStringRef("InvalidProcessType"));
 				// test ryw
 				Optional<Value> processType = wait(tx->get(addr));
