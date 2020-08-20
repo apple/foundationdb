@@ -630,18 +630,6 @@ Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWri
 	return rwModuleGetRangeActor(ryw, this, kr);
 }
 
-void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
-}
-
-void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
-}
-
-void ExcludeServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
-}
-
 Key ExcludeServersRangeImpl::decode(const KeyRef& key) const {
 	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
 	    .withPrefix(LiteralStringRef("\xff/conf/"));
@@ -865,18 +853,6 @@ FailedServersRangeImpl::FailedServersRangeImpl(KeyRangeRef kr) : SpecialKeyRange
 Future<Standalone<RangeResultRef>> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                     KeyRangeRef kr) const {
 	return rwModuleGetRangeActor(ryw, this, kr);
-}
-
-void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
-}
-
-void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
-}
-
-void FailedServersRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 }
 
 Key FailedServersRangeImpl::decode(const KeyRef& key) const {
