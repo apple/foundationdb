@@ -1050,8 +1050,8 @@ Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransa
 }
 
 void throwNotAllowedError(ReadYourWritesTransaction* ryw) {
-	auto msg = ManagementAPIError::toJsonString(
-				    false, "setclass", "Clear operation is meaningless thus forbidden for setclass");
+	auto msg = ManagementAPIError::toJsonString(false, "setclass",
+	                                            "Clear operation is meaningless thus forbidden for setclass");
 	ryw->setSpecialKeySpaceErrorMsg(msg);
 	throw special_keys_api_failure();
 }
