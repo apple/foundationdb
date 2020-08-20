@@ -1036,7 +1036,15 @@ ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTran
 }
 
 ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef range) {
-	state Optional<std::string> result;
+	// enable related options
+	ryw->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
+	vector<ProcessData> workers = wait(
+	    getWorkers(&ryw->getTransaction())); // make sure we use the Transaction object to avoid used_during_commit()
+
+	Optional<std::string> result;
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	auto iter = ranges.begin();
 	while (iter != ranges.end()) {
@@ -1045,13 +1053,13 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 		if (entry.first && entry.second.present()) {
 			// validate network address
 			Key address = iter->begin().removePrefix(range.begin);
-			auto a = AddressExclusion::parse(address);
-			if (!a.isValid()) {
+			AddressExclusion addr = AddressExclusion::parse(address);
+			if (!addr.isValid()) {
 				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
 				if (address.toString().find(":tls") != std::string::npos)
 					error += "        Do not include the `:tls' suffix when naming a process\n";
 				result = ManagementAPIError::toJsonString(false, "setclass", error);
-				return result;
+				break;
 			}
 			// validate class type
 			ValueRef processClassType = entry.second.get();
@@ -1060,8 +1068,23 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 			    processClassType != LiteralStringRef("default")) {
 				std::string error = "ERROR: \'" + processClassType.toString() + "\' is not a valid process class\n";
 				result = ManagementAPIError::toJsonString(false, "setclass", error);
-				return result;
+				break;
 			}
+			// write to transaction
+			// make sure we use the Transaction object to avoid used_during_commit()
+			bool foundChange = false;
+			for (int i = 0; i < workers.size(); i++) {
+				if (addr.excludes(workers[i].address)) {
+					if (processClass.classType() != ProcessClass::InvalidClass)
+						ryw->getTransaction().set(processClassKeyFor(workers[i].locality.processId().get()),
+						                          processClassValue(processClass));
+					else
+						ryw->getTransaction().clear(processClassKeyFor(workers[i].locality.processId().get()));
+					foundChange = true;
+				}
+			}
+			if (foundChange)
+				ryw->getTransaction().set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 		}
 		++iter;
 	}
@@ -1077,4 +1100,12 @@ Future<Standalone<RangeResultRef>> ProcessClassRangeImpl::getRange(ReadYourWrite
 
 Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	return processClassCommitActor(ryw, getKeyRange());
+}
+
+void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override {
+	throw special_keys_api_failure();
+}
+
+void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override {
+	throw special_keys_api_failure();
 }

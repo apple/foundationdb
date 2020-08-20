@@ -287,6 +287,8 @@ public:
 	Key decode(const KeyRef& key) const override { return Key(); }
 	Key encode(const KeyRef& key) const override { return Key(); }
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
 #include "flow/unactorcompiler.h"

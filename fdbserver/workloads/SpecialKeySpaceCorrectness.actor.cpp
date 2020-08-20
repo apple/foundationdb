@@ -112,9 +112,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		testRywLifetime(cx);
 		wait(timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
-		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self) &&
-		                 self->managementApiCorrectnessActor(cx, self),
+		                 testConflictRanges(cx, /*read*/ true, self) && testConflictRanges(cx, /*read*/ false, self),
 		             self->testDuration, Void()));
+		// Only use one client to avoid potential conflicts on changing cluster configuration
+		if (self->clientId == 0) wait(self->managementApiCorrectnessActor(cx, self));
 		return Void();
 	}
 
@@ -383,27 +384,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(e.code() == error_code_special_keys_cross_module_clear);
 			tx->reset();
 		}
-		// Management api error, and error message shema check
-		try {
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->set(LiteralStringRef("Invalid_Network_Address")
-			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
-			        ValueRef());
-			wait(tx->commit());
-			ASSERT(false);
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) throw;
-			ASSERT(e.code() == error_code_special_keys_api_failure);
-			Optional<Value> errorMsg =
-			    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-			ASSERT(errorMsg.present());
-			std::string errorStr;
-			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-			// special_key_space_management_api_error_msg schema validation
-			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-			tx->reset();
-		}
 
 		return Void();
 	}
@@ -563,6 +543,56 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(res.size() == SpecialKeySpace::getManagementApiOptionsSet().size());
 			for (int i = 0; i < res.size() - 1; ++i) ASSERT(res[i].key < res[i + 1].key);
 			tx->reset();
+		}
+		// "exclude" error message shema check
+		try {
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->set(LiteralStringRef("Invalid_Network_Address")
+			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
+			        ValueRef());
+			wait(tx->commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_special_keys_api_failure);
+			Optional<Value> errorMsg =
+			    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+			ASSERT(errorMsg.present());
+			std::string errorStr;
+			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+			// special_key_space_management_api_error_msg schema validation
+			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+			tx->reset();
+		}
+		// "setclass"
+		{
+			try {
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				auto worker = deterministicRandom()->randomChoice(workers);
+				std::string addr = worker.address.toString();
+				std::string suffix = ":tls";
+				// remove :tls suffix if needed
+				if ((addr.size() >= suffix.size()) && (addr.rfind(suffix) == addr.size() - suffix.size()))
+					addr = addr.substr(0, addr.size() - suffix.size());
+				tx->set(Key("class/" + addr)
+				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
+				        LiteralStringRef("InvalidProcessType"));
+				wait(tx->commit());
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				ASSERT(e.code() == error_code_special_keys_api_failure);
+				Optional<Value> errorMsg =
+				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+				ASSERT(errorMsg.present());
+				std::string errorStr;
+				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+				// special_key_space_management_api_error_msg schema validation
+				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+				tx->reset();
+			}
 		}
 		return Void();
 	}
