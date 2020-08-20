@@ -365,13 +365,11 @@ struct ResolutionRequestBuilder {
 			}
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
-			// This mitigates https://github.com/apple/foundationdb/issues/3647.
-			// Since this transaction is not lock aware, \xff/dbLocked must not
-			// have been set at this transaction's read snapshot. If that
-			// changes by commit time, then it won't commit on any proxy because
-			// of a conflict.
-			trIn.read_conflict_ranges.push_back_deep(trRequest.arena,
-			                                         KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
+			// This mitigates https://github.com/apple/foundationdb/issues/3647. Since this transaction is not lock
+			// aware, if this transaction got a read version then \xff/dbLocked must not have been set at this
+			// transaction's read snapshot. If that changes by commit time, then it won't commit on any proxy because of
+			// a conflict. A client could set a read version manually so this isn't totally bulletproof.
+			trIn.read_conflict_ranges.push_back(trRequest.arena, KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
 		}
 		for(auto& r : trIn.read_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges( r );
