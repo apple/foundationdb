@@ -345,7 +345,8 @@ struct ResolutionRequestBuilder {
 		return *out;
 	}
 
-	void addTransaction(CommitTransactionRef& trIn, int transactionNumberInBatch) {
+	void addTransaction(CommitTransactionRequest& trRequest, int transactionNumberInBatch) {
+		auto& trIn = trRequest.transaction;
 		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
 		outTr.assign(requests.size(), NULL);
 		ASSERT( transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768 );
@@ -362,6 +363,15 @@ struct ResolutionRequestBuilder {
 				isTXNStateTransaction = true;
 				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
 			}
+		}
+		if (isTXNStateTransaction && !trRequest.isLockAware()) {
+			// This mitigates https://github.com/apple/foundationdb/issues/3647.
+			// Since this transaction is not lock aware, \xff/dbLocked must not
+			// have been set at this transaction's read snapshot. If that
+			// changes by commit time, then it won't commit on any proxy because
+			// of a conflict.
+			trIn.read_conflict_ranges.push_back_deep(trRequest.arena,
+			                                         KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
 		}
 		for(auto& r : trIn.read_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges( r );
@@ -587,7 +597,7 @@ ACTOR Future<Void> commitBatch(
 	int conflictRangeCount = 0;
 	state int64_t maxTransactionBytes = 0;
 	for (int t = 0; t<trs.size(); t++) {
-		requests.addTransaction(trs[t].transaction, t);
+		requests.addTransaction(trs[t], t);
 		conflictRangeCount += trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
 		//TraceEvent("MPTransactionDump", self->dbgid).detail("Snapshot", trs[t].transaction.read_snapshot);
 		//for(auto& m : trs[t].transaction.mutations)
