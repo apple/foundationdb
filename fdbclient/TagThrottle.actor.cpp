@@ -216,13 +216,18 @@ namespace ThrottleApi {
 	}
 
 	ACTOR Future<Void> throttleTags(Database db, TagSet tags, double tpsRate, double initialDuration,
-                                    TagThrottleType throttleType, TransactionPriority priority, Optional<double> expirationTime) {
+                                    TagThrottleType throttleType, TransactionPriority priority, Optional<double> expirationTime,
+                                    Optional<uint8_t> reason) {
 		state Transaction tr(db);
 		state Key key = TagThrottleKey(tags, throttleType, priority).toKey();
 
 		ASSERT(initialDuration > 0);
 
-		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration);
+	    if(throttleType == TagThrottleType::MANUAL) {
+		    reason = TagThrottledReason::MANUAL;
+	    }
+		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration,
+	                              reason.present() ? reason.get() : TagThrottledReason::UNSET);
 		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
 		wr << throttle;
 		state Value value = wr.toValue();
