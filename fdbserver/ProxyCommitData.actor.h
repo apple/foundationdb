@@ -192,7 +192,7 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
-	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTagCommitCost;
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -246,7 +246,7 @@ struct ProxyCommitData {
 	}
 
 	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int cost){
-		auto [it, _] = ssTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
+		auto [it, _] = ssTrTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
 
 		for(auto& tag: tagSet) {
 			auto& costItem = it->second[tag];

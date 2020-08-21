@@ -127,21 +127,21 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 
 	TransactionTagMap<uint64_t> throttledTagCounts;
-	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTagCommitCost;
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
 	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
 	                   TransactionTagMap<uint64_t> throttledTagCounts,
-	                   UIDTransactionTagMap<TransactionCommitCostEstimation> ssTagCommitCost, bool detailed)
+	                   UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost, bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
-	    ssTagCommitCost(ssTagCommitCost), detailed(detailed) {}
+	    ssTrTagCommitCost(ssTrTagCommitCost), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, ssTagCommitCost);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, ssTrTagCommitCost);
 	}
 };
 

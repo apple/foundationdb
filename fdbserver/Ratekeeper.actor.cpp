@@ -851,7 +851,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		return Void();
 	}
 	double elapsed = now() - self->lastBusiestCommitTagPick;
-	// for each SS, select the busiest commit tag from ssTagCommitCost
+	// for each SS, select the busiest commit tag from ssTrTagCommitCost
 	for(auto it = self->storageQueueInfo.begin(); it != self->storageQueueInfo.end(); ++it) {
 		it->value.busiestWriteTag.reset();
 		TransactionTag busiestTag;
@@ -1384,7 +1384,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxyInfo.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
-				updateCommitCostEstimation(&self, req.ssTagCommitCost);
+				updateCommitCostEstimation(&self, req.ssTrTagCommitCost);
 
 				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() < p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
 					p.lastThrottledTagChangeId = self.throttledTagChangeId;
