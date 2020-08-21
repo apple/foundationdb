@@ -909,8 +909,14 @@ ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWrites
 		}
 	}
 
+	// sort and remove :tls
+	std::set<std::string> inProgressAddresses;
 	for (auto const& address : inProgressExclusion) {
-		Key addrKey = prefix.withSuffix(address.toString()); // TODO : sort and remove :tls
+		inProgressAddresses.insert(formatIpPort(address.ip, address.port));
+	}
+
+	for (auto const& address : inProgressAddresses) {
+		Key addrKey = prefix.withSuffix(address);
 		if (kr.contains(addrKey)) {
 			result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
 			result.arena().dependsOn(addrKey.arena());
