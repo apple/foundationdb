@@ -4126,7 +4126,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							}
 						}
 
-						state std::vector<TagThrottleInfo> tags; // = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
+						state std::vector<TagThrottleInfo> tags;
 						if(reportThrottled && reportRecommended) {
 							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
 						}

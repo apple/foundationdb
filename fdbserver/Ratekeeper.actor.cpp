@@ -485,6 +485,7 @@ public:
 	TransactionTagMap<RkTagThrottleData> autoThrottledTags;
 	TransactionTagMap<std::map<TransactionPriority, RkTagThrottleData>> manualThrottledTags;
 	TransactionTagMap<RkTagData> tagData;
+	uint32_t busyReadTagCount = 0, busyWriteTagCount = 0;
 };
 
 struct RatekeeperLimits {
@@ -820,6 +821,12 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 
 						if(tagKey.throttleType == TagThrottleType::AUTO) {
 							updatedTagThrottles.autoThrottleTag(self->id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
+							if(tagValue.reason == TagThrottledReason::BUSY_READ){
+								updatedTagThrottles.busyReadTagCount ++;
+							}
+							else if(tagValue.reason == TagThrottledReason::BUSY_WRITE) {
+								updatedTagThrottles.busyWriteTagCount ++;
+							}
 						}
 						else {
 							updatedTagThrottles.manualThrottleTag(self->id, tag, tagKey.priority, tagValue.tpsRate, tagValue.expirationTime, oldLimits);
@@ -855,7 +862,10 @@ void tryAutoThrottleTag(RatekeeperData *self, StorageQueueInfo const& ss) {
 			TagSet tags;
 			tags.addTag(ss.busiestTag.get());
 
-			self->addActor.send(ThrottleApi::throttleTags(self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO, TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION));
+			self->addActor.send(ThrottleApi::throttleTags(
+			    self->db, tags, clientRate.get(), SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION, TagThrottleType::AUTO,
+			    TransactionPriority::DEFAULT, now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION,
+			    TagThrottledReason::BUSY_READ));
 		}
 	}
 }
@@ -1203,6 +1213,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
 			.detail("TagsAutoThrottled", self->throttledTags.autoThrottleCount())
+		    .detail("TagsAutoThrottledBusyRead", self->throttledTags.busyReadTagCount)
+		    .detail("TagsAutoThrottledBusyWrite", self->throttledTags.busyWriteTagCount)
 			.detail("TagsManuallyThrottled", self->throttledTags.manualThrottleCount())
 			.detail("AutoThrottlingEnabled", self->autoThrottlingEnabled)
 			.trackLatest(name);
