@@ -1213,8 +1213,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
 			.detail("TagsAutoThrottled", self->throttledTags.autoThrottleCount())
-		    .detail("TagsAutoThrottledBusyRead", self->throttledTags.busyReadTagCount)
-		    .detail("TagsAutoThrottledBusyWrite", self->throttledTags.busyWriteTagCount)
+			.detail("TagsAutoThrottledBusyRead", self->throttledTags.busyReadTagCount)
+			.detail("TagsAutoThrottledBusyWrite", self->throttledTags.busyWriteTagCount)
 			.detail("TagsManuallyThrottled", self->throttledTags.manualThrottleCount())
 			.detail("AutoThrottlingEnabled", self->autoThrottlingEnabled)
 			.trackLatest(name);
