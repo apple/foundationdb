@@ -217,7 +217,7 @@ namespace ThrottleApi {
 
 	ACTOR Future<Void> throttleTags(Database db, TagSet tags, double tpsRate, double initialDuration,
                                     TagThrottleType throttleType, TransactionPriority priority, Optional<double> expirationTime,
-                                    Optional<uint8_t> reason) {
+                                    Optional<TagThrottledReason> reason) {
 		state Transaction tr(db);
 		state Key key = TagThrottleKey(tags, throttleType, priority).toKey();
 

@@ -115,8 +115,11 @@ enum class TagThrottleType : uint8_t {
 	AUTO
 };
 
-struct TagThrottledReason {
-	static constexpr uint8_t UNSET = 0, MANUAL = 1, BUSY_READ = 2, BUSY_WRITE = 3;
+enum class TagThrottledReason: uint8_t {
+	UNSET = 0,
+	MANUAL,
+	BUSY_READ,
+	BUSY_WRITE
 };
 
 struct TagThrottleKey {
@@ -136,10 +139,10 @@ struct TagThrottleValue {
 	double tpsRate;
 	double expirationTime;
 	double initialDuration;
-	uint8_t reason;
+	TagThrottledReason reason;
 
 	TagThrottleValue() : tpsRate(0), expirationTime(0), initialDuration(0), reason(TagThrottledReason::UNSET) {}
-	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration, uint8_t reason)
+	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason)
 		: tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
 	static TagThrottleValue fromValue(const ValueRef& value);
@@ -147,7 +150,8 @@ struct TagThrottleValue {
 	//To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be considered
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tpsRate, expirationTime, initialDuration, reason);
+		uint8_t* reasonPtr = (uint8_t*)&reason;
+		serializer(ar, tpsRate, expirationTime, initialDuration, *reasonPtr);
 	}
 };
 
@@ -158,9 +162,9 @@ struct TagThrottleInfo {
 	double tpsRate;
 	double expirationTime;
 	double initialDuration;
-	uint8_t reason;
+	TagThrottledReason reason;
 
-	TagThrottleInfo(TransactionTag tag, TagThrottleType throttleType, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration, uint8_t reason = TagThrottledReason::UNSET)
+	TagThrottleInfo(TransactionTag tag, TagThrottleType throttleType, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason = TagThrottledReason::UNSET)
 		: tag(tag), throttleType(throttleType), priority(priority), tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
 	TagThrottleInfo(TagThrottleKey key, TagThrottleValue value)
@@ -177,7 +181,7 @@ namespace ThrottleApi {
 
 	Future<Void> throttleTags(Database const& db, TagSet const& tags, double const& tpsRate, double const& initialDuration, 
 	                         TagThrottleType const& throttleType, TransactionPriority const& priority, Optional<double> const& expirationTime = Optional<double>(),
-                              Optional<uint8_t> const& reason = Optional<uint8_t>());
+                              Optional<TagThrottledReason> const& reason = Optional<TagThrottledReason>());
 
 	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, Optional<TagThrottleType> const& throttleType, Optional<TransactionPriority> const& priority);
 
