@@ -1440,6 +1440,7 @@ ACTOR Future<Void> commitBatch(
 
 	context.pProxyCommitData->lastVersionTime = context.startTime;
 	++context.pProxyCommitData->stats.commitBatchIn;
+	context.setupTraceBatch();
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
