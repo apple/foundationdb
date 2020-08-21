@@ -568,15 +568,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) throw;
-			ASSERT(e.code() == error_code_special_keys_api_failure);
-			Optional<Value> errorMsg =
-			    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-			ASSERT(errorMsg.present());
-			std::string errorStr;
-			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-			// special_key_space_management_api_error_msg schema validation
-			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+			if (e.code() == error_code_special_keys_api_failure) {
+				Optional<Value> errorMsg =
+					wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+				ASSERT(errorMsg.present());
+				std::string errorStr;
+				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+				// special_key_space_management_api_error_msg schema validation
+				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+				ASSERT(valueObj["command"].get_str() == "exclude" && !valueObj["retriable"].get_bool());
+			} else {
+				TraceEvent(SevDebug, "UnexpectedError").detail("Command", "Exclude").error(e);
+				wait(tx->onError(e));
+			}
 			tx->reset();
 		}
 		// "setclass"
@@ -593,8 +598,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				// check correctness of classType of each process
 				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				for (const auto& worker : workers) {
-					// TODO : test here
-					// ASSERT(!worker.address.isTLS());
 					Key addr =
 					    Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
@@ -626,15 +629,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(false);
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
-				ASSERT(e.code() == error_code_special_keys_api_failure);
-				Optional<Value> errorMsg =
-				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
-				ASSERT(errorMsg.present());
-				std::string errorStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-				// special_key_space_management_api_error_msg schema validation
-				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+				if (e.code() == error_code_special_keys_api_failure) {
+					Optional<Value> errorMsg =
+					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+					ASSERT(errorMsg.present());
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+					// special_key_space_management_api_error_msg schema validation
+					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+					ASSERT(valueObj["command"].get_str() == "setclass" && !valueObj["retriable"].get_bool());
+				} else {
+					TraceEvent(SevDebug, "UnexpectedError").detail("Command", "Setclass").error(e);
+					wait(tx->onError(e));
+				}
 				tx->reset();
 			}
 		}
