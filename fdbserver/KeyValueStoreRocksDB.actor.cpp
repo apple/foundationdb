@@ -1,13 +1,10 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 #include <rocksdb/db.h>
-#include <rocksdb/iostats_context.h>
 #include <rocksdb/options.h>
-#include <rocksdb/perf_context.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
-#include "flow/Platform.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -138,10 +135,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		explicit Reader(DB& db) : db(db) {}
 
-		void init() override {
-			rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
-			rocksdb::get_perf_context()->EnablePerLevelPerfContext();
-		}
+		void init() override {}
 
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
@@ -217,9 +211,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
 			}
-			auto now = timer_monotonic();
-			rocksdb::get_perf_context()->Reset();
-			rocksdb::get_iostats_context()->Reset();
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
 			if (a.rowLimit >= 0) {
@@ -270,20 +261,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			  result.readThrough = result[result.size()-1].key;
 			}
 			a.result.send(result);
-			auto elapsed = timer_monotonic() - now;
-			if (elapsed > 0.5) {
-				auto time = std::to_string(elapsed);
-				TraceEvent(SevError, "RocksDBSlowRead")
-				    .detail("Time", time)
-				    .detail("Method", "ReadRange")
-				    .detail("Start", a.keys.begin.printable())
-				    .detail("End", a.keys.end.printable())
-				    .detail("RowLimit", a.rowLimit)
-				    .detail("ByteLimit", a.byteLimit);
-				std::cout << "Time: " << time << "\n";
-				std::cout << "Perf: " << rocksdb::get_perf_context()->ToString() << "\n";
-				std::cout << "IO: " << rocksdb::get_iostats_context()->ToString() << "\n";
-			}
 		}
 	};
 
