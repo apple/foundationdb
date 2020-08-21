@@ -174,7 +174,7 @@ public:
 		return managementApiCommandToRange.at(command).begin;
 	}
 	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
-	static const std::unordered_set<std::string>& getManagementApiOptionsSet() { return options; }
+	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
@@ -195,7 +195,7 @@ private:
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
 	static std::unordered_map<std::string, KeyRange>
 	    managementApiCommandToRange; // management command to its special keys' range
-	static std::unordered_set<std::string> options; // "<command>/<option>"
+	static std::set<std::string> options; // "<command>/<option>"
 
 	// Initialize module boundaries, used to handle cross_module_read
 	void modulesBoundaryInit();

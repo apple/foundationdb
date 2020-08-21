@@ -70,7 +70,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	std::map<Key, UID> rangeToApplier;
 
 	// Sampled mutations to be sent back to restore controller
-	std::map<LoadingParam, MutationsVec> sampleMutations;
+	std::map<LoadingParam, SampledMutationsVec> sampleMutations;
 	int numSampledMutations; // The total number of mutations received from sampled data.
 
 	Future<Void> pollMetrics;
@@ -132,6 +132,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	// buffered data per version batch
 	std::map<int, Reference<LoaderBatchData>> batch;
 	std::map<int, Reference<LoaderBatchStatus>> status;
+	RestoreControllerInterface ci;
 
 	KeyRangeMap<Version> rangeVersions;
 
@@ -141,7 +142,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	void addref() { return ReferenceCounted<RestoreLoaderData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreLoaderData>::delref(); }
 
-	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex) {
+	explicit RestoreLoaderData(UID loaderInterfID, int assignedIndex, RestoreControllerInterface ci) : ci(ci) {
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
@@ -158,7 +159,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	int getVersionBatchState(int batchIndex) final {
 		std::map<int, Reference<LoaderBatchData>>::iterator item = batch.find(batchIndex);
-		if (item != batch.end()) { // Simply caller's effort in when it can call this func.
+		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return LoaderVersionBatchState::INVALID;
 		} else {
 			return item->second->vbState.get();
@@ -191,7 +192,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx);
+ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
+                                     RestoreControllerInterface ci);
 
 #include "flow/unactorcompiler.h"
 #endif
