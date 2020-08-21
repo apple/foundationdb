@@ -2671,8 +2671,13 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 	else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
 		return { "auto" };
 	}
-	else if(tokens.size() == 2 && tokencmp(tokens[1], "list")) {
-        return {"[throttled|recommended|all]", "[LIMITS]"};
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			return { "[throttled|recommended|all]", "[LIMITS]" };
+		}
+		else if(tokens.size() == 3 && (tokencmp(tokens[2], "throttled") || tokencmp(tokens[2], "recommended") || tokencmp(tokens[2], "all"))){
+			return {"[LIMITS]"};
+		}
 	}
 	else if(tokens.size() == 2 && inArgument) {
 		return { "[ARGS]" };
@@ -4118,8 +4123,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						state int throttleListLimit = 100;
 						if(tokens.size() >= 4) {
 							char *end;
-							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
-							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
+							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
+							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
 								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
 								is_error = true;
 								continue;
