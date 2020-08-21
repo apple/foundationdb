@@ -408,7 +408,7 @@ struct ResolutionRequestBuilder {
 ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<GetDataDistributorMetricsReply> nextReply = Never();
-	state KeyRange keys(normalKeys);
+
 	if(db->get().distributor.present()) nextRequestTimer = Void();
 	loop {
 		try {
@@ -417,7 +417,7 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 					if ( db->get().distributor.present() ) {
 						TraceEvent("DataDistributorChanged", db->get().id)
 							.detail("DDID", db->get().distributor.get().id());
-						nextRequestTimer = Void();  // trigger GetRate request
+						nextRequestTimer = Void();
 					} else {
 						TraceEvent("DataDistributorDied", db->get().id);
 						nextRequestTimer = Never();
@@ -428,7 +428,7 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 					nextRequestTimer = Never();
 					if(db->get().distributor.present()) {
 						nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
-						    GetDataDistributorMetricsRequest(keys, CLIENT_KNOBS->TOO_MANY, true)));
+						    GetDataDistributorMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
 					} else nextReply = Never();
 				}
 				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
@@ -1677,8 +1677,7 @@ ACTOR static Future<Void> transactionStarter(
 	state Span span;
 
 	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
-	// FIXME: There's weird RYWIterator reference problem occurs
-	// addActor.send(monitorDDMetricsChanges(&midShardSize, db));
+	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
 	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,

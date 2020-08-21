@@ -4826,21 +4826,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	return Void();
 }
 
-ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req, PromiseStream<GetMetricsListRequest> getShardMetricsList) {
-	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
-		getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
-
-	if(result.isError()) {
-		req.reply.sendError(result.getError());
-	} else {
-		GetDataDistributorMetricsReply rep;
-		rep.storageMetricsList = result.get();
-		req.reply.send(rep);
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!setDDEnabled(false, snapReq.snapUID)) {
@@ -4998,6 +4983,30 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
+ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req, PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
+		getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
+
+	if(result.isError()) {
+		req.reply.sendError(result.getError());
+	} else {
+		GetDataDistributorMetricsReply rep;
+		if(!req.midOnly) {
+			rep.storageMetricsList = result.get();
+		}
+		else {
+			auto& metricVec = result.get();
+			if(metricVec.empty()) rep.midShardSize = 0;
+			else {
+				rep.midShardSize = getMedianShardSize(metricVec.contents());
+			}
+		}
+		req.reply.send(rep);
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
@@ -5023,16 +5032,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
 				break;
 			}
-			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
-				ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
-					getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
-				if ( result.isError() ) {
-					req.reply.sendError(result.getError());
-				} else {
-					GetDataDistributorMetricsReply rep;
-					rep.storageMetricsList = result.get();
-					req.reply.send(rep);
-				}
+			when(GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture())) {
+					actors.add(ddGetMetrics(req, getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				actors.add(ddSnapCreate(snapReq, db));

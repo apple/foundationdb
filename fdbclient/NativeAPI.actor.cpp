@@ -3394,7 +3394,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		if(req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE){
 			wait(store(req.transaction.read_snapshot, readVersion) &&
 			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
-			if (!req.commitCostEstimation.present()) req.tagSet.reset();
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
