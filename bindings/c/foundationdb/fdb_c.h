@@ -99,7 +99,6 @@ extern "C" {
         int value_length;
     } FDBKeyValue;
 
-    DLLEXPORT fdb_bool_t fdb_future_reboot_worker( FDBFuture* f, FDBDatabase* db, uint8_t const* value, int value_length, fdb_bool_t check);
 #else
     typedef struct keyvalue {
         const void* key;
@@ -164,6 +163,9 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_database_create_transaction( FDBDatabase* d,
                                      FDBTransaction** out_transaction );
+    
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* value, int value_length, fdb_bool_t check, int duration);
 
     DLLEXPORT void fdb_transaction_destroy( FDBTransaction* tr);
 

@@ -357,8 +357,5 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
-// Attempt to kill a process 
-Future<bool> rebootWorker(Database cx, const ValueRef& addr, bool check);
-
 #include "flow/unactorcompiler.h"
 #endif

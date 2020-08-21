@@ -264,6 +264,10 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
 }
+
+ThreadFuture<bool> DLDatabase::rebootWorker(const ValueRef& value, bool check, uint32_t duration) {
+	return api->databaseRebootWorker(db, value.begin(), value.size(), check, duration);
+}
 	
 // DLApi
 template<class T>
@@ -742,6 +746,13 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	if(dbState->db) {
 		dbState->db->setOption(option, value);
 	}
+}
+
+ThreadFuture<bool> MultiVersionDatabase::rebootWorker(const ValueRef& value, bool check, uint32_t duration) {
+	if (dbState->db) {
+		return dbState->db->rebootWorker(value, check, duration);
+	}
+	return false;
 }
 
 void MultiVersionDatabase::Connector::connect() {

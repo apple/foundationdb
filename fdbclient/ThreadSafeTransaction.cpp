@@ -67,6 +67,13 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	}, &db->deferredError );
 }
 
+ThreadFuture<bool> ThreadSafeDatabase::rebootWorker(const ValueRef& value, bool check, uint32_t duration) {
+	DatabaseContext *db = this->db;
+	return onMainThread( [db, value, check, duration]() -> Future<bool> {
+		return db->rebootWorker(value, check, duration);
+	} );
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile *connFile = new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 

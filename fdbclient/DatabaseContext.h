@@ -202,6 +202,10 @@ public:
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
 
+	// Management API
+	// Attempt to kill or suspend a process 
+	Future<bool> rebootWorker(ValueRef addr, bool check = false, uint32_t duration = 0);
+
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
 		Future<Void> clientInfoMonitor, TaskPriority taskID, LocalityData const& clientLocality, 

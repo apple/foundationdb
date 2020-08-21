@@ -4548,7 +4548,7 @@ ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInt
 	return Void();
 }
 
-ACTOR Future<bool> rebootWorkerActor(Database cx, const ValueRef& addr, bool check) {
+ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check) {
 	// fetch the addresses of all workers
 	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
 	state Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
@@ -4568,6 +4568,6 @@ ACTOR Future<bool> rebootWorkerActor(Database cx, const ValueRef& addr, bool che
 	return true;
 }
 
-Future<bool> rebootWorker(Database cx, const ValueRef& addr, bool check) {
-	return rebootWorkerActor(cx, addr, check);
+Future<bool> DatabaseContext::rebootWorker(ValueRef addr, bool check, uint32_t duration) {
+	return rebootWorkerActor(this, addr, check);
 }
