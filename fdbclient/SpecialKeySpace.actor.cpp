@@ -910,7 +910,7 @@ ACTOR Future<Standalone<RangeResultRef>> ExclusionInProgressActor(ReadYourWrites
 	}
 
 	for (auto const& address : inProgressExclusion) {
-		Key addrKey = prefix.withSuffix(address.toString());
+		Key addrKey = prefix.withSuffix(address.toString()); // TODO : sort and remove :tls
 		if (kr.contains(addrKey)) {
 			result.push_back(result.arena(), KeyValueRef(addrKey, ValueRef()));
 			result.arena().dependsOn(addrKey.arena());
@@ -966,7 +966,10 @@ ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTran
                                                               KeyRangeRef kr) {
 	vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
 	auto workers = _workers; // strip const
-	std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
+	// TODO : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
+	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
+	});
 	Standalone<RangeResultRef> result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS
@@ -991,34 +994,19 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 	vector<ProcessData> workers = wait(
 	    getWorkers(&ryw->getTransaction())); // make sure we use the Transaction object to avoid used_during_commit()
 
-	Optional<std::string> result;
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	auto iter = ranges.begin();
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
-		// only check for setclass(set) operation, (clear) are forbidden thus not exist
+		// only loop through (set) operation, (clear) not exist
 		if (entry.first && entry.second.present()) {
-			// validate network address
+			// parse network address
 			Key address = iter->begin().removePrefix(range.begin);
 			AddressExclusion addr = AddressExclusion::parse(address);
-			if (!addr.isValid()) {
-				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
-				if (address.toString().find(":tls") != std::string::npos)
-					error += "        Do not include the `:tls' suffix when naming a process\n";
-				result = ManagementAPIError::toJsonString(false, "setclass", error);
-				break;
-			}
-			// validate class type
+			// parse class type
 			ValueRef processClassType = entry.second.get();
 			ProcessClass processClass(processClassType.toString(), ProcessClass::DBSource);
-			if (processClass.classType() == ProcessClass::InvalidClass &&
-			    processClassType != LiteralStringRef("default")) {
-				std::string error = "ERROR: \'" + processClassType.toString() + "\' is not a valid process class\n";
-				result = ManagementAPIError::toJsonString(false, "setclass", error);
-				break;
-			}
-			// write to transaction
-			// make sure we use the Transaction object to avoid used_during_commit()
+			// make sure we use the underlying Transaction object to avoid used_during_commit()
 			bool foundChange = false;
 			for (int i = 0; i < workers.size(); i++) {
 				if (addr.excludes(workers[i].address)) {
@@ -1035,7 +1023,7 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 		}
 		++iter;
 	}
-	return result;
+	return Optional<std::string>();
 }
 
 ProcessClassRangeImpl::ProcessClassRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -1046,6 +1034,36 @@ Future<Standalone<RangeResultRef>> ProcessClassRangeImpl::getRange(ReadYourWrite
 }
 
 Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransaction* ryw) {
+	// Validate network address and process class type
+	Optional<std::string> errorMsg;
+	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(getKeyRange());
+	auto iter = ranges.begin();
+	while (iter != ranges.end()) {
+		auto entry = iter->value();
+		// only check for setclass(set) operation, (clear) are forbidden thus not exist
+		if (entry.first && entry.second.present()) {
+			// validate network address
+			Key address = iter->begin().removePrefix(range.begin);
+			AddressExclusion addr = AddressExclusion::parse(address);
+			if (!addr.isValid()) {
+				std::string error = "ERROR: \'" + address.toString() + "\' is not a valid network endpoint address\n";
+				if (address.toString().find(":tls") != std::string::npos)
+					error += "        Do not include the `:tls' suffix when naming a process\n";
+				errorMsg = ManagementAPIError::toJsonString(false, "setclass", error);
+				return errorMsg;
+			}
+			// validate class type
+			ValueRef processClassType = entry.second.get();
+			ProcessClass processClass(processClassType.toString(), ProcessClass::DBSource);
+			if (processClass.classType() == ProcessClass::InvalidClass &&
+			    processClassType != LiteralStringRef("default")) {
+				std::string error = "ERROR: \'" + processClassType.toString() + "\' is not a valid process class\n";
+				errorMsg = ManagementAPIError::toJsonString(false, "setclass", error);
+				return errorMsg;
+			}
+		}
+		++iter;
+	}
 	return processClassCommitActor(ryw, getKeyRange());
 }
 
