@@ -105,6 +105,10 @@ public:
 	// Free pageID to be used again after the commit that moves oldestVersion past v
 	virtual void freePage(LogicalPageID pageID, Version v) = 0;
 
+	// If id is remapped, delete the original as of version v and return the page it was remapped to.  The caller
+	// is then responsible for referencing and deleting the returned page ID.
+	virtual LogicalPageID detachRemappedPage(LogicalPageID id, Version v) = 0;
+
 	// Returns the latest data (regardless of version) for a page by LogicalPageID
 	// The data returned will be the later of
 	//   - the most recent committed atomic
@@ -133,7 +137,7 @@ public:
 
 	virtual StorageBytes getStorageBytes() = 0;
 
-	// Count of pages in use by the pager client
+	// Count of pages in use by the pager client (including retained old page versions)
 	virtual Future<int64_t> getUserPageCount() = 0;
 
 	// Future returned is ready when pager has been initialized from disk and is ready for reads and writes.
