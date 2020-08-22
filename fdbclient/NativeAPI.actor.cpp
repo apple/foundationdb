@@ -3667,7 +3667,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			if (info.debugID.present()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
 					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().first());
+					.detail("ServerTraceID", info.debugID.get());
 
 			}
 			break;
@@ -3703,7 +3703,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			if (trLogInfo && !trLogInfo->identifier.empty()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
 					.detail("DebugTransactionID", trLogInfo->identifier)
-					.detail("ServerTraceID", info.debugID.get().first());
+					.detail("ServerTraceID", info.debugID.get());
 			}
 			break;
 
@@ -4097,9 +4097,9 @@ Future<Void> Transaction::onError( Error const& e ) {
 
 	return e;
 }
-ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys);
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys);
 
-ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRangeRef keys, Reference<LocationInfo> locationInfo) {
+ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Reference<LocationInfo> locationInfo) {
 	loop {
 		try {
 			WaitMetricsRequest req(keys, StorageMetrics(), StorageMetrics());
