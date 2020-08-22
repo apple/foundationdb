@@ -228,8 +228,17 @@ public class TupleTest {
 				// the reflection.
 				Field f = Tuple.class.getDeclaredField("memoizedPackedSize");
 				AccessController.doPrivileged((PrivilegedExceptionAction<Void>) () -> {
-					if(!f.isAccessible()) {
-						f.setAccessible(true);
+					String javaVersion = System.getProperty("java.version");
+					int version = Integer.parseInt(javaVersion);
+					if(version < 13) {
+					    if(!f.isAccessible()) {
+                            f.setAccessible(true);
+                        }
+					} else {
+					    Tuple testInstance = new Tuple();
+					    if(!f.canAccess(testInstance)) {
+                            f.setAccessible(true);
+                        }
 					}
 					f.setInt(t, 2 + s.getBytes("UTF-8").length);
 					return null;

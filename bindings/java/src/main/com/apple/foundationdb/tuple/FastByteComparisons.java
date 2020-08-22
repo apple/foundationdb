@@ -205,7 +205,18 @@ abstract class FastByteComparisons {
                         (PrivilegedAction<Object>) () -> {
                             try {
                                 Field f = Unsafe.class.getDeclaredField("theUnsafe");
-                                f.setAccessible(true);
+                                String javaVersion = System.getProperty("java.version");
+                                int version = Integer.parseInt(javaVersion);
+                                if(version < 13) {
+                                    if(!f.isAccessible()) {
+                                        f.setAccessible(true);
+                                    }
+                                } else {
+                                    Unsafe testInstance = (Unsafe) f.get(null);
+                                    if(!f.canAccess(testInstance)) {
+                                        f.setAccessible(true);
+                                    }
+                                }
                                 return f.get(null);
                             } catch (NoSuchFieldException e) {
                                 // It doesn't matter what we throw;
