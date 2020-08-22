@@ -4121,7 +4121,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Ref
 	}
 }
 
-ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRangeRef keys) {
+ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys) {
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
 	vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(
 	    getKeyRangeLocations(cx, keys, std::numeric_limits<int>::max(), false, &StorageServerInterface::waitMetrics,
