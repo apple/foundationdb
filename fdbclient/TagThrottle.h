@@ -150,8 +150,15 @@ struct TagThrottleValue {
 	//To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be considered
 	template<class Ar>
 	void serialize(Ar& ar) {
-		uint8_t* reasonPtr = (uint8_t*)&reason;
-		serializer(ar, tpsRate, expirationTime, initialDuration, *reasonPtr);
+		if(ar.protocolVersion().hasTagThrottleValueReason()) {
+			serializer(ar, tpsRate, expirationTime, initialDuration, reinterpret_cast<uint8_t&>(reason));
+		}
+		else if(ar.protocolVersion().hasTagThrottleValue()) {
+			serializer(ar, tpsRate, expirationTime, initialDuration);
+			if(ar.isDeserializing) {
+			    reason = TagThrottledReason::UNSET;
+			}
+		}
 	}
 };
 
