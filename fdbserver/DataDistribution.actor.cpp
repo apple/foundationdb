@@ -2075,7 +2075,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}
-				TraceEvent("BuildServerTeams")
+				TraceEvent(SevDebug, "BuildServerTeams")
 				    .detail("Score", score)
 				    .detail("BestScore", bestScore)
 				    .detail("TeamSize", serverTeam.size())
@@ -5033,7 +5033,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				break;
 			}
 			when(GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture())) {
-					actors.add(ddGetMetrics(req, getShardMetricsList));
+				actors.add(ddGetMetrics(req, getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				actors.add(ddSnapCreate(snapReq, db));

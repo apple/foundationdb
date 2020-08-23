@@ -243,6 +243,10 @@ public:
 	// KeyValueStoreMemory
 	int64_t REPLACE_CONTENTS_BYTES;
 
+	// KeyValueStoreRocksDB
+	int ROCKSDB_BACKGROUND_PARALLELISM;
+	int64_t ROCKSDB_MEMTABLE_BYTES;
+
 	// Leader election
 	int MAX_NOTIFICATIONS;
 	int MIN_NOTIFICATIONS;
