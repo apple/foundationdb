@@ -221,9 +221,6 @@ bool PolicyAcross::selectReplicas(
 	_newResults.clear();
 	_addedResults.resize(_arena, 0);
 
-	if (g_replicationdebug > 0) {
-		printf("Across !also:%4lu key: %-7s policy: %-10s => %s\n", alsoServers.size(), _attribKey.c_str(), _policy->name().c_str(), _policy->info().c_str());
-	}
 	for (auto& alsoServer : alsoServers) {
 		auto value = fromServers->getValueViaGroupKey(alsoServer, groupIndexKey);
 		if (value.present()) {
@@ -290,12 +287,6 @@ bool PolicyAcross::selectReplicas(
 				if ((lowerBound == _usedValues.end()) || (*lowerBound != value.get())) {
 					_selected = fromServers->restrict(indexKey, value.get());
 					if (_selected->size()) {
-						if (g_replicationdebug > 5) {
-							printf("Across select:%3d key: %-7s value: (%3d) %-10s entry: %s  index:%4d\n",
-							       fromServers->size() - checksLeft + 1, _attribKey.c_str(), value.get()._id,
-							       fromServers->valueText(value.get()).c_str(),
-							       fromServers->getEntryInfo(entry).c_str(), recordIndex);
-						}
 						if (_policy->selectReplicas(_selected, emptyEntryArray, results))
 						{
 							count ++;
