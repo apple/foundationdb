@@ -1786,11 +1786,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		state TraceEventFields ratekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdate") ) ), 1.0) );
 		TraceEventFields batchRatekeeper = wait( timeoutError(rkWorker.interf.eventLogRequest.getReply( EventLogRequest(LiteralStringRef("RkUpdateBatch") ) ), 1.0) );
 
+		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
 		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
 		double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
 		int autoThrottledTags = ratekeeper.getInt("TagsAutoThrottled");
+		int autoThrottledTagsBusyRead = ratekeeper.getInt("TagsAutoThrottledBusyRead");
+		int autoThrottledTagsBusyWrite = ratekeeper.getInt("TagsAutoThrottledBusyWrite");
 		int manualThrottledTags = ratekeeper.getInt("TagsManuallyThrottled");
 		int ssCount = ratekeeper.getInt("StorageServers");
 		int tlogCount = ratekeeper.getInt("TLogs");
@@ -1820,9 +1823,28 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
 
 		JsonBuilderObject throttledTagsObj;
-		JsonBuilderObject autoThrottledTagsObj;
-		autoThrottledTagsObj["count"] = autoThrottledTags;
+		JsonBuilderObject autoThrottledTagsObj, recommendThrottleTagsObj;
+		if(autoThrottlingEnabled) {
+			autoThrottledTagsObj["count"] = autoThrottledTags;
+			autoThrottledTagsObj["busy_read"] = autoThrottledTagsBusyRead;
+			autoThrottledTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
+
+			recommendThrottleTagsObj["count"] = 0;
+			recommendThrottleTagsObj["busy_read"] = 0;
+			recommendThrottleTagsObj["busy_write"] = 0;
+		}
+		else {
+			recommendThrottleTagsObj["count"] = autoThrottledTags;
+			recommendThrottleTagsObj["busy_read"] = autoThrottledTagsBusyRead;
+			recommendThrottleTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
+
+			autoThrottledTagsObj["count"] = 0;
+			autoThrottledTagsObj["busy_read"] = 0;
+			autoThrottledTagsObj["busy_write"] = 0;
+		}
+
 		throttledTagsObj["auto"] = autoThrottledTagsObj;
+		throttledTagsObj["recommend"] = recommendThrottleTagsObj;
 
 		JsonBuilderObject manualThrottledTagsObj;
 		manualThrottledTagsObj["count"] = manualThrottledTags;

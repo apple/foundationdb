@@ -723,7 +723,7 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	self->lockedKey = pProxyCommitData->txnStateStore->readValue(databaseLockedKey).get();
 	self->locked = self->lockedKey.present() && self->lockedKey.get().size();
 
-	const auto& mustContainSystemKey = pProxyCommitData->txnStateStore->readValue(mustContainSystemMutationsKey).get();
+	const Optional<Value> mustContainSystemKey = pProxyCommitData->txnStateStore->readValue(mustContainSystemMutationsKey).get();
 	if (mustContainSystemKey.present() && mustContainSystemKey.get().size()) {
 		for (int t = 0; t < trs.size(); t++) {
 			if( self->committed[t] == ConflictBatch::TransactionCommitted ) {
