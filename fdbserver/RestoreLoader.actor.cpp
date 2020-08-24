@@ -691,15 +691,9 @@ ACTOR Future<Void> sendMutationsToApplier(
 		    .detail("FinishedBatchIndex", finishedBatch->get())
 		    .detail("RequestBatchIndex", batchIndex);
 		ASSERT(false);
-		flushAndExit(FDB_EXIT_ERROR);
+		return Void();
 	}
-	// if (*finishedSendingVB >= batchIndex) {
-	// 	TraceEvent(SevWarnAlways, "FastRestoreLoaderSendMutationToApplierLateRequest")
-	// 	    .detail("IsRangeFile", isRangeFile)
-	// 	    .detail("EndVersion", asset.endVersion)
-	// 	    .detail("RestoreAsset", asset.toString());
-	// 	return Void();
-	// }
+
 	(*inflightSendLoadParamReqs)[batchIndex]++;
 
 	TraceEvent("FastRestoreLoaderSendMutationToApplier")

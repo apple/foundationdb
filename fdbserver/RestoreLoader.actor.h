@@ -174,7 +174,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	int inflightLoadingReqs; // number of load backup file requests released
 	std::map<int, int> inflightSendLoadParamReqs; // key: batchIndex, value: inflightSendLoadParamReqs
 
-	Reference<AsyncVar<bool>> hasPendingRequests; // is there pending requests for loader
+	Reference<AsyncVar<bool>> hasPendingRequests; // are there pending requests for loader
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the RestoreController is created
