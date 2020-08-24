@@ -2541,6 +2541,16 @@ void throttleGenerator(const char* text, const char *line, std::vector<std::stri
 		const char* opts[] = { "auto", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			const char* opts[] = { "throttled", "recommended", "all", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
+		else if(tokens.size() == 3) {
+			const char* opts[] = {"LIMITS", nullptr};
+			arrayGenerator(text, line, opts, lc);
+		}
+	}
 }
 
 void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
@@ -2660,6 +2670,14 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 	}
 	else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
 		return { "auto" };
+	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			return { "[throttled|recommended|all]", "[LIMITS]" };
+		}
+		else if(tokens.size() == 3 && (tokencmp(tokens[2], "throttled") || tokencmp(tokens[2], "recommended") || tokencmp(tokens[2], "all"))){
+			return {"[LIMITS]"};
+		}
 	}
 	else if(tokens.size() == 2 && inArgument) {
 		return { "[ARGS]" };
@@ -4077,8 +4095,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 					else if(tokencmp(tokens[1], "list")) {
-						if(tokens.size() > 3) {
-							printf("Usage: throttle list [LIMIT]\n");
+						if(tokens.size() > 4) {
+							printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
 							printf("\n");
 							printf("Lists tags that are currently throttled.\n");
 							printf("The default LIMIT is 100 tags.\n");
@@ -4086,36 +4104,72 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 
-						state int throttleListLimit = 100;
+						state bool reportThrottled = true;
+						state bool reportRecommended = false;
 						if(tokens.size() >= 3) {
-							char *end;
-							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
-							if ((tokens.size() > 3 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
-								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[2]).c_str());
+							if(tokencmp(tokens[2], "recommended")) {
+								reportThrottled = false; reportRecommended = true;
+							}
+							else if(tokencmp(tokens[2], "all")){
+								reportThrottled = true; reportRecommended = true;
+							}
+							else if(!tokencmp(tokens[2], "throttled")){
+								printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
 								is_error = true;
 								continue;
 							}
 						}
 
-						std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
+						state int throttleListLimit = 100;
+						if(tokens.size() >= 4) {
+							char *end;
+							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
+							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
+								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
+								is_error = true;
+								continue;
+							}
+						}
+
+						state std::vector<TagThrottleInfo> tags;
+						if(reportThrottled && reportRecommended) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
+						}
+						else if(reportThrottled) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
+						}
+						else if(reportRecommended) {
+							wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
+						}
 
 						bool anyLogged = false;
 						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
 							if(itr->expirationTime > now()) {
 								if(!anyLogged) {
 									printf("Throttled tags:\n\n");
-									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
-									printf(" --------------+----------------+-----------+--------+------------------\n");
+									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag\n");
+									printf(" --------------+----------------+-----------+--------+------------+------\n");
 									
 									anyLogged = true;
 								}
 
-								printf("  %12d | %13ds | %9s | %6s | %s\n", 
-									(int)(itr->tpsRate), 
-									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
-									transactionPriorityToString(itr->priority, false), 
-									itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual", 
-									itr->tag.toString().c_str());
+								std::string reasonStr = "unset";
+								if(itr->reason == TagThrottledReason::MANUAL){
+									reasonStr = "manual";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_WRITE) {
+									reasonStr = "busy write";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_READ) {
+									reasonStr = "busy read";
+								}
+
+								printf("  %12d | %13ds | %9s | %6s | %10s |%s\n", (int)(itr->tpsRate),
+								       std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
+								       transactionPriorityToString(itr->priority, false),
+								       itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
+								       reasonStr.c_str(),
+								       itr->tag.toString().c_str());
 							}
 						}
 
@@ -4124,7 +4178,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Usage: throttle list [LIMIT]\n");
 						}
 						if(!anyLogged) {
-							printf("There are no throttled tags\n");
+							printf("There are no %s tags\n", reportThrottled ? "throttled" : "recommended");
 						}
 					}
 					else if(tokencmp(tokens[1], "on")) {	
