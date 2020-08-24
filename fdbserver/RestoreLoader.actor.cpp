@@ -84,6 +84,30 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			    .detail("CpuUsage", self->cpuUsage)
 			    .detail("TargetCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT)
 			    .detail("MaxCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT);
+
+			if (SERVER_KNOBS->FASTRESTORE_EXPENSIVE_VALIDATION) {
+				// Sanity check: All requests before and in finishedBatch must have been processed; otherwise,
+				// those requests may cause segmentation fault after applier remove the batch data
+				if (!self->loadingQueue.empty() && self->loadingQueue.top().batchIndex <= self->finishedBatch.get()) {
+					// Still has pending requests from earlier batchIndex  and current batchIndex, which should not
+					// happen
+					TraceEvent(SevError, "FastRestoreLoaderSchedulerHasOldLoadFileRequests")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("PendingRequest", self->loadingQueue.top().toString());
+				}
+				if (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= self->finishedBatch.get()) {
+					TraceEvent(SevError, "FastRestoreLoaderSchedulerHasOldSendRequests")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("PendingRequest", self->sendingQueue.top().toString());
+				}
+				if (!self->sendLoadParamQueue.empty() &&
+				    self->sendLoadParamQueue.top().batchIndex <= self->finishedBatch.get()) {
+					TraceEvent(SevError, "FastRestoreLoaderSchedulerHasOldSendLoadParamRequests")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
+				}
+			}
+
 			while (!self->sendingQueue.empty()) {
 				const RestoreSendMutationsToAppliersRequest& req = self->sendingQueue.top();
 				// Dispatch the request if it is the next version batch to process or if cpu usage is low
