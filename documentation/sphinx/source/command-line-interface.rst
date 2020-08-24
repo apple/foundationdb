@@ -456,16 +456,20 @@ disable
 
 ``throttle disable auto``
 
-Disables cluster auto-throttling for busy transaction tags. This does not disable any currently active throttles. To do so, run the following command after disabling auto-throttling::
-
-> throttle off auto
+Disables cluster auto-throttling for busy transaction tags. This may not disable currently active throttles immediately, seconds of delay is expected.
 
 list
 ^^^^
 
-``throttle list [LIMIT]``
+``throttle list [throttled|recommended|all] [LIMIT]``
 
-Prints a list of currently active transaction tag throttles.
+Prints a list of currently active transaction tag throttles, or recommended transaction tag throttles if auto-throttling is disabled.
+
+``throttled`` - list active transaction tag throttles.
+
+``recommended`` - list transaction tag throttles recommended by the ratekeeper, but not active yet.
+
+``all`` - list both active and recommended transaction tag throttles.
 
 ``LIMIT`` - The number of throttles to print. Defaults to 100.
 
