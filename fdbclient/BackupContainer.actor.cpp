@@ -26,6 +26,7 @@
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/Status.h"
@@ -1611,7 +1612,11 @@ public:
 		if(g_network->isSimulated()) {
 			if(!fileExists(fullPath))
 				throw file_not_found();
-			std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
+			// std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
+			if (g_simulator.getCurrentProcess()->uid == UID()) {
+				TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID");
+			}
+			std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
 			unlink(uniquePath.c_str());
 			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 			fullPath = uniquePath;
