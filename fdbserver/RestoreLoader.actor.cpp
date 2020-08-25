@@ -340,8 +340,9 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
 	if (rLen != asset.len) throw restore_bad_read();
 
-	TraceEvent("FastRestoreLoader")
-	    .detail("DecodingLogFile", asset.filename)
+	TraceEvent("FastRestoreLoaderDecodingLogFile")
+	    .detail("BatchIndex", asset.batchIndex)
+	    .detail("Filename", asset.filename)
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len);
 
@@ -435,6 +436,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
+		    .detail("BatchIndex", asset.batchIndex)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", asset.offset)
 		    .detail("BlockLen", asset.len);
@@ -456,8 +458,9 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = batchData->kvOpsPerLP.end();
 	state std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter = batchData->sampleMutations.end();
 
-	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
-	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID).detail("LoadingParam", param.toString());
+	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID)
+	    .detail("BatchIndex", param.asset.batchIndex)
+	    .detail("LoadingParam", param.toString());
 	ASSERT(param.blockSize > 0);
 	ASSERT(param.asset.offset % param.blockSize == 0); // Parse file must be at block boundary.
 	ASSERT(batchData->kvOpsPerLP.find(param) == batchData->kvOpsPerLP.end());
@@ -495,7 +498,9 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 		                         param.asset);
 	}
 
-	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID).detail("LoadingParam", param.toString());
+	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID)
+	    .detail("BatchIndex", param.asset.batchIndex)
+	    .detail("LoadingParam", param.toString());
 
 	return Void();
 }
@@ -969,6 +974,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
 	TraceEvent(SevFRMutationInfo, "FastRestoreLoaderParseSerializedLogMutation")
+	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("RestoreAsset", asset.toString());
 
 	Arena tempArena;
@@ -1071,6 +1077,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
 	TraceEvent(SevFRDebugInfo, "FastRestoreDecodedRangeFile")
+	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("Filename", asset.filename)
 	    .detail("Version", version)
 	    .detail("BeginVersion", asset.beginVersion)
@@ -1085,8 +1092,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	try {
 		Standalone<VectorRef<KeyValueRef>> kvs =
 		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
-		TraceEvent("FastRestoreLoader")
-		    .detail("DecodedRangeFile", asset.filename)
+		TraceEvent("FastRestoreLoaderDecodedRangeFile")
+		    .detail("BatchIndex", asset.batchIndex)
+		    .detail("Filename", asset.filename)
 		    .detail("DataSize", kvs.contents().size());
 		blockData = kvs;
 	} catch (Error& e) {
@@ -1141,6 +1149,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		auto it = kvOps.insert(std::make_pair(msgVersion, MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestoreDecodeRangeFile")
+		    .detail("BatchIndex", asset.batchIndex)
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 
@@ -1170,6 +1179,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, asset.offset, asset.len));
 	TraceEvent("FastRestoreLoaderDecodeLogFile")
+	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("RestoreAsset", asset.toString())
 	    .detail("DataSize", data.contents().size());
 

@@ -249,29 +249,31 @@ struct RestoreAsset {
 	Key addPrefix;
 	Key removePrefix;
 
+	int batchIndex; // for progress tracking and performance investigation
+
 	RestoreAsset() = default;
 
 	// Q: Can we simply use uid for == and use different comparison rule for less than operator.
 	// The ordering of RestoreAsset may change, will that affect correctness or performance?
 	bool operator==(const RestoreAsset& r) const {
-		return beginVersion == r.beginVersion && endVersion == r.endVersion && range == r.range &&
-		       fileIndex == r.fileIndex && partitionId == r.partitionId && filename == r.filename &&
+		return batchIndex == r.batchIndex && beginVersion == r.beginVersion && endVersion == r.endVersion &&
+		       range == r.range && fileIndex == r.fileIndex && partitionId == r.partitionId && filename == r.filename &&
 		       offset == r.offset && len == r.len && addPrefix == r.addPrefix && removePrefix == r.removePrefix;
 	}
 	bool operator!=(const RestoreAsset& r) const {
 		return !(*this == r);
 	}
 	bool operator<(const RestoreAsset& r) const {
-		return std::make_tuple(fileIndex, filename, offset, len, beginVersion, endVersion, range.begin, range.end,
-		                       addPrefix, removePrefix) < std::make_tuple(r.fileIndex, r.filename, r.offset, r.len,
-		                                                                  r.beginVersion, r.endVersion, r.range.begin,
-		                                                                  r.range.end, r.addPrefix, r.removePrefix);
+		return std::make_tuple(batchIndex, fileIndex, filename, offset, len, beginVersion, endVersion, range.begin,
+		                       range.end, addPrefix, removePrefix) <
+		       std::make_tuple(r.batchIndex, r.fileIndex, r.filename, r.offset, r.len, r.beginVersion, r.endVersion,
+		                       r.range.begin, r.range.end, r.addPrefix, r.removePrefix);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, uid, beginVersion, endVersion, range, filename, fileIndex, partitionId, offset, len, addPrefix,
-		           removePrefix);
+		           removePrefix, batchIndex);
 	}
 
 	std::string toString() const {
@@ -279,7 +281,8 @@ struct RestoreAsset {
 		ss << "UID:" << uid.toString() << " begin:" << beginVersion << " end:" << endVersion
 		   << " range:" << range.toString() << " filename:" << filename << " fileIndex:" << fileIndex
 		   << " partitionId:" << partitionId << " offset:" << offset << " len:" << len
-		   << " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
+		   << " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString()
+		   << " BatchIndex:" << batchIndex;
 		return ss.str();
 	}
 
