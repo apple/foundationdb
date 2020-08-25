@@ -30,7 +30,9 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Holds the direct buffer that is shared with JNI wrapper. A typical usage is as follows:
- * TODO (Vishesh): Document the binary format.
+ * 
+ * The serialization format of result is =>
+ *     [int keyCount, boolean more, ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
  */
 class DirectBufferIterator implements Iterator<KeyValue>, AutoCloseable {
 	private ByteBuffer byteBuffer;

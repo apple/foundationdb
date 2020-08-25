@@ -52,14 +52,16 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 				: null;
 		try {
 			pointerReadLock.lock();
-			if (directIterator.getBuffer() != null) {
+			if (directIterator != null &&
+				directIterator.getBuffer() != null) {
 				FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
 				return new RangeResult(directIterator);
 			} else {
 				return FutureResults_get(getPtr());
 			}
 		} finally {
-			directIterator.close();
+			if (directIterator != null)
+				directIterator.close();
 			pointerReadLock.unlock();
 		}
 	}

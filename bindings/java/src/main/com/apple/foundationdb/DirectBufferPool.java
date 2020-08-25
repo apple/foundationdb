@@ -1,5 +1,5 @@
 /*
- * DirectBufferIterator.java
+ * DirectBufferPool.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -48,11 +48,12 @@ class DirectBufferPool {
 		return __instance;
 	}
 
+	// Resizes buffer pool given number and size. Throws OutOfMemory exception
+	// if unable to allocate as asked.
 	public synchronized void resize(int newSize, int bufferSize) {
 		buffers = new ArrayBlockingQueue<>(newSize);
 		while (buffers.size() < newSize) {
 			ByteBuffer buffer = ByteBuffer.allocateDirect(bufferSize);
-			assert (buffer != null);
 			buffers.add(buffer);
 		}
 	}
