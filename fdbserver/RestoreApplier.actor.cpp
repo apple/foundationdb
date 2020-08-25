@@ -118,7 +118,7 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 		    .detail("RequestBatchIndex", req.batchIndex)
 		    .detail("FinishedBatchIndex", self->finishedBatch.get());
 		req.reply.send(RestoreCommonReply(self->id(), true));
-		ASSERT(false); // Test to see if simulation can reproduce this
+		ASSERT_WE_THINK(false); // Test to see if simulation can reproduce this
 		return Void();
 	}
 

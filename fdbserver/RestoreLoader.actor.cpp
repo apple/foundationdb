@@ -85,6 +85,8 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			    .detail("TargetCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT)
 			    .detail("MaxCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT);
 
+			// TODO: Pop old requests whose version batch <= finishedBatch.get()
+			// TODO2: Simulate delayed request can be too old by introducing artificial delay
 			if (SERVER_KNOBS->FASTRESTORE_EXPENSIVE_VALIDATION) {
 				// Sanity check: All requests before and in finishedBatch must have been processed; otherwise,
 				// those requests may cause segmentation fault after applier remove the batch data
@@ -1207,6 +1209,7 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		// Sanity check: All requests before and in this batchIndex must have been processed; otherwise,
 		// those requests may cause segmentation fault after applier remove the batch data
+		// TODO: Pop old requests
 		if (!self->loadingQueue.empty() && self->loadingQueue.top().batchIndex <= req.batchIndex) {
 			// Still has pending requests from earlier batchIndex  and current batchIndex, which should not happen
 			TraceEvent(SevError, "FastRestoreLoaderHasPendingLoadFileRequests")
