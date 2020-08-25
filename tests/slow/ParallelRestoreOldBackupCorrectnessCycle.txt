@@ -1,10 +1,9 @@
 testTitle=BackupAndRestore
      testName=Cycle
- ;    nodeCount=30000
-     nodeCount=1000
- ;    transactionsPerSecond=500.0
+     nodeCount=30000
+ ;    nodeCount=1000
      transactionsPerSecond=2500.0
-     testDuration=30.0
+     testDuration=60.0
      expectedRate=0
      clearAfterTest=false
  ;	keyPrefix=!
@@ -16,7 +15,7 @@ testTitle=BackupAndRestore
  ; Test case for parallel restore
      testName=BackupAndParallelRestoreCorrectness
      backupAfter=10.0
-     restoreAfter=60.0
+     restoreAfter=90.0
      clearAfterTest=false
      simBackupAgents=BackupToFile
  ; backupRangesCount<0 means backup the entire normal keyspace
@@ -24,11 +23,11 @@ testTitle=BackupAndRestore
      usePartitionedLogs=false
 
      testName=RandomClogging
-     testDuration=90.0
+     testDuration=180.0
 
      testName=Rollback
      meanDelay=90.0
-     testDuration=90.0
+     testDuration=180.0
 
  ; Do NOT kill restore worker process yet
  ; Kill other process to ensure restore works when FDB cluster has faults
