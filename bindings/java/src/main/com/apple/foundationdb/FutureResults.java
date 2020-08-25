@@ -24,9 +24,10 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.Executor;
 
 class FutureResults extends NativeFuture<RangeResultInfo> {
-	FutureResults(long cPtr, Executor executor) {
+	FutureResults(long cPtr, boolean enableDirectBufferQueries, Executor executor) {
 		super(cPtr);
 		registerMarshalCallback(executor);
+		this.enableDirectBufferQueries = enableDirectBufferQueries;
 	}
 
 	@Override
@@ -46,7 +47,9 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	public RangeResult getResults() {
-		DirectBufferIterator directIterator = new DirectBufferIterator();
+		DirectBufferIterator directIterator = enableDirectBufferQueries
+				? new DirectBufferIterator()
+				: null;
 		try {
 			pointerReadLock.lock();
 			if (directIterator.getBuffer() != null) {
@@ -60,6 +63,8 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 			pointerReadLock.unlock();
 		}
 	}
+
+	private boolean enableDirectBufferQueries = false;
 
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
 	private native void FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)

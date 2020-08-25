@@ -33,6 +33,8 @@ import java.util.concurrent.CompletableFuture;
 class DirectBufferPool {
 	static final DirectBufferPool __instance = new DirectBufferPool();
 
+	// When tuning this, make sure that the size of the buffer,
+	// is always greater than the maximum size KV allowed by FDB.
 	static private final int DEFAULT_NUM_BUFFERS = 128;
 	static private final int DEFAULT_BUFFER_SIZE = 1024 * 512;
 

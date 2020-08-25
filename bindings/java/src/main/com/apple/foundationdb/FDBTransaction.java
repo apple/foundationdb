@@ -37,6 +37,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private final TransactionOptions options;
 
 	private boolean transactionOwner;
+	private boolean enableDirectBufferQueries = false;
 
 	public final ReadTransaction snapshot;
 
@@ -284,6 +285,17 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	///////////////////
+	//  Feature Options
+	///////////////////
+
+	/**
+	 * Use DirectByteBuffers to fetch getRange() results.
+	 */
+	public void setDirectBufferQueryEnabled(boolean v) {
+		enableDirectBufferQueries = v;
+	}
+
+	///////////////////
 	//  getRange -> KeySelectors
 	///////////////////
 	@Override
@@ -373,7 +385,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return new FutureResults(Transaction_getRange(
 					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
 					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
-					streamingMode, iteration, isSnapshot, reverse), executor);
+					streamingMode, iteration, isSnapshot, reverse), enableDirectBufferQueries, executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
