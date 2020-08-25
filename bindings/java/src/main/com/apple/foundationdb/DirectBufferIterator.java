@@ -24,100 +24,49 @@ import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * A singleton that manages a pool of {@link DirectByteBuffer}, that will be shared
- * by the {@link DirectBufferIterator} instances. It is responsibilty of user to
- * return the borrowed buffers.
- */
-class BufferPool {
-	static final BufferPool __instance = new BufferPool();
-	static private final int NUM_BUFFERS = 128;
-	private ArrayBlockingQueue<ByteBuffer> buffers = new ArrayBlockingQueue<>(NUM_BUFFERS);
-
-	public BufferPool() {
-		while (buffers.size() < NUM_BUFFERS) {
-			ByteBuffer buffer = ByteBuffer.allocateDirect(1024 * 512);
-			assert  (buffer != null);
-			buffers.add(buffer);
-		}
-	}
-
-	public static BufferPool getInstance() {
-		return __instance;
-	}
-
-	/**
-     * Requests a {@link #DirectByteBuffer} from our pool, and block if needed.
-     */
-	public synchronized ByteBuffer poll() {
-		return buffers.poll();
-	}
-
-	/**
-	 * Returns the {@link #DirectByteBuffer} that was borrowed from our pool. This is
-	 * non-blocking as it was borrowed from this pool.
-	 */
-	public synchronized void add(ByteBuffer buffer) {
-		buffers.offer(buffer);
-	}
-}
-
-/**
  * Holds the direct buffer that is shared with JNI wrapper. A typical usage is as follows:
- * 
- * 1. Call {@link #init()} which borrows {@code DirectByteBuffer} from {@link BufferPool}.
- *    This step will block until a buffer is successfully borrowed from {@link BufferPool}.
- * 2. Prepare the request by calling {@link #prepareRequest()} function. This will serialize
- *    the request into ByteBuffer.
- * 3. Use {@link #onResultReady()} to get future, when the results are ready.
- * 4. Call {@link #readSummary()} to read the metadata of the result from buffer. At this point,
- *    results will be ready.
- * 5. Use it like normal iterator.
- * 6. When done, call {@link #close()} to return the buffer to {@link BufferPool}.
- *
  * TODO (Vishesh): Document the binary format.
  */
-class DirectBufferIterator implements Iterator<KeyValue>, Closeable {
+class DirectBufferIterator implements Iterator<KeyValue>, AutoCloseable {
 	private ByteBuffer byteBuffer;
 	private int current = 0;
-	private int resultOffset = 0;
-	private RangeResultSummary summary;
-	private final CompletableFuture<Boolean> promise = new CompletableFuture<>();
+	private int keyCount = -1;
+	private boolean more = false;
 
 	public DirectBufferIterator() {
-		byteBuffer = BufferPool.getInstance().poll();
+		byteBuffer = DirectBufferPool.getInstance().poll();
 		byteBuffer.order(ByteOrder.nativeOrder());
 	}
 
 	@Override
 	public void close() {
 		if (byteBuffer != null) {
-			BufferPool.getInstance().add(byteBuffer);
+			DirectBufferPool.getInstance().add(byteBuffer);
 			byteBuffer = null;
 		}
 	}
 
-	public CompletableFuture<Boolean> onResultReady() {
-		return promise;
-	}
-
 	public boolean hasResultReady() {
-		return summary != null;
+		return keyCount > -1;
 	}
 
 	@Override
 	public boolean hasNext() {
 		assert (hasResultReady());
-		return current < summary.keyCount;
+		return current < keyCount;
 	}
 
 	@Override
 	public KeyValue next() {
-		assert (hasNext());
-		assert (hasResultReady());
+		assert (hasResultReady()); // Must be called once its ready.
+		if (!hasNext()) {
+			throw new NoSuchElementException();
+		}
 
 		final int keyLen = byteBuffer.getInt();
 		final int valueLen = byteBuffer.getInt();
@@ -135,34 +84,25 @@ class DirectBufferIterator implements Iterator<KeyValue>, Closeable {
 		return byteBuffer;
 	}
 
-	public RangeResultSummary getSummary() {
+	public int count() {
 		assert (hasResultReady());
-		return summary;
+		return keyCount;
 	}
 
-	// public String toString() {
-	// 	return String.format("DirectBufferIterator{KeyCount=%d, Current=%d, More=%b, LastKey=\"%s\", Ref=%s}\n",
-	// 			summary.keyCount, current, summary.more, summary.lastKey, super.toString());
-	// }
+	public boolean hasMore() {
+		assert (hasResultReady());
+		return more;
+	}
 
 	public int currentIndex() {
 		return current;
 	}
 
-	public void readSummary() {
+	public void readResultsSummary() {
 		byteBuffer.rewind();
 		byteBuffer.position(0);
 
-		final int keyCount = byteBuffer.getInt();
-		final boolean more = byteBuffer.getInt() > 0;
-		final int lastKeyLen = byteBuffer.getInt();
-
-		byte[] lastKey = null;
-		if (lastKeyLen > 0) {
-			lastKey = new byte[lastKeyLen];
-			byteBuffer.get(lastKey);
-		}
-
-		summary = new RangeResultSummary(lastKey, keyCount, more);
+		keyCount = byteBuffer.getInt();
+		more = byteBuffer.getInt() > 0;
 	}
 }

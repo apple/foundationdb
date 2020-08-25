@@ -53,10 +53,10 @@ class RangeResult {
 	}
 
 	RangeResult(DirectBufferIterator iterator) {
-		iterator.readSummary();
-		more = iterator.getSummary().more;
+		iterator.readResultsSummary();
+		more = iterator.hasMore();
 
-		int count = iterator.getSummary().keyCount;
+		int count = iterator.count();
 		values = new ArrayList<KeyValue>(count);
 
 		for (int i = 0; i < count; ++i) {
