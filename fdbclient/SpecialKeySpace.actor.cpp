@@ -1080,10 +1080,10 @@ void throwNotAllowedError(ReadYourWritesTransaction* ryw) {
 	throw special_keys_api_failure();
 }
 
-void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override {
+void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
 	return throwNotAllowedError(ryw);
 }
 
-void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override {
+void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	return throwNotAllowedError(ryw);
 }
