@@ -87,7 +87,7 @@ When you require the ``FDB`` gem, it exposes only one useful method:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
+For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :ref:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -738,9 +738,16 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| |transaction-get-committed-version-blurb|
 
-.. method:: Transaction.get_verionstamp() -> String
+.. method:: Transaction.get_versionstamp() -> String
 
     |infrequent| |transaction-get-versionstamp-blurb|
+
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_approximate_size() -> Int64Future
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`Int64Future`.
 
 Transaction options
 -------------------

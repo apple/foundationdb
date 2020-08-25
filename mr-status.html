@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.19',
+        VERSION:     '6.2.24',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -278,6 +278,44 @@
                   <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
                   <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
                <span class="p">},</span>
+               <span class="s2">&quot;grv_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
+                  <span class="s2">&quot;default&quot;</span><span class="o">:</span><span class="p">{</span>
+                      <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+                      <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+                  <span class="p">}</span>
+               <span class="p">},</span>
+               <span class="s2">&quot;read_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
+                  <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+                  <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+               <span class="p">},</span>
+               <span class="s2">&quot;commit_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
+                  <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
+                  <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+               <span class="p">},</span>
                <span class="s2">&quot;grv_latency_bands&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// How many GRV requests belong to the latency (in seconds) band (e.g., How many requests belong to [0.01,0.1] latency band). The key is the upper bound of the band and the lower bound is the next smallest band (or 0, if none). Example: {0.01: 27, 0.1: 18, 1: 1, inf: 98,filtered: 10}, we have 18 requests in [0.01, 0.1) band.</span>
                   <span class="s2">&quot;$map_key=upperBoundOfBand&quot;</span><span class="o">:</span> <span class="mi">1</span>
                <span class="p">},</span>
@@ -529,7 +567,9 @@
                <span class="s2">&quot;layer_status_incomplete&quot;</span><span class="p">,</span>
                <span class="s2">&quot;database_availability_timeout&quot;</span><span class="p">,</span>
                <span class="s2">&quot;consistencycheck_suspendkey_fetch_timeout&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;consistencycheck_disabled&quot;</span>
+               <span class="s2">&quot;consistencycheck_disabled&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;primary_dc_missing&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;fetch_primary_dc_timeout&quot;</span>
             <span class="p">]</span>
          <span class="p">},</span>
          <span class="s2">&quot;issues&quot;</span><span class="o">:</span><span class="p">[</span>
@@ -661,6 +701,7 @@
    <span class="s2">&quot;data_distribution_disabled_for_ss_failures&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
    <span class="s2">&quot;data_distribution_disabled_for_rebalance&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
    <span class="s2">&quot;data_distribution_disabled&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
+   <span class="s2">&quot;active_primary_dc&quot;</span><span class="o">:</span><span class="s2">&quot;pv&quot;</span><span class="p">,</span>
    <span class="s2">&quot;configuration&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;log_anti_quorum&quot;</span><span class="o">:</span><span class="mi">0</span><span class="p">,</span>
       <span class="s2">&quot;log_replicas&quot;</span><span class="o">:</span><span class="mi">2</span><span class="p">,</span>
@@ -985,6 +1026,14 @@
 <td>layer_status_incomplete</td>
 <td>Some or all of the layers subdocument could not be read.</td>
 </tr>
+<tr class="row-odd"><td>cluster.messages</td>
+<td>primary_dc_missing</td>
+<td>Unable to determine primary datacenter.</td>
+</tr>
+<tr class="row-even"><td>cluster.messages</td>
+<td>fetch_primary_dc_timeout</td>
+<td>Fetching primary DC timed out.</td>
+</tr>
 <tr class="row-odd"><td>cluster.processes.&lt;process&gt;.messages</td>
 <td>file_open_error</td>
 <td>Unable to open ‘&lt;file&gt;’ (&lt;os_error&gt;).</td>
@@ -1125,7 +1174,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 08, 2020.<br/>
+      Last updated on Aug 25, 2020.<br/>
     </p>
   </div>
 </footer>

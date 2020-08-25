@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Release Notes &#8212; FoundationDB 6.2</title>
+    
+    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../',
+        VERSION:     '6.2.24',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Release Notes" href="release-notes-460.html" />
+    <link rel="prev" title="Release Notes" href="release-notes-440.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="../index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="../contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="../index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id1">4.5.6</a><ul>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">4.5.5</a><ul>
+<li><a class="reference internal" href="#id3">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id4">4.5.4</a><ul>
+<li><a class="reference internal" href="#id5">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id6">4.5.3</a><ul>
+<li><a class="reference internal" href="#fdbcli">Fdbcli</a></li>
+<li><a class="reference internal" href="#java-completable">Java-completable</a></li>
+<li><a class="reference internal" href="#status">Status</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id7">4.5.2</a><ul>
+<li><a class="reference internal" href="#id8">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">4.5.1</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#id10">Fixes</a></li>
+<li><a class="reference internal" href="#id11">Fdbcli</a></li>
+<li><a class="reference internal" href="#fdbmonitor">Fdbmonitor</a></li>
+<li><a class="reference internal" href="#backup">Backup</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
+<li><a class="reference internal" href="#other-changes">Other Changes</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="release-notes-440.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="release-notes-460.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="../search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id1">4.5.6</a><ul>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">4.5.5</a><ul>
+<li><a class="reference internal" href="#id3">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id4">4.5.4</a><ul>
+<li><a class="reference internal" href="#id5">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id6">4.5.3</a><ul>
+<li><a class="reference internal" href="#fdbcli">Fdbcli</a></li>
+<li><a class="reference internal" href="#java-completable">Java-completable</a></li>
+<li><a class="reference internal" href="#status">Status</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id7">4.5.2</a><ul>
+<li><a class="reference internal" href="#id8">Fixes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">4.5.1</a><ul>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#id10">Fixes</a></li>
+<li><a class="reference internal" href="#id11">Fdbcli</a></li>
+<li><a class="reference internal" href="#fdbmonitor">Fdbmonitor</a></li>
+<li><a class="reference internal" href="#backup">Backup</a></li>
+<li><a class="reference internal" href="#bindings">Bindings</a></li>
+<li><a class="reference internal" href="#other-changes">Other Changes</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="release-notes">
+<h1>Release Notes</h1>
+<div class="section" id="id1">
+<h2>4.5.6</h2>
+<div class="section" id="fixes">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Disabled debug SevError trace event when applyMutations is cancelled</li>
+<li>Fixed problem skipping publishable files</li>
+<li>Publish debug symbols for files for all platforms</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id2">
+<h2>4.5.5</h2>
+<div class="section" id="id3">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>DR and backup restoration could stall when encountering transactions larger than 5 MB. &lt;<a class="reference external" href="rdar://problem/28744048">rdar://problem/28744048</a>&gt;</li>
+<li>The <code class="docutils literal"><span class="pre">_valid</span></code> field in layer status was missing when the client couldn&#8217;t communicate with the cluster. &lt;<a class="reference external" href="rdar://problem/27643333">rdar://problem/27643333</a>&gt;</li>
+<li>Backup uploads to blobstore were not verifying their checksums. &lt;<a class="reference external" href="rdar://problem/28417369">rdar://problem/28417369</a>&gt;</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id4">
+<h2>4.5.4</h2>
+<div class="section" id="id5">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Creating transactions with the multi-version client was not thread safe. &lt;<a class="reference external" href="rdar://problem/28546688">rdar://problem/28546688</a>&gt;</li>
+<li>The status latency probe is now performed separately from other status gathering code. &lt;<a class="reference external" href="rdar://problem/28119480">rdar://problem/28119480</a>&gt;</li>
+<li>Watches could fire early needlessly and in rare cases may not fire when they should. &lt;<a class="reference external" href="rdar://problem/27957628">rdar://problem/27957628</a>&gt;</li>
+<li>Change the type of the <code class="docutils literal"><span class="pre">query_queue_max</span></code> attribute in status from an object to an integer. &lt;<a class="reference external" href="rdar://problem/26709846">rdar://problem/26709846</a>&gt;</li>
+<li><code class="docutils literal"><span class="pre">fdbserver</span></code> arguments were not properly preserved in log output. &lt;<a class="reference external" href="rdar://problem/28407513">rdar://problem/28407513</a>&gt;</li>
+<li>Increase priority of getting read versions over commits on the master proxy.</li>
+<li>Java: Inserting a non-Long number into a Tuple and reading it back out threw a ClassCastException. &lt;<a class="reference external" href="rdar://problem/28260594">rdar://problem/28260594</a>&gt;</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id6">
+<h2>4.5.3</h2>
+<div class="section" id="fdbcli">
+<h3>Fdbcli</h3>
+<ul class="simple">
+<li>Fix: key and value output did not escape the backslash (&#8216;\&#8217;) character. &lt;<a class="reference external" href="rdar://problem/27832343">rdar://problem/27832343</a>&gt;</li>
+<li>Spaces in key and value output are no longer escaped. &lt;<a class="reference external" href="rdar://problem/27832343">rdar://problem/27832343</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="java-completable">
+<h3>Java-completable</h3>
+<ul class="simple">
+<li>Fix: Range queries with a limit could sometimes return fewer items than requested. &lt;<a class="reference external" href="rdar://problem/27879470">rdar://problem/27879470</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="status">
+<h3>Status</h3>
+<ul class="simple">
+<li>Fix: backup and DR <code class="docutils literal"><span class="pre">range_bytes_written</span></code> and <code class="docutils literal"><span class="pre">mutation_log_bytes_written</span></code> are reset when backup or DR is restarted. &lt;<a class="reference external" href="rdar://problem/27640774">rdar://problem/27640774</a>&gt;</li>
+<li>Added <code class="docutils literal"><span class="pre">_valid</span></code> and <code class="docutils literal"><span class="pre">_error</span></code> fields to layer status. &lt;<a class="reference external" href="rdar://problem/27643333">rdar://problem/27643333</a>&gt;</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id7">
+<h2>4.5.2</h2>
+<div class="section" id="id8">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Fixed thread safety issues with backup and DR.</li>
+<li>Fixed a load balancing problem when a machine was already failed when a client starts.</li>
+<li>Golang: adding an explicit conflict key included the key immediately following in the conflict range.</li>
+</ul>
+</div>
+</div>
+<div class="section" id="id9">
+<h2>4.5.1</h2>
+<div class="section" id="features">
+<h3>Features</h3>
+<ul class="simple">
+<li>When a process is added to a cluster, it will be given data at a much faster rate. &lt;<a class="reference external" href="rdar://problem/24075759">rdar://problem/24075759</a>&gt;</li>
+<li>Improved the speed at which the cluster reacts to a failed process.</li>
+</ul>
+</div>
+<div class="section" id="id10">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>Calculating status in large databases could cause slow tasks. &lt;<a class="reference external" href="rdar://problem/25805251">rdar://problem/25805251</a>&gt;</li>
+<li>Fdbrestore printed an error when passed the <code class="docutils literal"><span class="pre">--help</span></code> flag. &lt;<a class="reference external" href="rdar://problem/26126793">rdar://problem/26126793</a>&gt;</li>
+<li>A multi-version API external client that was a duplicate could cause a crash at client shutdown. &lt;<a class="reference external" href="rdar://problem/25838039">rdar://problem/25838039</a>&gt;</li>
+<li>A multi-version API external client that failed to load would cause a crash at client shutdown. &lt;<a class="reference external" href="rdar://problem/26611919">rdar://problem/26611919</a>&gt;</li>
+<li>Status could report an incorrect database size in rare scenarios. &lt;<a class="reference external" href="rdar://problem/25295683">rdar://problem/25295683</a>&gt;</li>
+<li>Data distribution would stop working (both exclude and new recruitment) if a call to commit on the storage server could hang indefinitely. &lt;<a class="reference external" href="rdar://problem/26276166">rdar://problem/26276166</a>&gt;</li>
+<li><code class="docutils literal"><span class="pre">fdbcli</span></code> would quit on some commands that were not errors or continue after some real errors when run with <code class="docutils literal"><span class="pre">--exec</span></code>. &lt;<a class="reference external" href="rdar://problem/25755317">rdar://problem/25755317</a>&gt;</li>
+<li>Trace files generated by clients using the multi-version API could have name collisions. &lt;<a class="reference external" href="rdar://problem/25884486">rdar://problem/25884486</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="id11">
+<h3>Fdbcli</h3>
+<ul class="simple">
+<li>Client issues are now aggregated by name and have an addresses list. Status details prints a truncated view of these. &lt;<a class="reference external" href="rdar://problem/23469072">rdar://problem/23469072</a>&gt;</li>
+<li>Status json lists incompatible clients. &lt;<a class="reference external" href="rdar://problem/24415680">rdar://problem/24415680</a>&gt;</li>
+<li>Status json includes processes that couldn&#8217;t be reached in the processes list. &lt;<a class="reference external" href="rdar://problem/26703551">rdar://problem/26703551</a>&gt;</li>
+<li>Exclude does not run if it will drop free space below 10%. This check can be bypassed by adding the word <code class="docutils literal"><span class="pre">FORCE</span></code> as a parameter. &lt;<a class="reference external" href="rdar://problem/22922266">rdar://problem/22922266</a>&gt;</li>
+<li>Added write mode, which must be turned on to set or clear keys. &lt;<a class="reference external" href="rdar://problem/25779641">rdar://problem/25779641</a>&gt;</li>
+<li>Added the <code class="docutils literal"><span class="pre">kill</span></code> command for killing processes.</li>
+</ul>
+</div>
+<div class="section" id="fdbmonitor">
+<h3>Fdbmonitor</h3>
+<ul class="simple">
+<li>The restart logic for dead child processes now uses a backoff. &lt;<a class="reference external" href="rdar://problem/26100711">rdar://problem/26100711</a>&gt;</li>
+<li>Added option to remove WD40 environment variables. &lt;<a class="reference external" href="rdar://problem/26100669">rdar://problem/26100669</a>&gt;</li>
+<li><code class="docutils literal"><span class="pre">fdbmonitor</span></code> will create the lockfile directory if it doesn&#8217;t exist. &lt;<a class="reference external" href="rdar://problem/26502883">rdar://problem/26502883</a>&gt;</li>
+<li>Added support for monitoring symbolic link changes in the configuration file path. &lt;<a class="reference external" href="rdar://problem/26100843">rdar://problem/26100843</a>&gt;</li>
+<li>Added an option to disable killing of child processes when the configuration changes. &lt;<a class="reference external" href="rdar://problem/26100939">rdar://problem/26100939</a>&gt;</li>
+<li>Added support for larger process IDs. &lt;<a class="reference external" href="rdar://problem/26350469">rdar://problem/26350469</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="backup">
+<h3>Backup</h3>
+<ul class="simple">
+<li>Blobstore URLs can now contain multiple IP addresses, separated by commas, over which to load balance requests. &lt;<a class="reference external" href="rdar://problem/23095572">rdar://problem/23095572</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="bindings">
+<h3>Bindings</h3>
+<ul class="simple">
+<li>API version updated to 450. There are no behavior changes in this API version. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-450"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
+<li>Add error predicate testing to client bindings. This new functionality should help complex use cases write correct transaction retry loops where dispatching on error classes is needed. &lt;<a class="reference external" href="rdar://problem/24492860">rdar://problem/24492860</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="other-changes">
+<h3>Other Changes</h3>
+<ul class="simple">
+<li>Maximum shard size increased from 100MB to 500MB. &lt;<a class="reference external" href="rdar://problem/21225031">rdar://problem/21225031</a>&gt;</li>
+<li>Support backslash as an escape character for semicolons and backslashes when setting network options using environment variables. &lt;<a class="reference external" href="rdar://problem/23902390">rdar://problem/23902390</a>&gt;</li>
+<li>Add <code class="docutils literal"><span class="pre">logGroup</span></code> attribute to rolled trace events. &lt;<a class="reference external" href="rdar://problem/25726509">rdar://problem/25726509</a>&gt;</li>
+<li>Calling get range with a begin key == <code class="docutils literal"><span class="pre">\xff\xff/worker_interfaces</span></code> will return a list of serialized worker interfaces. Calling set with the key <code class="docutils literal"><span class="pre">\xff\xff/reboot_worker</span></code> and a value which is a serialized worker interface will reboot that process. &lt;<a class="reference external" href="rdar://problem/26101019">rdar://problem/26101019</a>&gt;</li>
+</ul>
+</div>
+<div class="section" id="earlier-release-notes">
+<h3>Earlier release notes</h3>
+<ul class="simple">
+<li><a class="reference internal" href="release-notes-440.html"><span class="doc">4.4 (API Version 440)</span></a></li>
+<li><a class="reference internal" href="release-notes-430.html"><span class="doc">4.3 (API Version 430)</span></a></li>
+<li><a class="reference internal" href="release-notes-420.html"><span class="doc">4.2 (API Version 420)</span></a></li>
+<li><a class="reference internal" href="release-notes-410.html"><span class="doc">4.1 (API Version 410)</span></a></li>
+<li><a class="reference internal" href="release-notes-400.html"><span class="doc">4.0 (API Version 400)</span></a></li>
+<li><a class="reference internal" href="release-notes-300.html"><span class="doc">3.0 (API Version 300)</span></a></li>
+<li><a class="reference internal" href="release-notes-200.html"><span class="doc">2.0 (API Version 200)</span></a></li>
+<li><a class="reference internal" href="release-notes-100.html"><span class="doc">1.0 (API Version 100)</span></a></li>
+<li><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></li>
+<li><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></li>
+<li><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></li>
+<li><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></li>
+<li><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></li>
+</ul>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="../_sources/release-notes/release-notes-450.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 25, 2020.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

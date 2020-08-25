@@ -213,4 +213,4 @@ Java bindings
 Older API versions
 ==================
 
-API versions from the beta and alpha releases of Foundationdb (pre-100) are not documented here. See :doc:`old-release-notes/release-notes-023` for details about changes in those releases.
+API versions from the beta and alpha releases of Foundationdb (pre-100) are not documented here. See :doc:`release-notes/release-notes-023` for details about changes in those releases.

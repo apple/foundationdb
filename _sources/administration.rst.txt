@@ -489,7 +489,7 @@ If a process has had more than 10 TCP segments retransmitted in the last 5 secon
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; REXMIT! 2.5 GB / 4.1 GB RAM  )
 
 Machine-readable status
---------------------------------
+-----------------------
 
 The status command can provide a complete summary of statistics about the cluster and the database with the ``json`` argument. Full documentation for ``status json`` output can be found :doc:`here <mr-status>`.
 From the output of ``status json``, operators can find useful health metrics to determine whether or not their cluster is hitting performance limits.
@@ -500,6 +500,72 @@ Storage queue size      ``cluster.qos.worst_queue_bytes_storage_server`` contain
 Durable version lag     ``cluster.qos.worst_durability_lag_storage_server`` contains information about the worst storage server durability lag. The ``versions`` subfield contains the maximum number of versions in a storage queue. Ideally, this should be near 5 million. The ``seconds`` subfield contains the maximum number of seconds of non-durable data in a storage queue. Ideally, this should be near 5 seconds. If a storage server is overwhelmed, the durability lag could rise, causing performance issues.
 Transaction log queue   ``cluster.qos.worst_queue_bytes_log_server`` contains the maximum size in bytes of the mutations stored on a transaction log that have not yet been popped by storage servers. A large transaction log queue size can potentially cause the ratekeeper to increase throttling.
 ====================== ==============================================================================================================
+
+Server-side latency band tracking
+---------------------------------
+
+As part of the status document, ``status json`` provides some sampled latency metrics obtained by running probe transactions internally. While this can often be useful, it does not necessarily reflect the distribution of latencies for requests originated by clients.
+
+FoundationDB additionally provides optional functionality to measure the latencies of all incoming get read version (GRV), read, and commit requests and report some basic details about those requests. The latencies are measured from the time the server receives the request to the point when it replies, and will therefore not include time spent in transit between the client and server or delays in the client process itself.
+
+The latency band tracking works by configuring various latency thresholds and counting the number of requests that occur in each band (i.e. between two consecutive thresholds). For example, if you wanted to define a service-level objective (SLO) for your cluster where 99.9% of read requests were answered within N seconds, you could set a read latency threshold at N. You could then count the number of requests below and above the threshold and determine whether the required percentage of requests are answered sufficiently quickly.
+
+Configuration of server-side latency bands is performed by setting the ``\xff\x02/latencyBandConfig`` key to a string encoding the following JSON document::
+
+  { 
+    "get_read_version" : { 
+      "bands" : [ 0.01, 0.1] 
+    }, 
+    "read" : { 
+      "bands" : [ 0.01, 0.1],
+      "max_key_selector_offset" : 1000,
+      "max_read_bytes" : 1000000 
+    }, 
+    "commit" : { 
+      "bands" : [ 0.01, 0.1], 
+      "max_commit_bytes" : 1000000 
+    } 
+  }
+
+Every field in this configuration is optional, and any missing fields will be left unset (i.e. no bands will be tracked or limits will not apply). The configuration takes the following arguments:
+
+* ``bands`` - a list of thresholds (in seconds) to be measured for the given request type (``get_read_version``, ``read``, or ``commit``) 
+* ``max_key_selector_offset`` - an integer specifying the maximum key selector offset a read request can have and still be counted
+* ``max_read_bytes`` - an integer specifying the maximum size in bytes of a read response that will be counted
+* ``max_commit_bytes`` - an integer specifying the maximum size in bytes of a commit request that will be counted
+
+Setting this configuration key to a value that changes the configuration will result in the cluster controller server process logging a ``LatencyBandConfigChanged`` event. This event will indicate whether a configuration is present or not using its ``Present`` field. Specifying an invalid configuration will result in the latency band feature being unconfigured, and the server process running the cluster controller will log a ``InvalidLatencyBandConfiguration`` trace event.
+
+.. note:: GRV requests are counted only at default and immediate priority. Batch priority GRV requests are ignored for the purposes of latency band tracking.
+
+When configured, the ``status json`` output will include additional fields to report the number of requests in each latency band located at ``cluster.processes.<ID>.roles[N].*_latency_bands``::
+
+  "grv_latency_bands" : {
+    0.01: 10,
+    0.1: 0,
+    inf: 1,
+    filtered: 0
+  },
+  "read_latency_bands" : {
+    0.01: 12,
+    0.1: 1,
+    inf: 0,
+    filtered: 0
+  },
+  "commit_latency_bands" : {
+    0.01: 5,
+    0.1: 5,
+    inf: 2,
+    filtered: 1
+  }
+
+The ``grv_latency_bands`` and ``commit_latency_bands`` objects will only be logged for ``proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
+
+For example, ``0.1: 1`` in ``read_latency_bands`` indicates that there has been 1 read request with a latency in the range ``[0.01, 0.1)``. For the smallest specified threshold, the lower bound is 0 (e.g. ``[0, 0.01)`` in the example above). Requests that took longer than any defined latency band will be reported in the ``inf`` (infinity) band. Requests that were filtered by the configuration (e.g. using ``max_read_bytes``) are reported in the ``filtered`` category.
+
+Because each threshold reports latencies strictly in the range between the next lower threshold and itself, it may be necessary to sum up the counts for multiple bands to determine the total number of requests below a certain threshold.
+
+.. note:: No history of request counts is recorded for processes that ran in the past. This includes the history prior to restart for a process that has been restarted, for which the counts get reset to 0. For this reason, it is recommended that you collect this information periodically if you need to be able to track requests from such processes.
 
 .. _administration_fdbmonitor:
 

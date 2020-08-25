@@ -98,7 +98,7 @@ When you import the ``fdb`` module, it exposes only one useful symbol:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
+For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :ref:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -796,6 +796,13 @@ Most applications should use the read version that FoundationDB determines autom
 
 .. _api-python-transaction-options:
 
+Transaction misc functions
+--------------------------
+
+.. method:: Transaction.get_approximate_size()
+
+    |transaction-get-approximate-size-blurb|. Returns a :class:`FutureInt64`.
+
 Transaction options
 -------------------
 
@@ -1146,7 +1153,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
 .. method:: has_incomplete_versionstamp(tuple)
 
     Returns ``True`` if there is at least one element contained within the tuple that is a
-    :class`Versionstamp` instance that is incomplete. If there are multiple incomplete
+    :class:`Versionstamp` instance that is incomplete. If there are multiple incomplete
     :class:`Versionstamp` instances, this method will return ``True``, but trying to pack it into a
     byte string will result in an error.
 

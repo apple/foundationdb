@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Release Notes &#8212; FoundationDB 6.2</title>
+    
+    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../',
+        VERSION:     '6.2.24',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Release Notes" href="release-notes-016.html" />
+    <link rel="prev" title="Earlier Release Notes" href="../earlier-release-notes.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="../index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="../contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="../index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#foundationdb-alpha-5">FoundationDB Alpha 5</a><ul>
+<li><a class="reference internal" href="#language-support">Language support</a></li>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+<li><a class="reference internal" href="#changes-to-all-apis">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#python-api-changes">Python API changes</a></li>
+<li><a class="reference internal" href="#c-api-changes">C API changes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="../earlier-release-notes.html" title="Previous Chapter: Earlier Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Earlier Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="release-notes-016.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="../search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#foundationdb-alpha-5">FoundationDB Alpha 5</a><ul>
+<li><a class="reference internal" href="#language-support">Language support</a></li>
+<li><a class="reference internal" href="#features">Features</a></li>
+<li><a class="reference internal" href="#compatibility">Compatibility</a></li>
+<li><a class="reference internal" href="#changes-to-all-apis">Changes to all APIs</a></li>
+<li><a class="reference internal" href="#python-api-changes">Python API changes</a></li>
+<li><a class="reference internal" href="#c-api-changes">C API changes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="release-notes">
+<h1>Release Notes</h1>
+<div class="section" id="foundationdb-alpha-5">
+<h2>FoundationDB Alpha 5</h2>
+<div class="section" id="language-support">
+<h3>Language support</h3>
+<ul class="simple">
+<li>FoundationDB now supports <a class="reference internal" href="../api-ruby.html"><span class="doc">Ruby</span></a></li>
+<li>FoundationDB now supports Node.js</li>
+<li>FoundationDB now supports <a class="reference external" href="/javadoc/index.html">Java</a> and other JVM languages.</li>
+</ul>
+</div>
+<div class="section" id="features">
+<span id="alpha-5-rel-notes-features"></span><h3>Features</h3>
+<ul class="simple">
+<li>A new <a class="reference internal" href="../backups.html"><span class="doc">backup</span></a> system allows scheduled backups of a snapshot of the FoundationDB database to an external filesystem.</li>
+<li><a class="reference internal" href="../index.html"><span class="doc">Integrated HTML documentation</span></a></li>
+<li><a class="reference internal" href="../developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a> allow API clients to selectively relax FoundationDB&#8217;s strong isolation guarantee. Appropriate use can of them can reduce <a class="reference internal" href="../developer-guide.html#conflict-ranges"><span class="std std-ref">Conflict ranges</span></a> but makes reasoning about concurrency harder.</li>
+<li><a class="reference internal" href="../api-python.html#streaming-mode-python"><span class="std std-ref">Streaming modes</span></a> allow API clients to adjust how FoundationDB transfers data for range reads for improved performance.</li>
+<li>Client APIs automatically detect the appropriate network interface (local address) when connecting to a cluster, and will look for a <a class="reference internal" href="../administration.html#default-cluster-file"><span class="std std-ref">Default cluster file</span></a>.</li>
+</ul>
+</div>
+<div class="section" id="compatibility">
+<h3>Compatibility</h3>
+<ul class="simple">
+<li>Tuples encoded with prior alpha versions are incompatible with the tuple layer in Alpha 5.</li>
+<li>Databases created with Alpha 4 will be compatible. (See <a class="reference internal" href="../administration.html#upgrading-from-older-versions"><span class="std std-ref">Upgrading from older versions</span></a> for upgrade instructions)</li>
+<li>Databases created before Alpha 4 will be incompatible. (See <a class="reference internal" href="../administration.html#upgrading-from-older-versions"><span class="std std-ref">Upgrading from older versions</span></a> for details)</li>
+</ul>
+</div>
+<div class="section" id="changes-to-all-apis">
+<h3>Changes to all APIs</h3>
+<ul class="simple">
+<li>The API version has been updated to 14.</li>
+<li><a class="reference internal" href="../developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a> (see <a class="reference internal" href="#alpha-5-rel-notes-features"><span class="std std-ref">Features</span></a>, above).</li>
+<li><a class="reference internal" href="../api-python.html#streaming-mode-python"><span class="std std-ref">Streaming modes</span></a> (see <a class="reference internal" href="#alpha-5-rel-notes-features"><span class="std std-ref">Features</span></a>, above).</li>
+<li>Automatic network interface detection (see <a class="reference internal" href="#alpha-5-rel-notes-features"><span class="std std-ref">Features</span></a>, above).</li>
+<li>The tuple layer supports unicode strings (encoded as UTF-8), has a more compact encoding, and is not compatible with data from prior versions.</li>
+<li>Reversed range reads are now exposed through a separate parameter rather than via a negative <code class="docutils literal"><span class="pre">limit</span></code>.</li>
+<li>Extensible options are now exposed at the network, cluster, database and transaction levels. The parameters to <a class="reference internal" href="../api-c.html#c.fdb_setup_network" title="fdb_setup_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_setup_network()</span></code></a> and <code class="xref py py-func docutils literal"><span class="pre">fdb.init()</span></code> have been replaced by network options.</li>
+<li>Option enumerations are available in a machine-readable format for the benefit of third-party language binding developers.</li>
+</ul>
+</div>
+<div class="section" id="python-api-changes">
+<h3>Python API changes</h3>
+<ul class="simple">
+<li><a class="reference internal" href="../api-python.html#fdb.open" title="fdb.open"><code class="xref py py-func docutils literal"><span class="pre">fdb.open()</span></code></a> can be called with no parameters to use the <a class="reference internal" href="../administration.html#default-cluster-file"><span class="std std-ref">Default cluster file</span></a>.</li>
+<li>Waiting on a Future object has changed from <code class="docutils literal"><span class="pre">.get()</span></code> to <a class="reference internal" href="../api-python.html#fdb.Future.wait" title="fdb.Future.wait"><code class="xref py py-meth docutils literal"><span class="pre">.wait()</span></code></a></li>
+<li>Reversed range reads can by specified by passing a slice object with a -1 step.</li>
+<li>The convenience read methods on <a class="reference internal" href="../api-python.html#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal"><span class="pre">fdb.Database</span></code></a> are now transactional.</li>
+</ul>
+</div>
+<div class="section" id="c-api-changes">
+<h3>C API changes</h3>
+<ul class="simple">
+<li>Byte limits exposed in <a class="reference internal" href="../api-c.html#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.  These are not currently exposed by any of the higher level clients (and usually streaming modes should be preferred).</li>
+<li><a class="reference internal" href="../api-c.html#c.fdb_future_get_keyvalue_array" title="fdb_future_get_keyvalue_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_keyvalue_array()</span></code></a> returns an explicit flag indicating whether there is more data in the range beyond the limits passed to <a class="reference internal" href="../api-c.html#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a>.</li>
+<li><code class="docutils literal"><span class="pre">fdb_transaction_get_range_selector</span></code> has been eliminated - <a class="reference internal" href="../api-c.html#c.fdb_transaction_get_range" title="fdb_transaction_get_range"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_get_range()</span></code></a> always takes key selectors.</li>
+</ul>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="../_sources/release-notes/release-notes-014.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 25, 2020.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>
