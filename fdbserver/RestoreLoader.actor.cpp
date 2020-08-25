@@ -853,7 +853,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 
 	(*inflightSendLoadParamReqs)[batchIndex]--;
 
-	if (batchIndex < finishedBatch->get()) {
+	if (finishedBatch->get() < batchIndex) {
 		kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
 		TraceEvent("FastRestoreLoaderSendMutationToApplierDone")
 		    .detail("BatchIndex", batchIndex)
