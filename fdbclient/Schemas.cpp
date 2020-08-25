@@ -343,11 +343,18 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
          "throttled_tags":{
-            "auto":{
-               "count":0
+            "auto" : {
+                "busy_read" : 0,
+                "busy_write" : 0,
+                "count" : 0
             },
-            "manual":{
-               "count":0
+            "manual" : {
+                "count" : 0
+            },
+            "recommend" : {
+                "busy_read" : 0,
+                "busy_write" : 0,
+                "count" : 0
             }
          },
          "limiting_queue_bytes_storage_server":0,
