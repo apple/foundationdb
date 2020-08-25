@@ -319,7 +319,7 @@
                 "count" : 0
             },
             "manual" : {
-                "count" : 1
+                "count" : 0
             },
             "recommend" : {
                 "busy_read" : 0,
