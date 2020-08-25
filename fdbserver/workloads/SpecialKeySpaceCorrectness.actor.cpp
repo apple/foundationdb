@@ -526,7 +526,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	bool getRangeResultInOrder(const Standalone<RangeResultRef>& result) {
 		for (int i = 0; i < result.size() - 1; ++i) {
 			if (result[i].key >= result[i + 1].key) {
-				TraceEvent(SevDebug, "GetRangeResultNotInOrder")
+				TraceEvent(SevError, "TestFailure")
+				    .detail("Reason", "GetRangeResultNotInOrder")
 				    .detail("Index", i)
 				    .detail("Key1", result[i].key)
 				    .detail("Key2", result[i + 1].key);
@@ -570,7 +571,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (e.code() == error_code_actor_cancelled) throw;
 			if (e.code() == error_code_special_keys_api_failure) {
 				Optional<Value> errorMsg =
-					wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 				ASSERT(errorMsg.present());
 				std::string errorStr;
 				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
