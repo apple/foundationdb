@@ -77,6 +77,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreFinishRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
+					actors.clear(false); // cancel all pending actors
 					handleFinishRestoreRequest(req, self);
 					if (req.terminate) {
 						exitRole = Void();
