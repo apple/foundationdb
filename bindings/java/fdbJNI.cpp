@@ -604,7 +604,22 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
-void getDirectRangeQueryResults(JNIEnv *jenv, FDBFuture* f, uint8_t* buffer, int bufferCapacity) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1getDirect(
+    JNIEnv* jenv, jobject, jlong future, jobject jbuffer, jint bufferCapacity) {
+
+	if( !future ) {
+		throwParamNotNull(jenv);
+		return;
+	}
+
+	uint8_t* buffer = (uint8_t*)jenv->GetDirectBufferAddress(jbuffer);
+	if (!buffer) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return;
+	}
+
+	FDBFuture* f = (FDBFuture*)future;
 	const FDBKeyValue *kvs;
 	int count;
 	fdb_bool_t more;
@@ -624,11 +639,10 @@ void getDirectRangeQueryResults(JNIEnv *jenv, FDBFuture* f, uint8_t* buffer, int
 
 	for(int i = 0; i < count; i++) {
 		totalCapacityNeeded += kvs[i].key_length + kvs[i].value_length;
-	}
-
-	if (bufferCapacity < totalCapacityNeeded) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return;
+		if (bufferCapacity < totalCapacityNeeded) {
+			count = i; /* Only fit first `i` K/V pairs */
+			break;
+		}
 	}
 
 	int offset = 0;
@@ -663,89 +677,6 @@ void getDirectRangeQueryResults(JNIEnv *jenv, FDBFuture* f, uint8_t* buffer, int
 		memcpy(buffer + offset, kvs[i].value, kvs[i].value_length);
 		offset += kvs[i].value_length;
 	}
-}
-
-int readKeySelector(uint8_t* buffer, jint* numBytes, jint* orEqual, jint* offset, uint8_t** bytes) {
-	memcpy(numBytes, buffer, sizeof(jint));
-	memcpy(orEqual, buffer + sizeof(jint), sizeof(jint));
-	memcpy(offset, buffer + 2*sizeof(jint), sizeof(jint));
-	*bytes = buffer + sizeof(jint) * 3;
-	return *numBytes + sizeof(jint) * 3;
-}
-
-JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getDirectRange(
-	JNIEnv* jenv, jobject, jlong tPtr, jobject jbuffer, jint bufferCapacity) {
-
-	if (!tPtr || !jbuffer) {
-		throwParamNotNull(jenv);
-		return;
-	}
-
-	uint8_t* buffer = (uint8_t*)jenv->GetDirectBufferAddress(jbuffer);
-	if (!buffer) {
-		if (!jenv->ExceptionOccurred()) throwRuntimeEx(jenv, "Error getting handle to native resources");
-		return;
-	}
-
-	int readOffset = 0;
-
-	jint lengthBegin;
-	jint orEqualBegin;
-	jint offsetBegin;
-	uint8_t* barrBegin;
-	readOffset += readKeySelector(buffer + readOffset, &lengthBegin, &orEqualBegin, &offsetBegin, &barrBegin);
-
-	jint lengthEnd;
-	jint orEqualEnd;
-	jint offsetEnd;
-	uint8_t* barrEnd;
-	readOffset += readKeySelector(buffer + readOffset, &lengthEnd, &orEqualEnd, &offsetEnd, &barrEnd);
-
-	jint rowLimit;
-	memcpy(&rowLimit, buffer + readOffset, sizeof(jint));
-	readOffset += sizeof(jint);
-
-	jint targetBytes;
-	memcpy(&targetBytes, buffer + readOffset, sizeof(jint));
-	readOffset += sizeof(jint);
-
-	jint streamingMode;
-	memcpy(&streamingMode, buffer + readOffset, sizeof(jint));
-	readOffset += sizeof(jint);
-
-	jint iteration;
-	memcpy(&iteration, buffer + readOffset, sizeof(jint));
-	readOffset += sizeof(jint);
-
-	jint snapshot;
-	memcpy(&snapshot, buffer + readOffset, sizeof(jint));
-	readOffset += sizeof(jint);
-
-	jint reverse;
-	memcpy(&reverse, buffer + readOffset, sizeof(jint));
-	readOffset += sizeof(jint);
-
-
-	// Update targetBytes based on our buffer capacity
-	if (targetBytes < bufferCapacity - readOffset*2) {
-		// Rough slack to consider return metadata
-		targetBytes = bufferCapacity - readOffset*2;
-	}
-
-	FDBTransaction* tr = (FDBTransaction*)tPtr;
-
-	FDBFuture* f = fdb_transaction_get_range(tr, barrBegin, lengthBegin, orEqualBegin, offsetBegin, barrEnd, lengthEnd,
-											 orEqualEnd, offsetEnd, rowLimit, targetBytes,
-											 (FDBStreamingMode)streamingMode, iteration, snapshot, reverse);
-
-	if (fdb_future_block_until_ready(f) != 0) {
-		if (!jenv->ExceptionOccurred()) throwRuntimeEx(jenv, "Error executing get_range() query");
-		fdb_future_destroy(f);
-		return;
-	}
-
-	getDirectRangeQueryResults(jenv, f, buffer + readOffset, bufferCapacity - readOffset) ;
-	fdb_future_destroy(f);
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getEstimatedRangeSizeBytes(JNIEnv *jenv, jobject, jlong tPtr, 

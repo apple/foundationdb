@@ -52,6 +52,18 @@ class RangeResult {
 		this.more = more;
 	}
 
+	RangeResult(DirectBufferIterator iterator) {
+		iterator.readSummary();
+		more = iterator.getSummary().more;
+
+		int count = iterator.getSummary().keyCount;
+		values = new ArrayList<KeyValue>(count);
+
+		for (int i = 0; i < count; ++i) {
+			values.add(iterator.next());
+		}
+	}
+
 	public RangeResultSummary getSummary() {
 		final int keyCount = values.size();
 		final byte[] lastKey = keyCount > 0 ? values.get(keyCount -1).getKey() : null;

@@ -20,6 +20,7 @@
 
 package com.apple.foundationdb;
 
+import java.nio.ByteBuffer;
 import java.util.concurrent.Executor;
 
 class FutureResults extends NativeFuture<RangeResultInfo> {
@@ -45,13 +46,22 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	public RangeResult getResults() {
+		DirectBufferIterator directIterator = new DirectBufferIterator();
 		try {
 			pointerReadLock.lock();
-			return FutureResults_get(getPtr());
+			if (directIterator.getBuffer() != null) {
+				FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
+				return new RangeResult(directIterator);
+			} else {
+				return FutureResults_get(getPtr());
+			}
 		} finally {
+			directIterator.close();
 			pointerReadLock.unlock();
 		}
 	}
 
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
+	private native void FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
+		throws FDBException;
 }

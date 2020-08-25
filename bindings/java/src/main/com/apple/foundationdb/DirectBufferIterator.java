@@ -34,12 +34,14 @@ import java.util.concurrent.CompletableFuture;
  */
 class BufferPool {
 	static final BufferPool __instance = new BufferPool();
-	static private final int NUM_BUFFERS = 32;
+	static private final int NUM_BUFFERS = 128;
 	private ArrayBlockingQueue<ByteBuffer> buffers = new ArrayBlockingQueue<>(NUM_BUFFERS);
 
 	public BufferPool() {
 		while (buffers.size() < NUM_BUFFERS) {
-			buffers.add(ByteBuffer.allocateDirect(1024 * 1024 * 4));
+			ByteBuffer buffer = ByteBuffer.allocateDirect(1024 * 512);
+			assert  (buffer != null);
+			buffers.add(buffer);
 		}
 	}
 
@@ -50,8 +52,8 @@ class BufferPool {
 	/**
      * Requests a {@link #DirectByteBuffer} from our pool, and block if needed.
      */
-	public synchronized ByteBuffer take() throws InterruptedException {
-		return buffers.take();
+	public synchronized ByteBuffer poll() {
+		return buffers.poll();
 	}
 
 	/**
@@ -85,10 +87,8 @@ class DirectBufferIterator implements Iterator<KeyValue>, Closeable {
 	private RangeResultSummary summary;
 	private final CompletableFuture<Boolean> promise = new CompletableFuture<>();
 
-	public DirectBufferIterator() {}
-
-	public void init() throws InterruptedException {
-		byteBuffer = BufferPool.getInstance().take();
+	public DirectBufferIterator() {
+		byteBuffer = BufferPool.getInstance().poll();
 		byteBuffer.order(ByteOrder.nativeOrder());
 	}
 
@@ -140,10 +140,10 @@ class DirectBufferIterator implements Iterator<KeyValue>, Closeable {
 		return summary;
 	}
 
-	public String toString() {
-		return String.format("DirectBufferIterator{KeyCount=%d, Current=%d, More=%b, LastKey=\"%s\", Ref=%s}\n",
-				summary.keyCount, current, summary.more, summary.lastKey, super.toString());
-	}
+	// public String toString() {
+	// 	return String.format("DirectBufferIterator{KeyCount=%d, Current=%d, More=%b, LastKey=\"%s\", Ref=%s}\n",
+	// 			summary.keyCount, current, summary.more, summary.lastKey, super.toString());
+	// }
 
 	public int currentIndex() {
 		return current;
@@ -151,7 +151,7 @@ class DirectBufferIterator implements Iterator<KeyValue>, Closeable {
 
 	public void readSummary() {
 		byteBuffer.rewind();
-		byteBuffer.position(resultOffset);
+		byteBuffer.position(0);
 
 		final int keyCount = byteBuffer.getInt();
 		final boolean more = byteBuffer.getInt() > 0;
@@ -164,30 +164,5 @@ class DirectBufferIterator implements Iterator<KeyValue>, Closeable {
 		}
 
 		summary = new RangeResultSummary(lastKey, keyCount, more);
-	}
-
-	public void prepareRequest(byte[] begin, boolean beginOrEqual, int beginOffset, byte[] end, boolean endOrEqual,
-			int endOffset, int rowLimit, int targetBytes, int streamingMode, int iteration, boolean isSnapshot,
-			boolean reverse) {
-
-		// IMPORTANT!! Make sure the order is same when read in fdbJNI.cpp.
-		byteBuffer.rewind();
-		byteBuffer.putInt(begin.length);
-		byteBuffer.putInt(beginOrEqual ? 1 : 0);
-		byteBuffer.putInt(beginOffset);
-		byteBuffer.put(begin);
-
-		byteBuffer.putInt(end.length);
-		byteBuffer.putInt(endOrEqual ? 1 : 0);
-		byteBuffer.putInt(endOffset);
-		byteBuffer.put(end);
-
-		byteBuffer.putInt(rowLimit);
-		byteBuffer.putInt(targetBytes);
-		byteBuffer.putInt(streamingMode);
-		byteBuffer.putInt(iteration);
-		byteBuffer.putInt(isSnapshot ? 1 : 0);
-		byteBuffer.putInt(reverse ? 1 : 0);
-		resultOffset = byteBuffer.position();
 	}
 }

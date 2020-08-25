@@ -22,14 +22,13 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/directory/NoSuchDirectoryException.java
   src/main/com/apple/foundationdb/directory/package-info.java
   src/main/com/apple/foundationdb/directory/PathUtil.java
-  src/main/com/apple/foundationdb/DirectRangeQuery.java
-  src/main/com/apple/foundationdb/DirectRangeIterator.java
   src/main/com/apple/foundationdb/DirectBufferIterator.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
+  src/main/com/apple/foundationdb/FutureDirectResults.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
   src/main/com/apple/foundationdb/FutureStrings.java
