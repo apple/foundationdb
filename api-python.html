@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.19',
+        VERSION:     '6.2.24',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -109,6 +109,7 @@
 <li><a class="reference internal" href="#watches">Watches</a></li>
 <li><a class="reference internal" href="#conflict-ranges">Conflict ranges</a></li>
 <li><a class="reference internal" href="#versions">Versions</a></li>
+<li><a class="reference internal" href="#transaction-misc-functions">Transaction misc functions</a></li>
 <li><a class="reference internal" href="#transaction-options">Transaction options</a></li>
 </ul>
 </li>
@@ -194,6 +195,7 @@
 <li><a class="reference internal" href="#watches">Watches</a></li>
 <li><a class="reference internal" href="#conflict-ranges">Conflict ranges</a></li>
 <li><a class="reference internal" href="#versions">Versions</a></li>
+<li><a class="reference internal" href="#transaction-misc-functions">Transaction misc functions</a></li>
 <li><a class="reference internal" href="#transaction-options">Transaction options</a></li>
 </ul>
 </li>
@@ -250,7 +252,7 @@
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 13 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
+<p>For API changes between version 13 and 620 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-620.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
@@ -651,7 +653,7 @@ value of the key is also retrieved, using network bandwidth.</p>
 <dl class="method">
 <dt id="fdb.Database.options.set_transaction_include_port_in_address">
 <code class="descclassname">Database.options.</code><code class="descname">set_transaction_include_port_in_address</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. Enabling this option is equivalent to calling <a class="reference internal" href="#fdb.Transaction.options.set_include_port_in_address" title="fdb.Transaction.options.set_include_port_in_address"><code class="xref py py-func docutils literal"><span class="pre">Transaction.options.set_include_port_in_address()</span></code></a> on each transaction created by this database.</p>
+<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 630, and this option will be deprecated. Enabling this option is equivalent to calling <a class="reference internal" href="#fdb.Transaction.options.set_include_port_in_address" title="fdb.Transaction.options.set_include_port_in_address"><code class="xref py py-func docutils literal"><span class="pre">Transaction.options.set_include_port_in_address()</span></code></a> on each transaction created by this database.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1114,8 +1116,17 @@ both the caching and the increased network bandwidth.</p>
 </dd></dl>
 
 </div>
+<div class="section" id="transaction-misc-functions">
+<span id="api-python-transaction-options"></span><h3>Transaction misc functions</h3>
+<dl class="method">
+<dt id="fdb.Transaction.get_approximate_size">
+<code class="descclassname">Transaction.</code><code class="descname">get_approximate_size</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
+<dd><p>Gets the the approximate transaction size so far, which is the summation of the estimated size of mutations, read conflict ranges, and write conflict ranges.. Returns a <code class="xref py py-class docutils literal"><span class="pre">FutureInt64</span></code>.</p>
+</dd></dl>
+
+</div>
 <div class="section" id="transaction-options">
-<span id="api-python-transaction-options"></span><h3>Transaction options</h3>
+<h3>Transaction options</h3>
 <p>Transaction options alter the behavior of FoundationDB transactions. FoundationDB defaults to extremely safe transaction behavior, and we have worked hard to make the performance excellent with the default setting, so you should not often need to use transaction options.</p>
 <span class="target" id="api-python-snapshot-ryw"></span><dl class="method">
 <dt id="fdb.Transaction.options.set_snapshot_ryw_disable">
@@ -1154,7 +1165,7 @@ both the caching and the increased network bandwidth.</p>
 <dl class="method">
 <dt id="fdb.Transaction.options.set_include_port_in_address">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_include_port_in_address</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 700, and this option will be deprecated. One can set this for all transactions by calling <a class="reference internal" href="#fdb.Database.options.set_transaction_include_port_in_address" title="fdb.Database.options.set_transaction_include_port_in_address"><code class="xref py py-func docutils literal"><span class="pre">Database.options.set_transaction_include_port_in_address()</span></code></a>.</p>
+<dd><p>Addresses returned by get_addresses_for_key include the port when enabled. This will be enabled by default in api version 630, and this option will be deprecated. One can set this for all transactions by calling <a class="reference internal" href="#fdb.Database.options.set_transaction_include_port_in_address" title="fdb.Database.options.set_transaction_include_port_in_address"><code class="xref py py-func docutils literal"><span class="pre">Database.options.set_transaction_include_port_in_address()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1562,7 +1573,7 @@ or if there is more than one.</p>
 <dt id="fdb.tuple.has_incomplete_versionstamp">
 <code class="descclassname">fdb.tuple.</code><code class="descname">has_incomplete_versionstamp</code><span class="sig-paren">(</span><em>tuple</em><span class="sig-paren">)</span></dt>
 <dd><p>Returns <code class="docutils literal"><span class="pre">True</span></code> if there is at least one element contained within the tuple that is a
-:class`Versionstamp` instance that is incomplete. If there are multiple incomplete
+<a class="reference internal" href="#fdb.tuple.Versionstamp" title="fdb.tuple.Versionstamp"><code class="xref py py-class docutils literal"><span class="pre">Versionstamp</span></code></a> instance that is incomplete. If there are multiple incomplete
 <a class="reference internal" href="#fdb.tuple.Versionstamp" title="fdb.tuple.Versionstamp"><code class="xref py py-class docutils literal"><span class="pre">Versionstamp</span></code></a> instances, this method will return <code class="docutils literal"><span class="pre">True</span></code>, but trying to pack it into a
 byte string will result in an error.</p>
 </dd></dl>
@@ -2023,7 +2034,7 @@ this subspace and the passed tuple.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 08, 2020.<br/>
+      Last updated on Aug 25, 2020.<br/>
     </p>
   </div>
 </footer>
