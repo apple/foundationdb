@@ -1856,7 +1856,7 @@ ACTOR void _test_versionstamp() {
 int main( int argc, char** argv ) {
 	try {
 		platformInit();
-		registerCrashHandler();
+		registerSignalHandler();
 		setThreadLocalDeterministicRandomSeed(1);
 
 		// Get arguments

@@ -2696,7 +2696,7 @@ int main(int argc, char* argv[]) {
 #ifdef ALLOC_INSTRUMENTATION
 		g_extra_memory = new uint8_t[1000000];
 #endif
-		registerCrashHandler();
+		registerSignalHandler();
 
 		// Set default of line buffering standard out and error
 		setvbuf(stdout, NULL, _IONBF, 0);

@@ -648,7 +648,7 @@ EXTERNC void flushAndExit(int exitCode);
 // Initilization code that's run at the beginning of every entry point (except fdbmonitor)
 void platformInit();
 
-void registerCrashHandler();
+void registerSignalHandler();
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
