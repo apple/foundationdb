@@ -289,5 +289,11 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
+class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit ProcessClassSourceRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif

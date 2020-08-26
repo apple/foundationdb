@@ -972,7 +972,7 @@ ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTran
                                                               KeyRangeRef kr) {
 	vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
 	auto workers = _workers; // strip const
-	// TODO : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
+	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
 		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
 	});
@@ -1086,4 +1086,33 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRange
 
 void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	return throwNotAllowedError(ryw);
+}
+
+ACTOR Future<Standalone<RangeResultRef>> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
+                                                                    KeyRangeRef kr) {
+	vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
+	auto workers = _workers; // strip const
+	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
+	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
+		return formatIpPort(lhs.address.ip, lhs.address.port) < formatIpPort(rhs.address.ip, rhs.address.port);
+	});
+	Standalone<RangeResultRef> result;
+	for (auto& w : workers) {
+		// exclude :tls in keys even the network addresss is TLS
+		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
+		if (kr.contains(k)) {
+			Value v(w.processClass.sourceString());
+			result.push_back(result.arena(), KeyValueRef(k, v));
+			result.arena().dependsOn(k.arena());
+			result.arena().dependsOn(v.arena());
+		}
+	}
+	return result;
+}
+
+ProcessClassSourceRangeImpl::ProcessClassSourceRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                         KeyRangeRef kr) const {
+	return getProcessClassSourceActor(ryw, getKeyRange().begin, kr);
 }

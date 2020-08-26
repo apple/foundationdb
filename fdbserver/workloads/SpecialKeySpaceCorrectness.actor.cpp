@@ -591,7 +591,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// test getRange
 				state Standalone<RangeResultRef> result = wait(tx->getRange(
-				    KeyRangeRef(LiteralStringRef("class/"), LiteralStringRef("class0"))
+				    KeyRangeRef(LiteralStringRef("process/class_type/"), LiteralStringRef("process/class_type0"))
 				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
 				    CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
@@ -600,7 +600,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
 				for (const auto& worker : workers) {
 					Key addr =
-					    Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
+					    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 					bool found = false;
 					for (const auto& kv : result) {
@@ -615,7 +615,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 				state ProcessData worker = deterministicRandom()->randomChoice(workers);
 				state Key addr =
-				    Key("class/" + formatIpPort(worker.address.ip, worker.address.port))
+				    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
 				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 				tx->set(addr, LiteralStringRef("InvalidProcessType"));
 				// test ryw
