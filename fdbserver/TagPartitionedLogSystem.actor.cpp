@@ -428,7 +428,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	ACTOR static Future<Void> pushResetChecker( ConnectionResetInfo* self, NetworkAddress addr ) {
+	ACTOR static Future<Void> pushResetChecker( Reference<ConnectionResetInfo> self, NetworkAddress addr ) {
 		self->slowReplies = 0;
 		self->fastReplies = 0;
 		wait(delay(SERVER_KNOBS->PUSH_STATS_INTERVAL));
@@ -440,7 +440,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<TLogCommitReply> recordPushMetrics( ConnectionResetInfo* self, NetworkAddress addr, Future<TLogCommitReply> in ) {
+	ACTOR static Future<TLogCommitReply> recordPushMetrics( Reference<ConnectionResetInfo> self, NetworkAddress addr, Future<TLogCommitReply> in ) {
 		state double startTime = now();
 		TLogCommitReply t = wait(in);
 		if(now()-self->lastReset > SERVER_KNOBS->PUSH_RESET_INTERVAL) {
