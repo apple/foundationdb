@@ -19,6 +19,7 @@ numClears=100
 numClearRanges=10
 maxTransactionBytes=500000
 randomTestDuration=60
+resetDBTimeout=7200
 timeout=360000
 
 testName=AtomicRestore

@@ -91,6 +91,9 @@ public:
 	//The API being used by this client
 	TransactionType transactionType;
 
+	// Maximum time to reset DB to the original state
+	double resetDBTimeout;
+
 	ApiCorrectnessWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
 		numGets = getOption(options, LiteralStringRef("numGets"), 1000);
 		numGetRanges = getOption(options, LiteralStringRef("numGetRanges"), 100);
@@ -105,6 +108,8 @@ public:
 
 		int maxTransactionBytes = getOption(options, LiteralStringRef("maxTransactionBytes"), 500000);
 		maxKeysPerTransaction = std::max(1, maxTransactionBytes / (maxValueLength + maxLongKeyLength));
+
+		resetDBTimeout = getOption(options, LiteralStringRef("resetDBTimeout"), 1800.0);
 
 		if(maxTransactionBytes > 500000) {
 			TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargePacketSent").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
@@ -146,9 +151,9 @@ public:
 		wait(timeout(self->runScriptedTest(self, data), 600, Void()));
 
 		if(!self->hasFailed()) {
-			//Return database to original state (for a maximum of 1800 seconds)
+			// Return database to original state (for a maximum of resetDBTimeout seconds)
 			try {
-				wait(timeoutError(::success(self->runSet(data, self)), 1800));
+				wait(timeoutError(::success(self->runSet(data, self)), self->resetDBTimeout));
 			}
 			catch(Error &e) {
 				if(e.code() == error_code_timed_out) {
