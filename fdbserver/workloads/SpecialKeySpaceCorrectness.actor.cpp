@@ -689,7 +689,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				tx->reset();
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
-				tx->onError(e);
+				wait(tx->onError(e));
 			}
 		}
 		return Void();
