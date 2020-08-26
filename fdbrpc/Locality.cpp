@@ -72,7 +72,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::GrvProxyClass:
-			return ProcessClass::GoodFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:

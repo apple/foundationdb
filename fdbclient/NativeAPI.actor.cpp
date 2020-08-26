@@ -1540,13 +1540,18 @@ void DatabaseContext::updateProxies() {
 	proxiesLastChange = clientInfo->get().id;
 	masterProxies.clear();
 	grvProxies.clear();
+	bool masterProxyProvisional = false, grvProxyProvisional = false;
 	if (clientInfo->get().masterProxies.size()) {
 		masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().masterProxies));
-		proxyProvisional = clientInfo->get().masterProxies[0].provisional;
+		masterProxyProvisional = clientInfo->get().masterProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
 		grvProxies = Reference<GrvProxyInfo>(new GrvProxyInfo(clientInfo->get().grvProxies));
-		proxyProvisional = clientInfo->get().grvProxies[0].provisional;
+		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
+	}
+	if (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size()) {
+		ASSERT(masterProxyProvisional == grvProxyProvisional);
+		proxyProvisional = masterProxyProvisional;
 	}
 }
 
