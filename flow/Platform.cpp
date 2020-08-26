@@ -3190,7 +3190,7 @@ void crashHandler(int sig) {
 	//  but the idea is that we're about to crash anyway...
 	std::string backtrace = platform::get_backtrace();
 
-	bool error = (sig != SIGUSR2 || sig != SIGQUIT);
+	bool error = (sig != SIGUSR2 && sig != SIGQUIT);
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
