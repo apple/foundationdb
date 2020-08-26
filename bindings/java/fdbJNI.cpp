@@ -631,16 +631,12 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 
 	// Capacity for Metadata+Keys+Values
 	//  => sizeof(jint) for total key/value pairs
-	//  => sizeof(kint) to store more flag
+	//  => sizeof(jint) to store more flag
 	//  => sizeof(jint) to store key length per KV pair
 	//  => sizeof(jint) to store value length per KV pair
-	int totalCapacityNeeded = (count*2 + 2) * sizeof(jint);
-	if (count > 0) {
-		totalCapacityNeeded += kvs[count - 1].key_length;
-	}
-
+	int totalCapacityNeeded = 2 * sizeof(jint);
 	for(int i = 0; i < count; i++) {
-		totalCapacityNeeded += kvs[i].key_length + kvs[i].value_length;
+		totalCapacityNeeded += kvs[i].key_length + kvs[i].value_length + 2*sizeof(jint);
 		if (bufferCapacity < totalCapacityNeeded) {
 			count = i; /* Only fit first `i` K/V pairs */
 			more = true;

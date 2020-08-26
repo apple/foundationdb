@@ -85,6 +85,8 @@ public class FDB {
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
+	protected boolean enableDirectBufferQueries = false;
+
 	private boolean useShutdownHook = true;
 	private Thread shutdownHook;
 	private final Semaphore netRunning = new Semaphore(1);
@@ -227,6 +229,25 @@ public class FDB {
 	 */
 	public int getAPIVersion() {
 		return apiVersion;
+	}
+
+	/**
+	 * Enables or disables use of DirectByteBuffers for getRange() queries.
+	 *
+	 *	@param v Whether DirectByteBuffer should be used for getRange() queries.
+	 */
+	public void enableDirectBufferQuery(boolean enabled) {
+		enableDirectBufferQueries = enabled;
+	}
+
+	/**
+	 * Resizes the DirectBufferPool with given parameters, which is used by getRange() requests.
+	 *
+	 * @param poolSize Number of buffers in pool
+	 * @param bufferSize Size of each buffer in bytes
+	 */
+	public void resizeDirectBufferPool(int poolSize, int bufferSize) {
+		DirectBufferPool.getInstance().resize(poolSize, bufferSize);
 	}
 
 	/**

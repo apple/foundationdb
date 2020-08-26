@@ -20,10 +20,8 @@
 
 package com.apple.foundationdb;
 
-import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * A singleton that manages a pool of {@link DirectByteBuffer}, that will be
@@ -35,10 +33,15 @@ class DirectBufferPool {
 
 	// When tuning this, make sure that the size of the buffer,
 	// is always greater than the maximum size KV allowed by FDB.
+	// Current limits is :
+	//     10kB for key + 100kB for value + 1 int for count + 1 int for more + 2 int for KV size
+	static public final int MIN_BUFFER_SIZE = (10 + 100) * 1024 + Integer.BYTES * 4;
+
 	static private final int DEFAULT_NUM_BUFFERS = 128;
 	static private final int DEFAULT_BUFFER_SIZE = 1024 * 512;
 
 	private ArrayBlockingQueue<ByteBuffer> buffers;
+	private int currentBufferCapacity;
 
 	public DirectBufferPool() {
 		resize(DEFAULT_NUM_BUFFERS, DEFAULT_BUFFER_SIZE);
@@ -50,9 +53,13 @@ class DirectBufferPool {
 
 	// Resizes buffer pool given number and size. Throws OutOfMemory exception
 	// if unable to allocate as asked.
-	public synchronized void resize(int newSize, int bufferSize) {
-		buffers = new ArrayBlockingQueue<>(newSize);
-		while (buffers.size() < newSize) {
+	public synchronized void resize(int newPoolSize, int bufferSize) {
+		if (bufferSize < MIN_BUFFER_SIZE) {
+			throw new IllegalArgumentException("'bufferSize' must be at-least: " + MIN_BUFFER_SIZE + " bytes");
+		}
+		buffers = new ArrayBlockingQueue<>(newPoolSize);
+		currentBufferCapacity = bufferSize;
+		while (buffers.size() < newPoolSize) {
 			ByteBuffer buffer = ByteBuffer.allocateDirect(bufferSize);
 			buffers.add(buffer);
 		}
@@ -70,6 +77,12 @@ class DirectBufferPool {
 	 * is non-blocking as it was borrowed from this pool.
 	 */
 	public synchronized void add(ByteBuffer buffer) {
+		if (buffer.capacity() != currentBufferCapacity) {
+			// This can happen when a resize is called while there are outstanding requests,
+			// older buffers will be returned eventually.
+			return;
+		}
+
 		buffers.offer(buffer);
 	}
 }

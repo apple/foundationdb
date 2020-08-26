@@ -37,8 +37,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private final TransactionOptions options;
 
 	private boolean transactionOwner;
-	private boolean enableDirectBufferQueries = false;
-
 	public final ReadTransaction snapshot;
 
 	class ReadSnapshot implements ReadTransaction {
@@ -285,17 +283,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	}
 
 	///////////////////
-	//  Feature Options
-	///////////////////
-
-	/**
-	 * Use DirectByteBuffers to fetch getRange() results.
-	 */
-	public void setDirectBufferQueryEnabled(boolean v) {
-		enableDirectBufferQueries = v;
-	}
-
-	///////////////////
 	//  getRange -> KeySelectors
 	///////////////////
 	@Override
@@ -382,10 +369,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 					" -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 				begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 				iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureResults(Transaction_getRange(
-					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
-					streamingMode, iteration, isSnapshot, reverse), enableDirectBufferQueries, executor);
+			return new FutureResults(
+				Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
+									 end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
+									 streamingMode, iteration, isSnapshot, reverse),
+				FDB.instance().enableDirectBufferQueries, executor);
 		} finally {
 			pointerReadLock.unlock();
 		}

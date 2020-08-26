@@ -25,8 +25,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Holds the direct buffer that is shared with JNI wrapper. A typical usage is as follows:
@@ -40,8 +38,8 @@ class DirectBufferIterator implements Iterator<KeyValue>, AutoCloseable {
 	private int keyCount = -1;
 	private boolean more = false;
 
-	public DirectBufferIterator() {
-		byteBuffer = DirectBufferPool.getInstance().poll();
+	public DirectBufferIterator(ByteBuffer buffer) {
+		byteBuffer = buffer;
 		byteBuffer.order(ByteOrder.nativeOrder());
 	}
 

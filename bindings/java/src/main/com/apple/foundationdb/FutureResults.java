@@ -47,21 +47,20 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	public RangeResult getResults() {
-		DirectBufferIterator directIterator = enableDirectBufferQueries
-				? new DirectBufferIterator()
-				: null;
+		ByteBuffer buffer = enableDirectBufferQueries
+			? DirectBufferPool.getInstance().poll()
+			: null;
 		try {
 			pointerReadLock.lock();
-			if (directIterator != null &&
-				directIterator.getBuffer() != null) {
-				FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
-				return new RangeResult(directIterator);
+			if (buffer != null) {
+				try (DirectBufferIterator directIterator = new DirectBufferIterator(buffer)) {
+					FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
+					return new RangeResult(directIterator);
+				}
 			} else {
 				return FutureResults_get(getPtr());
 			}
 		} finally {
-			if (directIterator != null)
-				directIterator.close();
 			pointerReadLock.unlock();
 		}
 	}
