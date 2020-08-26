@@ -464,7 +464,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
 				if(it->connectionResetTrackers.size() == 0) {
-					for(int i = 0; i < it->logServers.size()) {
+					for(int i = 0; i < it->logServers.size(); i++) {
 						it->connectionResetTrackers.push_back(Reference<ConnectionResetInfo>( new ConnectionResetInfo() ));
 					}
 				}
