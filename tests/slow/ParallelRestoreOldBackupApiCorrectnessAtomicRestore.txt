@@ -19,7 +19,7 @@ numClears=100
 numClearRanges=10
 maxTransactionBytes=500000
 randomTestDuration=60
-timeout=2100
+timeout=360000
 
 testName=AtomicRestore
 startAfter=10.0
