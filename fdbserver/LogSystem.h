@@ -36,10 +36,20 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
+struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
+	double lastReset;
+	Future<Void> resetCheck;
+	int slowReplies;
+	int fastReplies;
+
+	ConnectionResetInfo() : lastReset(0), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+};
+
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
+	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
