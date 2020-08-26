@@ -432,7 +432,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		self->slowReplies = 0;
 		self->fastReplies = 0;
 		wait(delay(SERVER_KNOBS->PUSH_STATS_INTERVAL));
-		TraceEvent("SlowPushStats").detail("SlowReplies", self->slowReplies).detail("FastReplies", self->fastReplies);
+		TraceEvent("SlowPushStats").detail("PeerAddress", addr).detail("SlowReplies", self->slowReplies).detail("FastReplies", self->fastReplies);
 		if(self->slowReplies >= SERVER_KNOBS->PUSH_STATS_SLOW_AMOUNT && self->slowReplies/double(self->slowReplies+self->fastReplies) >= SERVER_KNOBS->PUSH_STATS_SLOW_RATIO) {
 			FlowTransport::transport().resetConnection(addr);
 			self->lastReset = now();
