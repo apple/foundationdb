@@ -110,7 +110,9 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				}
 			}
 
-			while (!self->sendingQueue.empty()) {
+			if (!self->sendingQueue.empty()) {
+				// Only release one sendMutationRequest at a time because it sends all data for a version batch
+				// and it takes large amount of resource
 				const RestoreSendMutationsToAppliersRequest& req = self->sendingQueue.top();
 				// Dispatch the request if it is the next version batch to process or if cpu usage is low
 				if (req.batchIndex - 1 == self->finishedSendingVB ||
@@ -118,16 +120,15 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 					self->addActor.send(handleSendMutationsRequest(req, self));
 					self->sendingQueue.pop();
 				}
-				break; // Only release one sendMutationRequest at a time because it sends all data for a version batch
-				       // and it takes large amount of resource
 			}
 			// When shall the node pause the process of other requests, e.g., load file requests
-			if ((self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
+			// TODO: Revisit if we should have (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)
+			if ((self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0) &&
+			    (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
 			     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS ||
 			     (self->inflightSendingReqs >= 1 &&
 			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
-			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) &&
-			    (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)) {
+			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT)) {
 				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
 					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightRequests")
 					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
