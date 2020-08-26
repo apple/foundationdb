@@ -647,6 +647,51 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				tx->reset();
 			}
 		}
+		// read class_source
+		{
+			try {
+				// test getRange
+				state Standalone<RangeResultRef> class_source_result = wait(tx->getRange(
+					KeyRangeRef(LiteralStringRef("process/class_source/"), LiteralStringRef("process/class_source0"))
+						.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
+					CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!class_source_result.more && class_source_result.size() < CLIENT_KNOBS->TOO_MANY);
+				ASSERT(self->getRangeResultInOrder(class_source_result));
+				// check correctness of classType of each process
+				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+				for (const auto& worker : workers) {
+					Key addr =
+						Key("process/class_source/" + formatIpPort(worker.address.ip, worker.address.port))
+							.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+					bool found = false;
+					for (const auto& kv : class_source_result) {
+						if (kv.key == addr) {
+							ASSERT(kv.value.toString() == worker.processClass.sourceString());
+							// Default source string is command_line
+							ASSERT(kv.value == LiteralStringRef("command_line"));
+							found = true;
+							break;
+						}
+					}
+					// Each process should find its corresponding element
+					ASSERT(found);
+				}
+				ProcessData worker = deterministicRandom()->randomChoice(workers);
+				state std::string address = formatIpPort(worker.address.ip, worker.address.port);
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tx->set(Key("process/class_type/" + address)
+							.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
+						LiteralStringRef("unset"));
+				wait(tx->commit());
+				Optional<Value> class_source = wait(tx->get(Key("process/class_source/" + address)
+							.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
+				ASSERT(class_source.present() && class_source.get() == LiteralStringRef("set_class"));
+				tx->reset();
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				tx->onError(e);
+			}
+		}
 		return Void();
 	}
 };
