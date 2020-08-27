@@ -698,7 +698,7 @@ retryTxn:
 }
 
 int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps, volatile double* throttle_factor,
-                 int thread_iters, volatile int* signal, mako_stats_t* stats, int dotrace, lat_block_t* block[],
+                 int thread_iters, volatile int* signal, mako_stats_t* stats, int dotrace, int dotagging, lat_block_t* block[],
                  int* elem_size, bool* is_memory_allocated) {
 	int xacts = 0;
 	int64_t total_xacts = 0;
@@ -771,6 +771,16 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 						if (err) {
 							fprintf(stderr, "ERROR: FDB_TR_OPTION_LOG_TRANSACTION: %s\n", fdb_get_error(err));
 						}
+					}
+				}
+
+				/* enable write tagging */
+				if (dotagging) {
+					err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_AUTO_THROTTLE_TAG,
+					                                 (uint8_t*)"mako_transaction", 16);
+					if (err) {
+						fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n",
+						        fdb_get_error(err));
 					}
 				}
 
@@ -876,6 +886,7 @@ void* worker_thread(void* thread_args) {
 	int op;
 	int i, size;
 	int dotrace = (worker_id == 0 && thread_id == 0 && args->txntrace) ? args->txntrace : 0;
+	int dotagging = (worker_id == 0 && thread_id == 0 && args->txntagging) ? args->txntagging : 0;
 	volatile int* signal = &((thread_args_t*)thread_args)->process->shm->signal;
 	volatile double* throttle_factor = &((thread_args_t*)thread_args)->process->shm->throttle_factor;
 	volatile int* readycount = &((thread_args_t*)thread_args)->process->shm->readycount;
@@ -940,8 +951,8 @@ void* worker_thread(void* thread_args) {
 
 	/* run the workload */
 	else if (args->mode == MODE_RUN) {
-		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, block,
-		                  elem_size, is_memory_allocated);
+		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters,
+				  signal, stats, dotrace, dotagging, block, elem_size, is_memory_allocated);
 		if (rc < 0) {
 			fprintf(stderr, "ERROR: run_workload failed\n");
 		}
@@ -1209,6 +1220,7 @@ int init_args(mako_args_t* args) {
 	args->tracepath[0] = '\0';
 	args->traceformat = 0; /* default to client's default (XML) */
 	args->txntrace = 0;
+	args->txntagging = 0;
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
@@ -1366,6 +1378,7 @@ void usage() {
 	printf("%-24s %s\n", "    --tracepath=PATH", "Set trace file path");
 	printf("%-24s %s\n", "    --trace_format <xml|json>", "Set trace format (Default: json)");
 	printf("%-24s %s\n", "    --txntrace=sec", "Specify transaction tracing interval (Default: 0)");
+	printf("%-24s %s\n", "    --txntagging", "Enable transaction tagging");
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 }
@@ -1407,6 +1420,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "commitget", no_argument, NULL, ARG_COMMITGET },
 			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
 			                                    { "trace", no_argument, NULL, ARG_TRACE },
+			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
 			                                    { "version", no_argument, NULL, ARG_VERSION },
 			                                    { NULL, 0, NULL, 0 }
 		};
@@ -1521,6 +1535,10 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			break;
 		case ARG_TXNTRACE:
 			args->txntrace = atoi(optarg);
+			break;
+		}
+		case ARG_TXNTAGGING:
+		  args->txntagging = 1;
 			break;
 		}
 	}
