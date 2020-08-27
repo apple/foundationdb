@@ -160,7 +160,8 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	bool sampleReadTags();
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
@@ -305,6 +306,7 @@ public:
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
+	Counter transactionsExpensiveClearCostEstCount;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -337,6 +339,7 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothMidShardSize;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
@@ -345,7 +348,7 @@ public:
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
-	                                   std::unique_ptr<SpecialKeyRangeReadImpl> impl);
+	                                   std::unique_ptr<SpecialKeyRangeReadImpl> &&impl);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 
