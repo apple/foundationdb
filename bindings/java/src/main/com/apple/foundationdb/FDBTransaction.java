@@ -25,6 +25,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.nio.ByteBuffer;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
@@ -36,7 +37,6 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private final TransactionOptions options;
 
 	private boolean transactionOwner;
-
 	public final ReadTransaction snapshot;
 
 	class ReadSnapshot implements ReadTransaction {
@@ -369,10 +369,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 					" -- range get: (%s, %s) limit: %d, bytes: %d, mode: %d, iteration: %d, snap: %s, reverse %s",
 				begin.toString(), end.toString(), rowLimit, targetBytes, streamingMode,
 				iteration, Boolean.toString(isSnapshot), Boolean.toString(reverse)));*/
-			return new FutureResults(Transaction_getRange(
-					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
-					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
-					streamingMode, iteration, isSnapshot, reverse), executor);
+			return new FutureResults(
+				Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
+									 end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
+									 streamingMode, iteration, isSnapshot, reverse),
+				FDB.instance().isDirectBufferQueriesEnabled(), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
