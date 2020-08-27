@@ -1610,9 +1610,10 @@ public:
 		std::string fullPath = joinPath(m_path, path);
 		#ifndef _WIN32
 		if(g_network->isSimulated()) {
-			if(!fileExists(fullPath))
+			if(!fileExists(fullPath)) {
 				throw file_not_found();
-			// std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
+			}
+
 			if (g_simulator.getCurrentProcess()->uid == UID()) {
 				TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID");
 			}
