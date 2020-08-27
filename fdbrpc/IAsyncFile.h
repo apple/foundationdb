@@ -63,8 +63,8 @@ public:
 	virtual Future<Void> truncate( int64_t size ) = 0;
 	virtual Future<Void> sync() = 0;
 	virtual Future<Void> flush() { return Void();  }      // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe
-	virtual Future<int64_t> size() = 0;
-	virtual std::string getFilename() = 0;
+	virtual Future<int64_t> size() const = 0;
+	virtual std::string getFilename() const = 0;
 
 	// Attempt to read the *length bytes at offset without copying.  If successful, a pointer to the
 	//   requested bytes is written to *data, and the number of bytes successfully read is
@@ -80,7 +80,7 @@ public:
 	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) { return io_error(); }
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
 
-	virtual int64_t debugFD() = 0;
+	virtual int64_t debugFD() const = 0;
 };
 
 typedef void (*runCycleFuncPtr)();
