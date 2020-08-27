@@ -105,8 +105,11 @@ struct ClientDBInfo {
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
 	double transactionTagSampleRate;
+	double transactionTagSampleCost;
 
-	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1), transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) {}
+	ClientDBInfo()
+	  : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1),
+	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE), transactionTagSampleCost(CLIENT_KNOBS->COMMIT_SAMPLE_COST) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -116,7 +119,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
+		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate,
+		           transactionTagSampleCost);
 	}
 };
 
@@ -155,7 +159,7 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
-	Optional<TransactionCommitCostEstimation> commitCostEstimation;
+	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
 
 	CommitTransactionRequest() : flags(0) {}
@@ -184,6 +188,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+	int64_t midShardSize = 0;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -191,7 +196,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo);
+		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
 	}
 };
 

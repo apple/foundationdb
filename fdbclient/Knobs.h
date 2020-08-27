@@ -60,6 +60,8 @@ public:
 	double BACKOFF_GROWTH_RATE;
 	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
 	int PROXY_COMMIT_OVERHEAD_BYTES;
+	double SHARD_STAT_SMOOTH_AMOUNT;
+	int INIT_MID_SHARD_BYTES;
 
 	int TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
@@ -85,6 +87,7 @@ public:
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
 	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
 	double DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	double MID_SHARD_SIZE_MAX_STALENESS;
 	bool TAG_ENCODE_KEY_SERVERS;
 
 	//KeyRangeMap
@@ -214,6 +217,9 @@ public:
 	// transaction tags
 	int MAX_TRANSACTION_TAG_LENGTH;
 	int MAX_TAGS_PER_TRANSACTION;
+	int COMMIT_SAMPLE_COST; // The expectation of sampling is every COMMIT_SAMPLE_COST sample once
+	int WRITE_COST_BYTE_FACTOR;
+	int INCOMPLETE_SHARD_PLUS; // The size of (possible) incomplete shard when estimate clear range
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;

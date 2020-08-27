@@ -875,6 +875,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT), transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
@@ -895,6 +896,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+
+	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
+
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG, SpecialKeySpace::IMPLTYPE::READONLY,
 		                              std::make_unique<SingleSpecialKeyImpl>(
@@ -1004,6 +1008,7 @@ DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("T
 	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
 	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
 	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+	smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT), transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
 	internal(false) {}
 
 
@@ -1096,8 +1101,13 @@ Future<Void> DatabaseContext::onMasterProxiesChanged() {
 	return this->masterProxiesChangeTrigger.onTrigger();
 }
 
-bool DatabaseContext::sampleReadTags() {
+bool DatabaseContext::sampleReadTags() const {
 	return clientInfo->get().transactionTagSampleRate > 0 && deterministicRandom()->random01() <= clientInfo->get().transactionTagSampleRate;
+}
+
+bool DatabaseContext::sampleOnCost(uint64_t cost) const {
+	if(clientInfo->get().transactionTagSampleCost <= 0) return false;
+	return deterministicRandom()->random01() <= (double)cost / clientInfo->get().transactionTagSampleCost;
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
@@ -1993,7 +2003,8 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, Spa
 				         cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
 				         GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-
+					if(v.midShardSize > 0)
+						cx->smoothMidShardSize.setTotal(v.midShardSize);
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -3009,7 +3020,6 @@ void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
 	data[key.size()] = 0;
 	t.mutations.emplace_back(req.arena, MutationRef::ClearRange, KeyRef(data, key.size()),
 	                         KeyRef(data, key.size() + 1));
-
 	if(addConflictRange)
 		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
@@ -3292,33 +3302,76 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR Future<TransactionCommitCostEstimation> estimateCommitCosts(Transaction* self,
-                                                                  CommitTransactionRef* transaction) {
-	state MutationRef* it = transaction->mutations.begin();
-	state MutationRef* end = transaction->mutations.end();
-	state TransactionCommitCostEstimation trCommitCosts;
-	state KeyRange keyRange;
-	for (; it != end; ++it) {
-		if (it->type == MutationRef::Type::SetValue) {
-			trCommitCosts.bytesWrite += it->expectedSize();
-			trCommitCosts.numWrite++;
-		} else if (it->isAtomicOp()) {
-			trCommitCosts.bytesAtomicWrite += it->expectedSize();
-			trCommitCosts.numAtomicWrite++;
-		} else if (it->type == MutationRef::Type::ClearRange) {
-			trCommitCosts.numClear++;
-			keyRange = KeyRange(KeyRangeRef(it->param1, it->param2));
+ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
+                                                                         CommitTransactionRef const * transaction) {
+	state ClientTrCommitCostEstimation trCommitCosts;
+	state KeyRangeRef keyRange;
+	state int i = 0;
+
+	for (; i < transaction->mutations.size(); ++i) {
+		auto* it = &transaction->mutations[i];
+
+		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
+			trCommitCosts.opsCount++;
+			trCommitCosts.writeCosts += getWriteOperationCost(it->expectedSize());
+		}
+		else if (it->type == MutationRef::Type::ClearRange) {
+			trCommitCosts.opsCount++;
+			keyRange = KeyRangeRef(it->param1, it->param2);
 			if (self->options.expensiveClearCostEstimation) {
-				StorageMetrics m = wait(self->getStorageMetrics(keyRange, std::numeric_limits<int>::max()));
-				trCommitCosts.bytesClearEst += m.bytes;
+				StorageMetrics m = wait(self->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
+				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
+				trCommitCosts.writeCosts += getWriteOperationCost(m.bytes);
+				++ trCommitCosts.expensiveCostEstCount;
+				++ self->getDatabase()->transactionsExpensiveClearCostEstCount;
 			}
 			else {
-				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-					self->getDatabase(), keyRange, std::numeric_limits<int>::max(), false, &StorageServerInterface::getShardState, self->info));
-				trCommitCosts.numClearShards += locations.size();
+				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+				    wait(getKeyRangeLocations(self->getDatabase(), keyRange, CLIENT_KNOBS->TOO_MANY, false,
+				                              &StorageServerInterface::getShardState, self->info));
+				if (locations.empty()) continue;
+
+				uint64_t bytes = 0;
+				if (locations.size() == 1) {
+					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS;
+				}
+				else { // small clear on the boundary will hit two shards but be much smaller than the shard size
+					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 +
+					        (locations.size() - 2) * (int64_t)self->getDatabase()->smoothMidShardSize.smoothTotal();
+				}
+
+				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(bytes));
+				trCommitCosts.writeCosts += getWriteOperationCost(bytes);
 			}
 		}
 	}
+
+	// sample on written bytes
+	if (!self->getDatabase()->sampleOnCost(trCommitCosts.writeCosts))
+		return Optional<ClientTrCommitCostEstimation>();
+
+	// sample clear op: the expectation of #sampledOp is every COMMIT_SAMPLE_COST sample once
+	// we also scale the cost of mutations whose cost is less than COMMIT_SAMPLE_COST as scaledCost = min(COMMIT_SAMPLE_COST, cost)
+	// If we have 4 transactions:
+	// A - 100 1-cost mutations: E[sampled ops] = 1, E[sampled cost] = 100
+	// B - 1 100-cost mutation: E[sampled ops] = 1, E[sampled cost] = 100
+	// C - 50 2-cost mutations: E[sampled ops] = 1, E[sampled cost] = 100
+	// D - 1 150-cost mutation and 150 1-cost mutations: E[sampled ops] = 3, E[sampled cost] = 150cost * 1 + 150 * 100cost * 0.01 = 300
+	ASSERT(trCommitCosts.writeCosts > 0);
+	std::deque<std::pair<int, uint64_t>> newClearIdxCosts;
+	for (const auto& [idx, cost] : trCommitCosts.clearIdxCosts) {
+		if(trCommitCosts.writeCosts >= CLIENT_KNOBS->COMMIT_SAMPLE_COST){
+			double mul = trCommitCosts.writeCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST);
+			if(deterministicRandom()->random01() < cost * mul / trCommitCosts.writeCosts) {
+				newClearIdxCosts.emplace_back(idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
+			}
+		}
+		else if(deterministicRandom()->random01() < (double)cost / trCommitCosts.writeCosts){
+			newClearIdxCosts.emplace_back(idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
+		}
+	}
+
+	trCommitCosts.clearIdxCosts.swap(newClearIdxCosts);
 	return trCommitCosts;
 }
 
@@ -3338,11 +3391,11 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		if (!req.tagSet.present()) {
-			wait(store(req.transaction.read_snapshot, readVersion));
+		if(req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE){
+			wait(store(req.transaction.read_snapshot, readVersion) &&
+			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
 		} else {
-			req.commitCostEstimation = TransactionCommitCostEstimation();
-			wait(store(req.transaction.read_snapshot, readVersion) && store(req.commitCostEstimation.get(), estimateCommitCosts(tr, &req.transaction)));
+			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
 		startTime = now();

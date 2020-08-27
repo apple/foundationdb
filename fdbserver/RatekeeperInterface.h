@@ -76,28 +76,32 @@ struct ClientTagThrottleLimits {
 };
 
 struct TransactionCommitCostEstimation {
-	int numWrite = 0;
-	int numAtomicWrite = 0;
-	int numClear = 0;
-	int numClearShards = 0;
-	uint64_t bytesWrite = 0;
-	uint64_t bytesAtomicWrite = 0;
-	uint64_t bytesClearEst = 0;
+	int opsSum = 0;
+	uint64_t costSum = 0;
+
+	uint64_t getCostSum() const { return costSum; }
+	int getOpsSum() const { return opsSum; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear, numClearShards);
+		serializer(ar, opsSum, costSum);
 	}
 
 	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
-		numWrite += other.numWrite;
-		numAtomicWrite += other.numAtomicWrite;
-		numClear += other.numClear;
-		bytesWrite += other.bytesWrite;
-		bytesAtomicWrite += other.numAtomicWrite;
-		numClearShards += other.numClearShards;
-		bytesClearEst += other.bytesClearEst;
+		opsSum += other.opsSum;
+		costSum += other.costSum;
 		return *this;
+	}
+};
+
+struct ClientTrCommitCostEstimation {
+	int opsCount = 0;
+	uint64_t writeCosts = 0;
+	std::deque<std::pair<int, uint64_t>> clearIdxCosts;
+	uint32_t expensiveCostEstCount = 0;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, opsCount, writeCosts, clearIdxCosts, expensiveCostEstCount);
 	}
 };
 
@@ -123,21 +127,21 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 
 	TransactionTagMap<uint64_t> throttledTagCounts;
-	TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst;
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
 	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
 	                   TransactionTagMap<uint64_t> throttledTagCounts,
-	                   TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst, bool detailed)
+	                   UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost, bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
-	    throttledTagCommitCostEst(throttledTagCommitCostEst), detailed(detailed) {}
+	    ssTrTagCommitCost(ssTrTagCommitCost), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, throttledTagCommitCostEst);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, ssTrTagCommitCost);
 	}
 };
 
