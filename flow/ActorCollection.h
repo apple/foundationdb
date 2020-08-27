@@ -31,7 +31,7 @@
 //   - Never returns otherwise, unless returnWhenEmptied=true in which case returns the first time it goes from count 1 to count 0 futures
 //   - Uses memory proportional to the number of unready futures added (i.e. memory
 //     is freed promptly when an actor in the collection returns)
-Future<Void> actorCollection( FutureStream<Future<Void>> const& addActor, int* const& optionalCountPtr = NULL, double* const& lastChangeTime = NULL, double* const& idleTime = NULL, double* const& allTime = NULL, bool const& returnWhenEmptied=false );
+Future<Void> actorCollection( FutureStream<Future<Void>> const& addActor, int* const& optionalCountPtr = nullptr, double* const& lastChangeTime = nullptr, double* const& idleTime = nullptr, double* const& allTime = nullptr, bool const& returnWhenEmptied=false );
 
 // ActorCollectionNoErrors is an easy-to-use wrapper for actorCollection() when you know that no errors will
 // be thrown by the actors (e.g. because they are wrapped with individual error reporters).
@@ -55,12 +55,12 @@ class ActorCollection : NonCopyable {
 
 public:
 	explicit ActorCollection( bool returnWhenEmptied ) {
-		m_out = actorCollection(m_add.getFuture(), NULL, NULL, NULL, NULL, returnWhenEmptied );
+		m_out = actorCollection(m_add.getFuture(), nullptr, nullptr, nullptr, nullptr, returnWhenEmptied );
 	}
 
 	void add( Future<Void> a ) { m_add.send(a); }
 	Future<Void> getResult() { return m_out; }
-	void clear( bool returnWhenEmptied ) { m_out.cancel(); m_out = actorCollection(m_add.getFuture(), NULL, NULL, NULL, NULL, returnWhenEmptied ); }
+	void clear( bool returnWhenEmptied ) { m_out.cancel(); m_out = actorCollection(m_add.getFuture(), nullptr, nullptr, nullptr, nullptr, returnWhenEmptied ); }
 };
 
 class SignalableActorCollection : NonCopyable {
@@ -70,7 +70,7 @@ class SignalableActorCollection : NonCopyable {
 
 	void init() {
 		PromiseStream<Future<Void>> addStream;
-		m_out = actorCollection(addStream.getFuture(), NULL, NULL, NULL, NULL, true);
+		m_out = actorCollection(addStream.getFuture(), nullptr, nullptr, nullptr, nullptr, true);
 		m_add = addStream;
 		stopSignal = Promise<Void>();
 		m_add.send(stopSignal.getFuture());

@@ -787,6 +787,7 @@ public:
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }
+
 	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) {
@@ -816,7 +817,7 @@ public:
 	}
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() { auto ptr = sav; sav = nullptr; return ptr; }
 	explicit Promise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
@@ -844,7 +845,7 @@ public:
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}
-	FutureStream() : queue(NULL) {}
+	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }

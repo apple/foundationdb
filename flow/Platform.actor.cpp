@@ -183,7 +183,7 @@ std::string removeWhitespace(const std::string &t)
 }
 
 #ifdef _WIN32
-#define ALLOC_FAIL NULL
+#define ALLOC_FAIL nullptr
 #elif defined(__unixish__)
 #define ALLOC_FAIL MAP_FAILED
 #else
@@ -211,7 +211,7 @@ bool handlePdhStatus(const PDH_STATUS& status, std::string message) {
 bool setPdhString(int id, std::string &out) {
 	char buf[512];
 	DWORD sz = 512;
-	if (!handlePdhStatus(PdhLookupPerfNameByIndex(NULL, id, buf, &sz), "PdhLookupPerfByNameIndex"))
+	if (!handlePdhStatus(PdhLookupPerfNameByIndex(nullptr, id, buf, &sz), "PdhLookupPerfByNameIndex"))
 		return false;
 	out = buf;
 	return true;
@@ -308,7 +308,7 @@ uint64_t getResidentMemoryUsage() {
 	struct kinfo_proc procstk;
 	size_t len = sizeof(procstk);
 
-	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
 		throw platform_error();
@@ -368,7 +368,7 @@ uint64_t getMemoryUsage() {
 	struct kinfo_proc procstk;
 	size_t len = sizeof(procstk);
 
-	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
 		throw platform_error();
@@ -499,31 +499,31 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 
 	uint_size = sizeof(page_size);
 
-	status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, NULL, 0);
+	status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
 	}
 
-	status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, NULL, 0);
+	status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
 	}
 
-	status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, NULL, 0);
+	status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
 	}
 
-	status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, NULL, 0);
+	status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
 	}
 
-	status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, NULL, 0);
+	status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, nullptr, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
@@ -637,8 +637,8 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	INJECT_FAULT( platform_error, "getInterfaceName" );
 	static char iname[20];
 
-	struct ifaddrs* interfaces = NULL;
-	const char* ifa_name = NULL;
+	struct ifaddrs* interfaces = nullptr;
+	const char* ifa_name = nullptr;
 
 	if (getifaddrs(&interfaces)) {
 		TraceEvent(SevWarnAlways, "GetInterfaceAddrs").GetLastError();
@@ -673,7 +673,7 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	if (ifa_name)
 		return iname;
 	else
-		return NULL;
+		return nullptr;
 }
 #endif
 
@@ -903,7 +903,7 @@ void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesR
 	if (!ifa_name)
 		return;
 
-	struct ifaddrs *interfaces = NULL;
+	struct ifaddrs *interfaces = nullptr;
 
 	if (getifaddrs(&interfaces))
 	{
@@ -944,7 +944,7 @@ void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesR
 	struct tcpstat tcpstat;
 	size_t stat_len;
 	stat_len = sizeof(tcpstat);
-	int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, NULL, 0);
+	int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, nullptr, 0);
 	if (tcpstatus < 0) {
 		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
 		throw platform_error();
@@ -964,7 +964,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 	memset(last, 0, sizeof last);
 
-	if (sysctlbyname("kern.cp_time", &cur, &cur_sz, NULL, 0) < 0)
+	if (sysctlbyname("kern.cp_time", &cur, &cur_sz, nullptr, 0) < 0)
 	{
 		TraceEvent(SevError, "GetMachineLoad").GetLastError();
 		throw platform_error();
@@ -1007,7 +1007,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	struct timespec ts;
 	static int num_devices;
 
-	kvm_t *kd = NULL;
+	kvm_t *kd = nullptr;
 
 	etime = ts.tv_nsec * 1e-6;;
 
@@ -1018,7 +1018,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	long double ms_per_transaction;
 
 	dscur.dinfo = (struct devinfo *)calloc(1, sizeof(struct devinfo));
-	if (dscur.dinfo == NULL) {
+	if (dscur.dinfo == nullptr) {
 		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
 		throw platform_error();
 	}
@@ -1033,7 +1033,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	for (dn = 0; dn < num_devices; dn++)
 	{
 
-		if (devstat_compute_statistics(&dscur.dinfo->devices[dn], NULL, etime,
+		if (devstat_compute_statistics(&dscur.dinfo->devices[dn], nullptr, etime,
 		DSM_MS_PER_TRANSACTION, &ms_per_transaction,
 		DSM_TOTAL_TRANSFERS_READ, &total_transfers_read,
 		DSM_TOTAL_TRANSFERS_WRITE, &total_transfers_write,
@@ -1104,14 +1104,14 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 
 	size_t len;
 
-	if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
+	if (sysctl(mib, 6, nullptr, &len, nullptr, 0) < 0) {
 		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
 		throw platform_error();
 	}
 
 	char *buf = (char*)malloc(len);
 
-	if (sysctl(mib, 6, buf, &len, NULL, 0) < 0) {
+	if (sysctl(mib, 6, buf, &len, nullptr, 0) < 0) {
 		free(buf);
 		TraceEvent(SevError, "GetNetworkTrafficReadInterfacesError").GetLastError();
 		throw platform_error();
@@ -1206,7 +1206,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		disk = tdisk;
 	}
 
-	CFDictionaryRef disk_dict = NULL;
+	CFDictionaryRef disk_dict = nullptr;
 	if (IORegistryEntryCreateCFProperties(disk, (CFMutableDictionaryRef*)&disk_dict, kCFAllocatorDefault, kNilOptions) != kIOReturnSuccess) {
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
@@ -1217,7 +1217,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	// Here and below, note that memory returned by CFDictionaryGetValue() is not owned by us, and should not be CFRelease()'d by us.
 	CFDictionaryRef stats_dict = (CFDictionaryRef)CFDictionaryGetValue(disk_dict, CFSTR(kIOBlockStorageDriverStatisticsKey));
 
-	if (stats_dict == NULL) {
+	if (stats_dict == nullptr) {
 		CFRelease(disk_dict);
 		IOObjectRelease(disk);
 		IOObjectRelease(disk_list);
@@ -1246,7 +1246,7 @@ std::vector<std::string> expandWildcardPath(const char *wildcardPath)
 {
 	PDH_STATUS Status;
 	char *EndOfPaths;
-	char *Paths = NULL;
+	char *Paths = nullptr;
 	DWORD BufferSize = 0;
 	std::vector<std::string> results;
 
@@ -1264,7 +1264,7 @@ std::vector<std::string> expandWildcardPath(const char *wildcardPath)
 		goto Cleanup;
 	}
 
-	if (Paths == NULL) {
+	if (Paths == nullptr) {
 		TraceEvent("WindowsPdhExpandCounterPathError").detail("Reason", "Path could not be expanded");
 		goto Cleanup;
 	}
@@ -1333,8 +1333,8 @@ struct SystemStatisticsState {
 	HCOUNTER SegmentsOutCounter;
 	HCOUNTER SegmentsRetransCounter;
 	HCOUNTER ProcessorIdleCounter;
-	SystemStatisticsState() : Query(NULL), QueueLengthCounter(NULL), DiskTimeCounter(NULL),
-		ReadsCounter(NULL), WritesCounter(NULL), WriteBytesCounter(NULL), ProcessorIdleCounter(NULL),
+	SystemStatisticsState() : Query(nullptr), QueueLengthCounter(nullptr), DiskTimeCounter(nullptr),
+		ReadsCounter(nullptr), WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr),
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
@@ -1387,22 +1387,22 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 			if (buf2[strlen(buf2) - 1] == '\\')
 				buf2[strlen(buf2) - 1] = 0;
 
-			HANDLE hDevice = CreateFile(buf2, 0, 0, NULL, OPEN_EXISTING, 0, NULL);
+			HANDLE hDevice = CreateFile(buf2, 0, 0, nullptr, OPEN_EXISTING, 0, nullptr);
 			if (hDevice == INVALID_HANDLE_VALUE) {
 				TraceEvent(SevWarn, "CreateFile").GetLastError().detail("Path", dataFolder);
 				return;
 			}
 
 			STORAGE_DEVICE_NUMBER storage_device;
-			if (!DeviceIoControl(hDevice, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0,
-								 &storage_device, sizeof(storage_device), &sz, NULL)) {
+			if (!DeviceIoControl(hDevice, IOCTL_STORAGE_GET_DEVICE_NUMBER, nullptr, 0,
+								 &storage_device, sizeof(storage_device), &sz, nullptr)) {
 				TraceEvent(SevWarn, "DeviceIoControl").GetLastError().detail("Path", dataFolder);
 				return;
 			}
 
 			// Find the drive letter involved!
 			sz = 512;
-			if (handlePdhStatus(PdhEnumObjectItems(NULL, NULL, state->pdhStrings.physicalDisk.c_str(),
+			if (handlePdhStatus(PdhEnumObjectItems(nullptr, nullptr, state->pdhStrings.physicalDisk.c_str(),
 								buf2, &sz2, buf, &sz, PERF_DETAIL_NOVICE, 0), "PdhEnumObjectItems")) {
 				char *ptr = buf;
 				while (*ptr) {
@@ -1424,7 +1424,7 @@ void initPdhStrings(SystemStatisticsState *state, std::string dataFolder) {
 #endif
 
 SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip, SystemStatisticsState** statState, bool logDetails) {
-	if( (*statState) == NULL )
+	if( (*statState) == nullptr )
 		(*statState) = new SystemStatisticsState();
 	SystemStatistics returnStats;
 
@@ -1456,11 +1456,11 @@ SystemStatistics getSystemStatistics(std::string dataFolder, const IPAddress* ip
 	}
 
 #if defined(_WIN32)
-	if((*statState)->Query == NULL) {
+	if((*statState)->Query == nullptr) {
 		initPdhStrings(*statState, dataFolder);
 
 		TraceEvent("SetupQuery");
-		handlePdhStatus( PdhOpenQuery(NULL, NULL, &(*statState)->Query), "PdhOpenQuery" );
+		handlePdhStatus( PdhOpenQuery(nullptr, nullptr, &(*statState)->Query), "PdhOpenQuery" );
 
 		if( !(*statState)->pdhStrings.diskDevice.empty() ) {
 			handlePdhStatus(PdhAddCounter((*statState)->Query, ("\\" + (*statState)->pdhStrings.physicalDisk + "(" + (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.pctIdle).c_str(), 0, &(*statState)->DiskTimeCounter), "PdhAddCounter");
@@ -1635,7 +1635,7 @@ struct OffsetTimer {
 		offset = mach_absolute_time();
 
 		struct timeval tv;
-		gettimeofday(&tv, NULL);
+		gettimeofday(&tv, nullptr);
 
 		offset_seconds = tv.tv_sec + 1e-6 * tv.tv_usec;
 	}
@@ -1668,7 +1668,7 @@ double timer() {
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
 #elif defined(__APPLE__)
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+	gettimeofday(&tv, nullptr);
 	return double(tv.tv_sec) + (tv.tv_usec * 1e-6);
 #else
 #error Port me!
@@ -1688,7 +1688,7 @@ uint64_t timer_int() {
 	return uint64_t(ts.tv_sec) * 1e9 + ts.tv_nsec;
 #elif defined(__APPLE__)
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+	gettimeofday(&tv, nullptr);
 	return uint64_t(tv.tv_sec) * 1e9 + (tv.tv_usec * 1e3);
 #else
 #error Port me!
@@ -1702,7 +1702,7 @@ void getLocalTime(const time_t *timep, struct tm *result) {
 		throw platform_error();
 	}
 #elif defined(__unixish__)
-	if(localtime_r(timep, result) == NULL) {
+	if(localtime_r(timep, result) == nullptr) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
 		throw platform_error();
 	}
@@ -1718,7 +1718,7 @@ void setMemoryQuota( size_t limit ) {
 #endif
 	INJECT_FAULT( platform_error, "setMemoryQuota" );
 #if defined(_WIN32)
-	HANDLE job = CreateJobObject( NULL, NULL );
+	HANDLE job = CreateJobObject( nullptr, nullptr );
 	if (!job) {
 		TraceEvent(SevError, "WinCreateJobError").GetLastError();
 		throw platform_error();
@@ -1755,7 +1755,7 @@ static int ModifyPrivilege( const char* szPrivilege, bool fEnable )
 	HRESULT hr = S_OK;
 	TOKEN_PRIVILEGES NewState;
 	LUID luid;
-	HANDLE hToken = NULL;
+	HANDLE hToken = nullptr;
 
 	// Open the process token for this process.
 	if (!OpenProcessToken( GetCurrentProcess(),
@@ -1767,7 +1767,7 @@ static int ModifyPrivilege( const char* szPrivilege, bool fEnable )
 	}
 
 	// Get the local unique ID for the privilege.
-	if ( !LookupPrivilegeValue( NULL,
+	if ( !LookupPrivilegeValue( nullptr,
 								szPrivilege,
 								&luid ))
 	{
@@ -1789,8 +1789,8 @@ static int ModifyPrivilege( const char* szPrivilege, bool fEnable )
 							   FALSE,
 							   &NewState,
 							   0,
-							   NULL,
-							   NULL))
+							   nullptr,
+							   nullptr))
 	{
 		TraceEvent( SevWarn, "AdjustTokenPrivileges" ).error(large_alloc_failed()).GetLastError();
 		hr = ERROR_FUNCTION_FAILED;
@@ -1826,18 +1826,18 @@ static void *allocateInternal(size_t length, bool largePages) {
 	if (largePages)
 		allocType |= MEM_LARGE_PAGES;
 
-	return VirtualAlloc(NULL, length, allocType, PAGE_READWRITE);
+	return VirtualAlloc(nullptr, length, allocType, PAGE_READWRITE);
 #elif defined(__linux__)
 	int flags = MAP_PRIVATE|MAP_ANONYMOUS;
 
 	if (largePages)
 		flags |= MAP_HUGETLB;
 
-	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
+	return mmap(nullptr, length, PROT_READ|PROT_WRITE, flags, -1, 0);
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 	int flags = MAP_PRIVATE|MAP_ANON;
 
-	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
+	return mmap(nullptr, length, PROT_READ|PROT_WRITE, flags, -1, 0);
 #else
 #error Port me!
 #endif
@@ -2061,7 +2061,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		}
 		f = 0;
 
-		if(!ReplaceFile( path.c_str(), tempfilename.c_str(), NULL, NULL, NULL, NULL ))
+		if(!ReplaceFile( path.c_str(), tempfilename.c_str(), nullptr, nullptr, nullptr, nullptr ))
 			throw io_error();
 	#elif defined(__unixish__)
 		if(!g_network->isSimulated()) {
@@ -2123,7 +2123,7 @@ bool createDirectory( std::string const& directory ) {
 	INJECT_FAULT( platform_error, "createDirectory" );
 
 #ifdef _WIN32
-	if (CreateDirectory( directory.c_str(), NULL )) {
+	if (CreateDirectory( directory.c_str(), nullptr )) {
 		createdDirectory();
 		return true;
 	}
@@ -2281,7 +2281,7 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 
 #ifdef _WIN32
 	char nameBuffer[MAX_PATH];
-	if(!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, NULL) || (mustExist && !fileExists(nameBuffer))) {
+	if(!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
 		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
@@ -2342,7 +2342,7 @@ std::string getUserHomeDirectory() {
 	return ret;
 #elif defined(_WIN32)
 	TCHAR szPath[MAX_PATH];
-	if( SHGetFolderPath(NULL, CSIDL_PROFILE, NULL, 0, szPath)  != S_OK ) {
+	if( SHGetFolderPath(nullptr, CSIDL_PROFILE, nullptr, 0, szPath)  != S_OK ) {
 		TraceEvent(SevError, "GetUserHomeDirectory").GetLastError();
 		throw platform_error();
 	}
@@ -2421,13 +2421,13 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 	state vector<std::string> result;
 	state int64_t tsc_begin = __rdtsc();
 
-	state DIR *dip = NULL;
+	state DIR *dip = nullptr;
 
-	if ((dip = opendir(directory.c_str())) != NULL) {
+	if ((dip = opendir(directory.c_str())) != nullptr) {
 		loop {
 			struct dirent *dit;
 			dit = readdir(dip);
-			if (dit == NULL) {
+			if (dit == nullptr) {
 				break;
 			}
 			std::string name(dit->d_name);
@@ -2599,7 +2599,7 @@ void waitThread(THREAD_HANDLE thread) {
 #ifdef _WIN32
 	WaitForSingleObject(thread, INFINITE);
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
-	pthread_join(thread, NULL);
+	pthread_join(thread, nullptr);
 #else
 	#error Port me!
 #endif
@@ -2711,7 +2711,7 @@ bool getEnvironmentVar(const char* name, std::string& value) {
 	}
 	return false;
 #elif defined(_WIN32)
-	int len = GetEnvironmentVariable(name, NULL, 0);
+	int len = GetEnvironmentVariable(name, nullptr, 0);
 	if (len == 0) {
 		if (GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
 			return false;
@@ -2740,7 +2740,7 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite)
 	int errcode = 0;
 	if(!overwrite) {
 		size_t envsize = 0;
-		errcode = getenv_s(&envsize, NULL, 0, name);
+		errcode = getenv_s(&envsize, nullptr, 0, name);
 		if(errcode || envsize) return errcode;
 	}
 	return _putenv_s(name, value);
@@ -2754,7 +2754,7 @@ int setEnvironmentVar(const char *name, const char *value, int overwrite)
 #endif
 std::string getWorkingDirectory() {
 	char *buf;
-	if( (buf = getcwd(NULL, 0)) == NULL ) {
+	if( (buf = getcwd(nullptr, 0)) == nullptr ) {
 		TraceEvent(SevWarnAlways, "GetWorkingDirectoryError").GetLastError();
 		throw platform_error();
 	}
@@ -2771,7 +2771,7 @@ namespace platform {
 std::string getDefaultConfigPath() {
 #ifdef _WIN32
 	TCHAR szPath[MAX_PATH];
-	if( SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, szPath)  != S_OK ) {
+	if( SHGetFolderPath(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, szPath)  != S_OK ) {
 		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
 		throw platform_error();
 	}
@@ -2808,7 +2808,7 @@ void outOfMemory() {
 	for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
 		std::string s;
 #ifdef __linux__
-		char *demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+		char *demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 		if (demangled) {
 			s = demangled;
 			if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
@@ -2995,7 +2995,7 @@ struct ImageInfo {
 	void *offset;
 	std::string symbolFileName;
 
-	ImageInfo() : offset(NULL), symbolFileName("") {}
+	ImageInfo() : offset(nullptr), symbolFileName("") {}
 };
 
 ImageInfo getImageInfo(const void *symbol) {
@@ -3084,7 +3084,7 @@ std::string get_backtrace() {
 namespace platform {
 std::string get_backtrace() { return std::string(); }
 std::string format_backtrace(void **addresses, int numAddresses) { return std::string(); }
-void* getImageOffset() { return NULL; }
+void* getImageOffset() { return nullptr; }
 } // namespace platform
 #endif
 
@@ -3093,7 +3093,7 @@ bool isLibraryLoaded(const char* lib_path) {
 #error Port me!
 #endif
 
-	void* dlobj = NULL;
+	void* dlobj = nullptr;
 
 #if defined(__unixish__)
 	dlobj = dlopen( lib_path, RTLD_NOLOAD | RTLD_LAZY );
@@ -3101,7 +3101,7 @@ bool isLibraryLoaded(const char* lib_path) {
 	dlobj = GetModuleHandle( lib_path );
 #endif
 
-	return dlobj != NULL;
+	return dlobj != nullptr;
 }
 
 void* loadLibrary(const char* lib_path) {
@@ -3109,16 +3109,16 @@ void* loadLibrary(const char* lib_path) {
 #error Port me!
 #endif
 
-	void* dlobj = NULL;
+	void* dlobj = nullptr;
 
 #if defined(__unixish__)
 	dlobj = dlopen( lib_path, RTLD_LAZY | RTLD_LOCAL );
-	if(dlobj == NULL) {
+	if(dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
 #else
 	dlobj = LoadLibrary( lib_path );
-	if(dlobj == NULL) {
+	if(dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).GetLastError();
 	}
 #endif
@@ -3127,16 +3127,16 @@ void* loadLibrary(const char* lib_path) {
 }
 
 void* loadFunction(void* lib, const char* func_name) {
-	void* dlfcn = NULL;
+	void* dlfcn = nullptr;
 
 #if defined(__unixish__)
 	dlfcn = dlsym( lib, func_name );
-	if(dlfcn == NULL) {
+	if(dlfcn == nullptr) {
 		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).detail("Error", dlerror());
 	}
 #else
 	dlfcn = GetProcAddress( (HINSTANCE)lib, func_name );
-	if(dlfcn == NULL) {
+	if(dlfcn == nullptr) {
 		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).GetLastError();
 	}
 #endif
@@ -3170,7 +3170,7 @@ std::string exePath() {
     mib[2] = KERN_PROC_PATHNAME;
     mib[3] = -1;
     size_t len = sizeof(binPath);
-    if (sysctl(mib, 4, binPath, &len, NULL, 0) != 0) {
+    if (sysctl(mib, 4, binPath, &len, nullptr, 0) != 0) {
         binPath[0] = '\0';
         return std::string(binPath);
     } else {
@@ -3246,7 +3246,7 @@ void crashHandler(int sig) {
 		_exit(sig + 128);
 	}
 	sa.sa_flags = 0;
-	if (sigaction(sig, &sa, NULL)) {
+	if (sigaction(sig, &sa, nullptr)) {
 		int err = errno;
 		fprintf(stderr, "sigaction failed: %s\n", strerror(err));
 		_exit(sig + 128);
@@ -3271,11 +3271,11 @@ void registerCrashHandler() {
 	sigfillset( &action.sa_mask );
 	action.sa_flags = 0;
 
-	sigaction(SIGILL, &action, NULL);
-	sigaction(SIGFPE, &action, NULL);
-	sigaction(SIGSEGV, &action, NULL);
-	sigaction(SIGBUS, &action, NULL);
-	sigaction(SIGUSR2, &action, NULL);
+	sigaction(SIGILL, &action, nullptr);
+	sigaction(SIGFPE, &action, nullptr);
+	sigaction(SIGSEGV, &action, nullptr);
+	sigaction(SIGBUS, &action, nullptr);
+	sigaction(SIGUSR2, &action, nullptr);
 #else
 	// No crash handler for other platforms!
 #endif
@@ -3434,10 +3434,10 @@ void* checkThread(void *arg) {
 			saturatedLogInterval = minSaturationLogInterval;
 		}
 	}
-	return NULL;
+	return nullptr;
 #else
 	// No slow task profiling for other platforms!
-	return NULL;
+	return nullptr;
 #endif
 }
 
@@ -3468,7 +3468,7 @@ void setupRunLoopProfiler() {
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		sigaction(SIGPROF, &action, NULL);
+		sigaction(SIGPROF, &action, nullptr);
 
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t *mainThread = (pthread_t*)malloc(sizeof(pthread_t));

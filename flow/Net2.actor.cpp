@@ -63,12 +63,12 @@ std::atomic<int64_t> net2RunLoopIterations(0);
 std::atomic<int64_t> net2RunLoopSleeps(0);
 
 volatile size_t net2backtraces_max = 10000;
-volatile void** volatile net2backtraces = NULL;
+volatile void** volatile net2backtraces = nullptr;
 volatile size_t net2backtraces_offset = 0;
 volatile bool net2backtraces_overflow = false;
 volatile int net2backtraces_count = 0;
 
-volatile void **other_backtraces = NULL;
+volatile void **other_backtraces = nullptr;
 sigset_t sigprof_set;
 
 
@@ -144,7 +144,7 @@ public:
 		if ( thread_network == this )
 			stopImmediately();
 		else
-			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
+			onMainThreadVoid( [this] { this->stopImmediately(); }, nullptr );
 	}
 	virtual void addStopCallback( std::function<void()> fn ) {
 		if ( thread_network == this )
@@ -322,7 +322,7 @@ struct SendBufferIterator {
 		if(limit > 0)
 			p = p->next;
 		else
-			p = NULL;
+			p = nullptr;
 	}
 
 	boost::asio::const_buffer operator*() const {
@@ -1299,7 +1299,7 @@ void Net2::run() {
 			net2backtraces_overflow = false;
 			net2backtraces_count = 0;
 
-			pthread_sigmask(SIG_SETMASK, &orig_set, NULL);
+			pthread_sigmask(SIG_SETMASK, &orig_set, nullptr);
 
 			if (was_overflow) {
 				TraceEvent("Net2RunLoopProfilerOverflow")
@@ -1644,7 +1644,7 @@ void ASIOReactor::sleep(double sleepTime) {
 			timespec tv;
 			tv.tv_sec = 0;
 			tv.tv_nsec = 20000;
-			nanosleep(&tv, NULL);
+			nanosleep(&tv, nullptr);
 #endif
 		}
 		else
