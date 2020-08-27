@@ -296,6 +296,8 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
+	toCommit->addTransactionInfo(SpanID());
+
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
 	{
@@ -357,7 +359,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 
 			auto& tags = self->tagsForKey(backupMutation.param1);
 			toCommit->addTags(tags);
-			toCommit->addTypedMessage(backupMutation);
+			toCommit->writeTypedMessage(backupMutation);
 
 //			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
 //				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
@@ -396,7 +398,7 @@ struct CommitBatchContext {
 
 	int batchOperations = 0;
 
-	Span span = Span("MP:commitBatch"_loc);
+	Span span;
 
 	int64_t batchBytes = 0;
 
@@ -476,7 +478,9 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 
     localBatchNumber(++pProxyCommitData->localCommitBatchesStarted), toCommit(pProxyCommitData->logSystem),
 
-    committed(trs.size()) {
+    committed(trs.size()),
+
+    span("MP:commitBatch"_loc) {
 
 	evaluateBatchSize();
 
@@ -671,7 +675,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			for (int resolver = 0; resolver < self->resolution.size(); resolver++)
 				committed = committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed) {
-				applyMetadataMutations(*self->pProxyCommitData, self->arena, self->pProxyCommitData->logSystem,
+				applyMetadataMutations(SpanID(), *self->pProxyCommitData, self->arena, self->pProxyCommitData->logSystem,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr, self->forceRecovery,
 				                       /* popVersion= */ 0, /* initialCommit */ false);
@@ -754,7 +758,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
-			applyMetadataMutations(*pProxyCommitData, self->arena, pProxyCommitData->logSystem,
+			applyMetadataMutations(trs[t].spanContext, *pProxyCommitData, self->arena, pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations, &self->toCommit, self->forceRecovery,
 			                       self->commitVersion + 1, /* initialCommit= */ false);
 		}
@@ -803,6 +807,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
 		state int mutationNum = 0;
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
+
+		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
+
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			if(self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 				self->yieldBytes = 0;
@@ -857,7 +864,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if(pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.addTypedMessage(m);
+				self->toCommit.writeTypedMessage(m);
 			}
 			else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
@@ -908,7 +915,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if(pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.addTypedMessage(m);
+				self->toCommit.writeTypedMessage(m);
 			} else {
 				UNREACHABLE();
 			}
@@ -1049,7 +1056,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		if(firstMessage) {
 			self->toCommit.addTxsTag();
 		}
-		self->toCommit.addMessage(StringRef(m.begin(), m.size()), !firstMessage);
+		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
 	}
 
@@ -1064,7 +1071,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	self->loggingComplete = pProxyCommitData->logSystem->push( self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(), pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->debugID );
+	self->loggingComplete = pProxyCommitData->logSystem->push( self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(), pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->span.context, self->debugID );
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber-1);
@@ -1806,7 +1813,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 						Arena arena;
 						bool confChanges;
-						applyMetadataMutations(commitData, arena, Reference<ILogSystem>(), mutations,
+						applyMetadataMutations(SpanID(), commitData, arena, Reference<ILogSystem>(), mutations,
 						                       /* pToCommit= */ nullptr, confChanges,
 						                       /* popVersion= */ 0, /* initialCommit= */ true);
 					}
