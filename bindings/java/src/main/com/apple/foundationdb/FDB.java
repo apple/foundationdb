@@ -85,7 +85,7 @@ public class FDB {
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
-	protected boolean enableDirectBufferQueries = false;
+	private boolean enableDirectBufferQueries = false;
 
 	private boolean useShutdownHook = true;
 	private Thread shutdownHook;
@@ -238,6 +238,16 @@ public class FDB {
 	 */
 	public void enableDirectBufferQuery(boolean enabled) {
 		enableDirectBufferQueries = enabled;
+	}
+
+	/**
+	 * Determines whether getRange() queries can use {@link DirectByteBuffer} from
+	 * {@link DirectBufferPool} to copy results.
+	 *
+	 * @return {@code true} if an enabled has been selected and {@code false} otherwise
+	 */
+	public boolean isDirectBufferQueriesEnabled() {
+		return enableDirectBufferQueries;
 	}
 
 	/**

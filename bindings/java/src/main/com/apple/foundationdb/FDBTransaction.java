@@ -373,7 +373,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 				Transaction_getRange(getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
 									 end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
 									 streamingMode, iteration, isSnapshot, reverse),
-				FDB.instance().enableDirectBufferQueries, executor);
+				FDB.instance().isDirectBufferQueriesEnabled(), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}

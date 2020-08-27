@@ -35,7 +35,7 @@ class DirectBufferPool {
 	// is always greater than the maximum size KV allowed by FDB.
 	// Current limits is :
 	//     10kB for key + 100kB for value + 1 int for count + 1 int for more + 2 int for KV size
-	static public final int MIN_BUFFER_SIZE = (10 + 100) * 1024 + Integer.BYTES * 4;
+	static public final int MIN_BUFFER_SIZE = (10 + 100) * 1000 + Integer.BYTES * 4;
 
 	static private final int DEFAULT_NUM_BUFFERS = 128;
 	static private final int DEFAULT_BUFFER_SIZE = 1024 * 512;
@@ -66,14 +66,14 @@ class DirectBufferPool {
 	}
 
 	/**
-	 * Requests a {@link #DirectByteBuffer} from our pool. Returns null if pool is empty.
+	 * Requests a {@link DirectByteBuffer} from our pool. Returns null if pool is empty.
 	 */
 	public synchronized ByteBuffer poll() {
 		return buffers.poll();
 	}
 
 	/**
-	 * Returns the {@link #DirectByteBuffer} that was borrowed from our pool. This
+	 * Returns the {@link DirectByteBuffer} that was borrowed from our pool. This
 	 * is non-blocking as it was borrowed from this pool.
 	 */
 	public synchronized void add(ByteBuffer buffer) {
