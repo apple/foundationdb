@@ -51,8 +51,10 @@ class DirectBufferPool {
 		return __instance;
 	}
 
-	// Resizes buffer pool given number and size. Throws OutOfMemory exception
-	// if unable to allocate as asked.
+	/**
+	 * Resizes buffer pool with given capacity and buffer size. Throws OutOfMemory exception
+	 * if unable to allocate as asked.
+	 */
 	public synchronized void resize(int newPoolSize, int bufferSize) {
 		if (bufferSize < MIN_BUFFER_SIZE) {
 			throw new IllegalArgumentException("'bufferSize' must be at-least: " + MIN_BUFFER_SIZE + " bytes");
@@ -73,8 +75,7 @@ class DirectBufferPool {
 	}
 
 	/**
-	 * Returns the {@link DirectByteBuffer} that was borrowed from our pool. This
-	 * is non-blocking as it was borrowed from this pool.
+	 * Returns the {@link DirectByteBuffer} that was borrowed from our pool.
 	 */
 	public synchronized void add(ByteBuffer buffer) {
 		if (buffer.capacity() != currentBufferCapacity) {
