@@ -87,6 +87,7 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
+  SpanContextMessage.h
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
@@ -127,6 +128,7 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBUpgrade.actor.cpp
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
+  workloads/Basic.actor.cpp
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp

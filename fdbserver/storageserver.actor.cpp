@@ -43,6 +43,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -2847,6 +2848,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 				}
+				else if (SpanContextMessage::isNextIn(cloneReader)) {
+					SpanContextMessage scm;
+					cloneReader >> scm;
+					// TODO: Set span context state here
+				}
 				else {
 					MutationRef msg;
 					cloneReader >> msg;
@@ -2939,6 +2945,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				data->logProtocol = rd.protocolVersion();
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
+			}
+			else if (SpanContextMessage::isNextIn(rd)) {
+				SpanContextMessage scm;
+				rd >> scm;
+				// TODO: Set span context state here
 			}
 			else {
 				MutationRef msg;

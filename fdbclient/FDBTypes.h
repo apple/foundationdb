@@ -129,9 +129,11 @@ enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
 	StringRef message;
+	// SpanID spanContext;
 	VectorRef<Tag> tags;
 
 	TagsAndMessage() {}
+	// TagsAndMessage(SpanID spanContext) : spanContext(spanContext) {}
 	TagsAndMessage(StringRef message, VectorRef<Tag> tags) : message(message), tags(tags) {}
 
 	// Loads tags and message from a serialized buffer. "rd" is checkpointed at

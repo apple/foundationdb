@@ -61,8 +61,9 @@ struct VersionedMessage {
 
 		ArenaReader reader(arena, message, AssumeVersion(currentProtocolVersion));
 
-		// Return false for LogProtocolMessage.
+		// Return false for metadata messages LogProtocolMessage and SpanContextMessage.
 		if (LogProtocolMessage::isNextIn(reader)) return false;
+		if (SpanContextMessage::isNextIn(reader)) return false;
 
 		reader >> *m;
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;

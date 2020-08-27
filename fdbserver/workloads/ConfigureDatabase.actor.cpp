@@ -31,7 +31,7 @@ static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1
 static const char* logTypes[] = {
 	"log_engine:=1", "log_engine:=2",
 	"log_spill:=1", "log_spill:=2",
-	"log_version:=2", "log_version:=3", "log_version:=4"
+	"log_version:=2", "log_version:=3", "log_version:=4", "log_version:=5"
 };
 static const char* redundancies[] = { "single", "double", "triple" };
 static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };

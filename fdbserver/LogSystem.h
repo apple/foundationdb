@@ -24,6 +24,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -828,6 +829,18 @@ struct CompareFirst {
 	}
 };
 
+// Structure to store serialized mutations sent from the proxy to the
+// transaction logs. The serialization repeats with the following format:
+//
+// +----------------------+ +----------------------+ +----------+ +----------------+         +----------------------+
+// |     Message size     | |      Subsequence     | | # of tags| |      Tag       | . . . . |       Mutation       |
+// +----------------------+ +----------------------+ +----------+ +----------------+         +----------------------+
+// <------- 32 bits ------> <------- 32 bits ------> <- 16 bits-> <---- 24 bits --->         <---- variable bits --->
+//
+// `Mutation` can be a serialized MutationRef or a special metadata message
+// such as LogProtocolMessage or SpanContextMessage. The type of `Mutation` is
+// uniquely identified by its first byte -- a value from MutationRef::Type.
+//
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
@@ -859,7 +872,14 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
+	// Add transaction info to be written before the first mutation in the transaction.
+	void addTransactionInfo(SpanID const& context) {
+		spanContext = context;
+		transactionSubseq = 0;
+		writtenLocations.clear();
+	}
+
+	void writeMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			if(logSystem->hasRemoteLogs()) {
@@ -875,15 +895,16 @@ struct LogPushData : NonCopyable {
 		uint32_t subseq = this->subsequence++;
 		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
-			messagesWriter[loc] << msgsize << subseq << uint16_t(prev_tags.size());
+			BinaryWriter& wr = messagesWriter[loc];
+			wr << msgsize << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
-				messagesWriter[loc] << tag;
-			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
+				wr << tag;
+			wr.serializeBytes(rawMessageWithoutLength);
 		}
 	}
 
 	template <class T>
-	void addTypedMessage(T const& item, bool allLocations = false) {
+	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false) {
 		prev_tags.clear();
 		if(logSystem->hasRemoteLogs()) {
 			prev_tags.push_back( logSystem->getRandomRouterTag() );
@@ -895,12 +916,31 @@ struct LogPushData : NonCopyable {
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
 		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
+
+		// Metadata messages should be written before span information. If this
+		// isn't a metadata message, make sure all locations have had
+		// transaction info written to them. Mutations may have different sets
+		// of tags, so it is necessary to check all tag locations each time a
+		// mutation is written.
+		if (!metadataMessage) {
+			// If span information hasn't been written for this transaction yet,
+			// generate a subsequence value for the message.
+			if (!transactionSubseq) {
+				transactionSubseq = this->subsequence++;
+			}
+
+			for (int loc : msg_locations) {
+				writeTransactionInfo(loc);
+			}
+		}
+
 		uint32_t subseq = this->subsequence++;
 		bool first = true;
 		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
+			BinaryWriter& wr = messagesWriter[loc];
+
 			if (first) {
-				BinaryWriter& wr = messagesWriter[loc];
 				firstOffset = wr.getLength();
 				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 				for(auto& tag : prev_tags)
@@ -911,7 +951,6 @@ struct LogPushData : NonCopyable {
 				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
 				first = false;
 			} else {
-				BinaryWriter& wr = messagesWriter[loc];
 				BinaryWriter& from = messagesWriter[msg_locations[0]];
 				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
 			}
@@ -929,7 +968,37 @@ private:
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
+	// Stores message locations that have had span information written to them
+	// for the current transaction. Adding transaction info will reset this
+	// field.
+	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
+	// Store transaction subsequence separately, as multiple mutations may need
+	// to write transaction info. This can happen if later mutations in a
+	// transaction need to write to a different location than earlier
+	// mutations.
+	uint32_t transactionSubseq;
+	SpanID spanContext;
+
+	// Writes transaction info to the message stream for the given location if
+	// it has not already been written (for the current transaction).
+	void writeTransactionInfo(int location) {
+		if (writtenLocations.count(location) == 0) {
+			writtenLocations.insert(location);
+
+			BinaryWriter& wr = messagesWriter[location];
+			SpanContextMessage contextMessage(spanContext);
+
+			int offset = wr.getLength();
+			wr << uint32_t(0) << transactionSubseq << uint16_t(prev_tags.size());
+			for(auto& tag : prev_tags)
+				wr << tag;
+			wr << contextMessage;
+			int length = wr.getLength() - offset;
+			*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
+		}
+	}
+
 };
 
 #endif
