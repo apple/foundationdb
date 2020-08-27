@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Release Notes &#8212; FoundationDB 6.2</title>
+    
+    <link rel="stylesheet" href="../_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    '../',
+        VERSION:     '6.2.24',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="../_static/jquery.js"></script>
+    <script type="text/javascript" src="../_static/underscore.js"></script>
+    <script type="text/javascript" src="../_static/doctools.js"></script>
+    <script type="text/javascript" src="../_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="../_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="../_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="../_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Release Notes" href="release-notes-200.html" />
+    <link rel="prev" title="Release Notes" href="release-notes-023.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="../index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>6.2</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="../contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="../index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id1">1.0.1</a></li>
+<li><a class="reference internal" href="#id2">1.0.0</a><ul>
+<li><a class="reference internal" href="#java">Java</a></li>
+<li><a class="reference internal" href="#python">Python</a></li>
+<li><a class="reference internal" href="#node-and-ruby">Node and Ruby</a></li>
+<li><a class="reference internal" href="#all">All</a></li>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="release-notes-023.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="release-notes-200.html" title="Next Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Release Notes &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="../search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Release Notes</a><ul>
+<li><a class="reference internal" href="#id1">1.0.1</a></li>
+<li><a class="reference internal" href="#id2">1.0.0</a><ul>
+<li><a class="reference internal" href="#java">Java</a></li>
+<li><a class="reference internal" href="#python">Python</a></li>
+<li><a class="reference internal" href="#node-and-ruby">Node and Ruby</a></li>
+<li><a class="reference internal" href="#all">All</a></li>
+<li><a class="reference internal" href="#fixes">Fixes</a></li>
+<li><a class="reference internal" href="#earlier-release-notes">Earlier release notes</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="release-notes">
+<h1>Release Notes</h1>
+<div class="section" id="id1">
+<h2>1.0.1</h2>
+<ul class="simple">
+<li>Fix segmentation fault in client when there are a very large number of dependent operations in a transaction and certain errors occur.</li>
+</ul>
+</div>
+<div class="section" id="id2">
+<h2>1.0.0</h2>
+<p>After a year and a half of Alpha and Beta testing, FoundationDB is now commercially available. Thanks to the help of the thousands of Alpha and Beta testers in our community, we believe that this release is highly robust and capable.</p>
+<p>You can now find pricing and order enterprise licenses online.</p>
+<p>The new Community License now permits free-of-charge use for production systems with up to 6 server processes and for non-production systems with an unlimited number of processes.</p>
+<p>There are only minor technical differences between this release and the 0.3.0 release of August 7, 2013:</p>
+<div class="section" id="java">
+<h3>Java</h3>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">clear(Range)</span></code> replaces the now deprecated <code class="docutils literal"><span class="pre">clearRangeStartsWith()</span></code>.</li>
+</ul>
+</div>
+<div class="section" id="python">
+<h3>Python</h3>
+<ul class="simple">
+<li>Windows installer supports Python 3.</li>
+</ul>
+</div>
+<div class="section" id="node-and-ruby">
+<h3>Node and Ruby</h3>
+<ul class="simple">
+<li>String option parameters are converted to UTF-8.</li>
+</ul>
+</div>
+<div class="section" id="all">
+<h3>All</h3>
+<ul class="simple">
+<li>API version updated to 100. See the <a class="reference internal" href="../api-version-upgrade-guide.html#api-version-upgrade-guide-100"><span class="std std-ref">API version upgrade guide</span></a> for upgrade details.</li>
+<li>Runs on Mac OS X 10.7.</li>
+<li>Improvements to installation packages, including package paths and directory modes.</li>
+<li>Eliminated cases of excessive resource usage in the locality API.</li>
+<li>Watches are disabled when read-your-writes functionality is disabled.</li>
+<li>Fatal error paths now call <code class="docutils literal"><span class="pre">_exit()</span></code> instead instead of <code class="docutils literal"><span class="pre">exit()</span></code>.</li>
+</ul>
+</div>
+<div class="section" id="fixes">
+<h3>Fixes</h3>
+<ul class="simple">
+<li>A few Python API entry points failed to respect the <code class="docutils literal"><span class="pre">as_foundationdb_key()</span></code> convenience interface.</li>
+<li><code class="docutils literal"><span class="pre">fdbcli</span></code> could print commit version numbers incorrectly in Windows.</li>
+<li>Multiple watches set on the same key were not correctly triggered by a subsequent write in the same transaction.</li>
+</ul>
+</div>
+<div class="section" id="earlier-release-notes">
+<h3>Earlier release notes</h3>
+<ul class="simple">
+<li><a class="reference internal" href="release-notes-023.html"><span class="doc">Beta 3 (API Version 23)</span></a></li>
+<li><a class="reference internal" href="release-notes-022.html"><span class="doc">Beta 2 (API Version 22)</span></a></li>
+<li><a class="reference internal" href="release-notes-021.html"><span class="doc">Beta 1 (API Version 21)</span></a></li>
+<li><a class="reference internal" href="release-notes-016.html"><span class="doc">Alpha 6 (API Version 16)</span></a></li>
+<li><a class="reference internal" href="release-notes-014.html"><span class="doc">Alpha 5 (API Version 14)</span></a></li>
+</ul>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="../_sources/release-notes/release-notes-100.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Aug 25, 2020.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

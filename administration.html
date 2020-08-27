@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.19',
+        VERSION:     '6.2.24',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -103,6 +103,7 @@
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
 <li><a class="reference internal" href="#machine-readable-status">Machine-readable status</a></li>
+<li><a class="reference internal" href="#server-side-latency-band-tracking">Server-side latency band tracking</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -199,6 +200,7 @@
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
 <li><a class="reference internal" href="#machine-readable-status">Machine-readable status</a></li>
+<li><a class="reference internal" href="#server-side-latency-band-tracking">Server-side latency band tracking</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#fdbmonitor-and-fdbserver"><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></a></li>
@@ -798,6 +800,69 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 </tbody>
 </table>
 </div>
+<div class="section" id="server-side-latency-band-tracking">
+<h3>Server-side latency band tracking</h3>
+<p>As part of the status document, <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> provides some sampled latency metrics obtained by running probe transactions internally. While this can often be useful, it does not necessarily reflect the distribution of latencies for requests originated by clients.</p>
+<p>FoundationDB additionally provides optional functionality to measure the latencies of all incoming get read version (GRV), read, and commit requests and report some basic details about those requests. The latencies are measured from the time the server receives the request to the point when it replies, and will therefore not include time spent in transit between the client and server or delays in the client process itself.</p>
+<p>The latency band tracking works by configuring various latency thresholds and counting the number of requests that occur in each band (i.e. between two consecutive thresholds). For example, if you wanted to define a service-level objective (SLO) for your cluster where 99.9% of read requests were answered within N seconds, you could set a read latency threshold at N. You could then count the number of requests below and above the threshold and determine whether the required percentage of requests are answered sufficiently quickly.</p>
+<p>Configuration of server-side latency bands is performed by setting the <code class="docutils literal"><span class="pre">\xff\x02/latencyBandConfig</span></code> key to a string encoding the following JSON document:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">{</span>
+  <span class="s2">&quot;get_read_version&quot;</span> <span class="p">:</span> <span class="p">{</span>
+    <span class="s2">&quot;bands&quot;</span> <span class="p">:</span> <span class="p">[</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">]</span>
+  <span class="p">},</span>
+  <span class="s2">&quot;read&quot;</span> <span class="p">:</span> <span class="p">{</span>
+    <span class="s2">&quot;bands&quot;</span> <span class="p">:</span> <span class="p">[</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">],</span>
+    <span class="s2">&quot;max_key_selector_offset&quot;</span> <span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
+    <span class="s2">&quot;max_read_bytes&quot;</span> <span class="p">:</span> <span class="mi">1000000</span>
+  <span class="p">},</span>
+  <span class="s2">&quot;commit&quot;</span> <span class="p">:</span> <span class="p">{</span>
+    <span class="s2">&quot;bands&quot;</span> <span class="p">:</span> <span class="p">[</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">],</span>
+    <span class="s2">&quot;max_commit_bytes&quot;</span> <span class="p">:</span> <span class="mi">1000000</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Every field in this configuration is optional, and any missing fields will be left unset (i.e. no bands will be tracked or limits will not apply). The configuration takes the following arguments:</p>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">bands</span></code> - a list of thresholds (in seconds) to be measured for the given request type (<code class="docutils literal"><span class="pre">get_read_version</span></code>, <code class="docutils literal"><span class="pre">read</span></code>, or <code class="docutils literal"><span class="pre">commit</span></code>)</li>
+<li><code class="docutils literal"><span class="pre">max_key_selector_offset</span></code> - an integer specifying the maximum key selector offset a read request can have and still be counted</li>
+<li><code class="docutils literal"><span class="pre">max_read_bytes</span></code> - an integer specifying the maximum size in bytes of a read response that will be counted</li>
+<li><code class="docutils literal"><span class="pre">max_commit_bytes</span></code> - an integer specifying the maximum size in bytes of a commit request that will be counted</li>
+</ul>
+<p>Setting this configuration key to a value that changes the configuration will result in the cluster controller server process logging a <code class="docutils literal"><span class="pre">LatencyBandConfigChanged</span></code> event. This event will indicate whether a configuration is present or not using its <code class="docutils literal"><span class="pre">Present</span></code> field. Specifying an invalid configuration will result in the latency band feature being unconfigured, and the server process running the cluster controller will log a <code class="docutils literal"><span class="pre">InvalidLatencyBandConfiguration</span></code> trace event.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">GRV requests are counted only at default and immediate priority. Batch priority GRV requests are ignored for the purposes of latency band tracking.</p>
+</div>
+<p>When configured, the <code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> output will include additional fields to report the number of requests in each latency band located at <code class="docutils literal"><span class="pre">cluster.processes.&lt;ID&gt;.roles[N].*_latency_bands</span></code>:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="s2">&quot;grv_latency_bands&quot;</span> <span class="p">:</span> <span class="p">{</span>
+  <span class="mf">0.01</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+  <span class="mf">0.1</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+  <span class="n">inf</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+  <span class="n">filtered</span><span class="p">:</span> <span class="mi">0</span>
+<span class="p">},</span>
+<span class="s2">&quot;read_latency_bands&quot;</span> <span class="p">:</span> <span class="p">{</span>
+  <span class="mf">0.01</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>
+  <span class="mf">0.1</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+  <span class="n">inf</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+  <span class="n">filtered</span><span class="p">:</span> <span class="mi">0</span>
+<span class="p">},</span>
+<span class="s2">&quot;commit_latency_bands&quot;</span> <span class="p">:</span> <span class="p">{</span>
+  <span class="mf">0.01</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+  <span class="mf">0.1</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
+  <span class="n">inf</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+  <span class="n">filtered</span><span class="p">:</span> <span class="mi">1</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal"><span class="pre">grv_latency_bands</span></code> and <code class="docutils literal"><span class="pre">commit_latency_bands</span></code> objects will only be logged for <code class="docutils literal"><span class="pre">proxy</span></code> roles, and <code class="docutils literal"><span class="pre">read_latency_bands</span></code> will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold.</p>
+<p>For example, <code class="docutils literal"><span class="pre">0.1:</span> <span class="pre">1</span></code> in <code class="docutils literal"><span class="pre">read_latency_bands</span></code> indicates that there has been 1 read request with a latency in the range <code class="docutils literal"><span class="pre">[0.01,</span> <span class="pre">0.1)</span></code>. For the smallest specified threshold, the lower bound is 0 (e.g. <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">0.01)</span></code> in the example above). Requests that took longer than any defined latency band will be reported in the <code class="docutils literal"><span class="pre">inf</span></code> (infinity) band. Requests that were filtered by the configuration (e.g. using <code class="docutils literal"><span class="pre">max_read_bytes</span></code>) are reported in the <code class="docutils literal"><span class="pre">filtered</span></code> category.</p>
+<p>Because each threshold reports latencies strictly in the range between the next lower threshold and itself, it may be necessary to sum up the counts for multiple bands to determine the total number of requests below a certain threshold.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">No history of request counts is recorded for processes that ran in the past. This includes the history prior to restart for a process that has been restarted, for which the counts get reset to 0. For this reason, it is recommended that you collect this information periodically if you need to be able to track requests from such processes.</p>
+</div>
+</div>
 </div>
 <div class="section" id="fdbmonitor-and-fdbserver">
 <span id="administration-fdbmonitor"></span><h2><code class="docutils literal"><span class="pre">fdbmonitor</span></code> and <code class="docutils literal"><span class="pre">fdbserver</span></code></h2>
@@ -923,13 +988,13 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.2.19-1_amd64.deb \
-foundationdb-server_6.2.19-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_6.2.24-1_amd64.deb \
+foundationdb-server_6.2.24-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.2.19-1.el7.x86_64.rpm \
-foundationdb-server-6.2.19-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.2.24-1.el7.x86_64.rpm \
+foundationdb-server-6.2.24-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -997,7 +1062,7 @@ foundationdb-server-6.2.19-1.el7.x86_64.rpm
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 08, 2020.<br/>
+      Last updated on Aug 25, 2020.<br/>
     </p>
   </div>
 </footer>

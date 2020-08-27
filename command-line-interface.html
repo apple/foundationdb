@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.19',
+        VERSION:     '6.2.24',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -99,12 +99,15 @@
 <li><a class="reference internal" href="#get">get</a></li>
 <li><a class="reference internal" href="#getrange">getrange</a></li>
 <li><a class="reference internal" href="#getrangekeys">getrangekeys</a></li>
+<li><a class="reference internal" href="#getversion">getversion</a></li>
+<li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#help">help</a><ul>
 <li><a class="reference internal" href="#help-escaping">help escaping</a></li>
 <li><a class="reference internal" href="#help-options">help options</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#include">include</a></li>
+<li><a class="reference internal" href="#lock">lock</a></li>
 <li><a class="reference internal" href="#option">option</a></li>
 <li><a class="reference internal" href="#reset">reset</a></li>
 <li><a class="reference internal" href="#rollback">rollback</a></li>
@@ -115,6 +118,7 @@
 <li><a class="reference internal" href="#status-json">status json</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#unlock">unlock</a></li>
 </ul>
 </li>
 </ul>
@@ -172,12 +176,15 @@
 <li><a class="reference internal" href="#get">get</a></li>
 <li><a class="reference internal" href="#getrange">getrange</a></li>
 <li><a class="reference internal" href="#getrangekeys">getrangekeys</a></li>
+<li><a class="reference internal" href="#getversion">getversion</a></li>
+<li><a class="reference internal" href="#advanceversion">advanceversion</a></li>
 <li><a class="reference internal" href="#help">help</a><ul>
 <li><a class="reference internal" href="#help-escaping">help escaping</a></li>
 <li><a class="reference internal" href="#help-options">help options</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#include">include</a></li>
+<li><a class="reference internal" href="#lock">lock</a></li>
 <li><a class="reference internal" href="#option">option</a></li>
 <li><a class="reference internal" href="#reset">reset</a></li>
 <li><a class="reference internal" href="#rollback">rollback</a></li>
@@ -188,6 +195,7 @@
 <li><a class="reference internal" href="#status-json">status json</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#unlock">unlock</a></li>
 </ul>
 </li>
 </ul>
@@ -315,6 +323,14 @@ fdb&gt;
 <p>The <code class="docutils literal"><span class="pre">getrangekeys</span></code> command fetches keys in a range. Its syntax is <code class="docutils literal"><span class="pre">getrangekeys</span> <span class="pre">&lt;BEGINKEY&gt;</span> <span class="pre">[ENDKEY]</span> <span class="pre">[LIMIT]</span></code>. It displays up to <code class="docutils literal"><span class="pre">&lt;LIMIT&gt;</span></code> keys for keys between <code class="docutils literal"><span class="pre">&lt;BEGINKEY&gt;</span></code> (inclusive) and <code class="docutils literal"><span class="pre">&lt;ENDKEY&gt;</span></code> (exclusive). If <code class="docutils literal"><span class="pre">&lt;ENDKEY&gt;</span></code> is omitted, then the range will include all keys starting with <code class="docutils literal"><span class="pre">&lt;BEGINKEY&gt;</span></code>. <code class="docutils literal"><span class="pre">&lt;LIMIT&gt;</span></code> defaults to 25 if omitted.</p>
 <p>Note that <a class="reference internal" href="#cli-escaping"><span class="std std-ref">characters can be escaped</span></a> when specifying keys (or values) in <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
 </div>
+<div class="section" id="getversion">
+<h3>getversion</h3>
+<p>The <code class="docutils literal"><span class="pre">getversion</span></code> command fetches the current read version of the cluster or currently running transaction.</p>
+</div>
+<div class="section" id="advanceversion">
+<h3>advanceversion</h3>
+<p>Forces the cluster to recover at the specified version. If the specified version is larger than the current version of the cluster, the cluster version is advanced to the specified version via a forced recovery.</p>
+</div>
 <div class="section" id="help">
 <h3>help</h3>
 <p>The <code class="docutils literal"><span class="pre">help</span></code> command provides information on specific commands. Its syntax is <code class="docutils literal"><span class="pre">help</span> <span class="pre">&lt;TOPIC&gt;</span></code>, where <code class="docutils literal"><span class="pre">&lt;TOPIC&gt;</span></code> is any of the commands in this section, <code class="docutils literal"><span class="pre">escaping</span></code>, or <code class="docutils literal"><span class="pre">options</span></code>. The latter two topics are described below:</p>
@@ -348,6 +364,10 @@ fdb&gt;
 <p>If <code class="docutils literal"><span class="pre">all</span></code> is specified, the excluded servers list is cleared.</p>
 <p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code>, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all <code class="docutils literal"><span class="pre">IP:*</span></code> exclusion entries).</p>
 <p>For information on adding machines to a cluster, see <a class="reference internal" href="administration.html#adding-machines-to-a-cluster"><span class="std std-ref">Adding machines to a cluster</span></a>.</p>
+</div>
+<div class="section" id="lock">
+<h3>lock</h3>
+<p>The <code class="docutils literal"><span class="pre">lock</span></code> command locks the database with a randomly generated lockUID.</p>
 </div>
 <div class="section" id="option">
 <h3>option</h3>
@@ -390,6 +410,10 @@ print cluster statistics.</p>
 <p><code class="docutils literal"><span class="pre">status</span> <span class="pre">json</span></code> will provide the cluster status in its JSON format. For a detailed description of this format, see <a class="reference internal" href="mr-status.html"><span class="doc">Machine-Readable Status</span></a>.</p>
 </div>
 </div>
+<div class="section" id="unlock">
+<h3>unlock</h3>
+<p>The <code class="docutils literal"><span class="pre">unlock</span></code> command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.</p>
+</div>
 </div>
 </div>
 
@@ -413,7 +437,7 @@ print cluster statistics.</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 08, 2020.<br/>
+      Last updated on Aug 25, 2020.<br/>
     </p>
   </div>
 </footer>
