@@ -244,7 +244,7 @@ public class FDB {
 	 * Determines whether getRange() queries can use {@link DirectByteBuffer} from
 	 * {@link DirectBufferPool} to copy results.
 	 *
-	 * @return {@code true} if direct buffer queues have been enabled and {@code false} otherwise
+	 * @return {@code true} if direct buffer queries have been enabled and {@code false} otherwise
 	 */
 	public boolean isDirectBufferQueriesEnabled() {
 		return enableDirectBufferQueries;
