@@ -1057,12 +1057,6 @@ Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransa
 					error += "        Do not include the `:tls' suffix when naming a process\n";
 				errorMsg = ManagementAPIError::toJsonString(false, "setclass", error);
 				return errorMsg;
-			} else if (addr.isWholeMachine()) {
-				std::string error = "ERROR: \'" + address.toString() +
-				                    "\' is a whole machine address which we do not support. Please apply the change on "
-				                    "each process individually\n";
-				errorMsg = ManagementAPIError::toJsonString(false, "setclass", error);
-				return errorMsg;
 			}
 			// validate class type
 			ValueRef processClassType = entry.second.get();
