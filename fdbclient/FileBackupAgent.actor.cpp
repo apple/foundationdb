@@ -3552,6 +3552,7 @@ namespace fileBackup {
 			// Apply range data and log data in order
 			wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
+			wait(taskBucket->finish(tr, task));
 			state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
 			wait(success(logsOnly));
 			if (logsOnly.isReady() && logsOnly.get().present() && logsOnly.get().get()) {
@@ -3560,7 +3561,6 @@ namespace fileBackup {
 				Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
 				wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
 			}
-			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -4496,8 +4496,8 @@ public:
 		if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
 
-		if (targetVersion == invalidVersion && incrementalBackupOnly && desc.maxLogEnd.present()) {
-			targetVersion = desc.maxLogEnd.get();
+		if (targetVersion == invalidVersion && incrementalBackupOnly && desc.contiguousLogEnd.present()) {
+			targetVersion = desc.contiguousLogEnd.get() - 1;
 		}
 
 		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly));

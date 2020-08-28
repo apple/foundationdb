@@ -54,18 +54,30 @@ struct IncrementalBackupWorkload : TestWorkload {
 	virtual Future<bool> check(Database const& cx) { return true; }
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
+        // Add a commit both before the submit and restore to test that incremental backup
+        // can be performed on non-empty database
 		if (self->submitOnly) {
 			Standalone<VectorRef<KeyRangeRef>> backupRanges;
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-			wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
-			                                    false, true));
+            TraceEvent("IBackupSubmitAttempt");
+            try {
+                wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
+                                                    false, true));
+            } catch (Error& e) {
+                if (e.code() != error_code_backup_duplicate) {
+                    throw;
+                }
+            }
+            TraceEvent("IBackupSubmitSuccess");
 		}
 		if (self->restoreOnly) {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
+            TraceEvent("IBackupRestoreAttempt");
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
 			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
 			                                       true, -1, true, normalKeys, Key(), Key(), true, true)));
+            TraceEvent("IBackupRestoreSuccess");
 		}
 		return Void();
 	}
