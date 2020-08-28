@@ -221,6 +221,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		}
 
 		TraceEvent("FastRestoreVersionBatchesSummary")
+		    .detail("VersionBatches", versionBatches.size())
 		    .detail("LogFiles", logFiles)
 		    .detail("RangeFiles", rangeFiles)
 		    .detail("LogBytes", logSize)
@@ -314,6 +315,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 						}
 					}
 				} else {
+					// TODO: Check why this may happen?!
 					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 					    .detail("RangeIndex", rangeIdx)
 					    .detail("RangeFiles", rangeFiles.size())

@@ -118,7 +118,7 @@ struct StagingKey {
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
 	void precomputeResult(const char* context, UID applierID, int batchIndex) {
-		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult", applierID)
+		TraceEvent(SevFRMutationInfo, "FastRestoreApplierPrecomputeResult", applierID)
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Context", context)
 		    .detail("Version", version.toString())

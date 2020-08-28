@@ -84,6 +84,7 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 			ASSERT(req.batchIndex <= self->batch.size()); // batchIndex starts from 1
 
 			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
+			ASSERT(batch.isValid());
 			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
 				req.reply.send(RestoreCommonReply(req.id));
 				continue;
@@ -164,7 +165,10 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 			break;
 		}
 
-		TraceEvent("FastRestoreController", controllerData->id()).detail("WorkerNode", workerInterf.first);
+		TraceEvent("FastRestoreController", controllerData->id())
+		    .detail("WorkerNode", workerInterf.first)
+		    .detail("NodeRole", role)
+		    .detail("NodeIndex", nodeIndex);
 		requests.emplace_back(workerInterf.first,
 		                      RestoreRecruitRoleRequest(controllerWorker->controllerInterf.get(), role, nodeIndex));
 		nodeIndex++;
