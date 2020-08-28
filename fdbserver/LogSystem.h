@@ -998,7 +998,6 @@ private:
 			*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
 		}
 	}
-
 };
 
 #endif

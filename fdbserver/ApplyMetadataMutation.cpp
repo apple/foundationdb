@@ -560,10 +560,10 @@ void applyMetadataMutations(SpanID const& spanContext, ProxyCommitData& proxyCom
 	}
 
 	applyMetadataMutations(spanContext, proxyCommitData.dbgid, arena, mutations, proxyCommitData.txnStateStore, toCommit,
-                           confChange, logSystem, popVersion, &proxyCommitData.vecBackupKeys, &proxyCommitData.keyInfo,
-                           &proxyCommitData.cacheInfo, uid_applyMutationsData, proxyCommitData.commit,
-                           proxyCommitData.cx, &proxyCommitData.committedVersion, &proxyCommitData.storageCache,
-                           &proxyCommitData.tag_popped, initialCommit);
+	                       confChange, logSystem, popVersion, &proxyCommitData.vecBackupKeys, &proxyCommitData.keyInfo,
+	                       &proxyCommitData.cacheInfo, uid_applyMutationsData, proxyCommitData.commit,
+	                       proxyCommitData.cx, &proxyCommitData.committedVersion, &proxyCommitData.storageCache,
+	                       &proxyCommitData.tag_popped, initialCommit);
 }
 
 void applyMetadataMutations(SpanID const& spanContext, const UID& dbgid, Arena& arena,
