@@ -295,7 +295,6 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
-
 	toCommit->addTransactionInfo(SpanID());
 
 	// Serialize the log range mutations within the map
