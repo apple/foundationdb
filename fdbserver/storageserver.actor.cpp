@@ -2777,6 +2777,7 @@ private:
 ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 {
 	state double start;
+	state Span span("SS:update"_loc);
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -2851,7 +2852,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				else if (SpanContextMessage::isNextIn(cloneReader)) {
 					SpanContextMessage scm;
 					cloneReader >> scm;
-					// TODO: Set span context state here
 				}
 				else {
 					MutationRef msg;
@@ -2949,7 +2949,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			else if (SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
-				// TODO: Set span context state here
+				span.addParent(scm.spanContext);
 			}
 			else {
 				MutationRef msg;

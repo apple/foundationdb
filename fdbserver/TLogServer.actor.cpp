@@ -1851,6 +1851,7 @@ ACTOR Future<Void> tLogCommit(
 		TLogCommitRequest req,
 		Reference<LogData> logData,
 		PromiseStream<Void> warningCollectorInput ) {
+	state Span span("TLog:tLogCommit"_loc, req.spanContext);
 	state Optional<UID> tlogDebugID;
 	if(req.debugID.present())
 	{

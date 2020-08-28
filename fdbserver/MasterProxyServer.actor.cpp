@@ -539,6 +539,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	state const int64_t localBatchNumber = self->localBatchNumber;
 	state const int latencyBucket = self->latencyBucket;
 	state const Optional<UID>& debugID = self->debugID;
+	state Span span("MP:preresolutionProcessing"_loc, self->span.context);
 
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
@@ -556,7 +557,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		);
 	}
 
-	GetCommitVersionRequest req(self->span.context, pProxyCommitData->commitVersionRequestNumber++,
+	GetCommitVersionRequest req(span.context, pProxyCommitData->commitVersionRequestNumber++,
 	                            pProxyCommitData->mostRecentProcessedRequestNumber, pProxyCommitData->dbgid);
 	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
 		pProxyCommitData->master.getCommitVersion.getReply(
@@ -595,13 +596,14 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// resolution processing but is still using CPU
 	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
+	state Span span("MP:getResolution"_loc, self->span.context);
 
 	ResolutionRequestBuilder requests(
 		pProxyCommitData,
 		self->commitVersion,
 		self->prevVersion,
 		pProxyCommitData->version,
-        self->span
+        span
 	);
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
@@ -969,6 +971,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
 	state const int64_t localBatchNumber = self->localBatchNumber;
 	state const Optional<UID>& debugID = self->debugID;
+	state Span span("MP:postResolution"_loc, self->span.context);
 
 	TEST(pProxyCommitData->latestLocalCommitBatchLogging.get() < localBatchNumber - 1); // Queuing post-resolution commit processing
 	wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
@@ -1021,7 +1024,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			// This should be *extremely* rare in the real world, but knob buggification should make it happen in simulation
 			TEST(true);  // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", pProxyCommitData->dbgid).detail("CommittedVersion", pProxyCommitData->committedVersion.get()).detail("NeedToCommit", commitVersion);
-			waitVersionSpan = Span(deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, {self->span.context});
+			waitVersionSpan = Span(deterministicRandom()->randomUniqueID(), "MP:overMaxReadTransactionLifeVersions"_loc, {span.context});
 			choose{
 				when(wait(pProxyCommitData->committedVersion.whenAtLeast(self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
 					wait(yield());
@@ -1071,7 +1074,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	self->loggingComplete = pProxyCommitData->logSystem->push( self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(), pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->span.context, self->debugID );
+	self->loggingComplete = pProxyCommitData->logSystem->push( self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(), pProxyCommitData->minKnownCommittedVersion, self->toCommit, span.context, self->debugID );
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber-1);
@@ -1093,6 +1096,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state Span span("MP:transactionLogging"_loc, self->span.context);
 
 	try {
 		choose {
@@ -1128,6 +1132,7 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 
 ACTOR Future<Void> reply(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state Span span("MP:reply"_loc, self->span.context);
 
 	const Optional<UID>& debugID = self->debugID;
 

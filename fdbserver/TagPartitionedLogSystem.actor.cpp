@@ -533,6 +533,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		vector<Future<Void>> quorumResults;
 		vector<Future<TLogCommitReply>> allReplies;
 		int location = 0;
+		Span span("TPLS:push"_loc, spanContext);
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
 				if(it->connectionResetTrackers.size() == 0) {
