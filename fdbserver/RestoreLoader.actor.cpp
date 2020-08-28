@@ -1246,16 +1246,19 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingLoadFileRequests")
 			    .detail("PendingRequest", self->loadingQueue.top().toString());
 			self->loadingQueue.pop();
+			ASSERT_WE_THINK(false); // Test if this can happen in smaller workload
 		}
 		while (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendRequests")
 			    .detail("PendingRequest", self->sendingQueue.top().toString());
 			self->sendingQueue.pop();
+			ASSERT_WE_THINK(false); // Test if this can happen in smaller workload
 		}
 		while (!self->sendLoadParamQueue.empty() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendLoadParamRequests")
 			    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
 			self->sendLoadParamQueue.pop();
+			ASSERT_WE_THINK(false); // Test if this can happen in smaller workload
 		}
 
 		self->finishedBatch.set(req.batchIndex);
