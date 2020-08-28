@@ -336,7 +336,7 @@ struct NetworkMetrics {
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
-	double lastZeroBusy;
+	double lastRunLoopBusyness;
 	std::vector<struct PriorityStats> starvationTrackers;
 
 	static const std::vector<int> starvationBins;
