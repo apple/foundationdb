@@ -289,15 +289,16 @@ public:
 	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true,
 	                        Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(),
-	                        Key removePrefix = Key(), bool lockDB = true, bool incrementalBackupOnly = false);
+	                        Key removePrefix = Key(), bool lockDB = true, bool incrementalBackupOnly = false,
+	                        Version beginVersion = -1);
 	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, bool waitForComplete = true,
 	                        Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys,
 	                        Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true,
-	                        bool incrementalBackupOnly = false) {
+	                        bool incrementalBackupOnly = false, Version beginVersion = -1) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
 		return restore(cx, cxOrig, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix,
-		               removePrefix, lockDB, incrementalBackupOnly);
+		               removePrefix, lockDB, incrementalBackupOnly, beginVersion);
 	}
 	Future<Version> atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix = Key(), Key removePrefix = Key());
 	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key()) {

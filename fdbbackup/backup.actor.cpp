@@ -135,6 +135,7 @@ enum {
 	OPT_PREFIX_REMOVE,
 	OPT_RESTORE_CLUSTERFILE_DEST,
 	OPT_RESTORE_CLUSTERFILE_ORIG,
+	OPT_RESTORE_BEGIN_VERSION,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -641,6 +642,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
 	{ OPT_WAITFORDONE,     "-w",               SO_NONE },
 	{ OPT_WAITFORDONE,     "--waitfordone",    SO_NONE },
+	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--version",        SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v",               SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -2123,7 +2125,10 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix, bool incrementalBackupOnly) {
+ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container,
+                              Standalone<VectorRef<KeyRangeRef>> ranges, Version beginVersion, Version targetVersion,
+                              std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone,
+                              std::string addPrefix, std::string removePrefix, bool incrementalBackupOnly) {
 	if(ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2179,9 +2184,9 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges,
-			                                                   waitForDone, targetVersion, verbose, KeyRef(addPrefix),
-			                                                   KeyRef(removePrefix), true, incrementalBackupOnly));
+			Version restoredVersion = wait(backupAgent.restore(
+			    db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose,
+			    KeyRef(addPrefix), KeyRef(removePrefix), true, incrementalBackupOnly, beginVersion));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -2960,6 +2965,7 @@ int main(int argc, char* argv[]) {
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		int maxErrors = 20;
+		Version beginVersion = invalidVersion;
 		Version restoreVersion = invalidVersion;
 		std::string restoreTimestamp;
 		bool waitForDone = false;
@@ -3247,6 +3253,17 @@ int main(int argc, char* argv[]) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
+					break;
+				}
+				case OPT_RESTORE_BEGIN_VERSION: {
+					const char* a = args->OptionArg();
+					long long ver = 0;
+					if (!sscanf(a, "%lld", &ver)) {
+						fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						return FDB_EXIT_ERROR;
+					}
+					beginVersion = ver;
 					break;
 				}
 				case OPT_RESTORE_VERSION: {
@@ -3753,7 +3770,9 @@ int main(int argc, char* argv[]) {
 
 			switch(restoreType) {
 				case RESTORE_START:
-					f = stopAfter( runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix, incrementalBackupOnly) );
+					f = stopAfter(runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys,
+				                             beginVersion, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay,
+				                             waitForDone, addPrefix, removePrefix, incrementalBackupOnly));
 					break;
 				case RESTORE_WAIT:
 					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );

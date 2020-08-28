@@ -75,6 +75,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state UID backupUID;
             TraceEvent("IBackupRestoreAttempt");
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+			// TODO: add testing scenario for atomics and beginVersion
 			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
 			                                       true, -1, true, normalKeys, Key(), Key(), true, true)));
             TraceEvent("IBackupRestoreSuccess");
