@@ -582,7 +582,7 @@ ACTOR Future<Standalone<RangeResultRef>> rwModuleGetRangeActor(ReadYourWritesTra
                                                                const SpecialKeyRangeRWImpl* impl, KeyRangeRef kr) {
 	state KeyRangeRef range = impl->getKeyRange();
 	Standalone<RangeResultRef> resultWithoutPrefix =
-	    wait(ryw->getRange(ryw->getDatabase()->specialKeySpace->decode(kr), CLIENT_KNOBS->TOO_MANY));
+	    wait(ryw->getTransaction().getRange(ryw->getDatabase()->specialKeySpace->decode(kr), CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
 	Standalone<RangeResultRef> result;
 	if (ryw->readYourWritesDisabled()) {
