@@ -1316,6 +1316,11 @@ namespace oldTLog_4_6 {
 			DUMPTOKEN( recruited.lock );
 			DUMPTOKEN( recruited.getQueuingMetrics );
 			DUMPTOKEN( recruited.confirmRunning );
+			DUMPTOKEN( recruited.waitFailure );
+			DUMPTOKEN( recruited.recoveryFinished );
+			DUMPTOKEN( recruited.disablePopRequest );
+			DUMPTOKEN( recruited.enablePopRequest );
+			DUMPTOKEN( recruited.snapRequest );
 
 			logData = Reference<LogData>( new LogData(self, recruited) );
 			logData->stopped = true;

@@ -2125,6 +2125,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.lock );
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
+		DUMPTOKEN( recruited.waitFailure );
+		DUMPTOKEN( recruited.recoveryFinished );
+		DUMPTOKEN( recruited.disablePopRequest );
+		DUMPTOKEN( recruited.enablePopRequest );
+		DUMPTOKEN( recruited.snapRequest );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], id_txsTags[id1], UID(), std::vector<Tag>(), "Restored") );
@@ -2292,6 +2297,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	DUMPTOKEN( recruited.lock );
 	DUMPTOKEN( recruited.getQueuingMetrics );
 	DUMPTOKEN( recruited.confirmRunning );
+	DUMPTOKEN( recruited.waitFailure );
+	DUMPTOKEN( recruited.recoveryFinished );
+	DUMPTOKEN( recruited.disablePopRequest );
+	DUMPTOKEN( recruited.enablePopRequest );
+	DUMPTOKEN( recruited.snapRequest );
 
 	for(auto it : self->id_data) {
 		if( !it.second->stopped ) {
