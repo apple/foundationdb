@@ -7242,6 +7242,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	    pagerMemoryOnly ? 2e9 : (BUGGIFY ? deterministicRandom()->randomInt(1, 10 * pageSize) : 0);
 	state Version versionIncrement = deterministicRandom()->randomInt64(1, 1e8);
 	state Version remapCleanupWindow = deterministicRandom()->randomInt64(0, versionIncrement * 50);
+	state int maxVerificationMapEntries = 300e3;
 
 	printf("\n");
 	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
@@ -7260,6 +7261,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%" PRId64, cacheSizeBytes).c_str());
 	printf("versionIncrement: %" PRId64 "\n", versionIncrement);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
+	printf("maxVerificationMapEntries: %d\n", maxVerificationMapEntries);
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
@@ -7297,7 +7299,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
 
-	while (totalPageOps < targetPageOps) {
+	while (totalPageOps < targetPageOps && written.size() < maxVerificationMapEntries) {
 		// Sometimes increment the version
 		if (deterministicRandom()->random01() < 0.10) {
 			++version;
@@ -7392,8 +7394,8 @@ TEST_CASE("!/redwood/correctness/btree") {
 			keys.insert(kv.key);
 		}
 
-		// Commit at end or after this commit's mutation bytes are reached
-		if (totalPageOps >= targetPageOps || mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
+		// Commit after any limits for this commit or the total test are reached
+		if (totalPageOps >= targetPageOps || written.size() >= maxVerificationMapEntries || mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
 			// Wait for previous commit to finish
 			wait(commit);
 			printf("Committed.  Next commit %d bytes, %" PRId64 " bytes.", mutationBytesThisCommit, mutationBytes.get());
@@ -7414,7 +7416,9 @@ TEST_CASE("!/redwood/correctness/btree") {
 			commit = map(btree->commit(), [=,&ops=totalPageOps](Void) {
 				// Update pager ops before clearing metrics
 				ops += g_redwoodMetrics.pageOps();
-				printf("PageOps %" PRId64 "/%" PRId64 " (%.2f%%)\n", ops, targetPageOps, ops * 100.0 / targetPageOps);
+				printf("PageOps %" PRId64 "/%" PRId64 " (%.2f%%) VerificationMapEntries %d/%d (%.2f%%)\n",
+					ops, targetPageOps, ops * 100.0 / targetPageOps,
+					written.size(), maxVerificationMapEntries, written.size() * 100.0 / maxVerificationMapEntries);
 				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 				// Notify the background verifier that version is committed and therefore readable
