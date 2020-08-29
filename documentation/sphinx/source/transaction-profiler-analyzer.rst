@@ -37,7 +37,7 @@ Sample usage
 
 * ``$python3 transaction_profiling_analyzer.py --help`` - Shows the help message and exits
  
-* ``python3 transaction_profiling_analyzer.py -C fdb.cluster --start-time "17:00 2020/07/07 PDT" --end-time "17:50 2020/07/07 PDT"`` - Analyses and prints full information between a start and end time frame
+* ``python3 transaction_profiling_analyzer.py -C fdb.cluster --start-time "17:00 2020/07/07 PDT" --end-time "17:50 2020/07/07 PDT"`` - Analyzes and prints full information between a start and end time frame
  
 Using filters:
 ==============
