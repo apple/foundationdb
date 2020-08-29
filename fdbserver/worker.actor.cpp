@@ -1258,6 +1258,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
+					DUMPTOKEN(recruited.reportCommitCostEstimation);
 
 					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
 					errorForwarders.add(

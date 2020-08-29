@@ -45,6 +45,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ProxyCommitData.actor.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
@@ -53,6 +54,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/Trace.h"
 #include "flow/Tracing.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -796,6 +798,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			continue;
 		}
 
+		state bool checkSample = trs[self->transactionNum].commitCostEstimation.present();
+		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
 		state int mutationNum = 0;
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
 		for (; mutationNum < pMutations->size(); mutationNum++) {
@@ -817,6 +821,25 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 			if (isSingleKeyMutation((MutationRef::Type) m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
+
+				// sample single key mutation based on cost
+				// the expectation of sampling is every COMMIT_SAMPLE_COST sample once
+				if (checkSample) {
+					double totalCosts = trCost->get().writeCosts;
+					double cost = getWriteOperationCost(m.expectedSize());
+					double mul = std::max(1.0, totalCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST));
+					ASSERT(totalCosts > 0);
+					double prob = mul * cost / totalCosts;
+
+					if (deterministicRandom()->random01() < prob) {
+						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
+							auto id = ssInfo->interf.id();
+							// scale cost
+							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
+							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, cost);
+						}
+					}
+				}
 
 				if(pProxyCommitData->singleKeyMutationEvent->enabled) {
 					KeyRangeRef shard = pProxyCommitData->keyInfo.rangeContaining(m.param1).range();
@@ -846,6 +869,17 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
+
+					// check whether clear is sampled
+					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
+					    trCost->get().clearIdxCosts[0].first == mutationNum) {
+						for (const auto& ssInfo : ranges.begin().value().src_info) {
+							auto id = ssInfo->interf.id();
+							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m,
+							                                  trCost->get().clearIdxCosts[0].second);
+						}
+						trCost->get().clearIdxCosts.pop_front();
+					}
 				}
 				else {
 					TEST(true); //A clear range extends past a shard boundary
@@ -853,6 +887,17 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					for (auto r : ranges) {
 						r.value().populateTags();
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
+
+						// check whether clear is sampled
+						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
+						    trCost->get().clearIdxCosts[0].first == mutationNum) {
+							for (const auto& ssInfo : r.value().src_info) {
+								auto id = ssInfo->interf.id();
+								pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m,
+								                                  trCost->get().clearIdxCosts[0].second);
+							}
+							trCost->get().clearIdxCosts.pop_front();
+						}
 					}
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m).detail("Dbgid", pProxyCommitData->dbgid).detail("To", allSources).detail("Mutation", m);
 
@@ -900,6 +945,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					}
 				}
 			}
+		}
+
+		if (checkSample) {
+			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
+			    trs[self->transactionNum].commitCostEstimation.get().expensiveCostEstCount;
 		}
 	}
 
@@ -1118,15 +1168,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
 			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
-
-			// aggregate commit cost estimation if committed
-			ASSERT(tr.commitCostEstimation.present() == tr.tagSet.present());
-			if (tr.tagSet.present()) {
-				TransactionCommitCostEstimation& costEstimation = tr.commitCostEstimation.get();
-				for (auto& tag : tr.tagSet.get()) {
-					pProxyCommitData->transactionTagCommitCostEst[tag] += costEstimation;
-				}
-			}
 		}
 		else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
@@ -1219,6 +1260,7 @@ ACTOR Future<Void> commitBatch(
 
 	context.pProxyCommitData->lastVersionTime = context.startTime;
 	++context.pProxyCommitData->stats.commitBatchIn;
+	context.setupTraceBatch();
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
@@ -1377,8 +1419,14 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
-				ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
-				if ( reply.isError() ) {
+				if (!db->get().distributor.present()) {
+					req.reply.sendError(dd_not_found());
+					continue;
+				}
+				ErrorOr<GetDataDistributorMetricsReply> reply =
+				    wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(
+				        GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
+				if (reply.isError()) {
 					req.reply.sendError(reply.getError());
 				} else {
 					GetDDMetricsReply newReply;
@@ -1492,7 +1540,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 		// send a snap request to DD
 		if (!commitData->db->get().distributor.present()) {
 			TraceEvent(SevWarnAlways, "DataDistributorNotPresent").detail("Operation", "SnapRequest");
-			throw operation_failed();
+			throw dd_not_found();
 		}
 		state Future<ErrorOr<Void>> ddSnapReq =
 			commitData->db->get().distributor.get().distributorSnapReq.tryGetReply(DistributorSnapRequest(snapReq.snapPayload, snapReq.snapUID));
@@ -1549,6 +1597,38 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	TraceEvent("SafetyCheckMasterProxyFinish");
 	req.reply.send(reply);
 	return Void();
+}
+
+ACTOR Future<Void> reportTxnTagCommitCost(UID myID, Reference<AsyncVar<ServerDBInfo>> db,
+                                          UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<Void> nextReply = Never();
+	if (db->get().ratekeeper.present()) nextRequestTimer = Void();
+	loop choose {
+		when(wait(db->onChange())) {
+			if (db->get().ratekeeper.present()) {
+				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
+				nextRequestTimer = Void();
+			} else {
+				TraceEvent("ProxyRatekeeperDied", myID);
+				nextRequestTimer = Never();
+			}
+		}
+		when(wait(nextRequestTimer)) {
+			nextRequestTimer = Never();
+			if (db->get().ratekeeper.present()) {
+				nextReply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
+				    ReportCommitCostEstimationRequest(*ssTrTagCommitCost)));
+			} else {
+				nextReply = Never();
+			}
+		}
+		when(wait(nextReply)) {
+			nextReply = Never();
+			ssTrTagCommitCost->clear();
+			nextRequestTimer = delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY);
+		}
+	}
 }
 
 ACTOR Future<Void> masterProxyServerCore(
@@ -1612,6 +1692,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
+	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

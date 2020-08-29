@@ -257,10 +257,9 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 						tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
 					}
 				}
-				reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
-					GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter,
-									   TransactionTagMap<TransactionCommitCostEstimation>(), detailed)));
-				transactionTagCounter->clear();
+			    reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(
+			        myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter, detailed)));
+			    transactionTagCounter->clear();
 				expectingDetailedReply = detailed;
 			}
 			when ( GetRateInfoReply rep = wait(reply) ) {
@@ -437,7 +436,9 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Grv
 }
 
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-								  GrvProxyStats* stats, Version minKnownCommittedVersion, PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags) {
+                                  GrvProxyStats* stats, Version minKnownCommittedVersion,
+                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags,
+                                  int64_t midShardSize = 0) {
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
 	Version replyVersion = reply.version;
@@ -460,7 +461,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 		else {
 			reply.version = replyVersion;
 		}
-
+		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
 
 		if(!request.tags.empty()) {
@@ -493,14 +494,53 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	return Void();
 }
 
-ACTOR static Future<Void> getReadVersionServer(
-	GrvProxyInterface proxy,
-	Reference<AsyncVar<ServerDBInfo>> db,
-	PromiseStream<Future<Void>> addActor,
-	GrvProxyData* grvProxyData,
-	GetHealthMetricsReply* healthMetricsReply,
-	GetHealthMetricsReply* detailedHealthMetricsReply)
-{
+ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<GetDataDistributorMetricsReply> nextReply = Never();
+
+	if (db->get().distributor.present()) nextRequestTimer = Void();
+	loop {
+		try {
+			choose {
+				when(wait(db->onChange())) {
+					if (db->get().distributor.present()) {
+						TraceEvent("DataDistributorChanged", db->get().id)
+						    .detail("DDID", db->get().distributor.get().id());
+						nextRequestTimer = Void();
+					} else {
+						TraceEvent("DataDistributorDied", db->get().id);
+						nextRequestTimer = Never();
+					}
+					nextReply = Never();
+				}
+				when(wait(nextRequestTimer)) {
+					nextRequestTimer = Never();
+					if (db->get().distributor.present()) {
+						nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
+						    GetDataDistributorMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
+					} else
+						nextReply = Never();
+				}
+				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
+					nextReply = Never();
+					ASSERT(reply.midShardSize.present());
+					*midShardSize = reply.midShardSize.get();
+					nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("DDMidShardSizeUpdateFail").error(e);
+			if (e.code() != error_code_timed_out && e.code() != error_code_dd_not_found) throw;
+			nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
+			nextReply = Never();
+		}
+	}
+}
+
+ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db,
+                                             PromiseStream<Future<Void>> addActor, GrvProxyData* grvProxyData,
+                                             GetHealthMetricsReply* healthMetricsReply,
+                                             GetHealthMetricsReply* detailedHealthMetricsReply) {
 	state double lastGRVTime = 0;
 	state PromiseStream<Void> GRVTimer;
 	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -510,15 +550,18 @@ ACTOR static Future<Void> getReadVersionServer(
 	state GrvTransactionRateInfo normalRateInfo(10);
 	state GrvTransactionRateInfo batchRateInfo(0);
 
-	state SpannedDeque<GetReadVersionRequest> systemQueue("GP:getReadVersionServerSystemQueue"_loc);
-	state SpannedDeque<GetReadVersionRequest> defaultQueue("GP:getReadVersionServerDefaultQueue"_loc);
-	state SpannedDeque<GetReadVersionRequest> batchQueue("GP:getReadVersionServerBatchQueue"_loc);
+	state SpannedDeque<GetReadVersionRequest> systemQueue("GP:transactionStarterSystemQueue"_loc);
+	state SpannedDeque<GetReadVersionRequest> defaultQueue("GP:transactionStarterDefaultQueue"_loc);
+	state SpannedDeque<GetReadVersionRequest> batchQueue("GP:transactionStarterBatchQueue"_loc);
 
 	state TransactionTagMap<uint64_t> transactionTagCounter;
 	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> normalGRVLatency;
 	state Span span;
+
+	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
+	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
 	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
 	addActor.send(queueGetReadVersionRequests(db, &systemQueue, &defaultQueue, &batchQueue,
@@ -627,7 +670,8 @@ ACTOR static Future<Void> getReadVersionServer(
 		batchRateInfo.updateBudget(systemTotalStarted + normalTotalStarted + batchTotalStarted, systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(), elapsed);
 
 		if (debugID.present()) {
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "GrvProxyServer.getReadVersionServer.AskLiveCommittedVersionFromMaster");
+			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(),
+			                      "GrvProxyServer.transactionStarter.AskLiveCommittedVersionFromMaster");
 		}
 
 		for (int i = 0; i < start.size(); i++) {
@@ -635,7 +679,7 @@ ACTOR static Future<Void> getReadVersionServer(
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(
 				    span.context, grvProxyData, i, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply, start[i], &grvProxyData->stats,
-											 grvProxyData->minKnownCommittedVersion, throttledTags));
+				                             grvProxyData->minKnownCommittedVersion, throttledTags, midShardSize));
 
 				// Use normal priority transaction's GRV latency to dynamically calculate transaction batching interval.
 				if (i == 0) {
@@ -673,7 +717,8 @@ ACTOR Future<Void> grvProxyServerCore(
 
 	grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 
-	addActor.send(getReadVersionServer(proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(transactionStarter(proxy, grvProxyData.db, addActor, &grvProxyData, &healthMetricsReply,
+	                                 &detailedHealthMetricsReply));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 
 	if(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
