@@ -44,4 +44,4 @@ Using filters:
 
 * ``python3 ~/transaction_profiling_analyzer.py -C fdb.cluster --filter-get --start-time "17:00 2020/07/07 PDT" --end-time "17:50 2020/07/07 PDT"`` - Analyzes and prints information about gets between a start and end time frame
  
-* ``python3 ~/transaction_profiling_analyzer.py -C fdb.cluster --filter-get --start-time "17:00 2020/07/07 PDT" --end-time "17:50 2020/07/07 PDT" --top-requests 5`` - Analyses and prints information about top 5 keys for gets between a start and end time frame
+* ``python3 ~/transaction_profiling_analyzer.py -C fdb.cluster --filter-get --start-time "17:00 2020/07/07 PDT" --end-time "17:50 2020/07/07 PDT" --top-requests 5`` - Analyzes and prints information about top 5 keys for gets between a start and end time frame
