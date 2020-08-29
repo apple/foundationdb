@@ -1245,16 +1245,22 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 			// Still has pending requests from earlier batchIndex  and current batchIndex, which should not happen
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingLoadFileRequests")
 			    .detail("PendingRequest", self->loadingQueue.top().toString());
+			const RestoreLoadFileRequest& oldReq = self->loadingQueue.top();
+			oldReq.reply.send(RestoreLoadFileReply(oldReq.param, true));
 			self->loadingQueue.pop();
 		}
 		while (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendRequests")
 			    .detail("PendingRequest", self->sendingQueue.top().toString());
+			const RestoreSendMutationsToAppliersRequest& oldReq = self->sendingQueue.top();
+			oldReq.reply.send(RestoreCommonReply(self->id(), true));
 			self->sendingQueue.pop();
 		}
 		while (!self->sendLoadParamQueue.empty() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
 			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendLoadParamRequests")
 			    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
+			const RestoreLoaderSchedSendLoadParamRequest& oldReq = self->sendLoadParamQueue.top();
+			oldReq.toSched.send(Void());
 			self->sendLoadParamQueue.pop();
 		}
 
