@@ -200,7 +200,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
 				    .detail("HasPendingRequests", self->hasPendingRequests->get());
 				self->hasPendingRequests->set(false);
-				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
+				wait(self->hasPendingRequests->onChange() || delay(5.0)); // CAREFUL:Improper req release may cause restore stuck here
 			}
 		}
 	} catch (Error& e) {
