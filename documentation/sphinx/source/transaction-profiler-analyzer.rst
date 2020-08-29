@@ -14,7 +14,7 @@ There are only two inputs for transaction profiling i.e. sampling rate and the s
 
 The transactions are sampled at the specified rate and all the events for that sampled transaction are recorded. Then at 30 second interval, the data for all the sampled transactions during that interval is flushed to the database. The sampled data is written into special key space ``“\xff\x02/fdbClientInfo/ - \xff\x02/fdbClientInfo0”``
  
-The second part of transaction profiling involves deleting old sampled data to restrict the size. Retention is purely based on the input size limit. If the size of all the recorded data exceeds the input limit,  then the old ones get deleted. But the limit is a soft limit, you could go over the limit temporarily.
+The second part of transaction profiling involves deleting old sampled data to restrict the size. Retention is purely based on the input size limit. If the size of all the recorded data exceeds the input limit, then the old ones get deleted. But the limit is a soft limit, you could go over the limit temporarily.
  
 There are many ways that this data can be exposed for analysis. One can imagine building a client that reads the data from the database and streams it to external tools such as Wavefront.
  
