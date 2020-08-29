@@ -30,7 +30,7 @@ Additional packages
 ===================
 
 * ``dateparser`` - for human date parsing
-* ``sortedcontainers``  - for estimating key range read/write density
+* ``sortedcontainers`` - for estimating key range read/write density
 
 Sample usage
 ============
