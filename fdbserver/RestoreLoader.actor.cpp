@@ -244,7 +244,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
 					self->initBackupContainer(req.param.url);
 					self->loadingQueue.push(req);
-					if (!hasQueuedRequests) {
+					if (!hasQueuedRequests || !self->hasPendingRequests->get()) {
 						self->hasPendingRequests->set(true);
 					}
 				}
@@ -252,7 +252,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					requestTypeStr = "sendMutations";
 					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
 					self->sendingQueue.push(req);
-					if (!hasQueuedRequests) {
+					if (!hasQueuedRequests || !self->hasPendingRequests->get()) {
 						self->hasPendingRequests->set(true);
 					}
 				}
@@ -1262,6 +1262,12 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 			const RestoreLoaderSchedSendLoadParamRequest& oldReq = self->sendLoadParamQueue.top();
 			oldReq.toSched.send(Void());
 			self->sendLoadParamQueue.pop();
+		}
+		if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
+			TraceEvent(SevDebug, "FastRestoreLoaderFinishVersionBatchRequestClearAllRequests", self->id())
+				.detail("HasPendingRequests", self->hasPendingRequests->get())
+				.detail("BatchIndex", req.batchIndex);
+			self->hasPendingRequests->set(false);
 		}
 
 		self->finishedBatch.set(req.batchIndex);

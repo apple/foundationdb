@@ -444,6 +444,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batc
 		                             : std::min(versionBatch.endVersion, request.targetVersion + 1);
 		param.asset.addPrefix = request.addPrefix;
 		param.asset.removePrefix = request.removePrefix;
+		param.asset.batchIndex = batchIndex;
 
 		TraceEvent("FastRestoreControllerPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)
