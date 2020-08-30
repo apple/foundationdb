@@ -610,6 +610,8 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-rv", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--restore_version", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
