@@ -1401,7 +1401,7 @@ public:
 						maxKeyRangeVersion = std::max(maxKeyRangeVersion, rangeFile.version);
 					}
 				}
-				// No range file match 'keyRangesFilter'.
+				// No range file matches 'keyRangesFilter'.
 				if (restorable.ranges.empty()) {
 					continue;
 				}

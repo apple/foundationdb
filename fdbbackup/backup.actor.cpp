@@ -2491,6 +2491,7 @@ ACTOR Future<Void> queryBackup(const char* name, std::string destinationContaine
 			printf("Using the minimum restorable version for the specified key ranges.\n");
 		} else if (restoreVersion < 0) {
 			printf("Error: the specified restorable version is not valid.");
+			return Void();
 		}
 		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 		if (fileSet.present()) {
