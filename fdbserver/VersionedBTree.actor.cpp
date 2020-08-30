@@ -6360,11 +6360,15 @@ ACTOR Future<Void> verify(VersionedBTree* btree, FutureStream<Version> vStream,
 				committedVersions.pop_front();
 			}
 
-			// Choose a random committed version, or sometimes the latest (which could be ahead of the latest version
-			// from vStream)
-			v = (committedVersions.empty() || deterministicRandom()->random01() < 0.25)
-			        ? btree->getLastCommittedVersion()
-			        : committedVersions[deterministicRandom()->randomInt(0, committedVersions.size())];
+			// Continue if the versions list is empty, which won't wait until it reaches the oldest readable
+			// btree version which will already be in vStream.
+			if(committedVersions.empty()) {
+				continue;
+			}
+
+			// Choose a random committed version.
+			v = committedVersions[deterministicRandom()->randomInt(0, committedVersions.size())];
+
 			debug_printf("Using committed version %" PRId64 "\n", v);
 			// Get a cursor at v so that v doesn't get expired between the possibly serial steps below.
 			state Reference<IStoreCursor> cur = btree->readAtVersion(v);
