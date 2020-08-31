@@ -1372,9 +1372,8 @@ public:
 		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
 		state int i = snapshots.size() - 1;
 		for (; i >= 0; i--) {
-			state KeyspaceSnapshotFile snapshot = snapshots[i];
 			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
-			if (targetVersion >= 0 && snapshot.beginVersion > targetVersion) {
+			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
 				break;
 			}
 
@@ -1383,14 +1382,14 @@ public:
 			state Version maxKeyRangeVersion = -1;
 
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
-			    wait(bc->readKeyspaceSnapshot(snapshot));
+			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
 			// Filter by keyRangesFilter.
 			if (keyRangesFilter.empty()) {
 				restorable.ranges = std::move(results.first);
 				restorable.keyRanges = std::move(results.second);
-				minKeyRangeVersion = snapshot.beginVersion;
-				maxKeyRangeVersion = snapshot.endVersion;
+				minKeyRangeVersion = snapshots[i].beginVersion;
+				maxKeyRangeVersion = snapshots[i].endVersion;
 			} else {
 				for (const auto& rangeFile : results.first) {
 					const auto& keyRange = results.second.at(rangeFile.fileName);
@@ -1412,7 +1411,7 @@ public:
 				targetVersion = maxKeyRangeVersion;
 			}
 			restorable.targetVersion = targetVersion;
-			restorable.snapshot = snapshot;
+			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
 			if (false && g_network->isSimulated()) {
 				// Sanity check key ranges

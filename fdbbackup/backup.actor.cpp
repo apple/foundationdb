@@ -605,11 +605,11 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
-	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
+	{ OPT_RESTORE_TIMESTAMP, "--query_restore_timestamp", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
-	{ OPT_RESTORE_VERSION, "-rv", SO_REQ_SEP },
-	{ OPT_RESTORE_VERSION, "--restore_version", SO_REQ_SEP },
+	{ OPT_RESTORE_VERSION, "-qrv", SO_REQ_SEP },
+	{ OPT_RESTORE_VERSION, "--query_restore_version", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -991,6 +991,15 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --delete_before_days NUM_DAYS\n"
 		   "                 Another way to specify version cutoff for expire operations.  Deletes data files containing no data at or after a\n"
 		   "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in the backup.\n");
+	printf("  -qrv --query_restore_version VERSION\n"
+	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum "
+	       "restorable version and -2 for minimum restorable version.\n");
+	printf(
+	    "  --query_restore_timestamp\n"
+	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
+	    BackupAgentBase::timeFormat().c_str());
+	printf(
+	    "                 and it will be converted to a version from that time using metadata in the cluster file.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
 		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
 	printf("  --restorable_after_version VERSION\n"
