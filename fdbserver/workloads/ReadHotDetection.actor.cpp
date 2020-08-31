@@ -109,6 +109,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				for (const auto& kr : keyRanges) {
 					if (kr.keys.contains(self->readKey)) {
 						self->passed = true;
+						return Void();
 					}
 				}
 				// The key ranges deemed read hot does not contain the readKey, which is impossible here.
