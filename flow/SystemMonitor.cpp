@@ -166,8 +166,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				n.detail(format("PriorityBusy%d", itr.first).c_str(), itr.second);
 			}
 
-			g_network->networkInfo.metrics.lastRunLoopBusyness = std::min(currentStats.elapsed,g_network->networkInfo.metrics.starvationTrackers[0].duration)/currentStats.elapsed;
-
+			bool firstTracker = true;
 			for (auto &itr : g_network->networkInfo.metrics.starvationTrackers) {
 				if(itr.active) {
 					itr.duration += now() - itr.windowedTimer;
@@ -177,6 +176,11 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 
 				n.detail(format("PriorityStarvedBelow%d", itr.priority).c_str(), std::min(currentStats.elapsed, itr.duration));
 				n.detail(format("PriorityMaxStarvedBelow%d", itr.priority).c_str(), itr.maxDuration);
+
+				if(firstTracker) {
+					g_network->networkInfo.metrics.lastRunLoopBusyness = std::min(currentStats.elapsed, itr.duration)/currentStats.elapsed;
+					firstTracker = false;
+				}
 
 				itr.duration = 0;
 				itr.maxDuration = 0;
