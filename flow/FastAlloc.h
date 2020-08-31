@@ -118,6 +118,7 @@ public:
 	static volatile int32_t pageCount;
 #endif
 
+	FastAllocator()=delete;
 private:
 #ifdef VALGRIND
 	static unsigned long vLock;
@@ -147,7 +148,6 @@ private:
 	}
 	static void* freelist;
 
-	FastAllocator();  // not implemented
 	static void initThread();
 	static void getMagazine();
 	static void releaseMagazine(void*);

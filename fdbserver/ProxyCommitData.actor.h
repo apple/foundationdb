@@ -63,6 +63,7 @@ struct ProxyStats {
 	Counter mutations;
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
+	Counter txnExpensiveClearCostEstCount;
 	Version lastCommitVersionAssigned;
 
 	LatencySample commitLatencySample;
@@ -119,6 +120,7 @@ struct ProxyStats {
 	    conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
 	    keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
 	    lastCommitVersionAssigned(0),
+	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
 	    commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -190,7 +192,7 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
-	TransactionTagMap<TransactionCommitCostEstimation> transactionTagCommitCostEst;
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -199,13 +201,7 @@ struct ProxyCommitData {
 		auto& tags = keyInfo[key].tags;
 		if (!tags.size()) {
 			auto& r = keyInfo.rangeContaining(key).value();
-			for (auto info : r.src_info) {
-				r.tags.push_back(info->tag);
-			}
-			for (auto info : r.dest_info) {
-				r.tags.push_back(info->tag);
-			}
-			uniquify(r.tags);
+			r.populateTags();
 			return r.tags;
 		}
 		return tags;
@@ -247,6 +243,18 @@ struct ProxyCommitData {
 		}
 
 		latencyBandConfig = newLatencyBandConfig;
+	}
+
+	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int cost){
+		auto [it, _] = ssTrTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
+
+		for(auto& tag: tagSet) {
+			auto& costItem = it->second[tag];
+			if(m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
+				costItem.opsSum ++;
+				costItem.costSum += cost;
+			}
+		}
 	}
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion,

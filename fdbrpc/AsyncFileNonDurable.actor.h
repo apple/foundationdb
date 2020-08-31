@@ -87,42 +87,42 @@ public:
 		ReferenceCounted<AsyncFileDetachable>::delref();
 	}
 
-	Future<int> read(void *data, int length, int64_t offset) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->read( data, length, offset ) );
 	}
 
-	Future<Void> write(void const *data, int length, int64_t offset) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->write( data, length, offset ) );
 	}
-	
-	Future<Void> truncate(int64_t size) {
+
+	Future<Void> truncate(int64_t size) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->truncate( size ) );
 	}
 
-	Future<Void> sync() {
+	Future<Void> sync() override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->sync() );
 	}
 
-	Future<int64_t> size() {
+	Future<int64_t> size() const override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
 			return io_error().asInjectedFault();
 		return sendErrorOnShutdown( file->size() );
 	}
 
-	int64_t debugFD() {
+	int64_t debugFD() const override {
 		if( !file.getPtr() )
 			throw io_error().asInjectedFault();
 		return file->debugFD();
 	}
-	std::string getFilename() {
+	std::string getFilename() const override {
 		if( !file.getPtr() )
 			throw io_error().asInjectedFault();
 		return file->getFilename();
@@ -137,7 +137,7 @@ public:
 	std::string filename;
 
 	//An approximation of the size of the file; .size() should be used instead of this variable in most cases
-	int64_t approximateSize;
+	mutable int64_t approximateSize;
 
 	//The address of the machine that opened the file
 	NetworkAddress openedAddress;
@@ -263,13 +263,11 @@ public:
 	}
 
 	//Passes along reads straight to the underlying file, waiting for any outstanding changes that could affect the results
-	Future<int> read(void *data, int length, int64_t offset) {
-		return read(this, data, length, offset);
-	}
+	Future<int> read(void* data, int length, int64_t offset) override { return read(this, data, length, offset); }
 
 	//Writes data to the file.  Writes are delayed a random amount of time before being
 	//passed to the underlying file
-	Future<Void> write(void const *data, int length, int64_t offset) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		//TraceEvent("AsyncFileNonDurable_Write", id).detail("Filename", filename).detail("Offset", offset).detail("Length", length);
 		if(length == 0) {
 			TraceEvent(SevWarnAlways, "AsyncFileNonDurable_EmptyModification", id).detail("Filename", filename);
@@ -283,10 +281,10 @@ public:
 		writeEnded.send(write(this, writeStarted, writeEnded.getFuture(), data, length, offset));
 		return writeStarted.getFuture();
 	}
-	
+
 	//Truncates the file.  Truncates are delayed a random amount of time before being
 	//passed to the underlying file
-	Future<Void> truncate(int64_t size) {
+	Future<Void> truncate(int64_t size) override {
 		//TraceEvent("AsyncFileNonDurable_Truncate", id).detail("Filename", filename).detail("Offset", size);
 		debugFileTruncate("AsyncFileNonDurableTruncate", filename, size);
 
@@ -306,17 +304,11 @@ public:
 	}
 
 	//Passes along size requests to the underlying file, augmenting with any writes past the end of the file
-	Future<int64_t> size() {
-		return size(this);
-	}
+	Future<int64_t> size() const override { return size(this); }
 
-	int64_t debugFD() {
-		return file->debugFD();
-	}
+	int64_t debugFD() const override { return file->debugFD(); }
 
-	std::string getFilename() {
-		return file->getFilename();
-	}
+	std::string getFilename() const override { return file->getFilename(); }
 
 	//Forces a non-durable sync (some writes are not made or made incorrectly)
 	//This is used when the file should 'die' without first completing its operations
@@ -358,7 +350,7 @@ private:
 	}
 
 	//Checks if the file is killed.  If so, then the current sync is completed if running and then an error is thrown
-	ACTOR Future<Void> checkKilled(AsyncFileNonDurable *self, std::string context) {
+	ACTOR static Future<Void> checkKilled(AsyncFileNonDurable const* self, std::string context) {
 		if(self->killed.isSet()) {
 			//TraceEvent("AsyncFileNonDurable_KilledInCheck", self->id).detail("In", context).detail("Filename", self->filename);
 			wait(self->killComplete.getFuture());
@@ -372,14 +364,14 @@ private:
 
 	//Passes along reads straight to the underlying file, waiting for any outstanding changes that could affect the results
 	ACTOR Future<int> onRead(AsyncFileNonDurable *self, void *data, int length, int64_t offset) {
-		wait(self->checkKilled(self, "Read"));
+		wait(checkKilled(self, "Read"));
 		vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
 		wait(waitForAll(priorModifications));
 		state Future<int> readFuture = self->file->read(data, length, offset);
 		wait( success( readFuture ) || self->killed.getFuture() );
 
 		// throws if we were killed
-		wait(self->checkKilled(self, "ReadEnd"));
+		wait(checkKilled(self, "ReadEnd"));
 
 		debugFileCheck("AsyncFileNonDurableRead", self->filename, data, offset, length);
 
@@ -421,7 +413,7 @@ private:
 
 		try {
 			//TraceEvent("AsyncFileNonDurable_Write", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
-			wait(self->checkKilled(self, "Write"));
+			wait(checkKilled(self, "Write"));
 
 			Future<Void> writeEnded = wait(ownFuture);
 			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length, true, writeEnded);
@@ -543,7 +535,7 @@ private:
 
 		try {
 			//TraceEvent("AsyncFileNonDurable_Truncate", self->id).detail("Delay", delayDuration).detail("Filename", self->filename);
-			wait(self->checkKilled(self, "Truncate"));
+			wait(checkKilled(self, "Truncate"));
 
 			Future<Void> truncateEnded = wait(ownFuture);
 			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(size, -1, true, truncateEnded);
@@ -600,8 +592,8 @@ private:
 			wait(waitUntilDiskReady(self->diskParameters, 0, true) || self->killed.getFuture());
 		}
 
-		wait(self->checkKilled(self, durable ? "Sync" : "Kill"));
-		
+		wait(checkKilled(self, durable ? "Sync" : "Kill"));
+
 		if(!durable)
 			self->killed.send( Void() );
 
@@ -653,7 +645,7 @@ private:
 		}
 		//A killed file cannot be allowed to report that it successfully synced
 		else {
-			wait(self->checkKilled(self, "SyncEnd"));
+			wait(checkKilled(self, "SyncEnd"));
 			wait(self->file->sync());
 			//TraceEvent("AsyncFileNonDurable_ImplSyncEnd", self->id).detail("Filename", self->filename).detail("Durable", durable);
 		}
@@ -679,13 +671,13 @@ private:
 	}
 
 	//Passes along size requests to the underlying file, augmenting with any writes past the end of the file
-	ACTOR Future<int64_t> onSize(AsyncFileNonDurable *self) {
+	ACTOR static Future<int64_t> onSize(AsyncFileNonDurable const* self) {
 		//TraceEvent("AsyncFileNonDurable_Size", self->id).detail("Filename", self->filename);
-		wait(self->checkKilled(self, "Size"));
+		wait(checkKilled(self, "Size"));
 		state Future<int64_t> sizeFuture = self->file->size();
 		wait( success( sizeFuture ) || self->killed.getFuture() );
 
-		wait(self->checkKilled(self, "SizeEnd"));
+		wait(checkKilled(self, "SizeEnd"));
 
 		//Include any modifications which extend past the end of the file
 		uint64_t maxModification = self->pendingModifications.lastItem().begin();
@@ -693,14 +685,14 @@ private:
 		return self->approximateSize;
 	}
 
-	ACTOR Future<int64_t> size(AsyncFileNonDurable *self) {
+	ACTOR static Future<int64_t> size(AsyncFileNonDurable const* self) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		wait( g_simulator.onMachine( currentProcess ) );
 
 		try {
-			state int64_t rep = wait( self->onSize( self ) );
+			state int64_t rep = wait(onSize(self));
 			wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
 
 			return rep;

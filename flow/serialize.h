@@ -31,6 +31,7 @@
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
 #include <algorithm>
+#include <deque>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
 // memcpy over a defined serialize() method on a POD struct.  As not all of our structs are packed,
@@ -172,6 +173,27 @@ inline void save( Archive& ar, const std::vector<T>& value ) {
 }
 template <class Archive, class T>
 inline void load( Archive& ar, std::vector<T>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	value.reserve(s);
+	for (int i = 0; i < s; i++) {
+		value.push_back(T());
+		ar >> value[i];
+	}
+	ASSERT( ar.protocolVersion().isValid() );
+}
+
+template <class Archive, class T>
+inline void save( Archive& ar, const std::deque<T>& value ) {
+	ar << (int)value.size();
+	for(auto it = value.begin(); it != value.end(); ++it)
+		ar << *it;
+	ASSERT( ar.protocolVersion().isValid() );
+}
+
+template <class Archive, class T>
+inline void load( Archive& ar, std::deque<T>& value ) {
 	int s;
 	ar >> s;
 	value.clear();
