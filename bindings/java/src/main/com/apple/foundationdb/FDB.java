@@ -234,14 +234,14 @@ public class FDB {
 	/**
 	 * Enables or disables use of DirectByteBuffers for getRange() queries.
 	 *
-	 *	@param v Whether DirectByteBuffer should be used for getRange() queries.
+	 *	@param enabled Whether DirectByteBuffer should be used for getRange() queries.
 	 */
 	public void enableDirectBufferQuery(boolean enabled) {
 		enableDirectBufferQueries = enabled;
 	}
 
 	/**
-	 * Determines whether getRange() queries can use {@link DirectByteBuffer} from
+	 * Determines whether {@code getRange()} queries can use {@code DirectByteBuffer} from
 	 * {@link DirectBufferPool} to copy results.
 	 *
 	 * @return {@code true} if direct buffer queries have been enabled and {@code false} otherwise
