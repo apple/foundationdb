@@ -993,13 +993,10 @@ static void printBackupUsage(bool devhelp) {
 		   "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in the backup.\n");
 	printf("  -qrv --query_restore_version VERSION\n"
 	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum "
-	       "restorable version and -2 for minimum restorable version.\n");
-	printf(
-	    "  --query_restore_timestamp\n"
-	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
-	    BackupAgentBase::timeFormat().c_str());
-	printf(
-	    "                 and it will be converted to a version from that time using metadata in the cluster file.\n");
+	       "                 restorable version and -2 for minimum restorable version.\n");
+	printf("  --query_restore_timestamp DATETIME\n"
+	       "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
+	printf("                 and it will be converted to a version from that time using metadata in the cluster file.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
 		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
 	printf("  --restorable_after_version VERSION\n"
@@ -1018,7 +1015,7 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction\n"
 	       "                 which sets the new backup parameters (if the UID matches).\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
-	printf("  -k KEYS        List of key ranges to backup or to filter the backup.\n"
+	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
 	printf("  --partitioned_log_experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
