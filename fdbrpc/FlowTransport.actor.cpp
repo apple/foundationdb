@@ -467,6 +467,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				}
 			} else {
 				self->outgoingConnectionIdle = false;
+				self->lastConnectTime = now();
 			}
 
 			try {
