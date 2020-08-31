@@ -94,6 +94,11 @@ public:
 	double PEEK_STATS_INTERVAL;
 	double PEEK_STATS_SLOW_AMOUNT;
 	double PEEK_STATS_SLOW_RATIO;
+	double PUSH_RESET_INTERVAL;
+	double PUSH_MAX_LATENCY;
+	double PUSH_STATS_INTERVAL;
+	double PUSH_STATS_SLOW_AMOUNT;
+	double PUSH_STATS_SLOW_RATIO;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
