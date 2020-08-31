@@ -297,13 +297,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 		// Find an alternative, if any, that is not failed, starting with nextAlt
 		state RequestStream<Request> const* stream = NULL;
+		state Interface interf;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;
 			if( nextAlt == startAlt )
 				useAlt = bestAlt;
 			else if( (nextAlt+alternatives->size()-startAlt) % alternatives->size() <= startDistance )
 				useAlt = (nextAlt+alternatives->size()-1) % alternatives->size();
-			
+
+			interf = alternatives->getInterface( useAlt );
 			stream = &alternatives->get( useAlt, channel );
 			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed && (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
@@ -359,6 +361,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			//Only the first location is available. 
 			Optional<REPLY_TYPE(Request)> result = wait( firstRequest );
 			if(result.present()) {
+				// Update the requests served metrics
+				if (interf.isCacheServer) {
+					g_network->networkInfo.metrics.countCacheHits++;
+					TraceEvent("CacheServedRequest")
+						.detail("CountCacheHits", g_network->networkInfo.metrics.countCacheHits)
+						.detail("CountReqs", g_network->networkInfo.metrics.countReqs);
+				}
+				g_network->networkInfo.metrics.countReqs++;
+				
 				return result.get();
 			}
 
@@ -378,6 +389,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 								throw result.getError();
 							}
 							else {
+								// Update the requests served metrics
+								if (interf.isCacheServer) {
+									g_network->networkInfo.metrics.countCacheHits++;
+									TraceEvent("CacheServedRequest")
+										.detail("CountCacheHits", g_network->networkInfo.metrics.countCacheHits)
+										.detail("CountReqs", g_network->networkInfo.metrics.countReqs);
+								}
+								g_network->networkInfo.metrics.countReqs++;
+
 								return result.get().get();
 							}
 						}
@@ -395,6 +415,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 								throw result.getError();
 							}
 							else {
+								// Update the requests served metrics
+								if (interf.isCacheServer) {
+									g_network->networkInfo.metrics.countCacheHits++;
+									TraceEvent("CacheServedRequest")
+										.detail("CountCacheHits", g_network->networkInfo.metrics.countCacheHits)
+										.detail("CountReqs", g_network->networkInfo.metrics.countReqs);
+								}
+								g_network->networkInfo.metrics.countReqs++;
+
 								return result.get().get();
 							}
 						}
@@ -425,6 +454,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 						}
 
 						if(result.get().present()) {
+							// Update the requests served metrics
+							if (interf.isCacheServer) {
+								g_network->networkInfo.metrics.countCacheHits++;
+								TraceEvent("CacheServedRequest")
+									.detail("CountCacheHits", g_network->networkInfo.metrics.countCacheHits)
+									.detail("CountReqs", g_network->networkInfo.metrics.countReqs);
+							}
+							g_network->networkInfo.metrics.countReqs++;
+
 							return result.get().get();
 						}
 

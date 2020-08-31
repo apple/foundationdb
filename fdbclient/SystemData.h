@@ -67,6 +67,7 @@ extern const KeyRangeRef storageCacheServerKeys;
 extern const KeyRef storageCacheServersPrefix, storageCacheServersEnd;
 const Key storageCacheServerKey(UID id);
 const Value storageCacheServerValue(const StorageServerInterface& ssi);
+StorageServerInterface decodeCacheServerListValue( ValueRef const& value );
 
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 extern const KeyRangeRef storageCacheKeys;

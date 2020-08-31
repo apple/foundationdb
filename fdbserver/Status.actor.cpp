@@ -522,6 +522,56 @@ struct RolesInfo {
 
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
+	JsonBuilderObject& addCacheRole(std::string const& role, StorageServerInterface& iface, EventMap const& metrics, Version maxTLogVersion, double* pDataLagSeconds) {
+		JsonBuilderObject obj;
+		double dataLagSeconds = -1.0;
+		obj["id"] = iface.id().shortString();
+		obj["role"] = role;
+		TraceEvent(SevDebug, "SCAddCacheRole").detail("Role", role);
+		try {
+			TraceEventFields const& storageMetrics = metrics.at("StorageMetrics");
+
+			obj.setKeyRawNumber("stored_bytes", storageMetrics.getValue("BytesStored"));
+			obj["input_bytes"] = StatusCounter(storageMetrics.getValue("BytesInput")).getStatus();
+			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
+			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
+			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
+			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
+			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
+			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
+			obj["mutations"] = StatusCounter(storageMetrics.getValue("Mutations")).getStatus();
+
+			Version version = storageMetrics.getInt64("Version");
+			obj["data_version"] = version;
+
+			int64_t versionLag = storageMetrics.getInt64("VersionLag");
+			if(maxTLogVersion > 0) {
+				// It's possible that the storage server hasn't talked to the logs recently, in which case it may not be aware of how far behind it is.
+				// To account for that, we also compute the version difference between each storage server and the tlog with the largest version.
+				//
+				// Because this data is only logged periodically, this difference will likely be an overestimate for the lag. We subtract off the logging interval
+				// in order to make this estimate a bounded underestimate instead.
+				versionLag = std::max<int64_t>(versionLag, maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
+			}
+
+			TraceEventFields const& readLatencyMetrics = metrics.at("ReadLatencyMetrics");
+			if(readLatencyMetrics.size()) {
+				obj["read_latency_bands"] = addLatencyBandInfo(readLatencyMetrics);
+			}
+
+			obj["data_lag"] = getLagObject(versionLag);
+
+		} catch (Error& e) {
+			if(e.code() != error_code_attribute_not_found)
+				throw e;
+		}
+
+		if (pDataLagSeconds) {
+			*pDataLagSeconds = dataLagSeconds;
+		}
+
+		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+	}
 	JsonBuilderObject& addRole(std::string const& role, TLogInterface& iface, EventMap const& metrics, Version* pMetricVersion) {
 		JsonBuilderObject obj;
 		Version	metricVersion = 0;
@@ -610,6 +660,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
+    vector<std::pair<StorageServerInterface, EventMap>> cacheServers,
     vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
     ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
@@ -722,6 +773,18 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole( "storage", ss->first, ss->second, maxTLogVersion, &lagSeconds );
 		if (lagSeconds != -1.0) {
 			ssLag[ss->first.address()] = lagSeconds;
+		}
+		wait(yield());
+	}
+
+	state std::vector<std::pair<StorageServerInterface, EventMap>>::iterator sc;
+	state std::map<NetworkAddress, double> scLag;
+	state double lagSecs;
+	//TraceEvent(SevDebug, "SCCacheServersList").detail("Size", cacheServers.size());
+	for(sc = cacheServers.begin(); sc != cacheServers.end(); ++sc) {
+		roles.addCacheRole( "storage_cache", sc->first, sc->second, maxTLogVersion, &lagSecs );
+		if (lagSecs != -1.0) {
+			scLag[sc->first.address()] = lagSecs;
 		}
 		wait(yield());
 	}
@@ -881,6 +944,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 			if(ssLag[address] >= 60) {
 				messages.push_back(JsonString::makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
+			}
+
+			// TODO: check if we need this for caches
+			if(scLag[address] >= 60) {
+				messages.push_back(JsonString::makeMessage("cache_server_lagging", format("Cache server lagging by %ld seconds.", (int64_t)scLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
@@ -1565,6 +1633,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 	}
 
 	wait(waitForAll(futures));
+	TraceEvent(SevDebug, "GetServerMetricsDoneWaitingforFutures");
 
 	vector<std::pair<iface, EventMap>> results;
 	auto futureItr = futures.begin();
@@ -1588,6 +1657,18 @@ ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStor
 	vector<std::pair<StorageServerInterface, EventMap>> results = wait(
 	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" }));
 
+	return results;
+}
+
+ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>>
+getStorageCacheServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	TraceEvent(SevDebug, "SCGetSCMetrics");
+	vector<StorageServerInterface> servers = wait(timeoutError(getStorageCacheServers(cx, true), 5.0));
+	TraceEvent(SevDebug, "SCCacheServersList").detail("Size", servers.size());
+	vector<std::pair<StorageServerInterface, EventMap>> results = wait(
+	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics" }));
+
+	TraceEvent(SevDebug, "SCCacheServersGotResults");
 	return results;
 }
 
@@ -1670,7 +1751,8 @@ JsonBuilderObject getPerfLimit(TraceEventFields const& ratekeeper, double transP
 }
 
 ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db, vector<WorkerDetails> workers, WorkerDetails mWorker, WorkerDetails rkWorker,
-	JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture)
+															 JsonBuilderObject *qos, JsonBuilderObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture,
+															 Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> cacheServerFuture)
 {
 	state JsonBuilderObject statusObj;
 	state JsonBuilderObject operationsObj;
@@ -1760,6 +1842,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		int64_t worstFreeSpaceTLog = ratekeeper.getInt64("WorstFreeSpaceTLog");
 		(*data_overlay).setKeyRawNumber("total_disk_used_bytes",ratekeeper.getValue("TotalDiskUsageBytes"));
 
+		// TODO: Do we need to include caches here?
 		if(ssCount > 0) {
 			(*data_overlay)["least_operating_space_bytes_storage_server"] = std::max(worstFreeSpaceStorageServer, (int64_t)0);
 			(*qos).setKeyRawNumber("worst_queue_bytes_storage_server", ratekeeper.getValue("WorstStorageServerQueue"));
@@ -1826,7 +1909,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		incomplete_reasons->insert("Unknown performance state.");
 	}
 
-	// Reads
+	// Reads on storage servers
 	try {
 		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> storageServers = wait(storageServerFuture);
 		if(!storageServers.present()) {
@@ -1840,6 +1923,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 		for(auto &ss : storageServers.get()) {
 			TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
+			TraceEvent(SevDebug, "SSServerMetrics").detail("Size", storageMetrics.size());
 
 			if (storageMetrics.size() > 0) {
 				readRequests.updateValues(StatusCounter(storageMetrics.getValue("QueryQueue")));
@@ -1853,6 +1937,46 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		operationsObj["reads"] = reads.getStatus();
 		keysObj["read"] = readKeys.getStatus();
 		bytesObj["read"] = readBytes.getStatus();
+
+	}
+	catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incomplete_reasons->insert("Unknown read state.");
+	}
+
+	// Reads on cache servers
+	try {
+		ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> cacheServers = wait(cacheServerFuture);
+		if(!cacheServers.present()) {
+			throw cacheServers.getError();
+		}
+
+		StatusCounter readRequests;
+		StatusCounter reads;
+		StatusCounter readKeys;
+		StatusCounter readBytes;
+
+		for(auto &ss : cacheServers.get()) {
+			TraceEventFields const& cacheMetrics = ss.second.at("StorageMetrics");
+			TraceEvent(SevDebug, "SCCacheServerMetrics").detail("Size", cacheMetrics.size());
+			if (cacheMetrics.size() > 0) {
+				readRequests.updateValues(StatusCounter(cacheMetrics.getValue("QueryQueue")));
+				reads.updateValues(StatusCounter(cacheMetrics.getValue("FinishedQueries")));
+				readKeys.updateValues(StatusCounter(cacheMetrics.getValue("RowsQueried")));
+				readBytes.updateValues(StatusCounter(cacheMetrics.getValue("BytesQueried")));
+			}
+		}
+
+		// TODO: check this
+		operationsObj["read_requests"] = readRequests.getStatus();
+		operationsObj["reads"] = reads.getStatus();
+		keysObj["read"] = readKeys.getStatus();
+		bytesObj["read"] = readBytes.getStatus();
+		//operationsObj["sc_read_requests"] = readRequests.getStatus();
+		//operationsObj["sc_reads"] = reads.getStatus();
+		//keysObj["sc_read"] = readKeys.getStatus();
+		//bytesObj["sc_read"] = readBytes.getStatus();
 
 	}
 	catch (Error& e) {
@@ -1884,6 +2008,8 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 		double storageCacheHitsHz = 0;
 		double storageCacheMissesHz = 0;
 
+		// TODO Do we need to have anything for caches here?
+		// Where do we add storage cache hot rate?
 		for(auto &ss : storageServers.get()) {
 			auto processMetrics = pMetrics.find(ss.first.address());
 			if(processMetrics != pMetrics.end()) {
@@ -2360,6 +2486,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::map<std::string, std::vector<JsonBuilderObject>> processIssues =
 		    getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
+		state vector<std::pair<StorageServerInterface, EventMap>> cacheServers;
 		state vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state vector<std::pair<MasterProxyInterface, EventMap>> proxies;
 		state JsonBuilderObject qos;
@@ -2423,6 +2550,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
+			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> cacheServerFuture = errorOr(getStorageCacheServersAndMetrics(cx, address_workers));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
 
@@ -2430,7 +2558,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &messages);
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture, cacheServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
@@ -2497,6 +2625,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				messages.push_back(JsonBuilder::makeMessage("storage_servers_error", "Timed out trying to retrieve storage servers."));
 			}
 
+			ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>> _cacheServers = wait(cacheServerFuture);
+			if (_cacheServers.present()) {
+				cacheServers = _cacheServers.get();
+			}
+			else {
+				TraceEvent(SevDebug, "SCGetSCFutures").detail("Size", cacheServers.size());
+				messages.push_back(JsonBuilder::makeMessage("cache_servers_error", "Timed out trying to retrieve cache servers."));
+			}
+
 			// ...also tlogs
 			ErrorOr<vector<std::pair<TLogInterface, EventMap>>> _tLogs = wait(tLogFuture);
 			if (_tLogs.present()) {
@@ -2526,7 +2663,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies,
+		                                                            processIssues, storageServers, cacheServers, tLogs, proxies,
 		                                                            coordinators, cx, configuration,
 		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
