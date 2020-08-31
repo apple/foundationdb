@@ -24,14 +24,15 @@
 #include <set>
 #include <vector>
 
-#include "fdbserver/TLogInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbserver/MutationTracking.h"
-#include "flow/IndexedSet.h"
-#include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
+#include "fdbrpc/ReplicationPolicy.h"
+#include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/MutationTracking.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/IndexedSet.h"
 
 struct DBCoreState;
 struct TLogSet;
@@ -882,6 +883,13 @@ struct LogPushData : NonCopyable {
 		}
 	}
 
+	void addMutationRef(const MutationRef& ref) { addTypedMessage(ref, false); }
+
+	void addLogProtocolMessage() { addTypedMessage(LogProtocolMessage(), false); }
+
+	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
+
+private:
 	template <class T>
 	void addTypedMessage(T const& item, bool allLocations = false) {
 		prev_tags.clear();
@@ -919,11 +927,6 @@ struct LogPushData : NonCopyable {
 		next_message_tags.clear();
 	}
 
-	Standalone<StringRef> getMessages(int loc) {
-		return messagesWriter[loc].toValue();
-	}
-
-private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;

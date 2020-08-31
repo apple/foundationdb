@@ -357,13 +357,15 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 
 			auto& tags = self->tagsForKey(backupMutation.param1);
 			toCommit->addTags(tags);
-			toCommit->addTypedMessage(backupMutation);
+			toCommit->addMutationRef(backupMutation);
 
-//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
-//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
-//					.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
-//			}
+			//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
+			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
+			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 					.detail("BackupMutationSize",
+			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
+			//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
+			//backupMutation.param1);
+			//			}
 		}
 	}
 	return Void();
@@ -857,7 +859,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if(pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.addTypedMessage(m);
+				self->toCommit.addMutationRef(m);
 			}
 			else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
@@ -908,7 +910,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if(pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.addTypedMessage(m);
+				self->toCommit.addMutationRef(m);
 			} else {
 				UNREACHABLE();
 			}
