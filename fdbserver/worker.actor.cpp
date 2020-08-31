@@ -1378,6 +1378,11 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.lock );
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
+				DUMPTOKEN( recruited.waitFailure );
+				DUMPTOKEN( recruited.recoveryFinished );
+				DUMPTOKEN( recruited.disablePopRequest );
+				DUMPTOKEN( recruited.enablePopRequest );
+				DUMPTOKEN( recruited.snapRequest );
 
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );

@@ -1,0 +1,400 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ActorCompiler Include="ClusterController.actor.cpp" />
+    <ActorCompiler Include="DataDistribution.actor.cpp" />
+    <ActorCompiler Include="DataDistributionQueue.actor.cpp" />
+    <ActorCompiler Include="DataDistributionTracker.actor.cpp" />
+    <ActorCompiler Include="masterserver.actor.cpp" />
+    <ActorCompiler Include="MoveKeys.actor.cpp" />
+    <ActorCompiler Include="fdbserver.actor.cpp" />
+    <ActorCompiler Include="pubsub.actor.cpp" />
+    <ActorCompiler Include="storageserver.actor.cpp" />
+    <ActorCompiler Include="TLogServer.actor.cpp" />
+    <ActorCompiler Include="worker.actor.cpp" />
+    <ActorCompiler Include="WaitFailure.actor.cpp" />
+    <ActorCompiler Include="MasterProxyServer.actor.cpp" />
+    <ActorCompiler Include="tester.actor.cpp" />
+    <ActorCompiler Include="workloads\Cycle.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\RandomClogging.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BulkLoad.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\MachineAttrition.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\LocalRatekeeper.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\KillRegion.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ReadWrite.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Sideband.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Storefront.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Inventory.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\PubSubMultiples.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\UnitPerf.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\FileSystem.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DDBalance.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="StorageMetrics.actor.h" />
+    <ActorCompiler Include="workloads\RandomSelector.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\SelectorCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\KVStoreTest.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ChangeConfig.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="KeyValueStoreSQLite.actor.cpp" />
+    <ActorCompiler Include="LeaderElection.actor.cpp" />
+    <ActorCompiler Include="workloads\StreamingRead.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BulkSetup.actor.h">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="Ratekeeper.actor.cpp" />
+    <ActorCompiler Include="Status.actor.cpp" />
+    <ActorCompiler Include="workloads\ConflictRange.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Throttling.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Throughput.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AsyncFileCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AsyncFileRead.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AsyncFileWrite.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AsyncFile.actor.h">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="DiskQueue.actor.cpp" />
+    <ActorCompiler Include="workloads\BackgroundSelectors.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\WriteBandwidth.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\QueuePush.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="KeyValueStoreMemory.actor.cpp" />
+    <ActorCompiler Include="SimulatedCluster.actor.cpp" />
+    <ActorCompiler Include="KeyValueStoreCompressTestData.actor.cpp" />
+    <ActorCompiler Include="Coordination.actor.cpp" />
+    <ActorCompiler Include="CoordinatedState.actor.cpp" />
+    <ActorCompiler Include="workloads\Rollback.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="QuietDatabase.actor.cpp" />
+    <ActorCompiler Include="workloads\ConsistencyCheck.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ConfigureDatabase.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\CpuProfiler.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DDMetrics.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\LogMetrics.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Performance.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Ping.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\RandomMoveKeys.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\TargetedKill.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\WriteDuringRead.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\CommitBugCheck.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Watches.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ThreadSafety.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\RemoveServersSafely.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="networktest.actor.cpp" />
+    <ActorCompiler Include="workloads\SaveAndKill.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Increment.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ApiWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ApiCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\RyowCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\IndexScan.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\FastTriggeredWatches.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\WatchAndWait.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\MetricLogging.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\RYWPerformance.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\RYWDisable.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="Resolver.actor.cpp" />
+    <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
+    <ActorCompiler Include="Orderer.actor.h" />
+    <ActorCompiler Include="workloads\DiskDurabilityTest.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="TagPartitionedLogSystem.actor.cpp" />
+    <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
+    <ActorCompiler Include="workloads\UnitTests.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\FuzzApiCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\MemoryLifetime.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DummyWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\TaskBucketCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AtomicOps.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\TriggerRecovery.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\SuspendProcesses.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\StatusWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Unreadable.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\VersionStamp.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="CoroFlow.actor.cpp" />
+    <ActorCompiler Include="workloads\Serializability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\LockDatabase.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\LockDatabaseFrequently.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DifferentClustersSameRV.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AtomicSwitchover.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ActorCompiler Include="LogRouter.actor.cpp" />
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\LowLatency.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\WorkerErrors.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\Mako.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="OldTLogServer.actor.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SkipList.cpp" />
+    <ClCompile Include="workloads\Fuzz.cpp">
+      <Filter>workloads</Filter>
+    </ClCompile>
+    <ClCompile Include="sqlite\btree.c">
+      <Filter>sqlite</Filter>
+    </ClCompile>
+    <ClCompile Include="sqlite\sqlite3.amalgamation.c">
+      <Filter>sqlite</Filter>
+    </ClCompile>
+    <ClCompile Include="VFSAsync.cpp" />
+    <ClCompile Include="workloads\AsyncFile.cpp">
+      <Filter>workloads</Filter>
+    </ClCompile>
+    <ClCompile Include="Knobs.cpp" />
+    <ClCompile Include="workloads\MemoryKeyValueStore.cpp">
+      <Filter>workloads</Filter>
+    </ClCompile>
+    <ClCompile Include="LatencyBandConfig.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ConflictSet.h" />
+    <ClInclude Include="DataDistribution.actor.h" />
+    <ClInclude Include="DataDistributorInterface.h" />
+    <ClInclude Include="MoveKeys.actor.h" />
+    <ClInclude Include="pubsub.h" />
+    <ClInclude Include="Knobs.h" />
+    <ClInclude Include="WorkerInterface.h" />
+    <ClInclude Include="WaitFailure.h" />
+    <ClInclude Include="TesterInterface.actor.h" />
+    <ClInclude Include="workloads\workloads.actor.h">
+      <Filter>workloads</Filter>
+    </ClInclude>
+    <ClInclude Include="IKeyValueStore.h" />
+    <ClInclude Include="ClusterRecruitmentInterface.h" />
+    <ClInclude Include="MasterInterface.h" />
+    <ClInclude Include="TLogInterface.h" />
+    <ClInclude Include="sqlite\sqlite3.h">
+      <Filter>sqlite</Filter>
+    </ClInclude>
+    <ClInclude Include="sqlite\sqlite3ext.h">
+      <Filter>sqlite</Filter>
+    </ClInclude>
+    <ClInclude Include="sqlite\btree.h">
+      <Filter>sqlite</Filter>
+    </ClInclude>
+    <ClInclude Include="sqlite\sqliteInt.h">
+      <Filter>sqlite</Filter>
+    </ClInclude>
+    <ClInclude Include="sqlite\sqliteLimit.h">
+      <Filter>sqlite</Filter>
+    </ClInclude>
+    <ClInclude Include="sqlite\hash.h">
+      <Filter>sqlite</Filter>
+    </ClInclude>
+    <ClInclude Include="LeaderElection.h" />
+    <ClInclude Include="StorageMetrics.h" />
+    <ClInclude Include="RatekeeperInterface.h" />
+    <ClInclude Include="Status.h" />
+    <ClInclude Include="IDiskQueue.h" />
+    <ClInclude Include="CoroFlow.h" />
+    <ClInclude Include="SimulatedCluster.h" />
+    <ClInclude Include="CoordinatedState.h" />
+    <ClInclude Include="ServerDBInfo.h" />
+    <ClInclude Include="QuietDatabase.h" />
+    <ClInclude Include="CoordinationInterface.h" />
+    <ClInclude Include="NetworkTest.h" />
+    <ClInclude Include="workloads\MemoryKeyValueStore.h">
+      <Filter>workloads</Filter>
+    </ClInclude>
+    <ClInclude Include="workloads\ApiWorkload.h">
+      <Filter>workloads</Filter>
+    </ClInclude>
+    <ClInclude Include="ResolverInterface.h" />
+    <ClInclude Include="DBCoreState.h" />
+    <ClInclude Include="LogSystem.h" />
+    <ClInclude Include="LogSystemDiskQueueAdapter.h" />
+    <ClInclude Include="LogSystemConfig.h" />
+    <ClInclude Include="ApplyMetadataMutation.h" />
+    <ClInclude Include="RecoveryState.h" />
+    <ClInclude Include="LogProtocolMessage.h" />
+    <ClInclude Include="IPager.h" />
+    <ClInclude Include="IVersionedStore.h" />
+    <ClInclude Include="template_fdb.h" />
+    <ClInclude Include="LatencyBandConfig.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="workloads">
+      <UniqueIdentifier>{6a79fc02-2f89-451d-9dd5-999d753b3159}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sqlite">
+      <UniqueIdentifier>{de5e282f-8d97-4054-b795-0a75b772326f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
