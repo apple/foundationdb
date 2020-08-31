@@ -6,6 +6,8 @@ LOGDIR="${WORKDIR}/log"
 ETCDIR="${WORKDIR}/etc"
 BINDIR="${BINDIR:-${SCRIPTDIR}}"
 FDBSERVERPORT="${FDBSERVERPORT:-4500}"
+SERVERCHECKS="${SERVERCHECKS:-10}"
+CONFIGUREWAIT="${CONFIGUREWAIT:-240}"
 FDBCONF="${ETCDIR}/fdb.cluster"
 LOGFILE="${LOGFILE:-${LOGDIR}/startcluster.log}"
 
@@ -13,6 +15,12 @@ LOGFILE="${LOGFILE:-${LOGDIR}/startcluster.log}"
 status=0
 messagetime=0
 messagecount=0
+let index2="${RANDOM} % 256"
+let index3="${RANDOM} % 256"
+let index4="(${RANDOM} % 255) + 1"
+# Define a random ip address on localhost
+IPADDRESS="127.${index2}.${index3}.${index4}"
+
 
 function log
 {
@@ -98,23 +106,23 @@ function createDirectories {
 	then
 		echo 'Failed to display user message'
 		let status="${status} + 1"
-	
+
 	elif ! mkdir -p "${LOGDIR}" "${ETCDIR}"
 	then
 		log "Failed to create directories"
 		let status="${status} + 1"
-	
+
 	# Display user message
 	elif ! displayMessage "Setting file permissions"
 	then
 		log 'Failed to display user message'
 		let status="${status} + 1"
-	
+
 	elif ! chmod 755 "${BINDIR}/fdbserver" "${BINDIR}/fdbcli"
 	then
 		log "Failed to set file permissions"
 		let status="${status} + 1"
-	
+
 	else
 		while read filepath
 		do
@@ -148,7 +156,10 @@ function createClusterFile {
 	else
 		description=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom 2> /dev/null | head -c 8)
 		random_str=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom 2> /dev/null | head -c 8)
-		echo "$description:$random_str@127.0.0.1:${FDBSERVERPORT}" > "${FDBCONF}"
+		let index2="${RANDOM} % 256"
+		let index3="${RANDOM} % 256"
+		let index4="(${RANDOM} % 255) + 1"
+		echo "${description}:${random_str}@${IPADDRESS}:${FDBSERVERPORT}" > "${FDBCONF}"
 	fi
 
 	if [ "${status}" -ne 0 ]; then
@@ -170,7 +181,7 @@ function startFdbServer {
 		log 'Failed to display user message'
 		let status="${status} + 1"
 
-	elif ! "${BINDIR}/fdbserver" -C "${FDBCONF}" -p "auto:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/$$" &> "${LOGDIR}/fdbserver.log" &
+	elif ! "${BINDIR}/fdbserver" -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
 	then
 		log "Failed to start FDB Server"
 		# Maybe the server is already running
@@ -226,7 +237,7 @@ function verifyAvailable {
 
 	# Determine if status json says the database is available.
 	else
-		avail=`"${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'status json' --timeout 10 2> /dev/null | grep -E '"database_available"|"available"' | grep 'true'`
+		avail=`"${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'status json' --timeout "${SERVERCHECKS}" 2> /dev/null | grep -E '"database_available"|"available"' | grep 'true'`
 		log "Avail value: ${avail}" "${DEBUGLEVEL}"
 		if [[ -n "${avail}" ]] ; then
 			return 0
@@ -262,7 +273,7 @@ function createDatabase {
 
 	# Configure the database.
 	else
-		"${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'configure new single memory; status' --timeout 240 --log --log-dir "${LOGDIR}" &>> "${LOGDIR}/fdbclient.log"
+		"${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'configure new single memory; status' --timeout "${CONFIGUREWAIT}" --log --log-dir "${LOGDIR}" &>> "${LOGDIR}/fdbclient.log"
 
 		if ! displayMessage "Checking if config succeeded"
 		then
@@ -270,7 +281,7 @@ function createDatabase {
 		fi
 
 		iteration=0
-		while [[ "${iteration}" -lt 10 ]] && ! verifyAvailable
+		while [[ "${iteration}" -lt "${SERVERCHECKS}" ]] && ! verifyAvailable
 		do
 			log "Database not created (iteration ${iteration})."
 			let iteration="${iteration} + 1"

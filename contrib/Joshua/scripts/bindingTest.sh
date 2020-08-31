@@ -1,6 +1,7 @@
 #!/bin/bash
 SCRIPTDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-pkill fdbserver
+KILLSERVERS="${KILLSERVERS:-0}"
+if [ "${KILLSERVERS}" -gt 0 ]; then pkill fdbserver; fi
 ulimit -S -c unlimited
 
 unset FDB_NETWORK_OPTION_EXTERNAL_CLIENT_DIRECTORY
