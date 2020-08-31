@@ -76,7 +76,8 @@ enum Arguments {
 	ARG_TPSINTERVAL,
 	ARG_TPSCHANGE,
 	ARG_TXNTRACE,
-	ARG_TXNTAGGING
+	ARG_TXNTAGGING,
+	ARG_TXNTAGGINGPREFIX
 };
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
@@ -96,6 +97,7 @@ typedef struct {
 } mako_txnspec_t;
 
 #define KNOB_MAX 256
+#define TAGPREFIXLENGTH_MAX 8
 
 /* benchmark parameters */
 typedef struct {
@@ -126,6 +128,7 @@ typedef struct {
 	uint8_t flatbuffers;
 	int txntrace;
 	int txntagging;
+	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 } mako_args_t;
 
 /* shared memory */
