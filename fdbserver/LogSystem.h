@@ -42,7 +42,7 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	int slowReplies;
 	int fastReplies;
 
-	ConnectionResetInfo() : lastReset(0), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
 };
 
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
