@@ -45,7 +45,8 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 			if (!x.present()) {
 				TraceEvent("WaitFailureTrigger").detail("PeerAddress", waitFailure.getEndpoint().getPrimaryAddress()).detail("Token", waitFailure.getEndpoint().token);
 				return Void();
-			} double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
+			}
+			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
 			if (w > 0)
 				wait( delay( w, taskID ) );
 		} catch (Error &e){
