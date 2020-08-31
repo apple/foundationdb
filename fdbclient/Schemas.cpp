@@ -278,6 +278,18 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "address":"1.2.3.4:1234"
                }
             ],
+            "epoch": {
+               "epoch": 1,
+               "epoch_begin": 23,
+               "epoch_end": 112315141
+            },
+            "missing_logs": [
+               {
+                  "id":"6f8d623d0cb9966f",
+                  "healthy":false,
+                  "address":"1.2.3.5:1234"
+               }
+            ],
             "log_replication_factor":3,
             "log_write_anti_quorum":0,
             "log_fault_tolerance":2,
@@ -288,6 +300,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "satellite_log_fault_tolerance":2
          }
       ],
+      "possibly_losing_old_logs_data": true,
       "fault_tolerance":{
          "max_zone_failures_without_losing_availability":0,
          "max_zone_failures_without_losing_data":0

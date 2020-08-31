@@ -1910,11 +1910,11 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 
 static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderArray oldTlogsArray;
-
 	if(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 		for(auto it : db->get().logSystemConfig.oldTLogs) {
 			JsonBuilderObject statusObj;
 			JsonBuilderArray logsObj;
+			JsonBuilderArray failedLogsObj;
 			Optional<int32_t> sat_log_replication_factor, sat_log_write_anti_quorum, sat_log_fault_tolerance, log_replication_factor, log_write_anti_quorum, log_fault_tolerance, remote_log_replication_factor, remote_log_fault_tolerance;
 
 			int maxFaultTolerance = 0;
@@ -1932,6 +1932,7 @@ static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Asyn
 					logsObj.push_back(logObj);
 					if(failed) {
 						failedLogs++;
+						failedLogsObj.push_back(logObj);
 					}
 				}
 				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
@@ -1952,6 +1953,18 @@ static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<Asyn
 			}
 			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
 			statusObj["logs"] = logsObj;
+
+			JsonBuilderObject epochInfo;
+			epochInfo["epoch"] = it.epoch;
+			epochInfo["epoch_begin"] = it.epochBegin;
+			epochInfo["epoch_end"] = it.epochEnd;
+			statusObj["epoch"] = epochInfo;
+
+			// We may lose logs in this log generation, storage servers may never be able to catch up this log
+			// generation.
+			if (maxFaultTolerance < 0) {
+				statusObj["missing_logs"] = failedLogsObj;
+			}
 
 			if (sat_log_replication_factor.present())
 				statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
@@ -2418,6 +2431,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && db->get().logSystemConfig.oldTLogs.size() > 0) {
 				statusObj["old_logs"] = oldTlogFetcher(&oldLogFaultTolerance, db, address_workers);
 			}
+
+			// Used as a signal that storage servers may not be able to catch up certain log generations
+			statusObj["possibly_losing_old_logs_data"] = oldLogFaultTolerance < 0;
 
 			if(configuration.present()) {
 				int extraTlogEligibleZones = getExtraTLogEligibleZones(workers, configuration.get());
