@@ -96,33 +96,8 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
-	int recentRequests;
-	Deque<int> requestBuckets;
-	double lastBucketBegin;
-	double bucketInterval;
-
-	void updateRequestBuckets() {
-		while(now() - lastBucketBegin > bucketInterval) {
-			lastBucketBegin += bucketInterval;
-			recentRequests -= requestBuckets.front();
-			requestBuckets.pop_front();
-			requestBuckets.push_back(0);
-		}
-	}
-
-	void addRequest() {
-		updateRequestBuckets();
-		++recentRequests;
-		++requestBuckets.back();
-	}
-
-	int getRecentRequests() {
-		updateRequestBuckets();
-		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
-	}
-
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	  : cc("ProxyStats", id.toString()),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
 		txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
@@ -148,9 +123,6 @@ struct ProxyStats {
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
-		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
-			requestBuckets.push_back(0);
-		}
 	}
 };
 
@@ -310,7 +282,6 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			stats->addRequest();
 			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
 				++stats->txnRequestErrors;
 				//FIXME: send an error instead of giving an unreadable version when the client can support the error: req.reply.sendError(proxy_memory_limit_exceeded());
@@ -629,7 +600,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 			choose{
 				when(CommitTransactionRequest req = waitNext(in)) {
 					//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-					commitData->stats.addRequest();
 					int bytes = getBytes(req);
 
 					// Drop requests if memory is under severe pressure
@@ -1439,7 +1409,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 			rep = v;
 		}
 	}
-	rep.recentRequests = commitData->stats.getRecentRequests();
+	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
@@ -1710,7 +1680,6 @@ ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, Promise
 	loop {
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
 		//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-		commitData->stats.addRequest();
 		if(req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && //Always do data distribution requests
 		   commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() > SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
 			++commitData->stats.keyServerLocationErrors;
