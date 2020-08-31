@@ -243,7 +243,7 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} lz4)
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
