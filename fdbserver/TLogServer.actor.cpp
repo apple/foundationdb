@@ -1394,7 +1394,6 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, Tag tag, int logRouters ) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	state std::vector<StringRef> relevantMessages;
-	// TODO: Change to passed in protocol version
 	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMessage;

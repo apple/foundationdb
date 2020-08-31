@@ -1,0 +1,12 @@
+testTitle=AsyncFileCorrectnessTest
+useDB=false
+runSetup=true
+clearAfterTest=false
+
+    testName=AsyncFileCorrectness
+    testDuration=10.0
+    unbufferedIO=true
+    ;fileName=/home/ajb/testfilecorrectness
+    targetFileSize=327680
+    maxOperationSize=8192
+    numSimultaneousOperations=10
