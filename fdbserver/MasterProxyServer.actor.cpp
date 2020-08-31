@@ -79,6 +79,60 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 	return Void();
 }
 
+struct ProxyStats {
+	CounterCollection cc;
+	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
+	Counter txnStartIn, txnStartOut, txnStartBatch;
+	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
+	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
+	Counter txnDefaultPriorityStartIn, txnDefaultPriorityStartOut;
+	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut, txnCommitOutSuccess, txnCommitErrors;
+	Counter txnConflicts;
+	Counter txnThrottled;
+	Counter commitBatchIn, commitBatchOut;
+	Counter mutationBytes;
+	Counter mutations;
+	Counter conflictRanges;
+	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
+	Version lastCommitVersionAssigned;
+
+	LatencySample commitLatencySample;
+	LatencySample grvLatencySample;
+
+	LatencyBands commitLatencyBands;
+	LatencyBands grvLatencyBands;
+
+	Future<Void> logger;
+
+	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
+	  : cc("ProxyStats", id.toString()),
+	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
+	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
+		txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
+		txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
+		txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
+		txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
+		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
+		txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),
+		txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
+		txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
+		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
+		txnConflicts("TxnConflicts", cc), txnThrottled("TxnThrottled", cc), commitBatchIn("CommitBatchIn", cc),
+		commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
+		conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
+		keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
+		lastCommitVersionAssigned(0),
+		commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+		grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
+		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
+		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
+		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
+		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+	}
+};
 struct TransactionRateInfo {
 	double rate;
 	double limit;
@@ -241,7 +295,6 @@ ACTOR Future<Void> queueTransactionStartRequests(
 	loop choose{
 		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			stats->addRequest();
 			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
 				++stats->txnRequestErrors;
 				//FIXME: send an error instead of giving an unreadable version when the client can support the error: req.reply.sendError(proxy_memory_limit_exceeded());
@@ -340,7 +393,8 @@ struct ResolutionRequestBuilder {
 		return *out;
 	}
 
-	void addTransaction(CommitTransactionRef& trIn, int transactionNumberInBatch) {
+	void addTransaction(CommitTransactionRequest& trRequest, int transactionNumberInBatch) {
+		auto& trIn = trRequest.transaction;
 		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
 		outTr.assign(requests.size(), NULL);
 		ASSERT( transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768 );
@@ -357,6 +411,13 @@ struct ResolutionRequestBuilder {
 				isTXNStateTransaction = true;
 				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
 			}
+		}
+		if (isTXNStateTransaction && !trRequest.isLockAware()) {
+			// This mitigates https://github.com/apple/foundationdb/issues/3647. Since this transaction is not lock
+			// aware, if this transaction got a read version then \xff/dbLocked must not have been set at this
+			// transaction's read snapshot. If that changes by commit time, then it won't commit on any proxy because of
+			// a conflict. A client could set a read version manually so this isn't totally bulletproof.
+			trIn.read_conflict_ranges.push_back(trRequest.arena, KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
 		}
 		std::vector<std::vector<int>> rCRIndexMap(
 		    requests.size()); // [resolver_index][read_conflict_range_index_on_the_resolver]
@@ -469,7 +530,6 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 			choose{
 				when(CommitTransactionRequest req = waitNext(in)) {
 					//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-					commitData->stats.addRequest();
 					int bytes = getBytes(req);
 
 					// Drop requests if memory is under severe pressure
@@ -860,11 +920,10 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
         self->span
 	);
 	int conflictRangeCount = 0;
-	self->maxTransactionBytes = 0;
-	for (int t = 0; t < trs.size(); t++) {
-		requests.addTransaction(trs[t].transaction, t);
-		conflictRangeCount +=
-		    trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
+	state int64_t maxTransactionBytes = 0;
+	for (int t = 0; t<trs.size(); t++) {
+		requests.addTransaction(trs[t], t);
+		conflictRangeCount += trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
 		//TraceEvent("MPTransactionDump", self->dbgid).detail("Snapshot", trs[t].transaction.read_snapshot);
 		//for(auto& m : trs[t].transaction.mutations)
 		self->maxTransactionBytes = std::max<int64_t>(
@@ -1580,7 +1639,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Pro
 	if (replyFromMaster.version > rep.version) {
 		rep = replyFromMaster;
 	}
-	rep.recentRequests = commitData->stats.getRecentRequests();
+	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
@@ -1858,7 +1917,6 @@ ACTOR static Future<Void> readRequestServer( MasterProxyInterface proxy, Promise
 	loop {
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
 		//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-		commitData->stats.addRequest();
 		if(req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && //Always do data distribution requests
 		   commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() > SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
 			++commitData->stats.keyServerLocationErrors;
