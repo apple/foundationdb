@@ -178,7 +178,7 @@ function createClusterFile {
 function stopCluster {
 	# Add an audit entree, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
-		printf '%-15s (%6s)  Stopping Fdbserver (%6s)\n' "$(date +'%Y-%m-%d %H:%M:%S (%s)')" "${$}" "${FDBSERVERID}" >> "${AUDITLOG}"
+		printf '%-15s (%6s)  Stopping Fdbserver (%6s)\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${FDBSERVERID}" >> "${AUDITLOG}"
 	fi
 	if [ -z "${FDBSERVERID}" ]; then
 		log 'FDB Server process is not defined'
@@ -199,7 +199,7 @@ function stopCluster {
 function startFdbServer {
 	# Add an audit entree, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
-		printf '%-15s (%6s)  Starting Fdbserver\n' "$(date +'%Y-%m-%d %H:%M:%S (%s)')" "${$}" >> "${AUDITLOG}"
+		printf '%-15s (%6s)  Starting Fdbserver\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" >> "${AUDITLOG}"
 	fi
 
 	if [ "${status}" -ne 0 ]; then
