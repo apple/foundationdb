@@ -2772,7 +2772,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		// To avoid removing machine teams too fast, which is unlikely happen though
 		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution) );
 
-		wait(waitUntilHealthy(self));
+		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
