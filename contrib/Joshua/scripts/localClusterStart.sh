@@ -10,6 +10,8 @@ SERVERCHECKS="${SERVERCHECKS:-10}"
 CONFIGUREWAIT="${CONFIGUREWAIT:-240}"
 FDBCONF="${ETCDIR}/fdb.cluster"
 LOGFILE="${LOGFILE:-${LOGDIR}/startcluster.log}"
+AUDITCLUSTER="${AUDITCLUSTER:-1}"
+AUDITLOG="${AUDITLOG:-/tmp/audit-cluster.log}"
 
 # Initialize the variables
 status=0
@@ -172,8 +174,34 @@ function createClusterFile {
 	return ${status}
 }
 
+# Stop the Cluster from running.
+function stopCluster {
+	# Add an audit entree, if enabled
+	if [ "${AUDITCLUSTER}" -gt 0 ]; then
+		printf '%-15s (%6s)  Stopping Fdbserver (%6s)\n' "$(date +'%Y-%m-%d %H:%M:%S (%s)')" "${$}" "${FDBSERVERID}" >> "${AUDITLOG}"
+	fi
+	if [ -z "${FDBSERVERID}" ]; then
+		log 'FDB Server process is not defined'
+		let status="${status} + 1"
+	elif ! kill -0 "${FDBSERVERID}"; then
+		log "Failed to locate FDB Server process (${FDBSERVERID})"
+		let status="${status} + 1"
+	elif ! kill -9 "${FDBSERVERID}"; then
+		log "Failed to kill FDB Server process (${FDBSERVERID})"
+		let status="${status} + 1"
+	else
+		log "Killed FDB Server process (${FDBSERVERID})"
+	fi
+	return "${status}"
+}
+
 # Start the server running.
 function startFdbServer {
+	# Add an audit entree, if enabled
+	if [ "${AUDITCLUSTER}" -gt 0 ]; then
+		printf '%-15s (%6s)  Starting Fdbserver\n' "$(date +'%Y-%m-%d %H:%M:%S (%s)')" "${$}" >> "${AUDITLOG}"
+	fi
+
 	if [ "${status}" -ne 0 ]; then
 		:
 	elif ! displayMessage "Starting Fdb Server"
@@ -185,14 +213,17 @@ function startFdbServer {
 	then
 		log "Failed to start FDB Server"
 		# Maybe the server is already running
-		FDBSERVERID="$(pidof fdbserver)"
+		#FDBSERVERID="$(pidof fdbserver)"
 		let status="${status} + 1"
 	else
 		FDBSERVERID="${!}"
 	fi
 
-	if ! kill -0 ${FDBSERVERID} ; then
-		log "FDB Server start failed."
+	if [ -z "${FDBSERVERID}" ]; then
+		log "FDB Server start failed because no process"
+		let status="${status} + 1"
+	elif ! kill -0 "${FDBSERVERID}" ; then
+		log "FDB Server start failed because no perms"
 		let status="${status} + 1"
 	fi
 
@@ -221,30 +252,31 @@ function getStatus {
 
 # Verify that the cluster is available.
 function verifyAvailable {
+	local status=0
+	if [ -z "${FDBSERVERID}" ]; then
+		log "FDB Server process is not defined."
+		let status="${status} + 1"
 	# Verify that the server is running.
-	if ! kill -0 "${FDBSERVERID}"
+	elif ! kill -0 "${FDBSERVERID}"
 	then
 		log "FDB server process (${FDBSERVERID}) is not running"
 		let status="${status} + 1"
-		return 1
-
 	# Display user message.
 	elif ! displayMessage "Checking cluster availability"
 	then
 		log 'Failed to display user message'
 		let status="${status} + 1"
-		return 1
-
 	# Determine if status json says the database is available.
 	else
 		avail=`"${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'status json' --timeout "${SERVERCHECKS}" 2> /dev/null | grep -E '"database_available"|"available"' | grep 'true'`
 		log "Avail value: ${avail}" "${DEBUGLEVEL}"
 		if [[ -n "${avail}" ]] ; then
-			return 0
+			:
 		else
-			return 1
+			let status="${status} + 1"
 		fi
 	fi
+	return "${status}"
 }
 
 # Configure the database on the server.
