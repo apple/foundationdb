@@ -3890,7 +3890,7 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 
 			wait(waitForAll(fReplies));
 
-			if(nLocs == 0) {
+			if(nLocs == 1) {
 				TEST(true); // Single-shard read hot range request
 				return fReplies[0].get().readHotRanges;
 			}
