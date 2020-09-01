@@ -92,7 +92,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
 	init( MID_SHARD_SIZE_MAX_STALENESS,           10.0 );
-	init( TAG_ENCODE_KEY_SERVERS,                 true ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = false;
+	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;

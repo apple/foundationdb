@@ -871,7 +871,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData *self) {
 		TransactionCommitCostEstimation maxCost;
 		double maxRate = 0, maxBusyness = 0;
 		for(const auto& [tag, cost] : it->value.tagCostEst) {
-			double rate = cost.getOpsSum() / elapsed;
+			double rate = cost.getCostSum() / elapsed;
 			if(rate > maxRate) {
 				busiestTag = tag;
 				maxRate = rate;
