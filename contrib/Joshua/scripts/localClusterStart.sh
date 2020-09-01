@@ -187,7 +187,7 @@ function stopCluster {
 	elif ! kill -0 "${FDBSERVERID}"; then
 		log "Failed to locate FDB Server process (${FDBSERVERID})"
 		let status="${status} + 1"
-	elif "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec "kill; kill ${CLUSTERSTRING}" --timeout 120 &>> "${LOGDIR}/fdbcli-kill.log"
+	elif "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec "kill; kill ${CLUSTERSTRING}; sleep 3" --timeout 120 &>> "${LOGDIR}/fdbcli-kill.log"
 	then
 		log "Killed cluster (${FDBSERVERID}) via cli"
 
@@ -214,7 +214,7 @@ function startFdbServer {
 		log 'Failed to display user message'
 		let status="${status} + 1"
 
-	elif ! "${BINDIR}/fdbserver" -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
+	elif ! "${BINDIR}/fdbserver" -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$} --knob_disable_posix_kernel_aio=1" &> "${LOGDIR}/fdbserver.log" &
 	then
 		log "Failed to start FDB Server"
 		# Maybe the server is already running
