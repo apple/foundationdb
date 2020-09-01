@@ -906,6 +906,7 @@ std::pair<MetricNameRef, KeyRef> decodeMetricConfKey( KeyRef const& prefix, KeyR
 const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
+const KeyRef databaseLockedKeyEnd = LiteralStringRef("\xff/dbLocked\x00");
 const KeyRef metadataVersionKey = LiteralStringRef("\xff/metadataVersion");
 const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00");
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");

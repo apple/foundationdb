@@ -458,8 +458,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 // Subclasses must initialize all members in their default constructors
 // Subclasses must serialize all members
 struct BasicLoadBalancedReply {
-	int recentRequests;
-	BasicLoadBalancedReply() : recentRequests(0) {}
+	int processBusyTime;
+	BasicLoadBalancedReply() : processBusyTime(0) {}
 };
 
 Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const BasicLoadBalancedReply *reply);
@@ -528,7 +528,7 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 			if(result.present()) {
 				Optional<BasicLoadBalancedReply> loadBalancedReply = getBasicLoadBalancedReply(&result.get());
 				if(loadBalancedReply.present()) {
-					alternatives->updateRecent( useAlt, loadBalancedReply.get().recentRequests );
+					alternatives->updateRecent( useAlt, loadBalancedReply.get().processBusyTime );
 				}
 
 				return result.get();
