@@ -186,9 +186,9 @@ struct MakoWorkload : TestWorkload {
 			// Meaningful Latency metrics
 			const int opExecutedAtOnce[] = {OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_COMMIT};
 			for (const int& op : opExecutedAtOnce){
-				m.push_back(PerfMetric("Mean " + opNames[op] +" Latency (ms)", 1000 * opLatencies[op].mean(), true));
-				m.push_back(PerfMetric("Max " + opNames[op] + " Latency (ms, averaged)", 1000 * opLatencies[op].max(), true));
-				m.push_back(PerfMetric("Min " + opNames[op] + " Latency (ms, averaged)", 1000 * opLatencies[op].min(), true));
+				m.push_back(PerfMetric("Mean " + opNames[op] +" Latency (us)", 1e6 * opLatencies[op].mean(), true));
+				m.push_back(PerfMetric("Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), true));
+				m.push_back(PerfMetric("Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), true));
 			}
 			// Latency for local operations if needed
 			if (latencyForLocalOperation) {
@@ -197,9 +197,9 @@ struct MakoWorkload : TestWorkload {
 					TraceEvent(SevDebug, "LocalLatency")
 						.detail("Name", opNames[op])
 						.detail("Size", opLatencies[op].getPopulationSize());
-					m.push_back(PerfMetric("Mean " + opNames[op] +" Latency (ms)", 1000 * opLatencies[op].mean(), true));
-					m.push_back(PerfMetric("Max " + opNames[op] + " Latency (ms, averaged)", 1000 * opLatencies[op].max(), true));
-					m.push_back(PerfMetric("Min " + opNames[op] + " Latency (ms, averaged)", 1000 * opLatencies[op].min(), true));
+					m.push_back(PerfMetric("Mean " + opNames[op] +" Latency (us)", 1e6 * opLatencies[op].mean(), true));
+					m.push_back(PerfMetric("Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), true));
+					m.push_back(PerfMetric("Min " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].min(), true));
 				}
 			}
 
