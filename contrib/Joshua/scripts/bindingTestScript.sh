@@ -61,8 +61,8 @@ fi
 # Display directory and log information, if an error occurred
 if [ "${status}" -ne 0 ]
 then
-	ls "${WORKDIR}" > "${LOGDIR}/dir.log"
-	ps -eafw > "${LOGDIR}/process-preclean.log"
+	ls "${WORKDIR}" &> "${LOGDIR}/dir.log"
+	ps -eafwH &> "${LOGDIR}/process-preclean.log"
 	if [ -f "${FDBCONF}" ]; then
 		cp -f "${FDBCONF}" "${LOGDIR}/"
 	fi
@@ -74,10 +74,10 @@ fi
 
 # Save debug information files, environment, and log information, if an error occurred
 if [ "${status}" -ne 0 ] && [ "${SAVEONERROR}" -gt 0 ]; then
-	ps -eafw > "${LOGDIR}/process-exit.log"
-	netstat -na > "${LOGDIR}/netstat.log"
-	df -h > "${LOGDIR}/disk.log"
-	env > "${LOGDIR}/env.log"
+	ps -eafwH &> "${LOGDIR}/process-exit.log"
+	netstat -na &> "${LOGDIR}/netstat.log"
+	df -h &> "${LOGDIR}/disk.log"
+	env &> "${LOGDIR}/env.log"
 fi
 
 # Stop the cluster
