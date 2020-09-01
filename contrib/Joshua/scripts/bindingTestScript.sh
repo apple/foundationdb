@@ -7,7 +7,7 @@ SCRIPTID="${$}"
 SAVEONERROR="${SAVEONERROR:-1}"
 PYTHONDIR="${BINDIR}/tests/python"
 testScript="${BINDIR}/tests/bindingtester/run_binding_tester.sh"
-VERSION="1.6"
+VERSION="1.7"
 
 source ${SCRIPTDIR}/localClusterStart.sh
 
@@ -35,6 +35,9 @@ fi
 
 # Begin the cluster using the logic in localClusterStart.sh.
 startCluster
+
+# Stop the cluster on exit
+trap "stopCluster" EXIT
 
 # Display user message
 if [ "${status}" -ne 0 ]; then
