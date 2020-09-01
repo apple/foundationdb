@@ -214,7 +214,7 @@ function startFdbServer {
 		log 'Failed to display user message'
 		let status="${status} + 1"
 
-	elif ! "${BINDIR}/fdbserver" -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$} --knob_disable_posix_kernel_aio=1" &> "${LOGDIR}/fdbserver.log" &
+	elif ! "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
 	then
 		log "Failed to start FDB Server"
 		# Maybe the server is already running
