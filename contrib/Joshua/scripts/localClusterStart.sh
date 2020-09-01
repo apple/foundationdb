@@ -10,7 +10,7 @@ SERVERCHECKS="${SERVERCHECKS:-10}"
 CONFIGUREWAIT="${CONFIGUREWAIT:-240}"
 FDBCONF="${ETCDIR}/fdb.cluster"
 LOGFILE="${LOGFILE:-${LOGDIR}/startcluster.log}"
-AUDITCLUSTER="${AUDITCLUSTER:-1}"
+AUDITCLUSTER="${AUDITCLUSTER:-0}"
 AUDITLOG="${AUDITLOG:-/tmp/audit-cluster.log}"
 
 # Initialize the variables
