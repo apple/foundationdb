@@ -187,7 +187,7 @@ function stopCluster {
 	elif ! kill -0 "${FDBSERVERID}"; then
 		log "Failed to locate FDB Server process (${FDBSERVERID})"
 		let status="${status} + 1"
-	elif "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'kill all' --timeout 120 &>> "${LOGDIR}/fdbcli-kill.log"
+	elif "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec "kill ${CLUSTERSTRING}" --timeout 120 &>> "${LOGDIR}/fdbcli-kill.log"
 	then
 		log "Killed cluster (${FDBSERVERID}) via cli"
 
