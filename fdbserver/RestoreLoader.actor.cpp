@@ -170,13 +170,18 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				}
 			}
 
-			// Dispatch loading backup file requests
+			// Dispatch loading backup file requests;
 			lastLoadReqs = 0;
 			while (!self->loadingQueue.empty()) {
 				if (lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
 					break;
 				}
 				const RestoreLoadFileRequest& req = self->loadingQueue.top();
+				if (req.batchIndex > self->finishedBatch.get() + 1 && 
+				self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) {
+					// Do not load future version batch requests if we have enough pending loading reqs
+					break;
+				}
 				if (req.batchIndex <= self->finishedBatch.get()) {
 					TraceEvent(SevError, "FastRestoreLoaderDispatchRestoreLoadFileRequestTooOld")
 					    .detail("FinishedBatchIndex", self->finishedBatch.get())

@@ -2999,6 +2999,7 @@ namespace fileBackup {
 			static TaskParam<int64_t> remainingInBatch() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
+		// MX: This is how restore dispatch new restore tasks
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state RestoreConfig restore(task);
 
@@ -3161,7 +3162,8 @@ namespace fileBackup {
 					if(f.isRange) {
 						addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr, taskBucket, task,
 							f, j, std::min<int64_t>(f.blockSize, f.fileSize - j),
-							TaskCompletionKey::joinWith(allPartsDone)));
+							TaskCompletionKey::joinWith(allPartsDone))); // MX: This ensures the batch of tasks is done before it is claimed done.
+							// MX: It achieves that we have a future that waits for many promises to set before the future is claimed as ready.
 					}
 					else {
 						addTaskFutures.push_back(RestoreLogDataTaskFunc::addTask(tr, taskBucket, task,
