@@ -80,4 +80,9 @@ if [ "${status}" -ne 0 ] && [ "${SAVEONERROR}" -gt 0 ]; then
 	env > "${LOGDIR}/env.log"
 fi
 
+# Stop the cluster
+if stopCluster; then
+	unset FDBSERVERID
+fi
+
 exit "${status}"

@@ -22,6 +22,7 @@ let index3="${RANDOM} % 256"
 let index4="(${RANDOM} % 255) + 1"
 # Define a random ip address on localhost
 IPADDRESS="127.${index2}.${index3}.${index4}"
+CLUSTERSTRING="${IPADDRESS}:${FDBSERVERPORT}"
 
 
 function log
@@ -178,7 +179,7 @@ function createClusterFile {
 function stopCluster {
 	# Add an audit entree, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
-		printf '%-15s (%6s)  Stopping Fdbserver (%6s)\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${FDBSERVERID}" >> "${AUDITLOG}"
+		printf '%-15s (%6s)  Stopping cluster %-20s (%6s): %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${CLUSTERSTRING}" "${FDBSERVERID}" >> "${AUDITLOG}"
 	fi
 	if [ -z "${FDBSERVERID}" ]; then
 		log 'FDB Server process is not defined'
@@ -186,11 +187,15 @@ function stopCluster {
 	elif ! kill -0 "${FDBSERVERID}"; then
 		log "Failed to locate FDB Server process (${FDBSERVERID})"
 		let status="${status} + 1"
+	elif "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'kill all' --timeout 120 &>> "${LOGDIR}/fdbcli-kill.log"
+	then
+		log "Killed cluster (${FDBSERVERID}) via cli"
+
 	elif ! kill -9 "${FDBSERVERID}"; then
-		log "Failed to kill FDB Server process (${FDBSERVERID})"
+		log "Failed to forcibly kill FDB Server process (${FDBSERVERID})"
 		let status="${status} + 1"
 	else
-		log "Killed FDB Server process (${FDBSERVERID})"
+		log "Forcibly killed FDB Server process (${FDBSERVERID})"
 	fi
 	return "${status}"
 }
@@ -199,7 +204,7 @@ function stopCluster {
 function startFdbServer {
 	# Add an audit entree, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
-		printf '%-15s (%6s)  Starting Fdbserver\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" >> "${AUDITLOG}"
+		printf '%-15s (%6s)  Starting cluster %-20s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${CLUSTERSTRING}" >> "${AUDITLOG}"
 	fi
 
 	if [ "${status}" -ne 0 ]; then
