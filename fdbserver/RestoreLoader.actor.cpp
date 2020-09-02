@@ -159,11 +159,11 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			curVBInflightReqs = self->inflightSendLoadParamReqs[self->finishedSendingVB + 1];
 			while (!self->sendLoadParamQueue.empty()) {
 				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
-				if (curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD ||
+				if ((req.batchIndex > self->finishedBatch.get() + 1 && curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD) ||
 				    sendLoadParams >= SERVER_KNOBS->FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH) {
 					// Too many future VB requests are released
 					break;
-				} else {
+				} else { // always release as many sendParam reqs as possible for current VB.
 					req.toSched.send(Void());
 					self->sendLoadParamQueue.pop();
 					sendLoadParams++;
@@ -173,12 +173,10 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			// Dispatch loading backup file requests;
 			lastLoadReqs = 0;
 			while (!self->loadingQueue.empty()) {
-				if (lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
-					break;
-				}
 				const RestoreLoadFileRequest& req = self->loadingQueue.top();
-				if (req.batchIndex > self->finishedBatch.get() + 1 && 
-				self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) {
+				if ((req.batchIndex > self->finishedBatch.get() + 1 && 
+				self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) ||
+				lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
 					// Do not load future version batch requests if we have enough pending loading reqs
 					break;
 				}
