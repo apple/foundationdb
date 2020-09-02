@@ -105,6 +105,12 @@ struct ResolutionRequestBuilder {
 		}
 	}
 
+	void setSplitTransaction(const SplitTransaction& splitTransaction) {
+		for (auto& request : requests) {
+			request.splitTransaction = splitTransaction;
+		}
+	}
+
 	CommitTransactionRef& getOutTransaction(int resolver, Version read_snapshot) {
 		CommitTransactionRef *& out = outTr[resolver];
 		if (!out) {
@@ -641,13 +647,13 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 
-	ResolutionRequestBuilder requests(
-		pProxyCommitData,
-		self->commitVersion,
-		self->prevVersion,
-		pProxyCommitData->version,
-        self->span
-	);
+	ResolutionRequestBuilder requests(pProxyCommitData, self->commitVersion, self->prevVersion,
+	                                  pProxyCommitData->version, self->span);
+
+	if (self->splitTransaction.present()) {
+		requests.setSplitTransaction(self->splitTransaction.get());
+	}
+
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {

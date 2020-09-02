@@ -18,35 +18,70 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ResolverInterface.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Orderer.actor.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/StorageMetrics.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/Orderer.actor.h"
+#include "fdbserver/PartMerger.h"
+#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/StorageMetrics.h"
+#include "fdbserver/TimedKVCache.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace {
+
+class ResolveTransactionBatchRequestMerger : public PartMerger<ResolveTransactionBatchRequest> {
+protected:
+	virtual void mergeFirstPart(const value_t& incomingRequest) override {
+		ASSERT(incomingRequest.transactions.size() == 1);
+		merged = incomingRequest;
+	}
+
+	virtual void merge(const value_t& incomingRequest) override {
+		ASSERT(incomingRequest.transactions.size() == 1);
+
+		auto& arena = merged.arena;
+		auto& current = merged.transactions[0];
+		auto& incoming = incomingRequest.transactions[0];
+
+		ASSERT(current.read_snapshot == incoming.read_snapshot);
+		ASSERT(current.report_conflicting_keys == incoming.report_conflicting_keys);
+
+		merged.arena.dependsOn(incomingRequest.arena);
+
+		current.read_conflict_ranges.append(arena, incoming.read_conflict_ranges.begin(),
+		                                    incoming.read_conflict_ranges.size());
+		current.write_conflict_ranges.append(arena, incoming.write_conflict_ranges.begin(),
+		                                     incoming.write_conflict_ranges.size());
+		// Mutations are not useful in the resolve context
+	}
+
+public:
+	using PartMerger::PartMerger;
+};
+
 struct ProxyRequestsInfo {
 	std::map<Version, ResolveTransactionBatchReply> outstandingBatches;
 	Version lastVersion;
 
 	ProxyRequestsInfo() : lastVersion(-1) {}
 };
-}
 
-namespace{
 struct Resolver : ReferenceCounted<Resolver> {
 	UID dbgid;
 	int proxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
+
+	TimedMergingKVCache<UID, ResolveTransactionBatchRequestMerger> splitTransactionMerger;
+	TimedKVCache<UID, Promise<Optional<ResolveTransactionBatchReply>>> splitTransactionResponse;
 
 	Map<Version, Standalone<VectorRef<StateTransactionRef>>> recentStateTransactions;
 	Deque<std::pair<Version, int64_t>> recentStateTransactionSizes;
@@ -77,15 +112,21 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Future<Void> logger;
 
-	Resolver( UID dbgid, int proxyCount, int resolverCount )
-		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0),
-		  cc("Resolver", dbgid.toString()),
-		  resolveBatchIn("ResolveBatchIn", cc), resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc), resolvedBytes("ResolvedBytes", cc),
-		  resolvedReadConflictRanges("ResolvedReadConflictRanges", cc), resolvedWriteConflictRanges("ResolvedWriteConflictRanges", cc), transactionsAccepted("TransactionsAccepted", cc),
-		  transactionsTooOld("TransactionsTooOld", cc), transactionsConflicted("TransactionsConflicted", cc), resolvedStateTransactions("ResolvedStateTransactions", cc), 
-		  resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc), resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
-		  splitRequests("SplitRequests", cc)
-	{
+	Resolver(UID dbgid, int proxyCount, int resolverCount)
+	  : dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1),
+	    splitTransactionMerger(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH),
+	    splitTransactionResponse(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH), conflictSet(newConflictSet()),
+	    iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE), debugMinRecentStateVersion(0), cc("Resolver", dbgid.toString()),
+	    resolveBatchIn("ResolveBatchIn", cc), resolveBatchStart("ResolveBatchStart", cc),
+	    resolvedTransactions("ResolvedTransactions", cc), resolvedBytes("ResolvedBytes", cc),
+	    resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),
+	    resolvedWriteConflictRanges("ResolvedWriteConflictRanges", cc),
+	    transactionsAccepted("TransactionsAccepted", cc), transactionsTooOld("TransactionsTooOld", cc),
+	    transactionsConflicted("TransactionsConflicted", cc),
+	    resolvedStateTransactions("ResolvedStateTransactions", cc),
+	    resolvedStateMutations("ResolvedStateMutations", cc), resolvedStateBytes("ResolvedStateBytes", cc),
+	    resolveBatchOut("ResolveBatchOut", cc), metricsRequests("MetricsRequests", cc),
+	    splitRequests("SplitRequests", cc) {
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
 		specialCounter(cc, "NeededVersion", [this](){ return this->neededVersion.get(); });
 		specialCounter(cc, "TotalStateBytes", [this](){ return this->totalStateBytes.get(); });
@@ -97,7 +138,18 @@ struct Resolver : ReferenceCounted<Resolver> {
 	}
 
 };
-} // namespace
+
+template <typename Response_t>
+void sendResolution(Reference<Resolver> self, ResolveTransactionBatchRequest& req, const Response_t& response) {
+	if (!req.splitTransaction.present()) {
+		req.reply.send(response);
+	} else {
+		const UID& splitID = req.splitTransaction.get().id;
+		self->splitTransactionResponse.get(splitID).send(response);
+	}
+}
+
+} // anonymous namespace
 
 ACTOR Future<Void> resolveBatch(
 	Reference<Resolver> self, 
@@ -289,20 +341,58 @@ ACTOR Future<Void> resolveBatch(
 	if(proxyInfoItr != self->proxyInfoMap.end()) {
 		auto batchItr = proxyInfoItr->second.outstandingBatches.find(req.version);
 		if(batchItr != proxyInfoItr->second.outstandingBatches.end()) {
-			req.reply.send(batchItr->second);
+			sendResolution(self, req, batchItr->second);
 		}
 		else {
 			TEST(true); // No outstanding batches for version on proxy
-			req.reply.send(Never());
+			sendResolution(self, req, Never());
 		}
 	}
 	else {
 		ASSERT_WE_THINK(false);  // The first non-duplicate request with this proxyAddress, including this one, should have inserted this item in the map!
 		//TEST(true); // No prior proxy requests
-		req.reply.send(Never());
+		sendResolution(self, req, Never());
 	}
 
 	++self->resolveBatchOut;
+
+	return Void();
+}
+
+ACTOR Future<Void> splitTransactionResolver(Reference<Resolver> self, ResolveTransactionBatchRequest batch) {
+	state const SplitTransaction& splitTransaction = batch.splitTransaction.get();
+	state const UID splitID = splitTransaction.id;
+
+	TraceEvent("SplitTransactionResolver")
+	    .detail("NumTransactionInBatch", batch.transactions.size())
+	    .detail("SplitID", batch.splitTransaction.get().id)
+	    .detail("PartIndex", splitTransaction.partIndex);
+
+	ASSERT(batch.transactions.size() == 1);
+	ASSERT(batch.splitTransaction.present());
+
+	if (!self->splitTransactionResponse.exists(splitID)) {
+		self->splitTransactionResponse.add(splitID, Promise<Optional<ResolveTransactionBatchReply>>());
+	}
+
+	const int partIndex = splitTransaction.partIndex;
+	const int totalParts = splitTransaction.totalParts;
+
+	self->splitTransactionMerger.add(splitID, batch, partIndex, totalParts);
+
+	// Additional exists called to trigger the removal of expired keys
+	if (self->splitTransactionMerger.exists(splitID) && self->splitTransactionMerger.get(splitID).ready()) {
+		const auto& merged = self->splitTransactionMerger.get(splitID).get();
+		wait(resolveBatch(self, merged));
+	}
+
+	state Optional<ResolveTransactionBatchReply> reply = wait(self->splitTransactionResponse.get(splitID).getFuture());
+
+	if (reply.present()) {
+		batch.reply.send(reply.get());
+	} else {
+		batch.reply.send(Never());
+	}
 
 	return Void();
 }
@@ -320,7 +410,11 @@ ACTOR Future<Void> resolverCore(
 	TraceEvent("ResolverInit", resolver.id()).detail("RecoveryCount", initReq.recoveryCount);
 	loop choose {
 		when ( ResolveTransactionBatchRequest batch = waitNext( resolver.resolve.getFuture() ) ) {
-			actors.add( resolveBatch(self, batch) );
+			if (!batch.splitTransaction.present()) {
+				actors.add(resolveBatch(self, batch));
+			} else {
+				actors.add(splitTransactionResolver(self, batch));
+			}
 		}
 		when ( ResolutionMetricsRequest req = waitNext( resolver.metrics.getFuture() ) ) {
 			++self->metricsRequests;
