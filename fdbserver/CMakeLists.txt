@@ -97,6 +97,8 @@ set(FDBSERVER_SRCS
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
+  TimedKVCache.h
+  TimedKVCache.actor.cpp
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp
