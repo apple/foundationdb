@@ -128,10 +128,9 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			}
 			// When shall the node pause the process of other requests, e.g., load file requests
 			// TODO: Revisit if we should have (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)
-			if (
-			     (self->inflightSendingReqs >= 1 &&
-			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
-			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) {
+			if ((self->inflightSendingReqs >= 1 &&
+			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
+			    self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) {
 				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
 					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightRequests")
 					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
@@ -160,7 +159,8 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			curVBInflightReqs = self->inflightSendLoadParamReqs[self->finishedSendingVB + 1];
 			while (!self->sendLoadParamQueue.empty()) {
 				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
-				if ((req.batchIndex > self->finishedBatch.get() + 1 && curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD) ||
+				if ((req.batchIndex > self->finishedBatch.get() + 1 &&
+				     curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD) ||
 				    sendLoadParams >= SERVER_KNOBS->FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH) {
 					// Too many future VB requests are released
 					break;
@@ -176,9 +176,9 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 			lastLoadReqs = 0;
 			while (!self->loadingQueue.empty()) {
 				const RestoreLoadFileRequest& req = self->loadingQueue.top();
-				if ((req.batchIndex > self->finishedBatch.get() + 1 && 
-				self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) ||
-				lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
+				if ((req.batchIndex > self->finishedBatch.get() + 1 &&
+				     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS) ||
+				    lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
 					// Do not load future version batch requests if we have enough pending loading reqs
 					break;
 				}

@@ -2999,9 +2999,10 @@ namespace fileBackup {
 			static TaskParam<int64_t> remainingInBatch() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
-		// MX: This is how restore dispatch new restore tasks
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			state RestoreConfig restore(task);
+	    // MX: This is how restore dispatch new restore tasks
+	    ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
+	                                      Reference<FutureBucket> futureBucket, Reference<Task> task) {
+		    state RestoreConfig restore(task);
 
 			state Version beginVersion = Params.beginVersion().get(task);
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
@@ -3160,18 +3161,19 @@ namespace fileBackup {
 						break;
 
 					if(f.isRange) {
-						addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(tr, taskBucket, task,
-							f, j, std::min<int64_t>(f.blockSize, f.fileSize - j),
-							TaskCompletionKey::joinWith(allPartsDone))); // MX: This ensures the batch of tasks is done before it is claimed done.
-							// MX: It achieves that we have a future that waits for many promises to set before the future is claimed as ready.
-					}
-					else {
-						addTaskFutures.push_back(RestoreLogDataTaskFunc::addTask(tr, taskBucket, task,
+					    addTaskFutures.push_back(RestoreRangeTaskFunc::addTask(
+					        tr, taskBucket, task, f, j, std::min<int64_t>(f.blockSize, f.fileSize - j),
+					        TaskCompletionKey::joinWith(allPartsDone))); // MX: This ensures the batch of tasks is done
+					                                                     // before it is claimed done.
+					    // MX: It achieves that we have a future that waits for many promises to set before the future
+					    // is claimed as ready.
+				    } else {
+					    addTaskFutures.push_back(RestoreLogDataTaskFunc::addTask(tr, taskBucket, task,
 							f, j, std::min<int64_t>(f.blockSize, f.fileSize - j),
 							TaskCompletionKey::joinWith(allPartsDone)));
-					}
+				    }
 
-					// Increment beginBlock for the file and total blocks dispatched for this task
+				    // Increment beginBlock for the file and total blocks dispatched for this task
 					++beginBlock;
 					++blocksDispatched;
 					--remainingInBatch;
@@ -3267,9 +3269,9 @@ namespace fileBackup {
 				.detail("RemainingInBatch", remainingInBatch);
 
 			return Void();
-		}
+	    }
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, std::string beginFile, int64_t beginBlock, int64_t batchSize, int64_t remainingInBatch = 0, TaskCompletionKey completionKey = TaskCompletionKey::noSignal(), Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+	    ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, std::string beginFile, int64_t beginBlock, int64_t batchSize, int64_t remainingInBatch = 0, TaskCompletionKey completionKey = TaskCompletionKey::noSignal(), Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
 
 			// Use high priority for dispatch tasks that have to queue more blocks for the current batch
