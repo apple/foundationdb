@@ -77,7 +77,7 @@ public:
 	static Key reservedTaskParamKeyBlockID;
 	static Key reservedTaskParamKeyVersion;
 
-	// Optional parameters tha specify a database Key that must have a specific Value in order for the Task
+	// Optional parameters that specify a database Key that must have a specific Value in order for the Task
 	// to be executed (for _execute() or _finish() to be called)  OR for keepRunning() to return true for the Task.
 	static Key reservedTaskParamValidKey;
 	static Key reservedTaskParamValidValue;
