@@ -979,12 +979,10 @@ ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTran
 	Standalone<RangeResultRef> result;
 	for (auto& w : workers) {
 		// exclude :tls in keys even the network addresss is TLS
-		Key k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port)));
+		KeyRef k(prefix.withSuffix(formatIpPort(w.address.ip, w.address.port), result.arena()));
 		if (kr.contains(k)) {
-			Value v(w.processClass.toString());
+			ValueRef v(result.arena(), w.processClass.toString());
 			result.push_back(result.arena(), KeyValueRef(k, v));
-			result.arena().dependsOn(k.arena());
-			result.arena().dependsOn(v.arena());
 		}
 	}
 	if (ryw->readYourWritesDisabled()) return result;
