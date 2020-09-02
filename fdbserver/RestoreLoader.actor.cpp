@@ -71,6 +71,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 		state int curVBInflightReqs = 0;
 		state int sendLoadParams = 0;
 		state int lastLoadReqs = 0;
+		state bool releasedReqs = false;
 		loop {
 			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
 			    .detail("SendingQueue", self->sendingQueue.size())
@@ -122,16 +123,15 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				    self->cpuUsage < SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
 					self->addActor.send(handleSendMutationsRequest(req, self));
 					self->sendingQueue.pop();
+					releasedReqs = true;
 				}
 			}
 			// When shall the node pause the process of other requests, e.g., load file requests
 			// TODO: Revisit if we should have (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)
-			if ((self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0) &&
-			    (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
-			     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS ||
+			if (
 			     (self->inflightSendingReqs >= 1 &&
 			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
-			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT)) {
+			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT) {
 				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
 					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightRequests")
 					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
@@ -153,6 +153,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 				} else {
 					req.toSched.send(Void());
 					self->sendLoadParamQueue.pop();
+					releasedReqs = true;
 				}
 			}
 			sendLoadParams = 0;
@@ -167,6 +168,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 					req.toSched.send(Void());
 					self->sendLoadParamQueue.pop();
 					sendLoadParams++;
+					releasedReqs = true;
 				}
 			}
 
@@ -186,12 +188,19 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 					    .detail("RequestBatchIndex", req.batchIndex);
 					req.reply.send(RestoreLoadFileReply(req.param, true));
 					self->loadingQueue.pop();
+					releasedReqs = true;
 					ASSERT(false); // Check if this ever happens easily
 				} else {
 					self->addActor.send(handleLoadFileRequest(req, self));
 					self->loadingQueue.pop();
 					lastLoadReqs++;
+					releasedReqs = true;
 				}
+			}
+
+			if (!releasedReqs) { // not release any request in this loop; wait a bit before try again
+				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
+				releasedReqs = false;
 			}
 
 			if (self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
