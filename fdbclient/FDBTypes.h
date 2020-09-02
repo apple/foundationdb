@@ -158,6 +158,8 @@ struct TagsAndMessage {
 		return sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint16_t) + tags.size() * sizeof(Tag);
 	}
 
+	uint32_t getVersionSub() const { return *(reinterpret_cast<const uint32_t*>(message.begin() + sizeof(int32_t))); }
+
 	StringRef getMessageWithoutTags() const {
 		return message.substr(getHeaderSize());
 	}

@@ -18,37 +18,106 @@
  * limitations under the License.
  */
 
-#include "flow/Hash3.h"
-#include "flow/UnitTest.h"
+#include <chrono>
+#include <map>
+#include <vector>
+
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
-#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/FDBTypes.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/LogProtocolMessage.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/MutationTracking.h"
-#include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbserver/IDiskQueue.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/Stats.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MutationTracking.h"
+#include "fdbserver/PartMerger.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TimedKVCache.h"
+#include "fdbserver/TLogInterface.h"
+#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
+#include "flow/Arena.h"
+#include "flow/Hash3.h"
+#include "flow/UnitTest.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::pair;
 using std::make_pair;
 using std::min;
 using std::max;
+
+namespace {
+
+using SubversionMessageMap_t = std::map<uint32_t, TagsAndMessage>;
+
+void readMessagesToMap(SubversionMessageMap_t& map, const Arena& arena, const StringRef& messages) {
+	ArenaReader rd(arena, messages, Unversioned());
+
+	while (!rd.empty()) {
+		TagsAndMessage tagsAndMsg;
+		tagsAndMsg.loadFromArena(&rd, nullptr);
+
+		const auto subversion = tagsAndMsg.getVersionSub();
+		ASSERT(map.find(subversion) == map.end());
+		map[subversion] = tagsAndMsg;
+	}
+}
+
+} // anonymous namespace
+
+class TLogCommitRequestMerger : public PartMerger<TLogCommitRequest> {
+
+private:
+	SubversionMessageMap_t subversionMessageMap;
+
+protected:
+	virtual void mergeFirstPart(const value_t& incomingRequest) override {
+		merged = incomingRequest;
+
+		readMessagesToMap(subversionMessageMap, merged.arena, merged.messages);
+	}
+
+	virtual void merge(const value_t& incomingRequest) override {
+		ASSERT(merged.splitTransaction.get().id == incomingRequest.splitTransaction.get().id);
+		ASSERT(merged.prevVersion == incomingRequest.prevVersion);
+		ASSERT(merged.version == incomingRequest.version);
+
+		// TODO -- verify it is reasonable
+		merged.knownCommittedVersion = std::max(merged.knownCommittedVersion, incomingRequest.knownCommittedVersion);
+		merged.minKnownCommittedVersion =
+		    std::max(merged.minKnownCommittedVersion, incomingRequest.minKnownCommittedVersion);
+
+		// Ensure the incoming request Arena does not get garbage collected when they get GCed while the first request
+		// is not fully committed.
+		merged.arena.dependsOn(incomingRequest.arena);
+
+		// The messages are merged separately into a map, for future use.
+		readMessagesToMap(subversionMessageMap, incomingRequest.arena, incomingRequest.messages);
+	}
+
+public:
+	using PartMerger::PartMerger;
+
+	std::vector<TagsAndMessage> getOrderedTagsAndMsgs() const {
+		std::vector<TagsAndMessage> result;
+		for (auto& item : subversionMessageMap) {
+			result.emplace_back(item.second);
+		}
+		return result;
+	}
+};
 
 struct TLogQueueEntryRef {
 	UID id;
@@ -306,6 +375,9 @@ struct TLogData : NonCopyable {
 	UID dbgid;
 	UID workerID;
 
+	TimedMergingKVCache<UID, TLogCommitRequestMerger> splitTransactionMerger;
+	TimedKVCache<UID, Promise<Version>> splitTransactionResponse;
+
 	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
 	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log interface should work without directly accessing rawPersistentQueue
 	TLogQueue *persistentQueue;	// Logical queue the log operates on and persist its data.
@@ -346,18 +418,22 @@ struct TLogData : NonCopyable {
                                        // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
+	std::vector<TagsAndMessage> mergedTagMessages;
 
-	TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
-			: dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
-			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
-			  dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0), queueCommitEnd(0),
-			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
-			  peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
-			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS),
-			  ignorePopRequest(false), ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped()
-		{
-			cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
-		}
+	TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+	         Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
+	  : dbgid(dbgid), workerID(workerID), splitTransactionMerger(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH),
+	    splitTransactionResponse(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH),
+	    instanceID(deterministicRandom()->randomUniqueID().first()), persistentData(persistentData),
+	    rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo),
+	    degraded(degraded), queueCommitBegin(0), queueCommitEnd(0), diskQueueCommitBytes(0),
+	    largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
+	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
+	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
+	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
+	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped() {
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	}
 };
 
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
@@ -379,6 +455,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		    poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped),
 		    versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag),
 		    unpoppedRecovered(r.unpoppedRecovered) {}
+
 		void operator=(TagData&& r) noexcept {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
@@ -1844,14 +1921,31 @@ ACTOR Future<Void> commitQueue( TLogData* self ) {
 	}
 }
 
+void sendCommitResponse(TLogData* self, TLogCommitRequest& req, const Version& response) {
+	if (!req.splitTransaction.present()) {
+		req.reply.send(response);
+	} else {
+		const UID& splitID = req.splitTransaction.get().id;
+		self->splitTransactionResponse.get(splitID).send(response);
+	}
+}
+
+void sendCommitResponse(TLogData* self, TLogCommitRequest& req, const Error& error) {
+	if (!req.splitTransaction.present()) {
+		req.reply.sendError(error);
+	} else {
+		const UID& splitID = req.splitTransaction.get().id;
+		self->splitTransactionResponse.get(splitID).sendError(error);
+	}
+}
+
 ACTOR Future<Void> tLogCommit(
 		TLogData* self,
 		TLogCommitRequest req,
 		Reference<LogData> logData,
 		PromiseStream<Void> warningCollectorInput ) {
 	state Optional<UID> tlogDebugID;
-	if(req.debugID.present())
-	{
+	if (req.debugID.present()) {
 		tlogDebugID = nondeterministicRandom()->randomUniqueID();
 		g_traceBatch.addAttach("CommitAttachID", req.debugID.get().first(), tlogDebugID.get().first());
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
@@ -1879,7 +1973,7 @@ ACTOR Future<Void> tLogCommit(
 	}
 
 	if(logData->stopped) {
-		req.reply.sendError( tlog_stopped() );
+		sendCommitResponse(self, req, tlog_stopped());
 		return Void();
 	}
 
@@ -1888,7 +1982,11 @@ ACTOR Future<Void> tLogCommit(
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		commitMessages(self, logData, req.version, req.arena, req.messages);
+		if (self->mergedTagMessages.size() != 0) {
+			commitMessages(self, logData, req.version, self->mergedTagMessages);
+		} else {
+			commitMessages(self, logData, req.version, req.arena, req.messages);
+		}
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
@@ -1917,14 +2015,46 @@ ACTOR Future<Void> tLogCommit(
 
 	if(stopped.isReady()) {
 		ASSERT(logData->stopped);
-		req.reply.sendError( tlog_stopped() );
+		sendCommitResponse(self, req, tlog_stopped());
 		return Void();
 	}
 
 	if(req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
 
-	req.reply.send( logData->durableKnownCommittedVersion );
+	sendCommitResponse(self, req, logData->durableKnownCommittedVersion);
+	return Void();
+}
+
+ACTOR Future<Void> tLogCommitSplitTransactions(TLogData* self, TLogCommitRequest req, Reference<LogData> logData,
+                                               PromiseStream<Void> warningCollectorInput) {
+
+	state const SplitTransaction& splitTransaction = req.splitTransaction.get();
+	state const UID splitID = splitTransaction.id;
+
+	if (!self->splitTransactionResponse.exists(splitID)) {
+		self->splitTransactionResponse.add(splitID, Promise<Version>());
+	}
+
+	const int partIndex = splitTransaction.partIndex;
+	const int totalParts = splitTransaction.totalParts;
+
+	self->splitTransactionMerger.add(splitID, req, partIndex, totalParts);
+
+	if (self->splitTransactionMerger.exists(splitID) && self->splitTransactionMerger.get(splitID).ready()) {
+		const auto& merged = self->splitTransactionMerger.get(splitID).get();
+		std::vector<TagsAndMessage> tagsAndMessages = self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs();
+		self->mergedTagMessages.swap(tagsAndMessages);
+		wait(tLogCommit(self, merged, logData, warningCollectorInput));
+	}
+
+	try {
+		state Version reply = wait(self->splitTransactionResponse.get(splitID).getFuture());
+		req.reply.send(reply);
+	} catch (Error& err) {
+		req.reply.sendError(err);
+	}
+
 	return Void();
 }
 
@@ -2213,10 +2343,15 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
 			TEST(logData->stopped); // TLogCommitRequest while stopped
-			if (!logData->stopped)
-				logData->addActor.send( tLogCommit( self, req, logData, warningCollectorInput ) );
-			else
+			if (!logData->stopped) {
+				if (!req.splitTransaction.present()) {
+					logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
+				} else {
+					logData->addActor.send(tLogCommitSplitTransactions(self, req, logData, warningCollectorInput));
+				}
+			} else {
 				req.reply.sendError( tlog_stopped() );
+			}
 		}
 		when( ReplyPromise< TLogLockResult > reply = waitNext( tli.lock.getFuture() ) ) {
 			logData->addActor.send( tLogLock(self, reply, logData) );

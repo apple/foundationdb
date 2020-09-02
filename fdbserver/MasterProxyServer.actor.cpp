@@ -546,7 +546,12 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 		    .detail("SplitId", splitTransaction.get().id.toString())
 		    .detail("PartIndex", splitTransaction.get().partIndex)
 		    .detail("TotalParts", splitTransaction.get().totalParts);
+
+		const auto startSubversion = splitTransaction.get().startSubversion;
+		ASSERT(startSubversion != BAD_START_SUBVERSION);
+		toCommit.setSubsequence(startSubversion);
 	}
+
 	// since we are using just the former to limit the number of versions actually in flight!
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 }
@@ -1117,9 +1122,18 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if ( self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
 
+	return Void();
+}
+
+ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	self->loggingComplete = pProxyCommitData->logSystem->push( self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(), pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->debugID );
+
+	self->loggingComplete = pProxyCommitData->logSystem->push(
+	    self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(),
+	    pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->debugID, self->splitTransaction);
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber-1);
@@ -1135,12 +1149,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
 		}
 	}
-
-	return Void();
-}
-
-ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 
 	try {
 		choose {

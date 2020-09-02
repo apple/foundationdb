@@ -22,11 +22,14 @@
 #define FDBSERVER_TLOGINTERFACE_H
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
+#include <iterator>
+#include <vector>
+
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/StorageServerInterface.h"
-#include <iterator>
 
 struct TLogInterface {
 	constexpr static FileIdentifier file_identifier = 16308510;
@@ -247,13 +250,19 @@ struct TLogCommitRequest {
 
 	ReplyPromise<TLogCommitReply> reply;
 	Optional<UID> debugID;
+	Optional<SplitTransaction> splitTransaction;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	TLogCommitRequest(const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion,
+	                  Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID,
+	                  Optional<SplitTransaction> splitTransaction_)
+	  : arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion),
+	    minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID),
+	    splitTransaction(splitTransaction_) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
+		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena,
+		           debugID, splitTransaction);
 	}
 };
 

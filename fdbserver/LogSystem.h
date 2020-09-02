@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/MasterProxyInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -679,12 +680,16 @@ struct ILogSystem {
 		// Never returns normally, but throws an error if the subsystem stops working
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
-		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
-		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
-		// Changes the version number of the bundle to be version (unblocking the next push)
-		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
-		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
+	virtual Future<Version> push(Version prevVersion, Version version, Version knownCommittedVersion,
+	                             Version minKnownCommittedVersion, struct LogPushData& data,
+	                             Optional<UID> debugID = Optional<UID>(),
+	                             Optional<SplitTransaction> splitTransaction = Optional<SplitTransaction>()) = 0;
+	// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered
+	// earlier) Puts the given messages into the bundle, each with the given tags, and with message versions (version,
+	// 0) - (version, N) Changes the version number of the bundle to be version (unblocking the next push) Returns when
+	// the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
+	// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any
+	// subsequent epoch (but may become visible in this epoch)
 
 	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
@@ -832,7 +837,8 @@ struct CompareFirst {
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
-	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
+	explicit LogPushData(Reference<ILogSystem> logSystem, uint32_t subsequence_ = 1)
+	  : logSystem(logSystem), subsequence(subsequence_) {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
 				for(int i = 0; i < log.tLogs.size(); i++) {
@@ -841,6 +847,8 @@ struct LogPushData : NonCopyable {
 			}
 		}
 	}
+
+	void setSubsequence(const int64_t subsequence_) { subsequence = subsequence_; }
 
 	void addTxsTag() {
 		if ( logSystem->getTLogVersion() >= TLogVersion::V4 ) {
@@ -902,24 +910,24 @@ private:
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
-		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
 		uint32_t subseq = this->subsequence++;
 		bool first = true;
 		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
+			BinaryWriter& wr = messagesWriter[loc];
 			if (first) {
-				BinaryWriter& wr = messagesWriter[loc];
 				firstOffset = wr.getLength();
-				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+				wr << static_cast<uint32_t>(0) << subseq << static_cast<uint16_t>(prev_tags.size());
 				for(auto& tag : prev_tags)
 					wr << tag;
 				wr << item;
 				firstLength = wr.getLength() - firstOffset;
+				// NOTE: Unlike addTypedMessage, we could not precalculate the size of the message since we do not know
+				// how BinaryWriter serialize item.
 				*(uint32_t*)((uint8_t*)wr.getData() + firstOffset) = firstLength - sizeof(uint32_t);
 				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
 				first = false;
 			} else {
-				BinaryWriter& wr = messagesWriter[loc];
 				BinaryWriter& from = messagesWriter[msg_locations[0]];
 				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
 			}
