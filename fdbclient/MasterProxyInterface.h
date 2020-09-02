@@ -146,6 +146,39 @@ struct CommitID {
 	    conflictingKRIndices(conflictingKRIndices) {}
 };
 
+/// Bad start mutation subversion for a split transaction. Basically for each split transaction, a
+constexpr int BAD_START_SUBVERSION = -1;
+
+/**
+ * @struct SplitTransaction
+ * @brief The data
+ */
+struct SplitTransaction {
+	constexpr static FileIdentifier file_identifier = 973581;
+
+	/// The unique ID of the transaction that is split
+	UID id;
+
+	/// Total number of parts
+	int totalParts;
+
+	/// The index of the current part
+	int partIndex;
+
+	/// The indexes of mutation items
+	int startSubversion = BAD_START_SUBVERSION;
+
+	SplitTransaction() : id(), totalParts(1), partIndex(0) {}
+
+	SplitTransaction(const UID& id_, const int totalParts_, const int partIndex_)
+	  : id(id_), totalParts(totalParts_), partIndex(partIndex_) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, totalParts, partIndex, startSubversion);
+	}
+};
+
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
 	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2 };
