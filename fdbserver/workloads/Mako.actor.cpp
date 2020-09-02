@@ -300,7 +300,7 @@ struct MakoWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> tracePeriodically( MakoWorkload *self){
-		state double start = now();
+		state double start = timer();
 		state double elapsed = 0.0;
 		state int64_t last_ops = 0;
 		state int64_t last_xacts = 0;
@@ -377,7 +377,7 @@ struct MakoWorkload : TestWorkload {
 		state std::vector<int> perOpCount(MAX_OP, 0);
 		// flag at index-i indicates whether checksum-i need to be updated
 		state std::vector<bool> csChangedFlags(self->csCount, false);
-		state double lastTime = now();
+		state double lastTime = timer();
 		state double commitStart;
 
 		TraceEvent("ClientStarting").detail("ActorIndex", actorIndex).detail("ClientIndex", self->clientId).detail("NumActors", self->actorCountPerClient);
@@ -481,9 +481,9 @@ struct MakoWorkload : TestWorkload {
 							}
 							wait(self->updateCSBeforeCommit(&tr, self, &csChangedFlags));
 							// commit the change and update metrics
-							commitStart = now();
+							commitStart = timer();
 							wait(tr.commit());
-							self->opLatencies[OP_COMMIT].addSample(now() - commitStart);
+							self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
 							++perOpCount[OP_COMMIT];
 							tr.reset();
 							if (self->latencyForLocalOperation) {
@@ -524,9 +524,9 @@ struct MakoWorkload : TestWorkload {
 							scr_end_key = rkey.toString();
 							scr_key_range_ref = KeyRangeRef(KeyRef(scr_start_key), KeyRef(scr_end_key));
 							wait(self->updateCSBeforeCommit(&tr, self, &csChangedFlags));
-							commitStart = now();
+							commitStart = timer();
 							wait(tr.commit());
-							self->opLatencies[OP_COMMIT].addSample(now() - commitStart);
+							self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
 							++perOpCount[OP_COMMIT];
 							tr.reset();
 							if (self->latencyForLocalOperation) {
@@ -544,9 +544,9 @@ struct MakoWorkload : TestWorkload {
 
 				if (doCommit) {
 					wait(self->updateCSBeforeCommit(&tr, self, &csChangedFlags));
-					commitStart = now();
+					commitStart = timer();
 					wait(tr.commit());
-					self->opLatencies[OP_COMMIT].addSample(now() - commitStart);
+					self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
 					++perOpCount[OP_COMMIT];
 				}
 				// successfully finish the transaction, update metrics
@@ -592,9 +592,9 @@ struct MakoWorkload : TestWorkload {
 	}
 	ACTOR template<class T>
 	static Future<Void> logLatency(Future<T> f,  ContinuousSample<double>* opLatencies){
-		state double opBegin = now();
+		state double opBegin = timer();
 		wait(success(f));
-		opLatencies->addSample(now() - opBegin);
+		opLatencies->addSample(timer() - opBegin);
 		return Void();
 	}
 
