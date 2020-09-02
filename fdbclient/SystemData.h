@@ -398,6 +398,7 @@ extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 // Snapshot + Incremental Restore
 extern const KeyRef writeRecoveryKey;
+extern const ValueRef writeRecoveryKeyTrue, writeRecoveryKeyFalse;
 extern const KeyRef snapshotEndVersionKey;
 
 #pragma clang diagnostic pop

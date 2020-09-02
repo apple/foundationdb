@@ -4728,6 +4728,22 @@ static std::set<int> const& normalDataDistributorErrors() {
 
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			TraceEvent("SnapDataDistributor_WriteFlagAttempt")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			tr->set(writeRecoveryKey, writeRecoveryKeyTrue);
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			TraceEvent("SnapDataDistributor_WriteFlagError").error(e);
+			wait(tr->onError(e));
+		}
+	}
 	TraceEvent("SnapDataDistributor_SnapReqEnter")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);

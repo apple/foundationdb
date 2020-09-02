@@ -1062,4 +1062,6 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(
 );
 
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
+const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
+const ValueRef writeRecoveryKeyFalse = LiteralStringRef("0");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
