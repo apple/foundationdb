@@ -194,12 +194,14 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	Optional<SplitTransaction> splitTransaction;
 
-	CommitTransactionRequest() : flags(0) {}
+	CommitTransactionRequest() : flags(0), splitTransaction() {}
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext);
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext,
+		           splitTransaction);
 	}
 };
 
