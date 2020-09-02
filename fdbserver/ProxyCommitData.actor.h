@@ -65,36 +65,9 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
-	int recentRequests;
-	Deque<int> requestBuckets;
-	double lastBucketBegin;
-	double bucketInterval;
-
-	void updateRequestBuckets() {
-		while (now() - lastBucketBegin > bucketInterval) {
-			lastBucketBegin += bucketInterval;
-			recentRequests -= requestBuckets.front();
-			requestBuckets.pop_front();
-			requestBuckets.push_back(0);
-		}
-	}
-
-	void addRequest() {
-		updateRequestBuckets();
-		++recentRequests;
-		++requestBuckets.back();
-	}
-
-	int getRecentRequests() {
-		updateRequestBuckets();
-		return recentRequests * FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE /
-		       (FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE - (lastBucketBegin + bucketInterval - now()));
-	}
-
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
-	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	  : cc("ProxyStats", id.toString()),
 	    txnCommitIn("TxnCommitIn", cc), txnCommitVersionAssigned("TxnCommitVersionAssigned", cc),
 	    txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc),
 	    txnCommitOut("TxnCommitOut", cc), txnCommitOutSuccess("TxnCommitOutSuccess", cc),
@@ -112,9 +85,6 @@ struct ProxyStats {
 		specialCounter(cc, "CommitBatchesMemBytesCount",
 		               [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
-		for (int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
-			requestBuckets.push_back(0);
-		}
 	}
 };
 

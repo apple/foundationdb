@@ -199,8 +199,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo,
-		           midShardSize);
+		serializer(ar, BasicLoadBalancedReply::processBusyTime, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
 	}
 };
 

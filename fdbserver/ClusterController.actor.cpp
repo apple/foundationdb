@@ -2884,10 +2884,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 		TraceEvent("DBInfoStartBroadcast", self->id);
 		choose {
 			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false) )) {
-				TraceEvent("DBInfoFinishBroadcast", self->id);
-				for(auto &it : notUpdated) {
-					TraceEvent("DBInfoNotUpdated", self->id).detail("Addr", it.getPrimaryAddress());
-				}
+				TraceEvent("DBInfoFinishBroadcast", self->id).detail("NotUpdated", notUpdated.size());
 				if(notUpdated.size()) {
 					self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
 					self->updateDBInfo.trigger();

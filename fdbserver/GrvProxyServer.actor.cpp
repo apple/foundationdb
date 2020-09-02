@@ -42,35 +42,8 @@ struct GrvProxyStats {
 
 	Future<Void> logger;
 
-	// Used for load balancing.
-	int recentRequests;
-	Deque<int> requestBuckets;
-	double lastBucketBegin;
-	double bucketInterval;
-
-	void updateRequestBuckets() {
-		while(now() - lastBucketBegin > bucketInterval) {
-			lastBucketBegin += bucketInterval;
-			recentRequests -= requestBuckets.front();
-			requestBuckets.pop_front();
-			requestBuckets.push_back(0);
-		}
-	}
-
-	void addRequest() {
-		updateRequestBuckets();
-		++recentRequests;
-		++requestBuckets.back();
-	}
-
-	int getRecentRequests() {
-		updateRequestBuckets();
-		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
-	}
-
 	explicit GrvProxyStats(UID id)
-	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
-	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	  : cc("ProxyStats", id.toString()),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
 	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
 	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
@@ -83,9 +56,6 @@ struct GrvProxyStats {
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		logger = traceCounters("GrvProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "GrvProxyMetrics");
-		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
-			requestBuckets.push_back(0);
-		}
 	}
 };
 
@@ -302,7 +272,6 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 	loop choose{
 			when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
 				//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			    stats->addRequest();
 				if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
 					++stats->txnRequestErrors;
 					//FIXME: send an error instead of giving an unreadable version when the client can support the error: req.reply.sendError(proxy_memory_limit_exceeded());
@@ -365,7 +334,7 @@ ACTOR Future<Void> updateLastCommit(GrvProxyData* self, Optional<UID> debugID = 
 	state double confirmStart = now();
 	self->lastStartCommit = confirmStart;
 	self->updateCommitRequests++;
-	wait(self->logSystem->confirmEpochLive(debugID)); // what should we do?
+	wait(self->logSystem->confirmEpochLive(debugID));
 	self->updateCommitRequests--;
 	self->lastCommitLatency = now()-confirmStart;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
@@ -421,7 +390,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Grv
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;
 	rep.metadataVersion = repFromMaster.metadataVersion;
-	rep.recentRequests = grvProxyData->stats.getRecentRequests();
+	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
+
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.After");
@@ -638,7 +608,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy, Reference<
 			else
 				batchPriTransactionsStarted[req.flags & 1] += tc;
 
-			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
+			start[req.flags & 1].push_back(std::move(req));
+			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
 		}
