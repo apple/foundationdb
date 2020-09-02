@@ -59,6 +59,7 @@ set(FDBSERVER_SRCS
   OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
   ProxyCommitData.actor.h
+  PartMerger.h
   pubsub.actor.cpp
   pubsub.h
   QuietDatabase.actor.cpp
