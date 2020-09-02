@@ -511,6 +511,30 @@ struct RolesInfo {
 					obj["busiest_read_tag"] = busiestReadTagObj;
 				}
 			}
+
+            TraceEventFields const& busiestWriteTag = metrics.at("BusiestWriteTag");
+            if(busiestWriteTag.size()) {
+                int64_t tagCost = busiestWriteTag.getInt64("TagCost");
+
+                if(tagCost > 0) {
+                    JsonBuilderObject busiestWriteTagObj;
+
+                    int64_t totalCost = busiestWriteTag.getInt64("TotalCost");
+                    ASSERT(totalCost > 0);
+
+                    busiestWriteTagObj["tag"] = busiestWriteTag.getValue("Tag");
+                    busiestWriteTagObj["fractional_cost"] = (double)tagCost / totalCost;
+
+                    double elapsed = busiestWriteTag.getDouble("Elapsed");
+                    if(elapsed > 0) {
+                        JsonBuilderObject estimatedCostObj;
+                        estimatedCostObj["hz"] = tagCost / elapsed;
+                        busiestWriteTagObj["estimated_cost"] = estimatedCostObj;
+                    }
+
+                    obj["busiest_write_tag"] = busiestWriteTagObj;
+                }
+            }
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;
@@ -1605,10 +1629,34 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
-	vector<std::pair<StorageServerInterface, EventMap>> results = wait(
-	    getServerMetrics(servers, address_workers, std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" }));
+ACTOR template <class iface>
+static Future<vector<TraceEventFields>> getServerBusiestWriteTags(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, WorkerDetails rkWorker) {
+    state vector<Future<Optional<TraceEventFields>>> futures;
+    for (auto s : servers) {
+		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
+    }
+    wait(waitForAll(futures));
+
+	vector<TraceEventFields> result(servers.size());
+	for(int i = 0; i < servers.size(); ++ i) {
+		if(futures[i].get().present()) {
+			result[i] = futures[i].get().get();
+		}
+	}
+	return result;
+}
+
+ACTOR static Future<vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(Database cx, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, WorkerDetails rkWorker) {
+	state vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
+	state vector<std::pair<StorageServerInterface, EventMap>> results;
+	state vector<TraceEventFields> busiestWriteTags;
+	wait(store(results, getServerMetrics(servers, address_workers,std::vector<std::string>{ "StorageMetrics", "ReadLatencyMetrics","ReadLatencyBands", "BusiestReadTag" }))
+	    && store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
+
+	ASSERT(busiestWriteTags.size() == results.size());
+	for(int i = 0; i < busiestWriteTags.size(); ++ i) {
+		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
+	}
 
 	return results;
 }
@@ -2464,7 +2512,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				address_workers[worker.interf.address()] = worker.interf;
 			}
 
-			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
+			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture = errorOr(getGrvProxiesAndMetrics(db, address_workers));

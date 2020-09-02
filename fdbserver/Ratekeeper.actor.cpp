@@ -887,14 +887,13 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 		}
 
 		TraceEvent("BusiestWriteTag", it->key)
-		    .detail("Elapsed", elapsed)
-		    .detail("Tag", printable(busiestTag))
-		    .detail("TagOps", maxCost.getOpsSum())
-		    .detail("TagCosts", maxCost.getCostSum())
-		    .detail("TagRate", maxRate)
-		    .detail("TagBusyness", maxBusyness)
-		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(it->key.toString() + "/BusiestWriteTag");
+			.detail("Elapsed", elapsed)
+			.detail("Tag", printable(busiestTag))
+			.detail("TagOps", maxCost.getOpsSum())
+			.detail("TagCost", maxCost.getCostSum())
+			.detail("TotalCost", it->value.totalWriteCosts)
+			.detail("Reported", it->value.busiestWriteTag.present())
+			.trackLatest(it->key.toString() + "/BusiestWriteTag");
 
 		// reset statistics
 		it->value.tagCostEst.clear();
