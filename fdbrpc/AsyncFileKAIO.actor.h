@@ -182,7 +182,7 @@ public:
 	virtual void addref() { ReferenceCounted<AsyncFileKAIO>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileKAIO>::delref(); }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileLogicalReads;
 		++countLogicalReads;
 		//printf("%p Begin logical read\n", getCurrentCoro());
@@ -205,7 +205,7 @@ public:
 
 		return result;
 	}
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 		//printf("%p Begin logical write\n", getCurrentCoro());
@@ -234,7 +234,7 @@ public:
 #ifndef FALLOC_FL_ZERO_RANGE
 #define FALLOC_FL_ZERO_RANGE 0x10
 #endif
-	virtual Future<Void> zeroRange( int64_t offset, int64_t length ) override {
+	Future<Void> zeroRange(int64_t offset, int64_t length) override {
 		bool success = false;
 		if (ctx.fallocateZeroSupported) {
 			int rc = fallocate( fd, FALLOC_FL_ZERO_RANGE, offset, length );
@@ -247,7 +247,7 @@ public:
 		}
 		return success ? Void() : IAsyncFile::zeroRange(offset, length);
 	}
-	virtual Future<Void> truncate( int64_t size ) {
+	Future<Void> truncate(int64_t size) override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 
@@ -308,7 +308,7 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> sync() {
+	Future<Void> sync() override {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 
@@ -340,13 +340,9 @@ public:
 
 		return fsync;
 	}
-	virtual Future<int64_t> size() { return nextFileSize; }
-	virtual int64_t debugFD() {
-		return fd;
-	}
-	virtual std::string getFilename() {
-		return filename;
-	}
+	Future<int64_t> size() const override { return nextFileSize; }
+	int64_t debugFD() const override { return fd; }
+	std::string getFilename() const override { return filename; }
 	~AsyncFileKAIO() {
 		close(fd);
 

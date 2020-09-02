@@ -74,36 +74,9 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
-	int recentRequests;
-	Deque<int> requestBuckets;
-	double lastBucketBegin;
-	double bucketInterval;
-
-	void updateRequestBuckets() {
-		while (now() - lastBucketBegin > bucketInterval) {
-			lastBucketBegin += bucketInterval;
-			recentRequests -= requestBuckets.front();
-			requestBuckets.pop_front();
-			requestBuckets.push_back(0);
-		}
-	}
-
-	void addRequest() {
-		updateRequestBuckets();
-		++recentRequests;
-		++requestBuckets.back();
-	}
-
-	int getRecentRequests() {
-		updateRequestBuckets();
-		return recentRequests * FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE /
-		       (FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE - (lastBucketBegin + bucketInterval - now()));
-	}
-
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
-	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	  : cc("ProxyStats", id.toString()),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
 	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
 	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
@@ -125,17 +98,14 @@ struct ProxyStats {
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount",
 		               [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
-		for (int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
-			requestBuckets.push_back(0);
-		}
 	}
 };
 
