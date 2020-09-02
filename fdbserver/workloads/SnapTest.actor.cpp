@@ -2,6 +2,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbserver/Status.h"
@@ -194,6 +195,21 @@ public: // workload functions
 			// create even keys before the snapshot
 			wait(self->_create_keys(cx, "snapKey"));
 		} else if (self->testID == 1) {
+			state Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					tr1->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr1->setOption(FDBTransactionOptions::LOCK_AWARE);
+					state Optional<Value> val = wait(tr1->get(writeRecoveryKey));
+					state Optional<Value> val2 = wait(tr1->get(snapshotEndVersionKey));
+					TraceEvent("CheckSpecialKey1")
+					    .detail("WriteRecoveryValue", val.present() ? val.get().toString() : "N/A")
+					    .detail("EndVersionValue", val2.present() ? val2.get().toString() : "N/A");
+					break;
+				} catch (Error& e) {
+					wait(tr1->onError(e));
+				}
+			}
 			// create a snapshot
 			state double toDelay = fmod(deterministicRandom()->randomUInt32(), self->maxSnapDelay);
 			TraceEvent("ToDelay").detail("Value", toDelay);
@@ -221,6 +237,21 @@ public: // workload functions
 					}
 				}
 			}
+			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
+					state Optional<Value> val3 = wait(tr2->get(writeRecoveryKey));
+					state Optional<Value> val4 = wait(tr2->get(snapshotEndVersionKey));
+					TraceEvent("CheckSpecialKey2")
+					    .detail("WriteRecoveryValue", val3.present() ? val3.get().toString() : "N/A")
+					    .detail("EndVersionValue", val4.present() ? val4.get().toString() : "N/A");
+					break;
+				} catch (Error& e) {
+					wait(tr2->onError(e));
+				}
+			}
 			CSimpleIni ini;
 			ini.SetUnicode();
 			ini.LoadFile(self->restartInfoLocation.c_str());
@@ -242,6 +273,21 @@ public: // workload functions
 				// since backup failed, skip the restore checking
 				TraceEvent(SevWarnAlways, "BackupFailedSkippingRestoreCheck");
 				return Void();
+			}
+			state Reference<ReadYourWritesTransaction> tr3(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					tr3->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr3->setOption(FDBTransactionOptions::LOCK_AWARE);
+					state Optional<Value> val5 = wait(tr3->get(writeRecoveryKey));
+					state Optional<Value> val6 = wait(tr3->get(snapshotEndVersionKey));
+					TraceEvent("CheckSpecialKey3")
+					    .detail("WriteRecoveryValue", val5.present() ? val5.get().toString() : "N/A")
+					    .detail("EndVersionValue", val6.present() ? val6.get().toString() : "N/A");
+					break;
+				} catch (Error& e) {
+					wait(tr3->onError(e));
+				}
 			}
 			state KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
 			state KeySelector end = firstGreaterOrEqual(normalKeys.end);

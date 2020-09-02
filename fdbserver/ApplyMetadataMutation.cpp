@@ -300,6 +300,9 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				confChange = true;
 				TEST(true);  // Recovering at a higher version.
+			} else if (m.param1 == writeRecoveryKey) {
+				TraceEvent("WriteRecoveryKeySet", dbgid);
+				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
 		}
 		else if (m.param2.size() && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
