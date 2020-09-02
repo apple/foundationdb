@@ -121,7 +121,7 @@ struct MakoWorkload : TestWorkload {
 		parseOperationsSpec();
 		for (int i = 0; i < MAX_OP; ++i) {
 			// initilize per-operation latency record
-			opLatencies.push_back(ContinuousSample<double>(rowCount / sampleSize));
+			opLatencies.push_back(ContinuousSample<double>(sampleSize));
 			// initialize per-operation counter
 			opCounters.push_back(PerfIntCounter(opNames[i]));
 		}
