@@ -391,6 +391,9 @@ public:
 	std::string LOG_DIRECTORY;
 	int64_t SERVER_MEM_LIMIT;
 
+	// Split transaction
+	double SPLIT_TRANSACTION_HISTORY_LENGTH;
+
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
