@@ -3598,12 +3598,13 @@ ACTOR Future<Void> tryCommit(Transaction* tr, Future<Version> readVersion) {
 	state std::vector<Promise<Standalone<StringRef>>> versionstampPromises(numProxies);
 	state std::vector<Future<Void>> responses;
 
+	tr->options.commitOnGivenProxy = true;
+
 	for (int i = 0; i < numProxies; ++i) {
 		responses.emplace_back(tryCommitSingleTransaction(tr, readVersion, &commitTransactionRequests[i],
 		                                                  &committedVersions[i], &versionstampPromises[i]));
 	}
 
-	tr->options.commitOnGivenProxy = true;
 	try {
 		wait(waitForAll(responses));
 	} catch (Error& e) {

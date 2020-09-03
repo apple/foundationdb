@@ -50,8 +50,8 @@ public:
 	 * @param value
 	 */
 	void add(const key_t& key, const value_t& value) {
-		double now = g_network->now();
-		timestampedKey.emplace_back(std::make_pair(now, key));
+		double now_ = now();
+		timestampedKey.emplace_back(std::make_pair(now_, key));
 		kvMapper[key] = value;
 	}
 
@@ -61,8 +61,8 @@ public:
 	 * @param value
 	 */
 	void add(const key_t& key, value_t&& value) {
-		double now = g_network->now();
-		timestampedKey.emplace_back(std::make_pair(now, key));
+		double now_ = now();
+		timestampedKey.emplace_back(std::make_pair(now_, key));
 		kvMapper.emplace(key, std::move(value));
 	}
 
@@ -109,8 +109,8 @@ private:
 
 protected:
 	void sweep() {
-		auto now = g_network->now();
-		while (!timestampedKey.empty() && (now - timestampedKey.front().first) > CACHE_EXPIRING_TIME_LENGTH) {
+		auto now_ = now();
+		while (!timestampedKey.empty() && (now_ - timestampedKey.front().first) > CACHE_EXPIRING_TIME_LENGTH) {
 			const auto& key = timestampedKey.front().second;
 			kvMapper.erase(key);
 			timestampedKey.pop_front();

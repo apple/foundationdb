@@ -53,7 +53,7 @@ bool shouldSplitCommitTransactionRequest(const CommitTransactionRequest& commitT
 
 	const int size =
 	    std::accumulate(commitTxnRequest.transaction.mutations.begin(), commitTxnRequest.transaction.mutations.end(), 0,
-	                    [](int total, const MutationRef& ref) { return total + ref.param2.size(); });
+	                    [](int total, const MutationRef& ref) { return total + ref.param2.expectedSize(); });
 
 	TraceEvent("ShouldSplitCommitTransaction")
 	    .detail("Size", size)
@@ -64,9 +64,7 @@ bool shouldSplitCommitTransactionRequest(const CommitTransactionRequest& commitT
 
 namespace {
 /**
- * In order to distribute the commit transactions to multiple proxies, all
- * commits must share the same read conflict and write conflicts, together with
- * the same splitID
+ * Distributes transactions to proxies. It distributes the read/write conflicts, but leave the mutations undistributed.
  */
 std::vector<CommitTransactionRequest> prepareSplitTransactions(const CommitTransactionRequest& commitTxnRequest,
                                                                const int numProxies) {
@@ -102,6 +100,7 @@ std::vector<CommitTransactionRequest> prepareSplitTransactions(const CommitTrans
 
 	} else if (conflict_split_mode == CONFLICTS_EVENLY_DISTRIBUTE) {
 
+		// NOTE Unlike mutations, the conflicts are not subversioned
 		const auto transaction = commitTxnRequest.transaction;
 		int proxyIndex = 0;
 
@@ -230,7 +229,7 @@ public:
 		ASSERT(numMutations > 0);
 
 		std::vector<int> result;
-		result.reserve(numMutations);
+		result.reserve(NUM_PROXIES);
 
 		// If there are more number of proxies than number of mutations, distribute N mutations to first N proxies and
 		// leave the remaining proxies empty.
@@ -280,6 +279,10 @@ public:
 	}
 };
 
+/**
+ * Split mutations in a given transaction into multiple transactions, keeping the sequence of the mutations in order for
+ * each mutation split.
+ */
 void distributeMutationsInSequence(const CommitTransactionRequest& request,
                                    std::vector<CommitTransactionRequest>& splitCommitTxnRequests,
                                    std::vector<int>& requestMutationStartSubversion) {
@@ -292,7 +295,7 @@ void distributeMutationsInSequence(const CommitTransactionRequest& request,
 
 	MutationSequenceDistributor distributor(NUM_PROXIES);
 	for (int i = 0; i < mutations.size(); ++i) {
-		distributor.insert(mutations[i].param2.size());
+		distributor.insert(mutations[i].param2.expectedSize());
 	}
 
 	requestMutationStartSubversion = distributor.evaluate();
@@ -314,10 +317,10 @@ void distributeMutationsInSequence(const CommitTransactionRequest& request,
 	}
 }
 
-} // namespace
+} // anonymous namespace
 
 /**
- * Evenly split mutations in a given transaction into multiple transactions.
+ *
  */
 std::vector<CommitTransactionRequest> splitCommitTransactionRequest(const CommitTransactionRequest& commitTxnRequest,
                                                                     const int numProxies) {

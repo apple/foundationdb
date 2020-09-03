@@ -160,6 +160,8 @@ struct TagsAndMessage {
 
 	uint32_t getVersionSub() const { return *(reinterpret_cast<const uint32_t*>(message.begin() + sizeof(int32_t))); }
 
+	uint8_t getMutateType() const { return *(reinterpret_cast<const uint8_t*>(message.begin() + getHeaderSize())); }
+
 	StringRef getMessageWithoutTags() const {
 		return message.substr(getHeaderSize());
 	}

@@ -22,6 +22,8 @@
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #pragma once
 
+#include <limits>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 
@@ -75,13 +77,14 @@ struct MutationRef {
 		MinV2,
 		AndV2,
 		CompareAndClear,
-		MAX_ATOMIC_OP
+		MAX_ATOMIC_OP,
+		Uninitialized = std::numeric_limits<uint8_t>::max()
 	};
 	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
 
-	MutationRef() {}
+	MutationRef() : type(Uninitialized) {}
 	MutationRef( Type t, StringRef a, StringRef b ) : type(t), param1(a), param2(b) {}
 	MutationRef( Arena& to, Type t, StringRef a, StringRef b ) : type(t), param1(to, a), param2(to, b) {}
 	MutationRef( Arena& to, const MutationRef& from ) : type(from.type), param1( to, from.param1 ), param2( to, from.param2 ) {}

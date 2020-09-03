@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include <chrono>
-#include <map>
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
@@ -60,18 +58,16 @@ using std::max;
 
 namespace {
 
-using SubversionMessageMap_t = std::map<uint32_t, TagsAndMessage>;
-
-void readMessagesToMap(SubversionMessageMap_t& map, const Arena& arena, const StringRef& messages) {
-	ArenaReader rd(arena, messages, Unversioned());
+void readMessages(std::vector<TagsAndMessage>& tagsAndMessages, const Arena& arena, const StringRef& rawMessages) {
+	ArenaReader rd(arena, rawMessages, Unversioned());
 
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
 		tagsAndMsg.loadFromArena(&rd, nullptr);
 
 		const auto subversion = tagsAndMsg.getVersionSub();
-		ASSERT(map.find(subversion) == map.end());
-		map[subversion] = tagsAndMsg;
+		ASSERT(tagsAndMessages[subversion].getMutateType() == MutationRef::Uninitialized);
+		tagsAndMessages[subversion] = tagsAndMsg;
 	}
 }
 
@@ -80,13 +76,13 @@ void readMessagesToMap(SubversionMessageMap_t& map, const Arena& arena, const St
 class TLogCommitRequestMerger : public PartMerger<TLogCommitRequest> {
 
 private:
-	SubversionMessageMap_t subversionMessageMap;
+	std::vector<TagsAndMessage> tagsAndMessages;
 
 protected:
 	virtual void mergeFirstPart(const value_t& incomingRequest) override {
 		merged = incomingRequest;
 
-		readMessagesToMap(subversionMessageMap, merged.arena, merged.messages);
+		readMessages(tagsAndMessages, merged.arena, merged.messages);
 	}
 
 	virtual void merge(const value_t& incomingRequest) override {
@@ -104,19 +100,13 @@ protected:
 		merged.arena.dependsOn(incomingRequest.arena);
 
 		// The messages are merged separately into a map, for future use.
-		readMessagesToMap(subversionMessageMap, incomingRequest.arena, incomingRequest.messages);
+		readMessages(tagsAndMessages, incomingRequest.arena, incomingRequest.messages);
 	}
 
 public:
 	using PartMerger::PartMerger;
 
-	std::vector<TagsAndMessage> getOrderedTagsAndMsgs() const {
-		std::vector<TagsAndMessage> result;
-		for (auto& item : subversionMessageMap) {
-			result.emplace_back(item.second);
-		}
-		return result;
-	}
+	std::vector<TagsAndMessage>& getOrderedTagsAndMsgs() { return tagsAndMessages; }
 };
 
 struct TLogQueueEntryRef {
@@ -2043,9 +2033,15 @@ ACTOR Future<Void> tLogCommitSplitTransactions(TLogData* self, TLogCommitRequest
 
 	if (self->splitTransactionMerger.exists(splitID) && self->splitTransactionMerger.get(splitID).ready()) {
 		const auto& merged = self->splitTransactionMerger.get(splitID).get();
-		std::vector<TagsAndMessage> tagsAndMessages = self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs();
+
+		// NOTE this invalidates the messages in self->splitTransactionMerger.get(splitID)! Yet the data is used only
+		// once here.
+		std::vector<TagsAndMessage>& tagsAndMessages =
+		    self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs();
 		self->mergedTagMessages.swap(tagsAndMessages);
+
 		wait(tLogCommit(self, merged, logData, warningCollectorInput));
+		self->mergedTagMessages.clear();
 	}
 
 	try {
