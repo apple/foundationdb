@@ -4429,8 +4429,11 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, Key
 				if (i > 0) {
 					results.push_back_deep(results.arena(), locations[i].first.begin); // Need this shard boundary
 				}
-				results.append_deep(results.arena(), fReplies[i].get().splitPoints.begin(),
-				                    fReplies[i].get().splitPoints.size());
+				if (fReplies[i].get().splitPoints.size() > 0) {
+					results.append(results.arena(), fReplies[i].get().splitPoints.begin(),
+										fReplies[i].get().splitPoints.size());
+					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
+				}
 			}
 			if (results.back() != keys.end) {
 				results.push_back_deep(results.arena(), keys.end);
