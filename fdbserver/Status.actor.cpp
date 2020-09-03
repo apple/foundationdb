@@ -512,29 +512,29 @@ struct RolesInfo {
 				}
 			}
 
-            TraceEventFields const& busiestWriteTag = metrics.at("BusiestWriteTag");
-            if(busiestWriteTag.size()) {
-                int64_t tagCost = busiestWriteTag.getInt64("TagCost");
+			TraceEventFields const& busiestWriteTag = metrics.at("BusiestWriteTag");
+			if(busiestWriteTag.size()) {
+				int64_t tagCost = busiestWriteTag.getInt64("TagCost");
 
-                if(tagCost > 0) {
-                    JsonBuilderObject busiestWriteTagObj;
+				if(tagCost > 0) {
+				    JsonBuilderObject busiestWriteTagObj;
 
-                    int64_t totalCost = busiestWriteTag.getInt64("TotalCost");
-                    ASSERT(totalCost > 0);
+				    int64_t totalCost = busiestWriteTag.getInt64("TotalCost");
+				    ASSERT(totalCost > 0);
 
-                    busiestWriteTagObj["tag"] = busiestWriteTag.getValue("Tag");
-                    busiestWriteTagObj["fractional_cost"] = (double)tagCost / totalCost;
+				    busiestWriteTagObj["tag"] = busiestWriteTag.getValue("Tag");
+				    busiestWriteTagObj["fractional_cost"] = (double)tagCost / totalCost;
 
-                    double elapsed = busiestWriteTag.getDouble("Elapsed");
-                    if(elapsed > 0) {
-                        JsonBuilderObject estimatedCostObj;
-                        estimatedCostObj["hz"] = tagCost / elapsed;
-                        busiestWriteTagObj["estimated_cost"] = estimatedCostObj;
-                    }
+				    double elapsed = busiestWriteTag.getDouble("Elapsed");
+				    if(elapsed > 0) {
+					JsonBuilderObject estimatedCostObj;
+					estimatedCostObj["hz"] = tagCost / elapsed;
+					busiestWriteTagObj["estimated_cost"] = estimatedCostObj;
+				    }
 
-                    obj["busiest_write_tag"] = busiestWriteTagObj;
-                }
-            }
+				    obj["busiest_write_tag"] = busiestWriteTagObj;
+				}
+			}
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;

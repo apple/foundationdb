@@ -45,19 +45,19 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-        // choose a version to check compatibility.
-        double choice = deterministicRandom()->random01();
-        if(choice < 0.3) {
-            apiVersion = 630;
-        }
-        else if(choice < 0.7){
-            apiVersion = 700;
-        }
-        else {
-            apiVersion = Database::API_VERSION_LATEST;
-        }
-        TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
-        cx->apiVersion = apiVersion;
+		// choose a version to check compatibility.
+		double choice = deterministicRandom()->random01();
+		if(choice < 0.3) {
+			apiVersion = 630;
+		}
+		else if(choice < 0.7){
+			apiVersion = 700;
+		}
+		else {
+			apiVersion = Database::API_VERSION_LATEST;
+		}
+		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
+		cx->apiVersion = apiVersion;
 
 		if (this->clientId != 0) return Void();
 		return timeout(runThrottleApi(this, cx), testDuration, Void());
