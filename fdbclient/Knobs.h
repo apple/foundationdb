@@ -27,8 +27,6 @@
 
 class ClientKnobs : public Knobs {
 public:
-	int BYTE_LIMIT_UNLIMITED;
-	int ROW_LIMIT_UNLIMITED;
 
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
