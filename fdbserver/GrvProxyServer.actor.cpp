@@ -43,10 +43,9 @@ struct GrvProxyStats {
 	Future<Void> logger;
 
 	explicit GrvProxyStats(UID id)
-	  : cc("ProxyStats", id.toString()),
-	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
-	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
-	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
+	  : cc("GrvProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
+	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
+	    txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
 	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
 	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
 	    txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
