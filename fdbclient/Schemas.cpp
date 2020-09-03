@@ -191,6 +191,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "estimated_cost":{
                         "hz": 0.0
                      }
+                  },
+                  "busiest_write_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz": 0.0
+                     }
                   }
                }
             ],
