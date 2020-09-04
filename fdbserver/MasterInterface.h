@@ -168,6 +168,7 @@ struct GetCommitVersionRequest {
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
+	Optional<UID> splitID;
 
 	GetCommitVersionRequest() { }
 	GetCommitVersionRequest(SpanID spanContext, uint64_t requestNum, uint64_t mostRecentProcessedRequestNum,
@@ -177,7 +178,7 @@ struct GetCommitVersionRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext);
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext, splitID);
 	}
 };
 

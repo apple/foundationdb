@@ -552,11 +552,7 @@ void CommitBatchContext::setupTraceBatch() {
 				debugID = nondeterministicRandom()->randomUniqueID();
 			}
 
-			g_traceBatch.addAttach(
-				"CommitAttachID",
-				tr.debugID.get().first(),
-				debugID.get().first()
-			);
+			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
 		}
 		span.addParent(tr.spanContext);
 	}
@@ -604,6 +600,9 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 	GetCommitVersionRequest req(self->span.context, pProxyCommitData->commitVersionRequestNumber++,
 	                            pProxyCommitData->mostRecentProcessedRequestNumber, pProxyCommitData->dbgid);
+	if (self->splitTransaction.present()) {
+		req.splitID = self->splitTransaction.get().id;
+	}
 	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
 		pProxyCommitData->master.getCommitVersion.getReply(
 			req, TaskPriority::ProxyMasterVersionReply
