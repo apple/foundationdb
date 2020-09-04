@@ -2854,7 +2854,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 				}
-				else if (SpanContextMessage::isNextIn(cloneReader)) {
+				else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
 					SpanContextMessage scm;
 					cloneReader >> scm;
 				}
@@ -2951,7 +2951,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
 			}
-			else if (SpanContextMessage::isNextIn(rd)) {
+			else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
 				span.addParent(scm.spanContext);

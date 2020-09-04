@@ -1763,7 +1763,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 						dbgLastMessageWasProtocol = true;
 						cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 					}
-					else if (SpanContextMessage::isNextIn(cloneReader)) {
+					else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
 						SpanContextMessage scm;
 						cloneReader >> scm;
 					}
@@ -1839,7 +1839,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 					data->logProtocol = reader.protocolVersion();
 					cloneCursor2->setProtocolVersion(data->logProtocol);
 				}
-				else if (SpanContextMessage::isNextIn(reader)) {
+				else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
 					SpanContextMessage scm;
 					reader >> scm;
 				}
