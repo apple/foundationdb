@@ -165,9 +165,9 @@ struct TagThrottleApiWorkload : TestWorkload {
 				++activeAutoThrottledTags;
 			}
 
-            if(self->apiVersion == 630) {
-                ASSERT(tag.reason == TagThrottledReason::UNSET);
-            }
+			if(self->apiVersion == 630) {
+				ASSERT(tag.reason == TagThrottledReason::UNSET);
+			}
 		}
 
 		ASSERT(manualThrottledTags <= SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS);
@@ -187,14 +187,14 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getRecommendedTags(TagThrottleApiWorkload* self, Database cx) {
-        std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getRecommendedTags(cx, CLIENT_KNOBS->TOO_MANY));
+		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getRecommendedTags(cx, CLIENT_KNOBS->TOO_MANY));
 
-        for(auto& tag : tags) {
-            ASSERT(tag.throttleType == TagThrottleType::AUTO);
-            if(self->apiVersion == 630) {
-                ASSERT(tag.reason == TagThrottledReason::UNSET);
-            }
-        }
+		for(auto& tag : tags) {
+			ASSERT(tag.throttleType == TagThrottleType::AUTO);
+			if(self->apiVersion == 630) {
+				ASSERT(tag.reason == TagThrottledReason::UNSET);
+			}
+		}
 		return Void();
 	}
 
