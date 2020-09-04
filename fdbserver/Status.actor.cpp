@@ -1871,28 +1871,18 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		(*qos)["batch_released_transactions_per_second"] = batchTransPerSec;
 
 		JsonBuilderObject throttledTagsObj;
-		JsonBuilderObject autoThrottledTagsObj, recommendThrottleTagsObj;
+		JsonBuilderObject autoThrottledTagsObj;
+		autoThrottledTagsObj["count"] = autoThrottledTags;
+		autoThrottledTagsObj["busy_read"] = autoThrottledTagsBusyRead;
+		autoThrottledTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
 		if(autoThrottlingEnabled) {
-			autoThrottledTagsObj["count"] = autoThrottledTags;
-			autoThrottledTagsObj["busy_read"] = autoThrottledTagsBusyRead;
-			autoThrottledTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
-
-			recommendThrottleTagsObj["count"] = 0;
-			recommendThrottleTagsObj["busy_read"] = 0;
-			recommendThrottleTagsObj["busy_write"] = 0;
+			autoThrottledTagsObj["is_recommended"] = 0;
 		}
 		else {
-			recommendThrottleTagsObj["count"] = autoThrottledTags;
-			recommendThrottleTagsObj["busy_read"] = autoThrottledTagsBusyRead;
-			recommendThrottleTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
-
-			autoThrottledTagsObj["count"] = 0;
-			autoThrottledTagsObj["busy_read"] = 0;
-			autoThrottledTagsObj["busy_write"] = 0;
+			autoThrottledTagsObj["is_recommended"] = 1;
 		}
 
 		throttledTagsObj["auto"] = autoThrottledTagsObj;
-		throttledTagsObj["recommend"] = recommendThrottleTagsObj;
 
 		JsonBuilderObject manualThrottledTagsObj;
 		manualThrottledTagsObj["count"] = manualThrottledTags;
