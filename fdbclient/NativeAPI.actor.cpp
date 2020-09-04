@@ -3470,7 +3470,7 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
 		} else if (options.commitOnGivenProxy) {
-			const auto& proxies = cx->clientInfo->get().proxies;
+			const auto& proxies = cx->clientInfo->get().masterProxies;
 			const auto& proxy = proxies[req.splitTransaction.get().partIndex];
 			reply = brokenPromiseToMaybeDelivered(proxy.commit.getReply(req));
 		} else {
@@ -3583,7 +3583,7 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 
 ACTOR Future<Void> tryCommit(Transaction* tr, Future<Version> readVersion) {
 	state CommitTransactionRequest commitTxnRequest = tr->getCommitTransactionRequest();
-	state const int numProxies = tr->getDatabase()->clientInfo->get().proxies.size();
+	state const int numProxies = tr->getDatabase()->clientInfo->get().masterProxies.size();
 
 	if (!shouldSplitCommitTransactionRequest(tr->getCommitTransactionRequest(), numProxies)) {
 		wait(tryCommitSingleTransaction(tr, readVersion));
