@@ -260,6 +260,7 @@ class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	Key decode(const KeyRef& key) const override;
 	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -269,6 +270,7 @@ class FailedServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit FailedServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	Key decode(const KeyRef& key) const override;
 	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;

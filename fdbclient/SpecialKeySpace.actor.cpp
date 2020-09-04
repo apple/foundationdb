@@ -645,6 +645,11 @@ Future<Standalone<RangeResultRef>> ExcludeServersRangeImpl::getRange(ReadYourWri
 	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
 }
 
+void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// ignore value
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(ValueRef())));
+}
+
 Key ExcludeServersRangeImpl::decode(const KeyRef& key) const {
 	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
 	    .withPrefix(LiteralStringRef("\xff/conf/"));
@@ -868,6 +873,11 @@ FailedServersRangeImpl::FailedServersRangeImpl(KeyRangeRef kr) : SpecialKeyRange
 Future<Standalone<RangeResultRef>> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                     KeyRangeRef kr) const {
 	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
+}
+
+void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	// ignore value
+	ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(ValueRef())));
 }
 
 Key FailedServersRangeImpl::decode(const KeyRef& key) const {
