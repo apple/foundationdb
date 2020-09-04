@@ -21,29 +21,26 @@
 #include <algorithm>
 #include <tuple>
 
+#include <fdbclient/DatabaseContext.h>
 #include "fdbclient/Atomic.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbrpc/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ProxyCommitData.actor.h"
+#include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
@@ -51,7 +48,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
-#include "flow/TDMetric.actor.h"
+#include "flow/Trace.h"
 #include "flow/Tracing.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -77,226 +74,6 @@ ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool
 		reply.send(Void());
 	}
 	return Void();
-}
-
-struct TransactionRateInfo {
-	double rate;
-	double limit;
-	double budget;
-
-	bool disabled;
-
-	Smoother smoothRate;
-	Smoother smoothReleased;
-
-	TransactionRateInfo(double rate) : rate(rate), limit(0), budget(0), disabled(true), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW),
-	                                   smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {}
-
-	void reset() {
-		// Determine the number of transactions that this proxy is allowed to release
-		// Roughly speaking, this is done by computing the number of transactions over some historical window that we could
-		// have started but didn't, and making that our limit. More precisely, we track a smoothed rate limit and release rate,
-		// the difference of which is the rate of additional transactions that we could have released based on that window.
-		// Then we multiply by the window size to get a number of transactions.
-		//
-		// Limit can be negative in the event that we are releasing more transactions than we are allowed (due to the use of
-		// our budget or because of higher priority transactions).
-		double releaseRate = smoothRate.smoothTotal() - smoothReleased.smoothRate();
-		limit = SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW * releaseRate;
-	}
-
-	bool canStart(int64_t numAlreadyStarted, int64_t count) {
-		return numAlreadyStarted + count <= std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
-	}
-
-	void updateBudget(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
-		// Update the budget to accumulate any extra capacity available or remove any excess that was used.
-		// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the window that elapsed.
-		//
-		// We may have exceeded our limit due to the budget or because of higher priority transactions, in which case this
-		// delta will be negative. The delta can also be negative in the event that our limit was negative, which can happen
-		// if we had already started more transactions in our window than our rate would have allowed.
-		//
-		// This budget has the property that when the budget is required to start transactions (because batches are big),
-		// the sum limit+budget will increase linearly from 0 to the batch size over time and decrease by the batch size
-		// upon starting a batch. In other words, this works equivalently to a model where we linearly accumulate budget over
-		// time in the case that our batches are too big to take advantage of the window based limits.
-		budget = std::max(0.0, budget + elapsed * (limit - numStartedAtPriority) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
-
-		// If we are emptying out the queue of requests, then we don't need to carry much budget forward
-		// If we did keep accumulating budget, then our responsiveness to changes in workflow could be compromised
-		if(queueEmptyAtPriority) {
-			budget = std::min(budget, SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET);
-		}
-
-		smoothReleased.addDelta(numStartedAtPriority);
-	}
-
-	void disable() {
-		disabled = true;
-		rate = 0;
-		smoothRate.reset(0);
-	}
-
-	void setRate(double rate) {
-		ASSERT(rate >= 0 && rate != std::numeric_limits<double>::infinity() && !std::isnan(rate));
-
-		this->rate = rate;
-		if(disabled) {
-			smoothRate.reset(rate);
-			disabled = false;
-		}
-		else {
-			smoothRate.setTotal(rate);
-		}
-	}
-};
-
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount,
-                           int64_t* inBatchTransactionCount, TransactionRateInfo* transactionRateInfo,
-                           TransactionRateInfo* batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply,
-                           GetHealthMetricsReply* detailedHealthMetricsReply,
-                           TransactionTagMap<uint64_t>* transactionTagCounter,
-                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags,
-                           UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
-	state Future<Void> nextRequestTimer = Never();
-	state Future<Void> leaseTimeout = Never();
-	state Future<GetRateInfoReply> reply = Never();
-	state double lastDetailedReply = 0.0; // request detailed metrics immediately
-	state bool expectingDetailedReply = false;
-	state int64_t lastTC = 0;
-
-	if (db->get().ratekeeper.present()) nextRequestTimer = Void();
-	loop choose {
-		when ( wait( db->onChange() ) ) {
-			if ( db->get().ratekeeper.present() ) {
-				TraceEvent("ProxyRatekeeperChanged", myID)
-				.detail("RKID", db->get().ratekeeper.get().id());
-				nextRequestTimer = Void();  // trigger GetRate request
-			} else {
-				TraceEvent("ProxyRatekeeperDied", myID);
-				nextRequestTimer = Never();
-				reply = Never();
-			}
-		}
-		when ( wait( nextRequestTimer ) ) {
-			nextRequestTimer = Never();
-			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
-
-			TransactionTagMap<uint64_t> tagCounts;
-			for(auto itr : *throttledTags) {
-				for(auto priorityThrottles : itr.second) {
-					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
-				}
-			}
-			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
-			    GetRateInfoRequest(myID, *inTransactionCount, *inBatchTransactionCount, tagCounts,
-			                       *ssTrTagCommitCost, detailed)));
-			transactionTagCounter->clear();
-			ssTrTagCommitCost->clear();
-			expectingDetailedReply = detailed;
-		}
-		when ( GetRateInfoReply rep = wait(reply) ) {
-			reply = Never();
-
-			transactionRateInfo->setRate(rep.transactionRate);
-			batchTransactionRateInfo->setRate(rep.batchTransactionRate);
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
-			lastTC = *inTransactionCount;
-			leaseTimeout = delay(rep.leaseDuration);
-			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
-			healthMetricsReply->update(rep.healthMetrics, expectingDetailedReply, true);
-			if (expectingDetailedReply) {
-				detailedHealthMetricsReply->update(rep.healthMetrics, true, true);
-				lastDetailedReply = now();
-			}
-
-			// Replace our throttles with what was sent by ratekeeper. Because we do this,
-			// we are not required to expire tags out of the map
-			if(rep.throttledTags.present()) {
-				*throttledTags = std::move(rep.throttledTags.get());
-			}
-		}
-		when ( wait( leaseTimeout ) ) {
-			transactionRateInfo->disable();
-			batchTransactionRateInfo->disable();
-			TraceEvent(SevWarn, "MasterProxyRateLeaseExpired", myID).suppressFor(5.0);
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
-			leaseTimeout = Never();
-		}
-	}
-}
-
-ACTOR Future<Void> queueTransactionStartRequests(
-	Reference<AsyncVar<ServerDBInfo>> db,
-	SpannedDeque<GetReadVersionRequest> *systemQueue,
-	SpannedDeque<GetReadVersionRequest> *defaultQueue,
-	SpannedDeque<GetReadVersionRequest> *batchQueue,
-	FutureStream<GetReadVersionRequest> readVersionRequests,
-	PromiseStream<Void> GRVTimer, double *lastGRVTime,
-	double *GRVBatchTime, FutureStream<double> replyTimes,
-	ProxyStats* stats, TransactionRateInfo* batchRateInfo,
-	TransactionTagMap<uint64_t>* transactionTagCounter)
-{
-	loop choose{
-		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
-			//WARNING: this code is run at a high priority, so it needs to do as little work as possible
-			if( stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() > SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ) {
-				++stats->txnRequestErrors;
-				//FIXME: send an error instead of giving an unreadable version when the client can support the error: req.reply.sendError(proxy_memory_limit_exceeded());
-				GetReadVersionReply rep;
-				rep.version = 1;
-				rep.locked = true;
-				req.reply.send(rep);
-				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
-			} else {
-				// TODO: check whether this is reasonable to do in the fast path
-				for(auto tag : req.tags) {
-					(*transactionTagCounter)[tag.first] += tag.second;
-				}
-
-				if (req.debugID.present())
-					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "MasterProxyServer.queueTransactionStartRequests.Before");
-
-				if (systemQueue->empty() && defaultQueue->empty() && batchQueue->empty()) {
-					forwardPromise(GRVTimer, delayJittered(std::max(0.0, *GRVBatchTime - (now() - *lastGRVTime)), TaskPriority::ProxyGRVTimer));
-				}
-
-				++stats->txnRequestIn;
-				stats->txnStartIn += req.transactionCount;
-				if (req.priority >= TransactionPriority::IMMEDIATE) {
-					stats->txnSystemPriorityStartIn += req.transactionCount;
-					systemQueue->push_back(req);
-					systemQueue->span.addParent(req.spanContext);
-				} else if (req.priority >= TransactionPriority::DEFAULT) {
-					stats->txnDefaultPriorityStartIn += req.transactionCount;
-					defaultQueue->push_back(req);
-					defaultQueue->span.addParent(req.spanContext);
-				} else {
-					// Return error for batch_priority GRV requests
-					int64_t proxiesCount = std::max((int)db->get().client.proxies.size(), 1);
-					if (batchRateInfo->rate <= (1.0 / proxiesCount)) {
-						req.reply.sendError(batch_transaction_throttled());
-						stats->txnThrottled += req.transactionCount;
-						continue;
-					}
-
-					stats->txnBatchPriorityStartIn += req.transactionCount;
-					batchQueue->push_back(req);
-					batchQueue->span.addParent(req.spanContext);
-				}
-			}
-		}
-		// dynamic batching monitors reply latencies
-		when(double reply_latency = waitNext(replyTimes)) {
-			double target_latency = reply_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
-			*GRVBatchTime = std::max(
-			    SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN,
-			    std::min(SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX,
-			             target_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
-			                 *GRVBatchTime * (1 - SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-		}
-	}
 }
 
 ACTOR void discardCommit(UID id, Future<LogSystemDiskQueueAdapter::CommitMessage> fcm, Future<Void> dummyCommitState) {
@@ -411,49 +188,6 @@ struct ResolutionRequestBuilder {
 		transactionResolverMap.emplace_back(std::move(resolversUsed));
 	}
 };
-
-ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo>> db) {
-	state Future<Void> nextRequestTimer = Never();
-	state Future<GetDataDistributorMetricsReply> nextReply = Never();
-
-	if(db->get().distributor.present()) nextRequestTimer = Void();
-	loop {
-		try {
-			choose {
-				when(wait(db->onChange())) {
-					if ( db->get().distributor.present() ) {
-						TraceEvent("DataDistributorChanged", db->get().id)
-							.detail("DDID", db->get().distributor.get().id());
-						nextRequestTimer = Void();
-					} else {
-						TraceEvent("DataDistributorDied", db->get().id);
-						nextRequestTimer = Never();
-					}
-					nextReply = Never();
-				}
-				when(wait(nextRequestTimer)) {
-					nextRequestTimer = Never();
-					if(db->get().distributor.present()) {
-						nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
-						    GetDataDistributorMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
-					} else nextReply = Never();
-				}
-				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
-					nextReply = Never();
-					ASSERT(reply.midShardSize.present());
-					*midShardSize = reply.midShardSize.get();
-					nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
-				}
-			}
-		} catch (Error& e) {
-			TraceEvent("DDMidShardSizeUpdateFail").error(e);
-			if(e.code() != error_code_timed_out && e.code() != error_code_dd_not_found)
-				throw ;
-			nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
-			nextReply = Never();
-		}
-	}
-}
 
 ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std::pair<std::vector<CommitTransactionRequest>, int> > out, FutureStream<CommitTransactionRequest> in, int desiredBytes, int64_t memBytesLimit) {
 	wait(delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher));
@@ -1098,8 +832,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					ASSERT(totalCosts > 0);
 					double prob = mul * cost / totalCosts;
 
-					if(deterministicRandom()->random01() < prob) {
-						for(const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
+					if (deterministicRandom()->random01() < prob) {
+						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
 							auto id = ssInfo->interf.id();
 							// scale cost
 							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
@@ -1138,10 +872,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					self->toCommit.addTags(ranges.begin().value().tags);
 
 					// check whether clear is sampled
-					if(checkSample && !trCost->get().clearIdxCosts.empty() && trCost->get().clearIdxCosts[0].first == mutationNum) {
-						for(const auto& ssInfo : ranges.begin().value().src_info) {
+					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
+					    trCost->get().clearIdxCosts[0].first == mutationNum) {
+						for (const auto& ssInfo : ranges.begin().value().src_info) {
 							auto id = ssInfo->interf.id();
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
+							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m,
+							                                  trCost->get().clearIdxCosts[0].second);
 						}
 						trCost->get().clearIdxCosts.pop_front();
 					}
@@ -1154,10 +890,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						allSources.insert(r.value().tags.begin(), r.value().tags.end());
 
 						// check whether clear is sampled
-						if(checkSample && !trCost->get().clearIdxCosts.empty() && trCost->get().clearIdxCosts[0].first == mutationNum) {
-							for(const auto& ssInfo : r.value().src_info) {
+						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
+						    trCost->get().clearIdxCosts[0].first == mutationNum) {
+							for (const auto& ssInfo : r.value().src_info) {
 								auto id = ssInfo->interf.id();
-								pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
+								pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m,
+								                                  trCost->get().clearIdxCosts[0].second);
 							}
 							trCost->get().clearIdxCosts.pop_front();
 						}
@@ -1210,7 +948,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			}
 		}
 
-		if(checkSample) {
+		if (checkSample) {
 			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
 			    trs[self->transactionNum].commitCostEstimation.get().expensiveCostEstCount;
 		}
@@ -1282,9 +1020,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					wait(yield());
 					break;
 				}
-				when(GetReadVersionReply v = wait(pProxyCommitData->getConsistentReadVersion.getReply(
-                        GetReadVersionRequest(waitVersionSpan.context, 0, TransactionPriority::IMMEDIATE,
-                                              GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)))) {
+				when(wait(pProxyCommitData->cx->onProxiesChanged())) {}
+				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
+				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID), TaskPriority::GetLiveCommittedVersionReply))) {
 					if(v.version > pProxyCommitData->committedVersion.get()) {
 						pProxyCommitData->locked = v.locked;
 						pProxyCommitData->metadataVersion = v.metadataVersion;
@@ -1404,12 +1142,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// by reporting commit version first before updating self->committedVersion. Otherwise, a client may get a commit
 	// version that the master is not aware of, and next GRV request may get a version less than self->committedVersion.
 	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion);   // A later version was reported committed first
-	if ( self->commitVersion > pProxyCommitData->committedVersion.get()) {
+	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
-			ReportRawCommittedVersionRequest(
-				self->commitVersion,
-				self->lockedAfter,
-				self->metadataVersionAfter), TaskPriority::ProxyMasterVersionReply));
+		    ReportRawCommittedVersionRequest(self->commitVersion, self->lockedAfter, self->metadataVersionAfter,
+		                                     pProxyCommitData->minKnownCommittedVersion),
+		    TaskPriority::ProxyMasterVersionReply));
 	}
 	if( self->commitVersion > pProxyCommitData->committedVersion.get() ) {
 		pProxyCommitData->locked = self->lockedAfter;
@@ -1544,275 +1281,6 @@ ACTOR Future<Void> commitBatch(
 	return Void();
 }
 
-ACTOR Future<Void> updateLastCommit(ProxyCommitData* self, Optional<UID> debugID = Optional<UID>()) {
-	state double confirmStart = now();
-	self->lastStartCommit = confirmStart;
-	self->updateCommitRequests++;
-	wait(self->logSystem->confirmEpochLive(debugID));
-	self->updateCommitRequests--;
-	self->lastCommitLatency = now()-confirmStart;
-	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
-	return Void();
-}
-
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, ProxyCommitData* commitData, uint32_t flags, Optional<UID> debugID,
-                                                          int transactionCount, int systemTransactionCount, int defaultPriTransactionCount, int batchPriTransactionCount)
-{
-	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
-	// (1) The version returned is the committedVersion of some proxy at some point before the request returns, so it is committed.
-	// (2) No proxy on our list reported committed a higher version before this request was received, because then its committedVersion would have been higher,
-	//     and no other proxy could have already committed anything without first ending the epoch
-	state Span span("MP:getLiveCommittedVersion"_loc, parentSpan);
-	++commitData->stats.txnStartBatch;
-	state Future<GetReadVersionReply> replyFromMasterFuture = commitData->master.getLiveCommittedVersion.getReply(
-	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
-
-	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags&GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
-		wait(updateLastCommit(commitData, debugID));
-	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 && now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > commitData->lastCommitTime.get()) {
-		wait(commitData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
-	}
-
-	if (debugID.present()) {
-		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.confirmEpochLive");
-	}
-
-	state GetReadVersionReply rep;
-	rep.locked = commitData->locked;
-	rep.metadataVersion = commitData->metadataVersion;
-	rep.version = commitData->committedVersion.get();
-
-	GetReadVersionReply replyFromMaster = wait(replyFromMasterFuture);
-	if (replyFromMaster.version > rep.version) {
-		rep = replyFromMaster;
-	}
-	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
-
-	if (debugID.present()) {
-		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
-	}
-
-	commitData->stats.txnStartOut += transactionCount;
-	commitData->stats.txnSystemPriorityStartOut += systemTransactionCount;
-	commitData->stats.txnDefaultPriorityStartOut += defaultPriTransactionCount;
-	commitData->stats.txnBatchPriorityStartOut += batchPriTransactionCount;
-
-	return rep;
-}
-
-ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::vector<GetReadVersionRequest> requests,
-                                  ProxyStats* stats, Version minKnownCommittedVersion,
-                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags, int64_t midShardSize = 0) {
-	GetReadVersionReply _reply = wait(replyFuture);
-	GetReadVersionReply reply = _reply;
-	Version replyVersion = reply.version;
-
-	double end = g_network->timer();
-	for(GetReadVersionRequest const& request : requests) {
-		double duration = end - request.requestTime();
-		if(request.priority == TransactionPriority::DEFAULT) {
-			stats->grvLatencySample.addMeasurement(duration);
-		}
-		if(request.priority >= TransactionPriority::DEFAULT) {
-			stats->grvLatencyBands.addMeasurement(duration);
-		}
-
-		if (request.flags & GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION) {
-			// Only backup worker may infrequently use this flag.
-			reply.version = minKnownCommittedVersion;
-		}
-		else {
-			reply.version = replyVersion;
-		}
-		reply.midShardSize = midShardSize;
-		reply.tagThrottleInfo.clear();
-
-		if(!request.tags.empty()) {
-			auto& priorityThrottledTags = throttledTags[request.priority];
-			for(auto tag : request.tags) {
-				auto tagItr = priorityThrottledTags.find(tag.first);
-				if(tagItr != priorityThrottledTags.end()) {
-					if(tagItr->second.expiration > now()) {
-						if(tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
-							TEST(true); // Auto TPS rate is unlimited
-						}
-						else {
-							TEST(true); // Proxy returning tag throttle
-							reply.tagThrottleInfo[tag.first] = tagItr->second;
-						}
-					}
-					else {
-						// This isn't required, but we might as well
-						TEST(true); // Proxy expiring tag throttle
-						priorityThrottledTags.erase(tagItr);
-					}
-				}
-			}
-		}
-
-		request.reply.send(reply);
-		++stats->txnRequestOut;
-	}
-
-	return Void();
-}
-
-ACTOR static Future<Void> transactionStarter(
-	MasterProxyInterface proxy,
-	Reference<AsyncVar<ServerDBInfo>> db,
-	PromiseStream<Future<Void>> addActor,
-	ProxyCommitData* commitData, GetHealthMetricsReply* healthMetricsReply,
-	GetHealthMetricsReply* detailedHealthMetricsReply)
-{
-	state double lastGRVTime = 0;
-	state PromiseStream<Void> GRVTimer;
-	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
-
-	state int64_t transactionCount = 0;
-	state int64_t batchTransactionCount = 0;
-	state TransactionRateInfo normalRateInfo(10);
-	state TransactionRateInfo batchRateInfo(0);
-
-	state SpannedDeque<GetReadVersionRequest> systemQueue("MP:transactionStarterSystemQueue"_loc);
-	state SpannedDeque<GetReadVersionRequest> defaultQueue("MP:transactionStarterDefaultQueue"_loc);
-	state SpannedDeque<GetReadVersionRequest> batchQueue("MP:transactionStarterBatchQueue"_loc);
-
-	state TransactionTagMap<uint64_t> transactionTagCounter;
-	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
-
-	state PromiseStream<double> replyTimes;
-	state Span span;
-
-	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
-	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
-
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
-	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
-	                      &(commitData->ssTrTagCommitCost)));
-	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
-	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
-	                                            &transactionTagCounter));
-
-	// Get a list of the other proxies that go together with us
-	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
-		wait(db->onChange());
-
-	ASSERT(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
-
-	TraceEvent("ProxyReadyForTxnStarts", proxy.id());
-
-	loop{
-		waitNext(GRVTimer.getFuture());
-		// Select zero or more transactions to start
-		double t = now();
-		double elapsed = now() - lastGRVTime;
-		lastGRVTime = t;
-
-		if(elapsed == 0) elapsed = 1e-15; // resolve a possible indeterminant multiplication with infinite transaction rate
-
-		normalRateInfo.reset();
-		batchRateInfo.reset();
-
-		int transactionsStarted[2] = {0,0};
-		int systemTransactionsStarted[2] = {0,0};
-		int defaultPriTransactionsStarted[2] = { 0, 0 };
-		int batchPriTransactionsStarted[2] = { 0, 0 };
-
-		vector<vector<GetReadVersionRequest>> start(2);  // start[0] is transactions starting with !(flags&CAUSAL_READ_RISKY), start[1] is transactions starting with flags&CAUSAL_READ_RISKY
-		Optional<UID> debugID;
-
-		int requestsToStart = 0;
-
-		while (requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
-			SpannedDeque<GetReadVersionRequest>* transactionQueue;
-			if(!systemQueue.empty()) {
-				transactionQueue = &systemQueue;
-			} else if(!defaultQueue.empty()) {
-				transactionQueue = &defaultQueue;
-			} else if(!batchQueue.empty()) {
-				transactionQueue = &batchQueue;
-			} else {
-				break;
-			}
-			transactionQueue->span.swap(span);
-
-			auto& req = transactionQueue->front();
-			int tc = req.transactionCount;
-
-			if(req.priority < TransactionPriority::DEFAULT && !batchRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-				break;
-			}
-			else if(req.priority < TransactionPriority::IMMEDIATE && !normalRateInfo.canStart(transactionsStarted[0] + transactionsStarted[1], tc)) {
-				break;
-			}
-
-			if (req.debugID.present()) {
-				if (!debugID.present()) debugID = nondeterministicRandom()->randomUniqueID();
-				g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
-			}
-
-			transactionsStarted[req.flags&1] += tc;
-			if (req.priority >= TransactionPriority::IMMEDIATE)
-				systemTransactionsStarted[req.flags & 1] += tc;
-			else if (req.priority >= TransactionPriority::DEFAULT)
-				defaultPriTransactionsStarted[req.flags & 1] += tc;
-			else
-				batchPriTransactionsStarted[req.flags & 1] += tc;
-
-			start[req.flags & 1].emplace_back(std::move(req));
-			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
-			transactionQueue->pop_front();
-			requestsToStart++;
-		}
-
-		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {
-			forwardPromise(GRVTimer, delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskPriority::ProxyGRVTimer));
-		}
-
-		/*TraceEvent("GRVBatch", proxy.id())
-		.detail("Elapsed", elapsed)
-		.detail("NTransactionToStart", nTransactionsToStart)
-		.detail("TransactionRate", transactionRate)
-		.detail("TransactionQueueSize", transactionQueue.size())
-		.detail("NumTransactionsStarted", transactionsStarted[0] + transactionsStarted[1])
-		.detail("NumSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
-		.detail("NumNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] -
-		systemTransactionsStarted[0] - systemTransactionsStarted[1])
-		.detail("TransactionBudget", transactionBudget)
-		.detail("BatchTransactionBudget", batchTransactionBudget);*/
-
-		int systemTotalStarted = systemTransactionsStarted[0] + systemTransactionsStarted[1];
-		int normalTotalStarted = defaultPriTransactionsStarted[0] + defaultPriTransactionsStarted[1];
-		int batchTotalStarted = batchPriTransactionsStarted[0] + batchPriTransactionsStarted[1];
-
-		transactionCount += transactionsStarted[0] + transactionsStarted[1];
-		batchTransactionCount += batchTotalStarted;
-
-		normalRateInfo.updateBudget(systemTotalStarted + normalTotalStarted, systemQueue.empty() && defaultQueue.empty(), elapsed);
-		batchRateInfo.updateBudget(systemTotalStarted + normalTotalStarted + batchTotalStarted, systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(), elapsed);
-
-		if (debugID.present()) {
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
-		}
-
-		for (int i = 0; i < start.size(); i++) {
-			if (start[i].size()) {
-				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(
-				    span.context, commitData, i, debugID, transactionsStarted[i], systemTransactionsStarted[i],
-				    defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
-				addActor.send(sendGrvReplies(readVersionReply, start[i], &commitData->stats,
-				                             commitData->minKnownCommittedVersion, throttledTags, midShardSize));
-
-				// for now, base dynamic batching on the time for normal requests (not read_risky)
-				if (i == 0) {
-					addActor.send(timeReply(readVersionReply, replyTimes));
-				}
-			}
-		}
-		span = Span(span.location);
-	}
-}
-
 ACTOR static Future<Void> doKeyServerLocationRequest( GetKeyServerLocationsRequest req, ProxyCommitData* commitData ) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
@@ -1945,29 +1413,13 @@ ACTOR static Future<Void> rejoinServer( MasterProxyInterface proxy, ProxyCommitD
 	}
 }
 
-ACTOR Future<Void> healthMetricsRequestServer(MasterProxyInterface proxy, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply)
-{
-	loop {
-		choose {
-			when(GetHealthMetricsRequest req =
-				 waitNext(proxy.getHealthMetrics.getFuture()))
-			{
-				if (req.detailed)
-					req.reply.send(*detailedHealthMetricsReply);
-				else
-					req.reply.send(*healthMetricsReply);
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db)
 {
 	loop {
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
-				if(!db->get().distributor.present()) {
+				if (!db->get().distributor.present()) {
 					req.reply.sendError(dd_not_found());
 					continue;
 				}
@@ -2038,23 +1490,6 @@ ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 			wait( delay(SERVER_KNOBS->UPDATE_REMOTE_LOG_VERSION_INTERVAL) || onChange );
 			if(onChange.isReady()) {
 				break;
-			}
-		}
-	}
-}
-
-ACTOR Future<Void> lastCommitUpdater(ProxyCommitData* self, PromiseStream<Future<Void>> addActor) {
-	loop {
-		double interval = std::max(SERVER_KNOBS->MIN_CONFIRM_INTERVAL, (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION - self->lastCommitLatency)/2.0);
-		double elapsed = now()-self->lastStartCommit;
-		if(elapsed < interval) {
-			wait( delay(interval + 0.0001 - elapsed) );
-		} else {
-			if(self->updateCommitRequests < SERVER_KNOBS->MAX_COMMIT_UPDATES) {
-				addActor.send(updateLastCommit(self));
-			} else {
-				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TooManyLastCommitUpdates").suppressFor(1.0);
-				self->lastStartCommit = now();
 			}
 		}
 	}
@@ -2164,6 +1599,38 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo>> db,
 	return Void();
 }
 
+ACTOR Future<Void> reportTxnTagCommitCost(UID myID, Reference<AsyncVar<ServerDBInfo>> db,
+                                          UIDTransactionTagMap<TransactionCommitCostEstimation>* ssTrTagCommitCost) {
+	state Future<Void> nextRequestTimer = Never();
+	state Future<Void> nextReply = Never();
+	if (db->get().ratekeeper.present()) nextRequestTimer = Void();
+	loop choose {
+		when(wait(db->onChange())) {
+			if (db->get().ratekeeper.present()) {
+				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
+				nextRequestTimer = Void();
+			} else {
+				TraceEvent("ProxyRatekeeperDied", myID);
+				nextRequestTimer = Never();
+			}
+		}
+		when(wait(nextRequestTimer)) {
+			nextRequestTimer = Never();
+			if (db->get().ratekeeper.present()) {
+				nextReply = brokenPromiseToNever(db->get().ratekeeper.get().reportCommitCostEstimation.getReply(
+				    ReportCommitCostEstimationRequest(*ssTrTagCommitCost)));
+			} else {
+				nextReply = Never();
+			}
+		}
+		when(wait(nextReply)) {
+			nextReply = Never();
+			ssTrTagCommitCost->clear();
+			nextRequestTimer = delay(SERVER_KNOBS->REPORT_TRANSACTION_COST_ESTIMATION_DELAY);
+		}
+	}
+}
+
 ACTOR Future<Void> masterProxyServerCore(
 	MasterProxyInterface proxy,
 	MasterInterface master,
@@ -2222,24 +1689,19 @@ ACTOR Future<Void> masterProxyServerCore(
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData));
-	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
-	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
 	addActor.send(ddMetricsRequestServer(proxy, db));
+	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
-
-	if(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0) {
-		addActor.send(lastCommitUpdater(&commitData, addActor));
-	}
 
 	int commitBatchByteLimit =
 	    (int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX,
 	                          std::max<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MIN,
 	                                           SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE *
-	                                               pow(commitData.db->get().client.proxies.size(),
+	                                               pow(commitData.db->get().client.masterProxies.size(),
 	                                                   SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER)));
 
 	commitBatcherActor = commitBatcher(&commitData, batchedCommits, proxy.commit.getFuture(), commitBatchByteLimit, commitBatchesMemoryLimit);
@@ -2364,7 +1826,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, MasterProxyInterface myInterface) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.proxies.begin(), db->get().client.proxies.end(), myInterface)) {
+		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().client.masterProxies.begin(), db->get().client.masterProxies.end(), myInterface)) {
 			throw worker_removed();
 		}
 		wait(db->onChange());

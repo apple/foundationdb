@@ -514,7 +514,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 			} catch (Error& e) {
 				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
 
-				wait( tr.onError(e) );
+				wait(tr.onError(e));
 				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
 			}
 		}
@@ -4486,12 +4486,12 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	loop {
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
-		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies));
+		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
 
 		choose {
 			when (wait(db->onChange())) {}
-			when (GetHealthMetricsReply reply = wait(proxies->size() ?
-					basicLoadBalance(proxies, &MasterProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
+			when (GetHealthMetricsReply reply = wait(grvProxies->size() ?
+					basicLoadBalance(grvProxies, &GrvProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
 					: Never())) {
 				if (reply.healthMetrics.batchLimited) {
 					*lastLimited = now();
@@ -4978,27 +4978,26 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 }
 
 static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
-	std::nth_element(metricVec.begin(), metricVec.begin() + metricVec.size() / 2,
-	                 metricVec.end(), [](const DDMetricsRef& d1, const DDMetricsRef& d2) {
-						  return d1.shardBytes < d2.shardBytes;
-						});
+	std::nth_element(metricVec.begin(), metricVec.begin() + metricVec.size() / 2, metricVec.end(),
+	                 [](const DDMetricsRef& d1, const DDMetricsRef& d2) { return d1.shardBytes < d2.shardBytes; });
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
-ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req, PromiseStream<GetMetricsListRequest> getShardMetricsList) {
-	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
-		getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
+ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
+                                PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
+	    errorOr(brokenPromiseToNever(getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
 
-	if(result.isError()) {
+	if (result.isError()) {
 		req.reply.sendError(result.getError());
 	} else {
 		GetDataDistributorMetricsReply rep;
-		if(!req.midOnly) {
+		if (!req.midOnly) {
 			rep.storageMetricsList = result.get();
-		}
-		else {
+		} else {
 			auto& metricVec = result.get();
-			if(metricVec.empty()) rep.midShardSize = 0;
+			if (metricVec.empty())
+				rep.midShardSize = 0;
 			else {
 				rep.midShardSize = getMedianShardSize(metricVec.contents());
 			}

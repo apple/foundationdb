@@ -47,6 +47,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeTLogRequest > tLog;
 	RequestStream< struct RecruitMasterRequest > master;
 	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
+	RequestStream< struct InitializeGrvProxyRequest > grvProxy;
 	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
 	RequestStream< struct InitializeRatekeeperRequest > ratekeeper;
 	RequestStream< struct InitializeResolverRequest > resolver;
@@ -81,6 +82,7 @@ struct WorkerInterface {
 		tLog.getEndpoint( TaskPriority::Worker );
 		master.getEndpoint( TaskPriority::Worker );
 		masterProxy.getEndpoint( TaskPriority::Worker );
+		grvProxy.getEndpoint( TaskPriority::Worker );
 		resolver.getEndpoint( TaskPriority::Worker );
 		logRouter.getEndpoint( TaskPriority::Worker );
 		debugPing.getEndpoint( TaskPriority::Worker );
@@ -91,7 +93,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, grvProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
 	}
 };
 
@@ -178,7 +180,8 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	std::vector<MasterProxyInterface> proxies;
+	std::vector<MasterProxyInterface> masterProxies;
+	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
@@ -196,8 +199,8 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
-		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
+		serializer(ar, id, mi, logSystemConfig, masterProxies, grvProxies, resolvers, recoveryCount, registrationCount,
+		           configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
 
@@ -206,7 +209,8 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> backupWorkers;
 	std::vector<WorkerInterface> tLogs;
 	std::vector<WorkerInterface> satelliteTLogs;
-	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> masterProxies;
+	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
 	std::vector<WorkerInterface> oldLogRouters;
@@ -217,7 +221,7 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId,
+		serializer(ar, tLogs, satelliteTLogs, masterProxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
 		           satelliteFallback, backupWorkers);
 	}
 };
@@ -443,6 +447,18 @@ struct InitializeMasterProxyRequest {
 	}
 };
 
+struct InitializeGrvProxyRequest {
+	constexpr static FileIdentifier file_identifier = 8265613;
+	MasterInterface master;
+	uint64_t recoveryCount;
+	ReplyPromise<GrvProxyInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, master, recoveryCount, reply);
+	}
+};
+
 struct InitializeDataDistributorRequest {
 	constexpr static FileIdentifier file_identifier = 8858952;
 	UID reqId;
@@ -657,6 +673,7 @@ struct Role {
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
 	static const Role MASTER_PROXY;
+	static const Role GRV_PROXY;
 	static const Role MASTER;
 	static const Role RESOLVER;
 	static const Role CLUSTER_CONTROLLER;
@@ -720,12 +737,13 @@ ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBI
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
 ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
+ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy, InitializeGrvProxyRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, UID workerID, 
                         bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
                         Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
-ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
+ACTOR Future<Void> resolver(ResolverInterface resolver, InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);

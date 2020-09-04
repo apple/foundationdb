@@ -49,15 +49,9 @@ struct ApplyMutationsData {
 
 struct ProxyStats {
 	CounterCollection cc;
-	Counter txnRequestIn, txnRequestOut, txnRequestErrors;
-	Counter txnStartIn, txnStartOut, txnStartBatch;
-	Counter txnSystemPriorityStartIn, txnSystemPriorityStartOut;
-	Counter txnBatchPriorityStartIn, txnBatchPriorityStartOut;
-	Counter txnDefaultPriorityStartIn, txnDefaultPriorityStartOut;
 	Counter txnCommitIn, txnCommitVersionAssigned, txnCommitResolving, txnCommitResolved, txnCommitOut,
 	    txnCommitOutSuccess, txnCommitErrors;
 	Counter txnConflicts;
-	Counter txnThrottled;
 	Counter commitBatchIn, commitBatchOut;
 	Counter mutationBytes;
 	Counter mutations;
@@ -67,39 +61,24 @@ struct ProxyStats {
 	Version lastCommitVersionAssigned;
 
 	LatencySample commitLatencySample;
-	LatencySample grvLatencySample;
-
 	LatencyBands commitLatencyBands;
-	LatencyBands grvLatencyBands;
 
 	Future<Void> logger;
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()),
-	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
-	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
-	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
-	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
-	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
-	    txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
-	    txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
-	    txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),
-	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
-	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
-	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
-	    txnConflicts("TxnConflicts", cc), txnThrottled("TxnThrottled", cc), commitBatchIn("CommitBatchIn", cc),
+	    txnCommitIn("TxnCommitIn", cc), txnCommitVersionAssigned("TxnCommitVersionAssigned", cc),
+	    txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc),
+	    txnCommitOut("TxnCommitOut", cc), txnCommitOutSuccess("TxnCommitOutSuccess", cc),
+	    txnCommitErrors("TxnCommitErrors", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc),
 	    commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
 	    conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
 	    keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
-	    lastCommitVersionAssigned(0),
-	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+	    lastCommitVersionAssigned(0), txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
 	    commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
+	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
 		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
@@ -190,18 +169,6 @@ struct ProxyCommitData {
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
 		    (newLatencyBandConfig.present() &&
-		     newLatencyBandConfig.get().grvConfig != latencyBandConfig.get().grvConfig)) {
-			TraceEvent("LatencyBandGrvUpdatingConfig").detail("Present", newLatencyBandConfig.present());
-			stats.grvLatencyBands.clearBands();
-			if (newLatencyBandConfig.present()) {
-				for (auto band : newLatencyBandConfig.get().grvConfig.bands) {
-					stats.grvLatencyBands.addThreshold(band);
-				}
-			}
-		}
-
-		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
-		    (newLatencyBandConfig.present() &&
 		     newLatencyBandConfig.get().commitConfig != latencyBandConfig.get().commitConfig)) {
 			TraceEvent("LatencyBandCommitUpdatingConfig").detail("Present", newLatencyBandConfig.present());
 			stats.commitLatencyBands.clearBands();
@@ -215,13 +182,13 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
-	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int cost){
+	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, int cost) {
 		auto [it, _] = ssTrTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
 
-		for(auto& tag: tagSet) {
+		for (auto& tag : tagSet) {
 			auto& costItem = it->second[tag];
-			if(m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
-				costItem.opsSum ++;
+			if (m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
+				costItem.opsSum++;
 				costItem.costSum += cost;
 			}
 		}
