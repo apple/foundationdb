@@ -71,6 +71,7 @@ std::vector<CommitTransactionRequest> prepareSplitTransactions(const CommitTrans
 
 	std::vector<CommitTransactionRequest> result;
 	UID splitID = deterministicRandom()->randomUniqueID();
+	const int NUM_MUTATIONS = commitTxnRequest.transaction.mutations.size();
 
 	result.reserve(numProxies);
 
@@ -78,7 +79,7 @@ std::vector<CommitTransactionRequest> prepareSplitTransactions(const CommitTrans
 		result.emplace_back(CommitTransactionRequest(commitTxnRequest));
 
 		auto& newRequest = result.back();
-		newRequest.splitTransaction = SplitTransaction(splitID, numProxies, i);
+		newRequest.splitTransaction = SplitTransaction(splitID, numProxies, i, NUM_MUTATIONS);
 
 		// Add FLAG_FIRST_IN_BATCH, to ensure the split transaction is single
 		newRequest.flags |= CommitTransactionRequest::FLAG_FIRST_IN_BATCH;

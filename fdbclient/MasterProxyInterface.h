@@ -151,7 +151,7 @@ constexpr int BAD_START_SUBVERSION = -1;
 
 /**
  * @struct SplitTransaction
- * @brief The data
+ * @brief The data provides information about a split transaction
  */
 struct SplitTransaction {
 	constexpr static FileIdentifier file_identifier = 973581;
@@ -168,14 +168,17 @@ struct SplitTransaction {
 	/// The indexes of mutation items
 	int startSubversion = BAD_START_SUBVERSION;
 
-	SplitTransaction() : id(), totalParts(1), partIndex(0) {}
+	/// Number of mutations
+	int numMutations;
 
-	SplitTransaction(const UID& id_, const int totalParts_, const int partIndex_)
-	  : id(id_), totalParts(totalParts_), partIndex(partIndex_) {}
+	SplitTransaction() : id(), totalParts(1), partIndex(0), numMutations(0) {}
+
+	SplitTransaction(const UID& id_, const int totalParts_, const int partIndex_, const int numMutations_)
+	  : id(id_), totalParts(totalParts_), partIndex(partIndex_), numMutations(numMutations_) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, totalParts, partIndex, startSubversion);
+		serializer(ar, id, totalParts, partIndex, startSubversion, numMutations);
 	}
 };
 

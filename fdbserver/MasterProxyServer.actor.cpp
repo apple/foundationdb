@@ -247,6 +247,11 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						}
 					}
 
+					// If a transaction is a split transaction, then all split parts should have the same prevVersion
+					// and version. The master server will ensure this by caching the version and the split ID. In this
+					// case, letting the split transaction being processed alone rather than in a batch prevents
+					// potential race condition with other transactions. Since the split transaction will always be
+					// flagged as firstInBatch, it ensures all previous transactions in the queue will be sent.
 					if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
 						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
@@ -530,7 +535,8 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 		);
 	}
 
-	if (trs[0].splitTransaction.present()) {
+	// trs.size() check is needed since there are commits with 0 trs.
+	if (trs.size() > 0 && trs[0].splitTransaction.present()) {
 		ASSERT(trs.size() == 1);
 		splitTransaction = trs[0].splitTransaction.get();
 

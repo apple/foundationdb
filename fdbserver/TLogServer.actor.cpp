@@ -66,8 +66,9 @@ void readMessages(std::vector<TagsAndMessage>& tagsAndMessages, const Arena& are
 		tagsAndMsg.loadFromArena(&rd, nullptr);
 
 		const auto subversion = tagsAndMsg.getVersionSub();
-		ASSERT(tagsAndMessages[subversion].getMutateType() == MutationRef::Uninitialized);
-		tagsAndMessages[subversion] = tagsAndMsg;
+		// Verify that this subversion is not used
+		ASSERT(tagsAndMessages[subversion - 1].message.size() == 0);
+		tagsAndMessages[subversion - 1] = tagsAndMsg;
 	}
 }
 
@@ -81,6 +82,8 @@ private:
 protected:
 	virtual void mergeFirstPart(const value_t& incomingRequest) override {
 		merged = incomingRequest;
+
+		tagsAndMessages.resize(incomingRequest.splitTransaction.get().numMutations);
 
 		readMessages(tagsAndMessages, merged.arena, merged.messages);
 	}
