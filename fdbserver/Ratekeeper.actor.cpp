@@ -1402,7 +1402,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 				updateCommitCostEstimation(&self, req.ssTrTagCommitCost);
 
-				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() < p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
+				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
 					p.lastThrottledTagChangeId = self.throttledTagChangeId;
 					p.lastTagPushTime = now();
 
