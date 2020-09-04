@@ -181,19 +181,18 @@ inline void load( Archive& ar, std::vector<T>& value ) {
 		value.push_back(T());
 		ar >> value[i];
 	}
-	ASSERT( ar.protocolVersion().isValid() );
+	ASSERT(ar.protocolVersion().isValid());
 }
 
 template <class Archive, class T>
-inline void save( Archive& ar, const std::deque<T>& value ) {
+inline void save(Archive& ar, const std::deque<T>& value) {
 	ar << (int)value.size();
-	for(auto it = value.begin(); it != value.end(); ++it)
-		ar << *it;
-	ASSERT( ar.protocolVersion().isValid() );
+	for (auto it = value.begin(); it != value.end(); ++it) ar << *it;
+	ASSERT(ar.protocolVersion().isValid());
 }
 
 template <class Archive, class T>
-inline void load( Archive& ar, std::deque<T>& value ) {
+inline void load(Archive& ar, std::deque<T>& value) {
 	int s;
 	ar >> s;
 	value.clear();

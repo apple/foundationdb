@@ -55,11 +55,11 @@ struct StorefrontWorkload : TestWorkload {
 
 	virtual std::string description() { return "StorefrontWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
+	virtual Future<Void> setup( Database const& cx ) {
 		return bulkSetup( cx, this, itemCount, Promise<double>() );
 	}
 
-	virtual Future<Void> start( Database const& cx ) { 
+	virtual Future<Void> start( Database const& cx ) {
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				orderingClient( cx->clone(), this, actorCount / transactionsPerSecond ) );
@@ -159,7 +159,7 @@ struct StorefrontWorkload : TestWorkload {
 
 						// set value for the order
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
-						tr.set( orderKey, wr.toValue() );
+						tr.set(orderKey, wr.toValue());
 
 						wait( tr.commit() );
 						self->orders[id] = items; // save this in a local list to test durability
@@ -209,7 +209,7 @@ struct StorefrontWorkload : TestWorkload {
 					KeyRangeRef( Key(format("/orders/%x", c)), Key(format("/orders/%x", c+1)) ) ) );
 
 		Transaction tr(cx);
-		state Future<Standalone<RangeResultRef>> values = tr.getRange( 
+		state Future<Standalone<RangeResultRef>> values = tr.getRange(
 				KeyRangeRef( self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount+1 );
 
 		wait( waitForAll( accumulators ) );
@@ -251,7 +251,9 @@ struct StorefrontWorkload : TestWorkload {
 					}
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
 					if( wr.toValue() != val.get().toString() ) {
-						TraceEvent( SevError, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
+						TraceEvent(SevError, "TestFailure")
+						    .detail("Reason", "OrderContentsMismatch")
+						    .detail("OrderID", id);
 						return false;
 					}
 				}

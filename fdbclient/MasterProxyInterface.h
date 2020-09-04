@@ -34,6 +34,7 @@
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "GrvProxyInterface.h"
 
 struct MasterProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -99,7 +100,8 @@ struct MasterProxyInterface {
 struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
-	vector< MasterProxyInterface > proxies;
+	vector< GrvProxyInterface > grvProxies;
+	vector< MasterProxyInterface > masterProxies;
 	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
@@ -109,7 +111,8 @@ struct ClientDBInfo {
 
 	ClientDBInfo()
 	  : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1),
-	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE), transactionTagSampleCost(CLIENT_KNOBS->COMMIT_SAMPLE_COST) {}
+	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE),
+	    transactionTagSampleCost(CLIENT_KNOBS->COMMIT_SAMPLE_COST) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -119,8 +122,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate,
-		           transactionTagSampleCost);
+		serializer(ar, grvProxies, masterProxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward,
+		           transactionTagSampleRate, transactionTagSampleCost);
 	}
 };
 
@@ -196,7 +199,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
+		serializer(ar, BasicLoadBalancedReply::processBusyTime, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
 	}
 };
 
@@ -301,11 +304,27 @@ struct GetKeyServerLocationsRequest {
 	}
 };
 
+struct GetRawCommittedVersionReply {
+	constexpr static FileIdentifier file_identifier = 1314732;
+	Optional<UID> debugID;
+	Version version;
+	bool locked;
+	Optional<Value> metadataVersion;
+	Version minKnownCommittedVersion;
+
+	GetRawCommittedVersionReply(): debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()), minKnownCommittedVersion(invalidVersion) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+	}
+};
+
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
 	SpanID spanContext;
 	Optional<UID> debugID;
-	ReplyPromise<GetReadVersionReply> reply;
+	ReplyPromise<GetRawCommittedVersionReply> reply;
 
 	explicit GetRawCommittedVersionRequest(SpanID spanContext, Optional<UID> const& debugID = Optional<UID>()) : spanContext(spanContext), debugID(debugID) {}
 	explicit GetRawCommittedVersionRequest() : spanContext(), debugID() {}

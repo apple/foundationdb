@@ -77,6 +77,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreFinishRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
+					actors.clear(false); // cancel all pending actors
 					handleFinishRestoreRequest(req, self);
 					if (req.terminate) {
 						exitRole = Void();
@@ -88,6 +89,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					break;
 				}
 			}
+			TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
 			    .detail("RequestType", requestTypeStr)
@@ -108,12 +110,23 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file.
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
-	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
-	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
+	state Reference<ApplierBatchData> batchData; // initialized as nullptr
 	state bool printTrace = false;
+	state NotifiedVersion* curMsgIndex = nullptr;
 
+	if (req.batchIndex <= self->finishedBatch.get()) { // Handle duplicate request from batchIndex that has finished
+		TraceEvent(SevWarn, "FastRestoreApplierRestoreSendVersionedMutationsRequestTooLate")
+		    .detail("RequestBatchIndex", req.batchIndex)
+		    .detail("FinishedBatchIndex", self->finishedBatch.get());
+		req.reply.send(RestoreCommonReply(self->id(), true));
+		ASSERT_WE_THINK(false); // Test to see if simulation can reproduce this
+		return Void();
+	}
+
+	batchData = self->batch[req.batchIndex];
+
+	ASSERT(batchData.isValid());
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
 	// wait(delay(0.0, TaskPriority::RestoreApplierReceiveMutations)); // This hurts performance from 100MB/s to 60MB/s
 	// on circus
 
@@ -121,11 +134,11 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 	// Trace when the receive phase starts at a VB and when it finishes.
 	// This can help check if receiveMutations block applyMutation phase.
 	// If so, we need more sophisticated scheduler to ensure priority execution
-	printTrace = (batchData->receiveMutationReqs % 100 == 1);
+	printTrace = (batchData->receiveMutationReqs % SERVER_KNOBS->FASTRESTORE_NUM_TRACE_EVENTS == 0);
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
+	    .detail("RestoreAssetMesssageIndex", batchData->processedFileState[req.asset].get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
 	    .detail("PreviousVersionBatchState", batchData->vbState.get())
@@ -133,11 +146,16 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
-	wait(curMsgIndex.whenAtLeast(req.msgIndex - 1));
+	ASSERT(batchData.isValid());
+	ASSERT(req.batchIndex > self->finishedBatch.get());
+	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
+	// Note: Insert new items into processedFileState will not invalidate the reference.
+	curMsgIndex = &batchData->processedFileState[req.asset];
+	wait(curMsgIndex->whenAtLeast(req.msgIndex - 1));
 	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
 	state bool isDuplicated = true;
-	if (curMsgIndex.get() == req.msgIndex - 1) {
+	if (curMsgIndex->get() == req.msgIndex - 1) {
 		isDuplicated = false;
 
 		for (int mIndex = 0; mIndex < req.versionedMutations.size(); mIndex++) {
@@ -165,14 +183,14 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			ASSERT(versionedMutation.mutation.type != MutationRef::SetVersionstampedKey &&
 			       versionedMutation.mutation.type != MutationRef::SetVersionstampedValue);
 		}
-		curMsgIndex.set(req.msgIndex);
+		curMsgIndex->set(req.msgIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedMessageIndex", curMsgIndex.get())
+	    .detail("ProcessedMessageIndex", curMsgIndex->get())
 	    .detail("Request", req.toString());
 	return Void();
 }
@@ -398,6 +416,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
+	int numGetTxns = 0;
 	double delayTime = 0; // Start transactions at different time to avoid overwhelming FDB.
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
 		if (!stagingKeyIter->second.hasBaseValue()) {
@@ -407,12 +426,14 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
 			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
 			                                                      batchIndex, &batchData->counters));
+			numGetTxns++;
 			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
 			numKeysInBatch = 0;
 			incompleteStagingKeys.clear();
 		}
 	}
 	if (numKeysInBatch > 0) {
+		numGetTxns++;
 		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
 		                                                      batchIndex, &batchData->counters));
 	}
@@ -420,7 +441,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Compute the other staging keys")
-	    .detail("StagingKeys", batchData->stagingKeys.size());
+	    .detail("StagingKeys", batchData->stagingKeys.size())
+	    .detail("GetStagingKeyBatchTxns", numGetTxns);
 	// Pre-compute pendingMutations to other keys in stagingKeys that has base value
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
@@ -577,8 +599,10 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 
 	state bool isDuplicated = true;
-	if (self->finishedBatch.get() == req.batchIndex - 1) {
+	if (self->finishedBatch.get() ==
+	    req.batchIndex - 1) { // duplicate request from earlier version batch will be ignored
 		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		ASSERT(batchData.isValid());
 		TraceEvent("FastRestoreApplierPhaseHandleApplyToDBRunning", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("FinishedBatch", self->finishedBatch.get())
@@ -604,7 +628,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
 		if (self->finishedBatch.get() == req.batchIndex - 1) {
 			self->finishedBatch.set(req.batchIndex);
-			self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
+			// self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
 			// Free memory for the version batch
 			self->batch.erase(req.batchIndex);
 			if (self->delayedActors > 0) {

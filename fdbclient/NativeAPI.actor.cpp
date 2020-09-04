@@ -483,14 +483,17 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
-ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
+ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
 	state vector< MasterProxyInterface > curProxies;
-	curProxies = clientDBInfo->get().proxies;
+	state vector< GrvProxyInterface > curGrvProxies;
+	curProxies = clientDBInfo->get().masterProxies;
+	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop{
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().proxies != curProxies) {
-			curProxies = clientDBInfo->get().proxies;
+		if (clientDBInfo->get().masterProxies != curProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
+			curProxies = clientDBInfo->get().masterProxies;
+			curGrvProxies = clientDBInfo->get().grvProxies;
 			triggerVar->trigger();
 		}
 	}
@@ -671,9 +674,9 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext *cx, bo
 		CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
 	loop {
 		choose {
-			when(wait(cx->onMasterProxiesChanged())) {}
+			when(wait(cx->onProxiesChanged())) {}
 			when(GetHealthMetricsReply rep =
-				 wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getHealthMetrics,
+				 wait(basicLoadBalance(cx->getGrvProxies(false), &GrvProxyInterface::getHealthMetrics,
 							 GetHealthMetricsRequest(sendDetailedRequest)))) {
 				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
 				if (detailed) {
@@ -846,9 +849,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  bool switchable)
   : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
-    apiVersion(apiVersion), switchable(switchable), provisional(false), cc("TransactionMetrics"),
-    transactionReadVersions("ReadVersions", cc),
-    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+    apiVersion(apiVersion), switchable(switchable), proxyProvisional(false), cc("TransactionMetrics"),
+    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
@@ -875,10 +877,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
     healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT), transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
-	connected = clientInfo->get().proxies.size() ? Void() : clientInfo->onChange();
+	connected = (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size())
+	                ? Void()
+	                : clientInfo->onChange();
 
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
@@ -893,7 +898,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
+	monitorProxiesInfoChange = monitorProxiesChange(clientInfo, &proxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
 
@@ -994,23 +999,36 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	}
 }
 
-DatabaseContext::DatabaseContext( const Error &err ) : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
-	transactionReadVersionsCompleted("ReadVersionsCompleted", cc), transactionReadVersionBatches("ReadVersionBatches", cc), transactionBatchReadVersions("BatchPriorityReadVersions", cc),
-	transactionDefaultReadVersions("DefaultPriorityReadVersions", cc), transactionImmediateReadVersions("ImmediatePriorityReadVersions", cc),
-	transactionBatchReadVersionsCompleted("BatchPriorityReadVersionsCompleted", cc), transactionDefaultReadVersionsCompleted("DefaultPriorityReadVersionsCompleted", cc),
-	transactionImmediateReadVersionsCompleted("ImmediatePriorityReadVersionsCompleted", cc), transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
-	transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc), transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-	transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc), transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc),
-	transactionBytesRead("BytesRead", cc), transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc), transactionCommittedMutations("CommittedMutations", cc),
-	transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionSetMutations("SetMutations", cc), transactionClearMutations("ClearMutations", cc),
-	transactionAtomicMutations("AtomicMutations", cc), transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
-	transactionKeyServerLocationRequests("KeyServerLocationRequests", cc), transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc), transactionsTooOld("TooOld", cc),
-	transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-	transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-	GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
-	smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT), transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
-	internal(false) {}
-
+DatabaseContext::DatabaseContext(const Error& err)
+  : deferredError(err), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+    transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
+    transactionReadVersionBatches("ReadVersionBatches", cc),
+    transactionBatchReadVersions("BatchPriorityReadVersions", cc),
+    transactionDefaultReadVersions("DefaultPriorityReadVersions", cc),
+    transactionImmediateReadVersions("ImmediatePriorityReadVersions", cc),
+    transactionBatchReadVersionsCompleted("BatchPriorityReadVersionsCompleted", cc),
+    transactionDefaultReadVersionsCompleted("DefaultPriorityReadVersionsCompleted", cc),
+    transactionImmediateReadVersionsCompleted("ImmediatePriorityReadVersionsCompleted", cc),
+    transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
+    transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
+    transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
+    transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
+    transactionCommittedMutations("CommittedMutations", cc),
+    transactionCommittedMutationBytes("CommittedMutationBytes", cc), transactionSetMutations("SetMutations", cc),
+    transactionClearMutations("ClearMutations", cc), transactionAtomicMutations("AtomicMutations", cc),
+    transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
+    transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
+    transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
+    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
+    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
+    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
+    transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -1018,7 +1036,7 @@ Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, F
 
 DatabaseContext::~DatabaseContext() {
 	cacheListMonitor.cancel();
-	monitorMasterProxiesInfoChange.cancel();
+	monitorProxiesInfoChange.cancel();
 	for(auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT( server_interf.empty() );
@@ -1097,8 +1115,8 @@ void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 }
 
-Future<Void> DatabaseContext::onMasterProxiesChanged() {
-	return this->masterProxiesChangeTrigger.onTrigger();
+Future<Void> DatabaseContext::onProxiesChanged() {
+	return this->proxiesChangeTrigger.onTrigger();
 }
 
 bool DatabaseContext::sampleReadTags() const {
@@ -1106,7 +1124,7 @@ bool DatabaseContext::sampleReadTags() const {
 }
 
 bool DatabaseContext::sampleOnCost(uint64_t cost) const {
-	if(clientInfo->get().transactionTagSampleCost <= 0) return false;
+	if (clientInfo->get().transactionTagSampleCost <= 0) return false;
 	return deterministicRandom()->random01() <= (double)cost / clientInfo->get().transactionTagSampleCost;
 }
 
@@ -1146,8 +1164,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::MACHINE_ID:
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ) );
+				if( clientInfo->get().masterProxies.size() )
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies) );
+				if( clientInfo->get().grvProxies.size() )
+					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ) );
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1156,8 +1176,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::DATACENTER_ID:
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
+				if( clientInfo->get().masterProxies.size() )
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies));
+				if( clientInfo->get().grvProxies.size() )
+					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1199,11 +1221,13 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
+	self->grvProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
 	auto clearedClientInfo = self->clientInfo->get();
-	clearedClientInfo.proxies.clear();
+	clearedClientInfo.masterProxies.clear();
+	clearedClientInfo.grvProxies.clear();
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
 	self->connectionFile->set(connFile);
@@ -1534,19 +1558,40 @@ void stopNetwork() {
 	closeTraceFile();
 }
 
-Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
-	if (masterProxiesLastChange != clientInfo->get().id) {
-		masterProxiesLastChange = clientInfo->get().id;
-		masterProxies.clear();
-		if( clientInfo->get().proxies.size() ) {
-			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
-			provisional = clientInfo->get().proxies[0].provisional;
-		}
+void DatabaseContext::updateProxies() {
+	if (proxiesLastChange == clientInfo->get().id) return;
+	proxiesLastChange = clientInfo->get().id;
+	masterProxies.clear();
+	grvProxies.clear();
+	bool masterProxyProvisional = false, grvProxyProvisional = false;
+	if (clientInfo->get().masterProxies.size()) {
+		masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().masterProxies));
+		masterProxyProvisional = clientInfo->get().masterProxies[0].provisional;
 	}
-	if(provisional && !useProvisionalProxies) {
+	if (clientInfo->get().grvProxies.size()) {
+		grvProxies = Reference<GrvProxyInfo>(new GrvProxyInfo(clientInfo->get().grvProxies));
+		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
+	}
+	if (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size()) {
+		ASSERT(masterProxyProvisional == grvProxyProvisional);
+		proxyProvisional = masterProxyProvisional;
+	}
+}
+
+Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
+	updateProxies();
+	if (proxyProvisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
 	}
 	return masterProxies;
+}
+
+Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxies) {
+	updateProxies();
+	if (proxyProvisional && !useProvisionalProxies) {
+		return Reference<GrvProxyInfo>();
+	}
+	return grvProxies;
 }
 
 //Actor which will wait until the MultiInterface<MasterProxyInterface> returned by the DatabaseContext cx is not NULL
@@ -1555,7 +1600,7 @@ ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, b
 		Reference<ProxyInfo> proxies = cx->getMasterProxies(useProvisionalProxies);
 		if (proxies)
 			return proxies;
-		wait( cx->onMasterProxiesChanged() );
+		wait( cx->onProxiesChanged() );
 	}
 }
 
@@ -1687,8 +1732,8 @@ ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Da
 	loop {
 		++cx->transactionKeyServerLocationRequests;
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+			when (wait(cx->onProxiesChanged())) {}
+			when (GetKeyServerLocationsReply rep = wait(basicLoadBalance(
 			         cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations,
 			         GetKeyServerLocationsRequest(span.context, key, Optional<KeyRef>(), 100, isBackward, key.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
@@ -1736,8 +1781,8 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 	loop {
 		++cx->transactionKeyServerLocationRequests;
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
+			when ( wait( cx->onProxiesChanged() ) ) {}
+			when ( GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
 			         cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations,
 			         GetKeyServerLocationsRequest(span.context, keys.begin, keys.end, limit, reverse, keys.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
@@ -1998,13 +2043,12 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version, Spa
 	try {
 		loop {
 			choose {
-				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when(GetReadVersionReply v = wait(basicLoadBalance(
-				         cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
+				when ( wait( cx->onProxiesChanged() ) ) {}
+				when( GetReadVersionReply v = wait(basicLoadBalance(
+				         cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion,
 				         GetReadVersionRequest(span.context, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					if(v.midShardSize > 0)
-						cx->smoothMidShardSize.setTotal(v.midShardSize);
+					if (v.midShardSize > 0) cx->smoothMidShardSize.setTotal(v.midShardSize);
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
@@ -2022,9 +2066,9 @@ ACTOR Future<Version> getRawVersion( Database cx, SpanID spanContext ) {
 	state Span span("NAPI:getRawVersion"_loc, { spanContext });
 	loop {
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {}
-			when(GetReadVersionReply v =
-			         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getConsistentReadVersion,
+			when ( wait( cx->onProxiesChanged() ) ) {}
+			when ( GetReadVersionReply v =
+			         wait(basicLoadBalance(cx->getGrvProxies(false), &GrvProxyInterface::getConsistentReadVersion,
 			                               GetReadVersionRequest(spanContext, 0, TransactionPriority::IMMEDIATE), cx->taskID))) {
 				return v.version;
 			}
@@ -3303,7 +3347,7 @@ void Transaction::setupWatches() {
 }
 
 ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transaction* self,
-                                                                         CommitTransactionRef const * transaction) {
+                                                                         CommitTransactionRef const* transaction) {
 	state ClientTrCommitCostEstimation trCommitCosts;
 	state KeyRangeRef keyRange;
 	state int i = 0;
@@ -3314,16 +3358,15 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 		if (it->type == MutationRef::Type::SetValue || it->isAtomicOp()) {
 			trCommitCosts.opsCount++;
 			trCommitCosts.writeCosts += getWriteOperationCost(it->expectedSize());
-		}
-		else if (it->type == MutationRef::Type::ClearRange) {
+		} else if (it->type == MutationRef::Type::ClearRange) {
 			trCommitCosts.opsCount++;
 			keyRange = KeyRangeRef(it->param1, it->param2);
 			if (self->options.expensiveClearCostEstimation) {
 				StorageMetrics m = wait(self->getStorageMetrics(keyRange, CLIENT_KNOBS->TOO_MANY));
 				trCommitCosts.clearIdxCosts.emplace_back(i, getWriteOperationCost(m.bytes));
 				trCommitCosts.writeCosts += getWriteOperationCost(m.bytes);
-				++ trCommitCosts.expensiveCostEstCount;
-				++ self->getDatabase()->transactionsExpensiveClearCostEstCount;
+				++trCommitCosts.expensiveCostEstCount;
+				++self->getDatabase()->transactionsExpensiveClearCostEstCount;
 			}
 			else {
 				std::vector<pair<KeyRange, Reference<LocationInfo>>> locations =
@@ -3334,8 +3377,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 				uint64_t bytes = 0;
 				if (locations.size() == 1) {
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS;
-				}
-				else { // small clear on the boundary will hit two shards but be much smaller than the shard size
+				} else { // small clear on the boundary will hit two shards but be much smaller than the shard size
 					bytes = CLIENT_KNOBS->INCOMPLETE_SHARD_PLUS * 2 +
 					        (locations.size() - 2) * (int64_t)self->getDatabase()->smoothMidShardSize.smoothTotal();
 				}
@@ -3347,27 +3389,26 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Transac
 	}
 
 	// sample on written bytes
-	if (!self->getDatabase()->sampleOnCost(trCommitCosts.writeCosts))
-		return Optional<ClientTrCommitCostEstimation>();
+	if (!self->getDatabase()->sampleOnCost(trCommitCosts.writeCosts)) return Optional<ClientTrCommitCostEstimation>();
 
 	// sample clear op: the expectation of #sampledOp is every COMMIT_SAMPLE_COST sample once
-	// we also scale the cost of mutations whose cost is less than COMMIT_SAMPLE_COST as scaledCost = min(COMMIT_SAMPLE_COST, cost)
-	// If we have 4 transactions:
-	// A - 100 1-cost mutations: E[sampled ops] = 1, E[sampled cost] = 100
-	// B - 1 100-cost mutation: E[sampled ops] = 1, E[sampled cost] = 100
-	// C - 50 2-cost mutations: E[sampled ops] = 1, E[sampled cost] = 100
-	// D - 1 150-cost mutation and 150 1-cost mutations: E[sampled ops] = 3, E[sampled cost] = 150cost * 1 + 150 * 100cost * 0.01 = 300
+	// we also scale the cost of mutations whose cost is less than COMMIT_SAMPLE_COST as scaledCost =
+	// min(COMMIT_SAMPLE_COST, cost) If we have 4 transactions: A - 100 1-cost mutations: E[sampled ops] = 1, E[sampled
+	// cost] = 100 B - 1 100-cost mutation: E[sampled ops] = 1, E[sampled cost] = 100 C - 50 2-cost mutations: E[sampled
+	// ops] = 1, E[sampled cost] = 100 D - 1 150-cost mutation and 150 1-cost mutations: E[sampled ops] = 3, E[sampled
+	// cost] = 150cost * 1 + 150 * 100cost * 0.01 = 300
 	ASSERT(trCommitCosts.writeCosts > 0);
 	std::deque<std::pair<int, uint64_t>> newClearIdxCosts;
 	for (const auto& [idx, cost] : trCommitCosts.clearIdxCosts) {
-		if(trCommitCosts.writeCosts >= CLIENT_KNOBS->COMMIT_SAMPLE_COST){
+		if (trCommitCosts.writeCosts >= CLIENT_KNOBS->COMMIT_SAMPLE_COST) {
 			double mul = trCommitCosts.writeCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST);
-			if(deterministicRandom()->random01() < cost * mul / trCommitCosts.writeCosts) {
-				newClearIdxCosts.emplace_back(idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
+			if (deterministicRandom()->random01() < cost * mul / trCommitCosts.writeCosts) {
+				newClearIdxCosts.emplace_back(
+				    idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
 			}
-		}
-		else if(deterministicRandom()->random01() < (double)cost / trCommitCosts.writeCosts){
-			newClearIdxCosts.emplace_back(idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
+		} else if (deterministicRandom()->random01() < (double)cost / trCommitCosts.writeCosts) {
+			newClearIdxCosts.emplace_back(
+			    idx, cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost);
 		}
 	}
 
@@ -3391,7 +3432,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					commit_unknown_result()});
 		}
 
-		if(req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE){
+		if (req.tagSet.present() && tr->options.priority < TransactionPriority::IMMEDIATE) {
 			wait(store(req.transaction.read_snapshot, readVersion) &&
 			     store(req.commitCostEstimation, estimateCommitCosts(tr, &req.transaction)));
 		} else {
@@ -3412,7 +3453,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if(cx->clientInfo->get().firstProxy.present()) {
 				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
 			} else {
-				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
+				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().masterProxies;
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
 		} else {
@@ -3420,7 +3461,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 
 		choose {
-			when ( wait( cx->onMasterProxiesChanged() ) ) {
+			when ( wait( cx->onProxiesChanged() ) ) {
 				reply.cancel();
 				throw request_maybe_delivered();
 			}
@@ -3823,7 +3864,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			validateOptionValue(value, false);
 			options.reportConflictingKeys = true;
 			break;
-		
+
 		case FDBTransactionOptions::EXPENSIVE_CLEAR_COST_ESTIMATION_ENABLE:
 			validateOptionValue(value, false);
 			options.expensiveClearCostEstimation = true;
@@ -3845,8 +3886,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
 		loop {
 			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
 			choose {
-				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+				when ( wait( cx->onProxiesChanged() ) ) {}
+				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if(tags.size() != 0) {
 						auto &priorityThrottledTags = cx->throttledTags[priority];
 						for(auto& tag : tags) {
@@ -4286,13 +4327,22 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			}
 
 			wait(waitForAll(fReplies));
-			Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
 
-			for (int i = 0; i < nLocs; i++)
-				results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
-				               fReplies[i].get().readHotRanges.size());
+			if(nLocs == 1) {
+				TEST(true); // Single-shard read hot range request
+				return fReplies[0].get().readHotRanges;
+			}
+			else {
+				TEST(true); // Multi-shard read hot range request
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
+				for (int i = 0; i < nLocs; i++) {
+					results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
+								fReplies[i].get().readHotRanges.size());
+					results.arena().dependsOn(fReplies[i].get().readHotRanges.arena());
+				}
 
-			return results;
+				return results;
+			}
 		} catch (Error& e) {
 			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 				TraceEvent(SevError, "GetReadHotSubRangesError").error(e);
@@ -4381,7 +4431,7 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 	state Future<Void> clientTimeout = delay(5.0);
 	loop {
 		choose {
-			when(wait(cx->onMasterProxiesChanged())) {}
+			when(wait(cx->onProxiesChanged())) {}
 			when(ErrorOr<GetDDMetricsReply> rep =
 			         wait(errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
 			                                  GetDDMetricsRequest(keys, shardLimit))))) {
@@ -4488,7 +4538,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 	try {
 		loop {
 			choose {
-				when(wait(cx->onMasterProxiesChanged())) {}
+				when(wait(cx->onProxiesChanged())) {}
 				when(wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID, true /*atmostOnce*/ ))) {
 					TraceEvent("SnapCreateExit")
 						.detail("SnapCmd", snapCmd.toString())
@@ -4515,7 +4565,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	try {
 		loop {
 			choose {
-				when(wait(cx->onMasterProxiesChanged())) {}
+				when(wait(cx->onProxiesChanged())) {}
 				when(ExclusionSafetyCheckReply _ddCheck =
 				         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
 				                          req, cx->taskID))) {
