@@ -30,6 +30,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
 #include "flow/IndexedSet.h"
+#include "flow/Knobs.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
@@ -984,6 +985,9 @@ private:
 	// Writes transaction info to the message stream for the given location if
 	// it has not already been written (for the current transaction).
 	void writeTransactionInfo(int location) {
+		if (!FLOW_KNOBS->WRITE_TRACING_ENABLED) {
+			return;
+		}
 		if (writtenLocations.count(location) == 0) {
 			writtenLocations.insert(location);
 
