@@ -874,6 +874,7 @@ struct LogPushData : NonCopyable {
 
 	// Add transaction info to be written before the first mutation in the transaction.
 	void addTransactionInfo(SpanID const& context) {
+		TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
 		spanContext = context;
 		transactionSubseq = 0;
 		writtenLocations.clear();
