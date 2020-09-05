@@ -64,6 +64,10 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
+
+add_executable(cancel_data_race_test test/cancel_data_race_test.cpp)
+target_link_libraries(cancel_data_race_test fdb_c)
+
 # The tests don't build on windows
 if(NOT WIN32)
   set(MAKO_SRCS
