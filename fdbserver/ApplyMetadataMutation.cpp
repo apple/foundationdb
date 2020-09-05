@@ -26,7 +26,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogProtocolMessage.h"
-
+#include "fdbserver/ProxyCommitData.actor.h"
 
 Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInfo>>* storageCache, IKeyValueStore* txnStateStore) {
 	Reference<StorageInfo> storageInfo;
@@ -42,6 +42,30 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 	return storageInfo;
 }
 
+// If a mutation causes a change to the txnStateStore, then it better be the case that isMetadataMutation returns true
+// for that mutation. Otherwise it won't be propagated to other proxies, and this will corrupt the txnStateStore.
+struct AssertMetadataMutation {
+	AssertMetadataMutation(IKeyValueStore* txnStateStore, const MutationRef* mutation)
+	  : wrapper(dynamic_cast<TxnStateStoreWrapper*>(txnStateStore)), mutation(mutation) {
+		if (wrapper) {
+			initialCount = wrapper->getMutationsAppliedCount();
+		}
+	}
+	~AssertMetadataMutation() {
+		if (wrapper) {
+			if (wrapper->getMutationsAppliedCount() > initialCount) {
+				TEST(true); // Assert mutation applied to txnStateStore is a metadata mutation.
+				ASSERT_ABORT(isMetadataMutation(*mutation));
+			}
+		}
+	}
+
+private:
+	int64_t initialCount;
+	TxnStateStoreWrapper* wrapper;
+	const MutationRef* mutation;
+};
+
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
@@ -56,6 +80,8 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 	//std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
 	for (auto const& m : mutations) {
+		AssertMetadataMutation assertMetadataMutation(txnStateStore, &m);
+
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
 
 		if (m.param1.size() && m.param1[0] == systemKeys.begin[0] && m.type == MutationRef::SetValue) {

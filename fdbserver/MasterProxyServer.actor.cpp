@@ -754,9 +754,13 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
+			int64_t initialMetadataEffectsCount = pProxyCommitData->txnStateStoreWrapper.getMutationsAppliedCount();
 			applyMetadataMutations(*pProxyCommitData, self->arena, pProxyCommitData->logSystem,
 			                       trs[t].transaction.mutations, &self->toCommit, self->forceRecovery,
 			                       self->commitVersion + 1, /* initialCommit= */ false);
+			if (pProxyCommitData->txnStateStoreWrapper.getMutationsAppliedCount() > initialMetadataEffectsCount) {
+				TEST(!trs[t].isLockAware());
+			}
 		}
 		if(self->firstStateMutations) {
 			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
@@ -1678,7 +1682,9 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
+	commitData.txnStateStoreWrapper.setTxnStateStore(
+	    keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true));
+	commitData.txnStateStoreWrapper.setDebugID(proxy.id());
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
