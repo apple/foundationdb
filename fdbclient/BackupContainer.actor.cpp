@@ -1365,16 +1365,106 @@ public:
 		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 	}
 
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl_original(
+	    Reference<BackupContainerFileSystem> bc, Version targetVersion) {
+		// Find the most recent keyrange snapshot to end at or before targetVersion
+		state Optional<KeyspaceSnapshotFile> snapshot;
+		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		// printf("old h1 %ld  %ld\n", targetVersion, snapshots.size());
+		for (auto const& s : snapshots) {
+			if (s.endVersion <= targetVersion) snapshot = s;
+		}
+
+		if (snapshot.present()) {
+			// printf("h2 %ld %ld\n", snapshot.get().beginVersion, snapshot.get().endVersion);
+			state RestorableFileSet restorable;
+			restorable.snapshot = snapshot.get();
+			restorable.targetVersion = targetVersion;
+
+			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
+			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
+			restorable.ranges = std::move(results.first);
+			restorable.keyRanges = std::move(results.second);
+			// TODO: Reenable the sanity check after TooManyFiles error is resolved
+			if (false && g_network->isSimulated()) {
+				// Sanity check key ranges
+				state std::map<std::string, KeyRange>::iterator rit;
+				for (rit = restorable.keyRanges.begin(); rit != restorable.keyRanges.end(); rit++) {
+					auto it = std::find_if(restorable.ranges.begin(), restorable.ranges.end(),
+					                       [file = rit->first](const RangeFile f) { return f.fileName == file; });
+					ASSERT(it != restorable.ranges.end());
+					KeyRange result = wait(bc->getSnapshotFileKeyRange(*it));
+					ASSERT(rit->second.begin <= result.begin && rit->second.end >= result.end);
+				}
+			}
+
+			// No logs needed if there is a complete key space snapshot at the target version.
+			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
+			    snapshot.get().endVersion == targetVersion) {
+				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
+				return Optional<RestorableFileSet>(restorable);
+			}
+
+			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
+			state std::vector<LogFile> logs;
+			state std::vector<LogFile> plogs;
+			wait(store(logs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false)) &&
+			     store(plogs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, true)));
+
+			if (plogs.size() > 0) {
+				logs.swap(plogs);
+				// sort by tag ID so that filterDuplicates works.
+				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
+					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
+					       std::tie(b.tagId, b.beginVersion, b.endVersion);
+				});
+
+				// Remove duplicated log files that can happen for old epochs.
+				std::vector<LogFile> filtered = filterDuplicates(logs);
+
+				restorable.logs.swap(filtered);
+				// sort by version order again for continuous analysis
+				std::sort(restorable.logs.begin(), restorable.logs.end());
+				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
+					restorable.continuousBeginVersion = snapshot.get().beginVersion;
+					restorable.continuousEndVersion = targetVersion + 1; // not inclusive
+					return Optional<RestorableFileSet>(restorable);
+				}
+				return Optional<RestorableFileSet>();
+			}
+
+			// List logs in version order so log continuity can be analyzed
+			std::sort(logs.begin(), logs.end());
+
+			// printf("old backup used log begin version: %ld\n", logs.empty() ? -1 : logs.front().beginVersion);
+			// If there are logs and the first one starts at or before the snapshot begin version then proceed
+			if (!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
+				Version end = logs.begin()->endVersion;
+				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
+				if (end >= targetVersion) {
+					restorable.continuousBeginVersion = logs.begin()->beginVersion;
+					restorable.continuousEndVersion = end;
+					return Optional<RestorableFileSet>(restorable);
+				}
+			}
+		}
+
+		return Optional<RestorableFileSet>();
+	}
+
+	// might have problem working with old backup
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
 	                                                                    Version targetVersion,
 	                                                                    VectorRef<KeyRangeRef> keyRangesFilter) {
 		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
 		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
 		state int i = snapshots.size() - 1;
+		// printf("new h1 %ld  %ld %ld\n", targetVersion, keyRangesFilter.size(), snapshots.size());
 		for (; i >= 0; i--) {
+			// printf("h2 %ld %ld\n", snapshots[i].beginVersion, snapshots[i].endVersion);
 			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
 			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
-				break;
+				continue;
 			}
 
 			state RestorableFileSet restorable;
@@ -1384,12 +1474,18 @@ public:
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
 
+			// Old backup does not have metadata about key ranges and can not be filtered with key ranges.
+			if (keyRangesFilter.size() && results.second.empty() && !results.first.empty()) {
+				throw backup_not_filterable_with_key_ranges();
+			}
+
 			// Filter by keyRangesFilter.
 			if (keyRangesFilter.empty()) {
 				restorable.ranges = std::move(results.first);
 				restorable.keyRanges = std::move(results.second);
 				minKeyRangeVersion = snapshots[i].beginVersion;
 				maxKeyRangeVersion = snapshots[i].endVersion;
+				// printf("h3 %ld   %ld    %ld\n", minKeyRangeVersion, maxKeyRangeVersion, restorable.keyRanges.size());
 			} else {
 				for (const auto& rangeFile : results.first) {
 					const auto& keyRange = results.second.at(rangeFile.fileName);
@@ -1405,12 +1501,14 @@ public:
 					continue;
 				}
 			}
-			if (targetVersion >= 0 && targetVersion < maxKeyRangeVersion) continue;
 			// 'latestVersion' represents using the minimum restorable version in a snapshot.
-			if (targetVersion == latestVersion) {
-				targetVersion = maxKeyRangeVersion;
-			}
-			restorable.targetVersion = targetVersion;
+			// if (targetVersion == latestVersion) {
+			// 	restorable.targetVersion = maxKeyRangeVersion;
+			// } else
+			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
+
+			if (restorable.targetVersion < maxKeyRangeVersion) continue;
+			// restorable.targetVersion = targetVersion;
 			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
 			if (false && g_network->isSimulated()) {
@@ -1426,7 +1524,7 @@ public:
 			}
 
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
-			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == targetVersion) {
+			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
 				return Optional<RestorableFileSet>(restorable);
 			}
@@ -1434,8 +1532,8 @@ public:
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
 			state std::vector<LogFile> logs;
 			state std::vector<LogFile> plogs;
-			wait(store(logs, bc->listLogFiles(minKeyRangeVersion, targetVersion, false)) &&
-			     store(plogs, bc->listLogFiles(minKeyRangeVersion, targetVersion, true)));
+			wait(store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, false)) &&
+			     store(plogs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, true)));
 
 			if (plogs.size() > 0) {
 				logs.swap(plogs);
@@ -1450,9 +1548,9 @@ public:
 				restorable.logs.swap(filtered);
 				// sort by version order again for continuous analysis
 				std::sort(restorable.logs.begin(), restorable.logs.end());
-				if (isPartitionedLogsContinuous(restorable.logs, minKeyRangeVersion, targetVersion)) {
+				if (isPartitionedLogsContinuous(restorable.logs, minKeyRangeVersion, restorable.targetVersion)) {
 					restorable.continuousBeginVersion = minKeyRangeVersion;
-					restorable.continuousEndVersion = targetVersion + 1; // not inclusive
+					restorable.continuousEndVersion = restorable.targetVersion + 1; // not inclusive
 					return Optional<RestorableFileSet>(restorable);
 				}
 				return Optional<RestorableFileSet>();
@@ -1461,11 +1559,17 @@ public:
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
 
+			// printf("6.2 backup used: log begin version: %ld\n", logs.empty() ? -1 : logs.front().beginVersion);
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
+
 				Version end = logs.begin()->endVersion;
-				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
-				if (end >= targetVersion) {
+				computeRestoreEndVersion(logs, &restorable.logs, &end, restorable.targetVersion);
+
+				// printf("6.2 backup used: end_version: %ld  target: %ld\n", end, restorable.targetVersion);
+
+				if (end >= restorable.targetVersion) {
+					// printf("6.2 backup used finish\n");
 					restorable.continuousBeginVersion = logs.begin()->beginVersion;
 					restorable.continuousEndVersion = end;
 					return Optional<RestorableFileSet>(restorable);
@@ -1476,9 +1580,43 @@ public:
 		return Optional<RestorableFileSet>();
 	}
 
+	static void printRestorableSet(const RestorableFileSet& restorable) {
+		printf("restorable: begin %ld, end %ld, target %ld, ranges size %ld, logs size %ld, filename %s\n",
+		       restorable.continuousBeginVersion, restorable.continuousEndVersion, restorable.targetVersion,
+		       restorable.ranges.size(), restorable.logs.size(), restorable.snapshot.fileName.c_str());
+	}
+
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_compare(Reference<BackupContainerFileSystem> bc,
+	                                                                       Version targetVersion,
+	                                                                       VectorRef<KeyRangeRef> keyRangesFilter) {
+
+		state Optional<RestorableFileSet> newResult = wait(getRestoreSet_impl(bc, targetVersion, keyRangesFilter));
+		if (keyRangesFilter.empty() && targetVersion != latestVersion) {
+			state Optional<RestorableFileSet> oldResult = wait(getRestoreSet_impl_original(bc, targetVersion));
+			// printf("comparing\n");
+			// if (oldResult.present()) {
+			// 	// printf("old\n");
+			// 	printRestorableSet(oldResult.get());
+			// }
+			ASSERT(newResult.present() == oldResult.present());
+			if (newResult.present()) {
+				// printf("new\n");
+				// printRestorableSet(newResult.get());
+				ASSERT(oldResult.get().continuousBeginVersion == oldResult.get().continuousBeginVersion);
+				ASSERT(oldResult.get().continuousEndVersion == oldResult.get().continuousEndVersion);
+				ASSERT(oldResult.get().targetVersion == oldResult.get().targetVersion);
+				ASSERT(oldResult.get().ranges.size() == oldResult.get().ranges.size());
+				ASSERT(oldResult.get().keyRanges.size() == oldResult.get().keyRanges.size());
+				ASSERT(oldResult.get().snapshot.fileName == oldResult.get().snapshot.fileName);
+			}
+		}
+		return newResult;
+	}
+
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter);
+		return getRestoreSet_compare(Reference<BackupContainerFileSystem>::addRef(this), targetVersion,
+		                             keyRangesFilter);
 	}
 
 private:
