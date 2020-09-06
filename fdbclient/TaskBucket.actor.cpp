@@ -331,11 +331,11 @@ public:
 			wait(delay(0.8 * (BUGGIFY ? (2 * deterministicRandom()->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 
 			if(now() - start > 300) {
-				TraceEvent(SevWarnAlways, "TaskBucketLongExtend")
-				.detail("Duration", now() - start)
-				.detail("TaskUID", task->key)
-				.detail("TaskType", task->params[Task::reservedTaskParamKeyType])
-				.detail("Priority", task->getPriority());
+				TraceEvent(SevWarnAlways, "TB_LongExtend")
+				    .detail("Duration", now() - start)
+				    .detail("TaskUID", task->key)
+				    .detail("TaskType", task->params[Task::reservedTaskParamKeyType])
+				    .detail("Priority", task->getPriority());
 			}
 			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
 			wait(task->extendMutex.take());
@@ -479,7 +479,7 @@ public:
 			Future<Void> w = ready(waitForAny(tasks));
 			if(!availableSlots.empty()) {
 				if(*pollDelay > 600) {
-					TraceEvent(SevWarnAlways, "TaskBucketLongPollDelay").suppressFor(1.0).detail("Delay", *pollDelay);
+					TraceEvent(SevWarnAlways, "TB_LongPollDelay").suppressFor(1.0).detail("Delay", *pollDelay);
 				}
 				w = w || delay(*pollDelay * (0.9 + deterministicRandom()->random01() / 5));   // Jittered by 20 %, so +/- 10%
 			}
@@ -727,14 +727,17 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
-		TraceEvent("TaskBucket").detail("DebugPrintRange", "Print DB Range").detail("Key", subspace.key()).detail("Count", values.size()).detail("Msg", msg);
-		
+		TraceEvent("TB_DebugPrintRange")
+		    .detail("Key", subspace.key())
+		    .detail("Count", values.size())
+		    .detail("Msg", msg);
+
 		/*printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
 		for (auto & s : values) {
-			printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), s.value.c_str());
-			TraceEvent("TaskBucket").detail("DebugPrintRange", msg)
-				.detail("Key", s.key)
-				.detail("Value", s.value);
+		    printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), s.value.c_str());
+		    TraceEvent("TB_DebugPrintKV").detail("Msg", msg)
+		        .detail("Key", s.key)
+		        .detail("Value", s.value);
 		}*/
 
 		return Void();
