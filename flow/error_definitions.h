@@ -198,6 +198,7 @@ ERROR( backup_auth_missing, 2317, "Cannot find authentication details (such as a
 ERROR( backup_auth_unreadable, 2318, "Cannot read or parse one or more sources of authentication information for Backup Container URLs")
 ERROR( backup_does_not_exist, 2319, "Backup does not exist")
 ERROR( backup_not_filterable_with_key_ranges, 2320, "Backup before 6.3 cannot be filtered with key ranges")
+ERROR( backup_not_overlapped_with_keys_filter, 2321, "Backup key ranges doesn't overlap with key ranges filter")
 ERROR( restore_invalid_version, 2361, "Invalid restore version")
 ERROR( restore_corrupted_data, 2362, "Corrupted backup data")
 ERROR( restore_missing_data, 2363, "Missing backup data")

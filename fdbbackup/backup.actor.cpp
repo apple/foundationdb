@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
+#include "flow/Trace.h"
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -120,7 +122,7 @@ enum {
 	OPT_USE_PARTITIONED_LOG,
 
 	// Backup and Restore constants
-	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
+	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE, OPT_BACKUPKEYS_FILTER,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL, OPT_MOD_VERIFY_UID,
@@ -610,8 +612,8 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-qrv", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--query_restore_version", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
-	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILTER, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILTER, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
@@ -992,8 +994,8 @@ static void printBackupUsage(bool devhelp) {
 		   "                 Another way to specify version cutoff for expire operations.  Deletes data files containing no data at or after a\n"
 		   "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in the backup.\n");
 	printf("  -qrv --query_restore_version VERSION\n"
-	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum "
-	       "                 restorable version and -2 for minimum restorable version.\n");
+	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
+	       "                 restorable version (default) and -2 for minimum restorable version.\n");
 	printf("  --query_restore_timestamp DATETIME\n"
 	       "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
 	printf("                 and it will be converted to a version from that time using metadata in the cluster file.\n");
@@ -2460,71 +2462,125 @@ ACTOR Future<Void> describeBackup(const char *name, std::string destinationConta
 	return Void();
 }
 
+static void reportBackupQueryError(UID operationId, JsonBuilderObject& result, std::string errorMessage) {
+	result["error"] = errorMessage;
+	printf("%s\n", result.getJson().c_str());
+	TraceEvent("BackupQueryFailure").detail("OperationId", operationId).detail("Reason", errorMessage);
+}
+
 // If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
 // selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overriden to the version
 // resolved to that timestamp.
 ACTOR Future<Void> queryBackup(const char* name, std::string destinationContainer,
                                Standalone<VectorRef<KeyRangeRef>> keyRangesFilter, Version restoreVersion,
-                               std::string originalClusterFile, std::string restoreTimestamp) {
+                               std::string originalClusterFile, std::string restoreTimestamp, bool verbose) {
+	state UID operationId = deterministicRandom()->randomUniqueID();
+	state JsonBuilderObject result;
+	state std::string errorMessage;
+	result["key_ranges_filter"] = printable(keyRangesFilter);
+	result["destination_container"] = destinationContainer;
+
+	TraceEvent("BackupQueryStart")
+	    .detail("OperationId", operationId)
+	    .detail("DestinationContainer", destinationContainer)
+	    .detail("KeyRangesFilter", printable(keyRangesFilter))
+	    .detail("SpecifiedRestoreVersion", restoreVersion)
+	    .detail("RestoreTimestamp", restoreTimestamp)
+	    .detail("BackupClusterFile", originalClusterFile);
+
 	// Resolve restoreTimestamp if given
 	if (!restoreTimestamp.empty()) {
 		if (originalClusterFile.empty()) {
-			printf("Error: an original cluster file must be given in order to resolve restore target timestamp '%s'\n",
-			       restoreTimestamp.c_str());
+			reportBackupQueryError(
+			    operationId, result,
+			    format("an original cluster file must be given in order to resolve restore target timestamp '%s'",
+			           restoreTimestamp.c_str()));
 			return Void();
 		}
 
 		if (!fileExists(originalClusterFile)) {
-			printf("Error: original source database cluster file '%s' does not exist.\n", originalClusterFile.c_str());
+			reportBackupQueryError(operationId, result,
+			                       format("The specified original source database cluster file '%s' does not exist\n",
+			                              originalClusterFile.c_str()));
 			return Void();
 		}
 
 		Database origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
 		Version v = wait(timeKeeperVersionFromDatetime(restoreTimestamp, origDb));
-		printf("Timestamp '%s' resolves to version %" PRId64 "\n", restoreTimestamp.c_str(), v);
+		result["restore_timestamp"] = restoreTimestamp;
+		result["restore_timestamp_resolved_version"] = v;
 		restoreVersion = v;
 	}
 
 	try {
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer);
 		if (restoreVersion == invalidVersion) {
-			printf("Using the maximum restorable version for the specified key ranges.\n");
 			BackupDescription desc = wait(bc->describeBackup());
 			if (!desc.maxRestorableVersion.present()) {
-				printf("Error: the specified backup is not restorable to any version.\n");
+				reportBackupQueryError(operationId, result, "the specified backup is not restorable to any version");
 				return Void();
 			}
 			restoreVersion = desc.maxRestorableVersion.get();
-		} else if (restoreVersion == latestVersion) {
-			printf("Using the minimum restorable version for the specified key ranges.\n");
-		} else if (restoreVersion < 0) {
-			printf("Error: the specified restorable version is not valid.");
+		} else if (restoreVersion < 0 && restoreVersion != latestVersion) {
+			reportBackupQueryError(operationId, result,
+			                       errorMessage =
+			                           format("the specified restorable version %ld is not valid", restoreVersion));
 			return Void();
 		}
 		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
 		if (fileSet.present()) {
-			printf("Key ranges filter: %s\n", keyRangesFilter.empty() ? "empty" : printable(keyRangesFilter).c_str());
-			printf("Restoring to version: %" PRId64 "\n", fileSet.get().targetVersion);
-			printf("Range Files (file_name; file_size; key_range; version): \n");
+			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
+			result["restore_version"] = fileSet.get().targetVersion;
+			JsonBuilderArray rangeFilesJson;
+			JsonBuilderArray logFilesJson;
 			for (const auto& rangeFile : fileSet.get().ranges) {
-				ASSERT(fileSet.get().keyRanges.count(rangeFile.fileName));
-				printf("  %s; %" PRId64 ", %s; %" PRId64 "\n", rangeFile.fileName.c_str(), rangeFile.fileSize,
-				       fileSet.get().keyRanges.at(rangeFile.fileName).toString().c_str(), rangeFile.version);
+				JsonBuilderObject object;
+				object["file_name"] = rangeFile.fileName;
+				object["file_size"] = rangeFile.fileSize;
+				object["version"] = rangeFile.version;
+				object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+				                          ? "none"
+				                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
+				rangeFilesJson.push_back(object);
+				totalRangeFilesSize += rangeFile.fileSize;
 			}
-			printf("Log Files (file_name; file_size; begin_version; end_version): \n");
 			for (const auto& log : fileSet.get().logs) {
-				printf("  %s; %" PRId64 "; %" PRId64 "; %" PRId64 "\n", log.fileName.c_str(), log.fileSize,
-				       log.beginVersion, log.endVersion);
+				JsonBuilderObject object;
+				object["file_name"] = log.fileName;
+				object["file_size"] = log.fileSize;
+				object["begin_version"] = log.beginVersion;
+				object["end_version"] = log.endVersion;
+				logFilesJson.push_back(object);
+				totalLogFilesSize += log.fileSize;
 			}
+
+			result["total_range_files_size"] = totalRangeFilesSize;
+			result["total_log_files_size"] = totalLogFilesSize;
+
+			if (verbose) {
+				result["ranges"] = rangeFilesJson;
+				result["logs"] = logFilesJson;
+			}
+
+			TraceEvent("BackupQueryReceivedRestorableFilesSet")
+			    .detail("DestinationContainer", destinationContainer)
+			    .detail("KeyRangesFilter", printable(keyRangesFilter))
+			    .detail("ActualRestoreVersion", fileSet.get().targetVersion)
+			    .detail("NumRangeFiles", fileSet.get().ranges.size())
+			    .detail("NumLogFiles", fileSet.get().logs.size())
+			    .detail("RangeFilesBytes", totalRangeFilesSize)
+			    .detail("LogFilesBytes", totalLogFilesSize);
 		} else {
-			printf("No restorable files set found for specified key ranges.\n");
+			reportBackupQueryError(operationId, result, "no restorable files set found for specified key ranges");
+			return Void();
 		}
+
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
-		throw;
+		reportBackupQueryError(operationId, result, e.what());
+		return Void();
 	}
 
+	printf("%s\n", result.getJson().c_str());
 	return Void();
 }
 
@@ -3039,6 +3095,7 @@ int main(int argc, char* argv[]) {
 		std::string addPrefix;
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
+		Standalone<VectorRef<KeyRangeRef>> backupKeysFilter;
 		int maxErrors = 20;
 		Version restoreVersion = invalidVersion;
 		std::string restoreTimestamp;
@@ -3253,6 +3310,15 @@ int main(int argc, char* argv[]) {
 				case OPT_BACKUPKEYS:
 					try {
 						addKeyRange(args->OptionArg(), backupKeys);
+					}
+					catch (Error &) {
+						printHelpTeaser(argv[0]);
+						return FDB_EXIT_ERROR;
+					}
+					break;
+				case OPT_BACKUPKEYS_FILTER:
+					try {
+						addKeyRange(args->OptionArg(), backupKeysFilter);
 					}
 					catch (Error &) {
 						printHelpTeaser(argv[0]);
@@ -3794,8 +3860,8 @@ int main(int argc, char* argv[]) {
 
 			case BACKUP_QUERY:
 				initTraceFile();
-				f = stopAfter(queryBackup(argv[0], destinationContainer, backupKeys, restoreVersion,
-				                          restoreClusterFileOrig, restoreTimestamp));
+				f = stopAfter(queryBackup(argv[0], destinationContainer, backupKeysFilter, restoreVersion,
+				                          restoreClusterFileOrig, restoreTimestamp, !quietDisplay));
 				break;
 
 			case BACKUP_DUMP:
