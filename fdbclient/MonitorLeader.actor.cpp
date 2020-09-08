@@ -623,7 +623,10 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		req.knownClientInfoID = clientData->clientInfo->get().read().id;
 		choose {
 			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
-				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
+				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id())
+				    .detail("MasterProxy0", ni.masterProxies.size() ? ni.masterProxies[0].id() : UID())
+					.detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
+				    .detail("ClientID", ni.id);
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 			}
 			when( wait( knownLeader->onChange() ) ) {}
@@ -678,23 +681,40 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 	}
 }
 
-void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies ) {
-	if(ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
-		std::vector<UID> proxyUIDs;
-		for(auto& proxy : ni.proxies) {
-			proxyUIDs.push_back(proxy.id());
+void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastMasterProxyUIDs, std::vector<MasterProxyInterface>& lastMasterProxies,
+					  std::vector<UID>& lastGrvProxyUIDs, std::vector<GrvProxyInterface>& lastGrvProxies) {
+	if(ni.masterProxies.size() > CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS) {
+		std::vector<UID> masterProxyUIDs;
+		for(auto& masterProxy : ni.masterProxies) {
+			masterProxyUIDs.push_back(masterProxy.id());
 		}
-		if(proxyUIDs != lastProxyUIDs) {
-			lastProxyUIDs = proxyUIDs;
-			lastProxies = ni.proxies;
-			deterministicRandom()->randomShuffle(lastProxies);
-			lastProxies.resize(CLIENT_KNOBS->MAX_PROXY_CONNECTIONS);
-			for(int i = 0; i < lastProxies.size(); i++) {
-				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
+		if(masterProxyUIDs != lastMasterProxyUIDs) {
+			lastMasterProxyUIDs.swap(masterProxyUIDs);
+			lastMasterProxies = ni.masterProxies;
+			deterministicRandom()->randomShuffle(lastMasterProxies);
+			lastMasterProxies.resize(CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS);
+			for(int i = 0; i < lastMasterProxies.size(); i++) {
+				TraceEvent("ConnectedMasterProxy").detail("MasterProxy", lastMasterProxies[i].id());
 			}
 		}
-		ni.firstProxy = ni.proxies[0];
-		ni.proxies = lastProxies;
+		ni.firstProxy = ni.masterProxies[0];
+		ni.masterProxies = lastMasterProxies;
+	}
+	if(ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
+		std::vector<UID> grvProxyUIDs;
+		for(auto& grvProxy : ni.grvProxies) {
+			grvProxyUIDs.push_back(grvProxy.id());
+		}
+		if(grvProxyUIDs != lastGrvProxyUIDs) {
+			lastGrvProxyUIDs.swap(grvProxyUIDs);
+			lastGrvProxies = ni.grvProxies;
+			deterministicRandom()->randomShuffle(lastGrvProxies);
+			lastGrvProxies.resize(CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS);
+			for(int i = 0; i < lastGrvProxies.size(); i++) {
+				TraceEvent("ConnectedGrvProxy").detail("GrvProxy", lastGrvProxies[i].id());
+			}
+		}
+		ni.grvProxies = lastGrvProxies;
 	}
 }
 
@@ -707,6 +727,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 	state Optional<double> incorrectTime;
 	state std::vector<UID> lastProxyUIDs;
 	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastGrvProxyUIDs;
+	state std::vector<GrvProxyInterface> lastGrvProxies;
 
 	deterministicRandom()->randomShuffle(addrs);
 	loop {
@@ -758,7 +780,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			connFile->notifyConnected();
 
 			auto& ni = rep.get().mutate();
-			shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+			shrinkProxyList(ni, lastProxyUIDs, lastProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->set( ni );
 			successIdx = idx;
 		} else {

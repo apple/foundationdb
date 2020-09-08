@@ -144,6 +144,7 @@
             "name" : "recruiting_transaction_servers",
             "required_logs" : 3,
             "required_proxies" : 1,
+            "required_grv_proxies" : 1,
             "required_resolvers" : 1
         },
         "workload" : {

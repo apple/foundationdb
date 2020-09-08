@@ -400,7 +400,7 @@ struct RolesInfo {
 		latencyStats.setKeyRawNumber("p95", metrics.getValue("P95"));
 		latencyStats.setKeyRawNumber("p99", metrics.getValue("P99"));
 		latencyStats.setKeyRawNumber("p99.9", metrics.getValue("P99.9"));
-		
+
 		return latencyStats;
 	}
 
@@ -555,6 +555,28 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
+			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
+			if(commitLatencyMetrics.size()) {
+				obj["commit_latency_statistics"] = addLatencyStatistics(commitLatencyMetrics);
+			}
+
+			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
+			if(commitLatencyBands.size()) {
+				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
+			}
+		} catch (Error &e) {
+			if(e.code() != error_code_attribute_not_found) {
+				throw e;
+			}
+		}
+
+		return roles.insert( std::make_pair(iface.address(), obj ))->second;
+	}
+	JsonBuilderObject& addRole(std::string const& role, GrvProxyInterface& iface, EventMap const& metrics) {
+		JsonBuilderObject obj;
+		obj["id"] = iface.id().shortString();
+		obj["role"] = role;
+		try {
 			TraceEventFields const& grvLatencyMetrics = metrics.at("GRVLatencyMetrics");
 			if(grvLatencyMetrics.size()) {
 				JsonBuilderObject priorityStats;
@@ -566,16 +588,6 @@ struct RolesInfo {
 			TraceEventFields const& grvLatencyBands = metrics.at("GRVLatencyBands");
 			if(grvLatencyBands.size()) {
 				obj["grv_latency_bands"] = addLatencyBandInfo(grvLatencyBands);
-			}
-
-			TraceEventFields const& commitLatencyMetrics = metrics.at("CommitLatencyMetrics");
-			if(commitLatencyMetrics.size()) {
-				obj["commit_latency_statistics"] = addLatencyStatistics(commitLatencyMetrics);
-			}
-
-			TraceEventFields const& commitLatencyBands = metrics.at("CommitLatencyBands");
-			if(commitLatencyBands.size()) {
-				obj["commit_latency_bands"] = addLatencyBandInfo(commitLatencyBands);
 			}
 		} catch (Error &e) {
 			if(e.code() != error_code_attribute_not_found) {
@@ -610,7 +622,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
-    vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<MasterProxyInterface, EventMap>> proxies,
+    vector<std::pair<TLogInterface, EventMap>> tLogs,
+    vector<std::pair<MasterProxyInterface, EventMap>> proxies,
+    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
 
@@ -701,6 +715,12 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
 	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
 		roles.addRole( "proxy", proxy->first, proxy->second );
+		wait(yield());
+	}
+
+	state std::vector<std::pair<GrvProxyInterface, EventMap>>::iterator grvProxy;
+	for(grvProxy = grvProxies.begin(); grvProxy != grvProxies.end(); ++grvProxy) {
+		roles.addRole("grv_proxy", grvProxy->first, grvProxy->second);
 		wait(yield());
 	}
 
@@ -1021,12 +1041,14 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
 			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
 			int requiredProxies = atoi( md.getValue("RequiredProxies").c_str() );
+			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
 			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
 			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredProxies));
 			//int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
 			message["required_proxies"] = requiredProxies;
+			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
@@ -1601,8 +1623,14 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 
 ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
 	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().client.proxies, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "CommitLatencyMetrics", "GRVLatencyBands", "CommitLatencyBands" }));
+	    db->get().client.masterProxies, address_workers, std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
 
+	return results;
+}
+
+ACTOR static Future<vector<std::pair<GrvProxyInterface, EventMap>>> getGrvProxiesAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	vector<std::pair<GrvProxyInterface, EventMap>> results = wait(getServerMetrics(
+		db->get().client.grvProxies, address_workers, std::vector<std::string>{ "GRVLatencyMetrics", "GRVLatencyBands" }));
 	return results;
 }
 
@@ -1679,39 +1707,52 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Writes and conflicts
 	try {
-		vector<Future<TraceEventFields>> proxyStatFutures;
+		state vector<Future<TraceEventFields>> proxyStatFutures;
+		state vector<Future<TraceEventFields>> grvProxyStatFutures;
 		std::map<NetworkAddress, WorkerDetails> workersMap;
 		for (auto const& w : workers) {
 			workersMap[w.interf.address()] = w;
 		}
-		for (auto &p : db->get().client.proxies) {
+		for (auto &p : db->get().client.masterProxies) {
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
 				proxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))), 1.0));
 			else
 				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
 		}
-		vector<TraceEventFields> proxyStats = wait(getAll(proxyStatFutures));
+		for (auto &p : db->get().client.grvProxies) {
+			auto worker = getWorker(workersMap, p.address());
+			if (worker.present())
+				grvProxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("GrvProxyMetrics"))), 1.0));
+			else
+				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
+		}
+		state vector<TraceEventFields> proxyStats = wait(getAll(proxyStatFutures));
+		state vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
 
-		StatusCounter mutations;
-		StatusCounter mutationBytes;
-		StatusCounter txnConflicts;
 		StatusCounter txnStartOut;
 		StatusCounter txnSystemPriorityStartOut;
 		StatusCounter txnDefaultPriorityStartOut;
 		StatusCounter txnBatchPriorityStartOut;
+
+		StatusCounter mutations;
+		StatusCounter mutationBytes;
+		StatusCounter txnConflicts;
 		StatusCounter txnCommitOutSuccess;
 		StatusCounter txnKeyLocationOut;
 		StatusCounter txnMemoryErrors;
+
+		for (auto &gps : grvProxyStats) {
+			txnStartOut.updateValues( StatusCounter(gps.getValue("TxnStartOut")) );
+			txnSystemPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnSystemPriorityStartOut")));
+			txnDefaultPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnDefaultPriorityStartOut")));
+			txnBatchPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnBatchPriorityStartOut")));
+		}
 
 		for (auto &ps : proxyStats) {
 			mutations.updateValues( StatusCounter(ps.getValue("Mutations")) );
 			mutationBytes.updateValues( StatusCounter(ps.getValue("MutationBytes")) );
 			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
-			txnStartOut.updateValues( StatusCounter(ps.getValue("TxnStartOut")) );
-			txnSystemPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnSystemPriorityStartOut")));
-			txnDefaultPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnDefaultPriorityStartOut")));
-			txnBatchPriorityStartOut.updateValues(StatusCounter(ps.getValue("TxnBatchPriorityStartOut")));
 			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
 			txnKeyLocationOut.updateValues( StatusCounter(ps.getValue("KeyServerLocationOut")) );
 			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnRequestErrors")) );
@@ -2362,6 +2403,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
 		state vector<std::pair<TLogInterface, EventMap>> tLogs;
 		state vector<std::pair<MasterProxyInterface, EventMap>> proxies;
+		state vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
@@ -2425,6 +2467,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture = errorOr(getGrvProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &messages);
@@ -2514,6 +2557,15 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			else {
 				messages.push_back(JsonBuilder::makeMessage("proxies_error", "Timed out trying to retrieve proxies."));
 			}
+
+			// ...also grv proxies
+			ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>> _grvProxies = wait(grvProxyFuture);
+			if (_grvProxies.present()) {
+				grvProxies = _grvProxies.get();
+			}
+			else {
+				messages.push_back(JsonBuilder::makeMessage("grv_proxies_error", "Timed out trying to retrieve grv proxies."));
+			}
 			wait( waitForAll(warningFutures) );
 		}
 		else {
@@ -2527,7 +2579,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
 		                                                            latestError, traceFileOpenErrors, programStarts,
 		                                                            processIssues, storageServers, tLogs, proxies,
-		                                                            coordinators, cx, configuration,
+		                                                            grvProxies, coordinators, cx, configuration,
 		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
 		                                                            &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;

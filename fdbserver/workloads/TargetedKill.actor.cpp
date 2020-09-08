@@ -99,6 +99,17 @@ struct TargetedKillWorkload : TestWorkload {
 				o = ++o%proxies->size();
 			}
 		}
+		else if( self->machineToKill == "grvproxy" ) {
+			auto grvProxies = cx->getGrvProxies(false);
+			int o = deterministicRandom()->randomInt(0, grvProxies->size());
+			for( int i = 0; i < grvProxies->size(); i++) {
+				GrvProxyInterface gpi = grvProxies->getInterface(o);
+				machine = gpi.address();
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+					break;
+				o = ++o%grvProxies->size();
+			}
+		}
 		else if( self->machineToKill == "tlog" ) {
 			auto tlogs = self->dbInfo->get().logSystemConfig.allPresentLogs();
 			int o = deterministicRandom()->randomInt(0, tlogs.size());

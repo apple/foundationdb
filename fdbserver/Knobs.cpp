@@ -328,7 +328,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( POLLING_FREQUENCY,                                     2.0 ); if( longLeaderElection ) POLLING_FREQUENCY = 8.0;
 	init( HEARTBEAT_FREQUENCY,                                   0.5 ); if( longLeaderElection ) HEARTBEAT_FREQUENCY = 1.0;
 
-	// Master Proxy
+	// Master Proxy and GRV Proxy
 	init( START_TRANSACTION_BATCH_INTERVAL_MIN,                 1e-6 );
 	init( START_TRANSACTION_BATCH_INTERVAL_MAX,                0.010 );
 	init( START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.5 );
@@ -374,6 +374,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
+	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -438,6 +439,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( EXPECTED_TLOG_FITNESS,              ProcessClass::UnsetFit );
 	init( EXPECTED_LOG_ROUTER_FITNESS,        ProcessClass::UnsetFit );
 	init( EXPECTED_PROXY_FITNESS,             ProcessClass::UnsetFit );
+	init( EXPECTED_GRV_PROXY_FITNESS,         ProcessClass::UnsetFit );
 	init( EXPECTED_RESOLVER_FITNESS,          ProcessClass::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && BUGGIFY ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;
 
@@ -677,7 +679,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// clang-format on
 
-	if(clientKnobs) {
+	if (clientKnobs) {
 		clientKnobs->IS_ACCEPTABLE_DELAY =
 		    clientKnobs->IS_ACCEPTABLE_DELAY *
 		    std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS) /

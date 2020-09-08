@@ -116,9 +116,11 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
 	state std::vector<UID> lastProxyUIDs;
 	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastGrvProxyUIDs;
+	state std::vector<GrvProxyInterface> lastGrvProxies;
 	loop {
 		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		shrinkProxyList(ni, lastProxyUIDs, lastProxies, lastGrvProxyUIDs, lastGrvProxies);
 		info->set( ni );
 		wait( db->onChange() );
 	}
@@ -993,6 +995,7 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
 		DUMPTOKEN(recruited.masterProxy);
+		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
@@ -1255,6 +1258,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
+					DUMPTOKEN(recruited.reportCommitCostEstimation);
 
 					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
 					errorForwarders.add(
@@ -1384,6 +1388,25 @@ ACTOR Future<Void> workerServer(
 				//printf("Recruited as masterProxyServer\n");
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
 						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+				req.reply.send(recruited);
+			}
+			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
+				GrvProxyInterface recruited;
+				recruited.processId = locality.processId();
+				recruited.provisional = false;
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				details["ForMaster"] = req.master.id().shortString();
+				startRole( Role::GRV_PROXY, recruited.id(), interf.id(), details );
+
+				DUMPTOKEN(recruited.getConsistentReadVersion);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.getHealthMetrics);
+
+				//printf("Recruited as grvProxyServer\n");
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::GRV_PROXY, recruited.id(),
+						grvProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
@@ -1835,6 +1858,7 @@ const Role Role::STORAGE_SERVER("StorageServer", "SS");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
 const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
+const Role Role::GRV_PROXY("GrvProxyServer", "GP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");

@@ -48,6 +48,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "transaction",
                   "resolution",
                   "proxy",
+                  "grv_proxy",
                   "master",
                   "test",
                   "storage_cache"
@@ -84,6 +85,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "$enum":[
                         "master",
                         "proxy",
+                        "grv_proxy",
                         "log",
                         "storage",
                         "resolver",
@@ -482,6 +484,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
          "required_proxies":1,
+         "required_grv_proxies":1,
          "name":{
             "$enum":[
                "reading_coordinated_state",
@@ -670,9 +673,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             }
          ],
          "auto_proxies":3,
+         "auto_grv_proxies":1,
          "auto_resolvers":1,
          "auto_logs":3,
          "proxies":5,
+         "grv_proxies":1,
          "backup_worker_enabled":1
       },
       "data":{
@@ -872,9 +877,11 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "memory"
     ]},
     "auto_proxies":3,
+    "auto_grv_proxies":1,
     "auto_resolvers":1,
     "auto_logs":3,
     "proxies":5
+    "grv_proxies":1
 })configSchema");
 
 const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
