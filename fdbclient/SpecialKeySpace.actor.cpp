@@ -50,6 +50,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
 
+Standalone<RangeResultRef> rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr,
+                                       const Standalone<RangeResultRef>& res);
+
 // This function will move the given KeySelector as far as possible to the standard form:
 // orEqual == false && offset == 1 (Standard form)
 // If the corresponding key is not in the underlying key range, it will move over the range
@@ -456,6 +459,24 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 
 Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
 	return commitActor(this, ryw);
+}
+
+SKSCTestImpl::SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	ASSERT(range.contains(kr));
+	auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
+	// all keys are written to RYW, since GRV is set, the read should happen locally
+	ASSERT(resultFuture.isReady());
+	auto result = resultFuture.getValue();
+	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
+	auto kvs = resultFuture.getValue();
+	return rywGetRange(ryw, kr, kvs);
+}
+
+Future<Optional<std::string>> SKSCTestImpl::commit(ReadYourWritesTransaction* ryw) {
+	ASSERT(false);
+	return Optional<std::string>();
 }
 
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}

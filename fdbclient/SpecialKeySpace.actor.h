@@ -216,6 +216,14 @@ private:
 	void modulesBoundaryInit();
 };
 
+// Used for SpecialKeySpaceCorrectnessWorkload
+class SKSCTestImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit SKSCTestImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 // to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
 // The returned key value pairs are interpretted as :
