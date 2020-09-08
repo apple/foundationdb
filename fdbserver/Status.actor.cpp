@@ -1028,14 +1028,30 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 	state JsonBuilderObject message;
 
 	try {
-		state Future<TraceEventFields> activeGens = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
-		TraceEventFields md = wait( timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
+		std::vector<Future<TraceEventFields>> futures;
+		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0));
+		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryFullyRecovered") ) ), 1.0));
+		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0));
+		std::vector<TraceEventFields> msgs = wait(getAll(futures));
+
+		const TraceEventFields& md = msgs[2];
 		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
 
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
+
+		const TraceEventFields& mLastRecoveryMsg = msgs[1];
+		std::string lastFullyRecoveredTimeS;
+		if (mLastRecoveryMsg.tryGetValue("Time", lastFullyRecoveredTimeS)) {
+			double lastFullyRecoveredTime = atof(lastFullyRecoveredTimeS.c_str());
+			// `lastFullyRecoveredTime` is the timestamp taken on master so the time interval calculated below may not
+			// be accurate due to the clock skew across the network, but it's good enough for the purpose it's used.
+			message["time_since_last_fully_recovered_seconds"] = now() - lastFullyRecoveredTime;
+		} else {
+			message["time_since_last_fully_recovered_seconds"] = -1;
+		}
 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
@@ -1056,7 +1072,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
-		TraceEventFields mdActiveGens = wait(activeGens);
+		const TraceEventFields& mdActiveGens = msgs[0];
 		if(mdActiveGens.size()) {
 			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
