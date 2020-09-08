@@ -225,8 +225,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	KeyRange randomKeyRange() {
 		Key prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
-		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes))).withPrefix(prefix);
-		Key rkey2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes))).withPrefix(prefix);
+		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
+		                .withPrefix(prefix);
+		Key rkey2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
+		                .withPrefix(prefix);
 		return rkey1 <= rkey2 ? KeyRangeRef(rkey1, rkey2) : KeyRangeRef(rkey2, rkey1);
 	}
 
