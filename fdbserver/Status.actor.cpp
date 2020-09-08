@@ -1747,6 +1747,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnSystemPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnSystemPriorityStartOut")));
 			txnDefaultPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnDefaultPriorityStartOut")));
 			txnBatchPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnBatchPriorityStartOut")));
+			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("TxnRequestErrors")));
 		}
 
 		for (auto &ps : proxyStats) {
@@ -1755,7 +1756,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
 			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
 			txnKeyLocationOut.updateValues( StatusCounter(ps.getValue("KeyServerLocationOut")) );
-			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnRequestErrors")) );
 			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("KeyServerLocationErrors")) );
 			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnCommitErrors")) );
 		}
