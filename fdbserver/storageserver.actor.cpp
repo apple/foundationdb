@@ -1058,7 +1058,12 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 				}
 
 				++data->numWatches;
-				data->watchBytes += ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+
+				// Pessimistic estimate the number of overhead bytes used by each
+				// watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
+				// must be kept alive until the watch is finished.
+				state size_t WATCH_OVERHEAD_BYTES = 1000;
+				data->watchBytes += (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				try {
 					if(latest < minVersion) {
 						// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur up to or including minVersion
@@ -1071,10 +1076,10 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 					}
 					wait(watchFuture);
 					--data->numWatches;
-					data->watchBytes -= ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+					data->watchBytes -= (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				} catch( Error &e ) {
 					--data->numWatches;
-					data->watchBytes -= ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+					data->watchBytes -= (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 					throw;
 				}
 			} catch( Error &e ) {
