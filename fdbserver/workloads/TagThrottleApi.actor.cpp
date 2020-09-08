@@ -26,7 +26,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TagThrottleApiWorkload : TestWorkload {
-	int apiVersion;
 	bool autoThrottleEnabled;
 	double testDuration;
 
@@ -45,20 +44,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		// choose a version to check compatibility.
-		double choice = deterministicRandom()->random01();
-		if(choice < 0.3) {
-			apiVersion = 630;
-		}
-		else if(choice < 0.7){
-			apiVersion = 700;
-		}
-		else {
-			apiVersion = Database::API_VERSION_LATEST;
-		}
-		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
-		cx->apiVersion = apiVersion;
-
 		if (this->clientId != 0) return Void();
 		return timeout(runThrottleApi(this, cx), testDuration, Void());
 	}
@@ -164,10 +149,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 			else if(tag.expirationTime > now()) {
 				++activeAutoThrottledTags;
 			}
-
-			if(self->apiVersion == 630) {
-				ASSERT(tag.reason == TagThrottledReason::UNSET);
-			}
 		}
 
 		ASSERT(manualThrottledTags <= SERVER_KNOBS->MAX_MANUAL_THROTTLED_TRANSACTION_TAGS);
@@ -191,9 +172,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 
 		for(auto& tag : tags) {
 			ASSERT(tag.throttleType == TagThrottleType::AUTO);
-			if(self->apiVersion == 630) {
-				ASSERT(tag.reason == TagThrottledReason::UNSET);
-			}
 		}
 		return Void();
 	}

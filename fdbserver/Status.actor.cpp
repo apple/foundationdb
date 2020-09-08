@@ -1632,7 +1632,7 @@ static Future<vector<std::pair<iface, EventMap>>> getServerMetrics(vector<iface>
 ACTOR template <class iface>
 static Future<vector<TraceEventFields>> getServerBusiestWriteTags(vector<iface> servers, std::unordered_map<NetworkAddress, WorkerInterface> address_workers, WorkerDetails rkWorker) {
     state vector<Future<Optional<TraceEventFields>>> futures;
-    for (auto s : servers) {
+    for (const auto& s : servers) {
 		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
     }
     wait(waitForAll(futures));
@@ -1795,6 +1795,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnSystemPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnSystemPriorityStartOut")));
 			txnDefaultPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnDefaultPriorityStartOut")));
 			txnBatchPriorityStartOut.updateValues(StatusCounter(gps.getValue("TxnBatchPriorityStartOut")));
+			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("TxnRequestErrors")));
 		}
 
 		for (auto &ps : proxyStats) {
@@ -1803,7 +1804,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
 			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
 			txnKeyLocationOut.updateValues( StatusCounter(ps.getValue("KeyServerLocationOut")) );
-			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnRequestErrors")) );
 			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("KeyServerLocationErrors")) );
 			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnCommitErrors")) );
 		}
@@ -1876,10 +1876,10 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 		autoThrottledTagsObj["busy_read"] = autoThrottledTagsBusyRead;
 		autoThrottledTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
 		if(autoThrottlingEnabled) {
-			autoThrottledTagsObj["is_recommended"] = 0;
+			autoThrottledTagsObj["recommended_only"] = 0;
 		}
 		else {
-			autoThrottledTagsObj["is_recommended"] = 1;
+			autoThrottledTagsObj["recommended_only"] = 1;
 		}
 
 		throttledTagsObj["auto"] = autoThrottledTagsObj;

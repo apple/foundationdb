@@ -152,6 +152,7 @@ set(FDBSERVER_SRCS
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp

@@ -96,29 +96,67 @@ enum enumRestoreType {
 //
 enum {
 	// Backup constants
-	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE,
-	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_DELETE_BEFORE_DAYS,
-	OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME, OPT_EXPIRE_MIN_RESTORABLE_DAYS,
-	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
-	OPT_DUMP_BEGIN, OPT_DUMP_END, OPT_JSON, OPT_DELETE_DATA, OPT_MIN_CLEANUP_SECONDS,
+	OPT_DESTCONTAINER,
+	OPT_SNAPSHOTINTERVAL,
+	OPT_ERRORLIMIT,
+	OPT_NOSTOPWHENDONE,
+	OPT_EXPIRE_BEFORE_VERSION,
+	OPT_EXPIRE_BEFORE_DATETIME,
+	OPT_EXPIRE_DELETE_BEFORE_DAYS,
+	OPT_EXPIRE_RESTORABLE_AFTER_VERSION,
+	OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
+	OPT_EXPIRE_MIN_RESTORABLE_DAYS,
+	OPT_BASEURL,
+	OPT_BLOB_CREDENTIALS,
+	OPT_DESCRIBE_DEEP,
+	OPT_DESCRIBE_TIMESTAMPS,
+	OPT_DUMP_BEGIN,
+	OPT_DUMP_END,
+	OPT_JSON,
+	OPT_DELETE_DATA,
+	OPT_MIN_CLEANUP_SECONDS,
 	OPT_USE_PARTITIONED_LOG,
 
 	// Backup and Restore constants
-	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
+	OPT_TAGNAME,
+	OPT_BACKUPKEYS,
+	OPT_WAITFORDONE,
+	OPT_INCREMENTALONLY,
 
 	// Backup Modify
-	OPT_MOD_ACTIVE_INTERVAL, OPT_MOD_VERIFY_UID,
+	OPT_MOD_ACTIVE_INTERVAL,
+	OPT_MOD_VERIFY_UID,
 
 	// Restore constants
-	OPT_RESTORECONTAINER, OPT_RESTORE_VERSION, OPT_RESTORE_TIMESTAMP, OPT_PREFIX_ADD, OPT_PREFIX_REMOVE, OPT_RESTORE_CLUSTERFILE_DEST, OPT_RESTORE_CLUSTERFILE_ORIG,
+	OPT_RESTORECONTAINER,
+	OPT_RESTORE_VERSION,
+	OPT_RESTORE_TIMESTAMP,
+	OPT_PREFIX_ADD,
+	OPT_PREFIX_REMOVE,
+	OPT_RESTORE_CLUSTERFILE_DEST,
+	OPT_RESTORE_CLUSTERFILE_ORIG,
+	OPT_RESTORE_BEGIN_VERSION,
 
 	// Shared constants
-	OPT_CLUSTERFILE, OPT_QUIET, OPT_DRYRUN, OPT_FORCE,
-	OPT_HELP, OPT_DEVHELP, OPT_VERSION, OPT_PARENTPID, OPT_CRASHONERROR,
-	OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACE, OPT_TRACE_DIR,
-	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_MEMLIMIT, OPT_LOCALITY,
+	OPT_CLUSTERFILE,
+	OPT_QUIET,
+	OPT_DRYRUN,
+	OPT_FORCE,
+	OPT_HELP,
+	OPT_DEVHELP,
+	OPT_VERSION,
+	OPT_PARENTPID,
+	OPT_CRASHONERROR,
+	OPT_NOBUFSTDOUT,
+	OPT_BUFSTDOUTERR,
+	OPT_TRACE,
+	OPT_TRACE_DIR,
+	OPT_KNOB,
+	OPT_TRACE_LOG_GROUP,
+	OPT_MEMLIMIT,
+	OPT_LOCALITY,
 
-	//DB constants
+	// DB constants
 	OPT_SOURCE_CLUSTER,
 	OPT_DEST_CLUSTER,
 	OPT_CLEANUP,
@@ -154,7 +192,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
-	    SO_END_OF_OPTIONS
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
@@ -197,6 +235,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_INCREMENTALONLY,  "--incremental",    SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -603,6 +642,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
 	{ OPT_WAITFORDONE,     "-w",               SO_NONE },
 	{ OPT_WAITFORDONE,     "--waitfordone",    SO_NONE },
+	{ OPT_RESTORE_BEGIN_VERSION, "--begin_version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--version",        SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v",               SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -622,6 +662,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_INCREMENTALONLY,  "--incremental",    SO_NONE },
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
@@ -975,6 +1016,9 @@ static void printBackupUsage(bool devhelp) {
 	       "                 remove mutations for it. By default this is set to one hour.\n");
 	printf("  --delete_data\n"
 		   "                 This flag will cause cleanup to remove mutations for the most stale backup or DR.\n");
+	// TODO: Enable this command-line argument once atomics are supported
+	// printf("  --incremental\n"
+	//        "                 Performs incremental backup without the base backup.\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -1032,8 +1076,11 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	// TODO: Enable this command-line argument once atomics are supported
+	// printf("  --incremental\n"
+	//        "                 Performs incremental restore without the base backup.\n");
 #ifndef TLS_DISABLED
-	printf(TLS_HELP);
+	    printf(TLS_HELP);
 #endif
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
@@ -1721,7 +1768,8 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 
 ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun,
-                                bool waitForCompletion, bool stopWhenDone, bool usePartitionedLog) {
+                                bool waitForCompletion, bool stopWhenDone, bool usePartitionedLog,
+                                bool incrementalBackupOnly) {
 	try {
 		state FileBackupAgent backupAgent;
 
@@ -1766,7 +1814,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotInterv
 
 		else {
 			wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
-			                              usePartitionedLog));
+			                              usePartitionedLog, incrementalBackupOnly));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2077,7 +2125,10 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container, Standalone<VectorRef<KeyRangeRef>> ranges, Version targetVersion, std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone, std::string addPrefix, std::string removePrefix) {
+ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std::string tagName, std::string container,
+                              Standalone<VectorRef<KeyRangeRef>> ranges, Version beginVersion, Version targetVersion,
+                              std::string targetTimestamp, bool performRestore, bool verbose, bool waitForDone,
+                              std::string addPrefix, std::string removePrefix, bool incrementalBackupOnly) {
 	if(ranges.empty()) {
 		ranges.push_back_deep(ranges.arena(), normalKeys);
 	}
@@ -2119,19 +2170,23 @@ ACTOR Future<Void> runRestore(Database db, std::string originalClusterFile, std:
 
 			BackupDescription desc = wait(bc->describeBackup());
 
-			if(!desc.maxRestorableVersion.present()) {
+			if (incrementalBackupOnly && desc.contiguousLogEnd.present()) {
+				targetVersion = desc.contiguousLogEnd.get() - 1;
+			} else if (desc.maxRestorableVersion.present()) {
+				targetVersion = desc.maxRestorableVersion.get();
+			} else {
 				fprintf(stderr, "The specified backup is not restorable to any version.\n");
 				throw restore_error();
 			}
-
-			targetVersion = desc.maxRestorableVersion.get();
 
 			if(verbose)
 				printf("Using target restore version %" PRId64 "\n", targetVersion);
 		}
 
 		if (performRestore) {
-			Version restoredVersion = wait(backupAgent.restore(db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose, KeyRef(addPrefix), KeyRef(removePrefix)));
+			Version restoredVersion = wait(backupAgent.restore(
+			    db, origDb, KeyRef(tagName), KeyRef(container), ranges, waitForDone, targetVersion, verbose,
+			    KeyRef(addPrefix), KeyRef(removePrefix), true, incrementalBackupOnly, beginVersion));
 
 			if(waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -2910,11 +2965,13 @@ int main(int argc, char* argv[]) {
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		int maxErrors = 20;
+		Version beginVersion = invalidVersion;
 		Version restoreVersion = invalidVersion;
 		std::string restoreTimestamp;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
 		bool usePartitionedLog = false; // Set to true to use new backup system
+		bool incrementalBackupOnly = false;
 		bool forceAction = false;
 		bool trace = false;
 		bool quietDisplay = false;
@@ -3167,6 +3224,10 @@ int main(int argc, char* argv[]) {
 				case OPT_USE_PARTITIONED_LOG:
 					usePartitionedLog = true;
 					break;
+				case OPT_INCREMENTALONLY:
+					// TODO: Enable this command-line argument once atomics are supported
+					// incrementalBackupOnly = true;
+					break;
 				case OPT_RESTORECONTAINER:
 					restoreContainer = args->OptionArg();
 					// If the url starts with '/' then prepend "file://" for backwards compatibility
@@ -3192,6 +3253,17 @@ int main(int argc, char* argv[]) {
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
+					break;
+				}
+				case OPT_RESTORE_BEGIN_VERSION: {
+					const char* a = args->OptionArg();
+					long long ver = 0;
+					if (!sscanf(a, "%lld", &ver)) {
+						fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						return FDB_EXIT_ERROR;
+					}
+					beginVersion = ver;
 					break;
 				}
 				case OPT_RESTORE_VERSION: {
@@ -3567,7 +3639,8 @@ int main(int argc, char* argv[]) {
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
 				f = stopAfter(submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName,
-				                           dryRun, waitForDone, stopWhenDone, usePartitionedLog));
+				                           dryRun, waitForDone, stopWhenDone, usePartitionedLog,
+				                           incrementalBackupOnly));
 				break;
 			}
 
@@ -3697,7 +3770,9 @@ int main(int argc, char* argv[]) {
 
 			switch(restoreType) {
 				case RESTORE_START:
-					f = stopAfter( runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
+					f = stopAfter(runRestore(db, restoreClusterFileOrig, tagName, restoreContainer, backupKeys,
+				                             beginVersion, restoreVersion, restoreTimestamp, !dryRun, !quietDisplay,
+				                             waitForDone, addPrefix, removePrefix, incrementalBackupOnly));
 					break;
 				case RESTORE_WAIT:
 					f = stopAfter( success(ba.waitRestore(db, KeyRef(tagName), true)) );
