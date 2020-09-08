@@ -354,7 +354,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                 "busy_read" : 0,
                 "busy_write" : 0,
                 "count" : 0,
-                "is_recommended": 0
+                "recommended_only": 0
             },
             "manual" : {
                 "count" : 0
