@@ -151,7 +151,7 @@ struct StagingKey {
 		}
 		for (; lb != pendingMutations.end(); lb++) {
 			MutationRef mutation = lb->second;
-			if (type == MutationRef::CompareAndClear) { // Special atomicOp
+			if (mutation.type == MutationRef::CompareAndClear) { // Special atomicOp
 				Arena arena;
 				Optional<StringRef> inputVal;
 				if (hasBaseValue()) {
