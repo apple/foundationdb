@@ -585,9 +585,10 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		state int samplesMessages = fSendSamples.size();
 		wait(waitForAll(fSendSamples));
 	} catch (Error& e) { // In case ci.samples throws broken_promise due to unstable network
-		if (e.code() == error_code_broken_promise) {
+		if (e.code() == error_code_broken_promise || e.code() == error_code_operation_cancelled) {
 			TraceEvent(SevWarnAlways, "FastRestoreLoaderPhaseLoadFileSendSamples")
-			    .detail("SamplesMessages", samplesMessages);
+			    .detail("SamplesMessages", samplesMessages)
+			    .error(e, true);
 		} else {
 			TraceEvent(SevError, "FastRestoreLoaderPhaseLoadFileSendSamplesUnexpectedError").error(e, true);
 		}
@@ -1111,6 +1112,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
 	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 	state Standalone<VectorRef<KeyValueRef>> blockData;
+	// should retry here
 	try {
 		Standalone<VectorRef<KeyValueRef>> kvs =
 		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
