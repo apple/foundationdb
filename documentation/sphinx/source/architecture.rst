@@ -6,7 +6,7 @@ FoundationDB makes your architecture flexible and easy to operate. Your applicat
 
 The following diagram details the logical architecture.
 
-.. image:: /images/Architecture.png
+|image0|
 
 
 Detailed FoundationDB Architecture
@@ -362,6 +362,7 @@ Documentation <https://github.com/apple/foundationdb/blob/master/design/data-dis
 `Recovery
 Documentation <https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md>`__
 
+.. |image0| image:: images/Architecture.png
 .. |image1| image:: images/architecture-1.jpeg
 .. |image2| image:: images/architecture-2.jpeg
 .. |image3| image:: images/architecture-3.jpeg
