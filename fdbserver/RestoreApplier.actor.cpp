@@ -478,7 +478,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
-	state Key endKey = begin->second.key;
+	state Key endKey = begin->first;
 	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
@@ -508,7 +508,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 				} else {
 					ASSERT(false);
 				}
-				endKey = iter != end ? iter->second.key : endKey;
+				endKey = iter != end ? iter->first : endKey;
 				iter++;
 				if (sets > 10000000 || clears > 10000000) {
 					TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchInfiniteLoop", applierID)
