@@ -829,7 +829,6 @@ ACTOR Future<bool> checkExclusion(Database db, std::vector<AddressExclusion>* ad
 }
 
 void includeServers(ReadYourWritesTransaction* ryw) {
-	ryw->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
@@ -1000,7 +999,6 @@ ACTOR Future<Standalone<RangeResultRef>> getProcessClassActor(ReadYourWritesTran
 
 ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef range) {
 	// enable related options
-	ryw->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
