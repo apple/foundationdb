@@ -597,7 +597,7 @@ namespace fileBackup {
 				if(b != 0xFF)
 					throw restore_corrupted_data_padding();
 
-		    if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // simulate blob failures
+		    if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
 			    double i = deterministicRandom()->random01();
 			    if (i < 0.5) {
 				    throw http_request_failed();
