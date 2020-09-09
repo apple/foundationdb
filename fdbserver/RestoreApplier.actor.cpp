@@ -89,9 +89,10 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					break;
 				}
 			}
-			TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
+			//TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
+			bool isError = e.code() != error_code_operation_cancelled;
+			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreApplierError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
 			actors.clear(false);
@@ -466,7 +467,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::iterator begin,
                                                 std::map<Key, StagingKey>::iterator end, Database cx,
                                                 FlowLock* applyStagingKeysBatchLock, UID applierID,
-                                                ApplierBatchData::Counters* cc) {
+                                                ApplierBatchData::Counters* cc, KeyRangeRef range) {
 	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) {
 		TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchSkipped", applierID).detail("Begin", begin->first);
 		ASSERT(!g_network->isSimulated());
@@ -483,7 +484,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->addWriteConflictRange(KeyRangeRef(begin->first, endKey)); // Reduce resolver load
+			tr->addWriteConflictRange(range); // Reduce resolver load
 			std::map<Key, StagingKey>::iterator iter = begin;
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
@@ -548,7 +549,7 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 		txnSize += cur->second.expectedMutationSize();
 		if (txnSize > SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
 			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
-			                                         &batchData->counters));
+			                                         &batchData->counters, KeyRangeRef(begin->first, cur->first)));
 			batchData->counters.appliedBytes += txnSize;
 			batchData->appliedBytes += txnSize;
 			begin = cur;
@@ -558,8 +559,9 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 		cur++;
 	}
 	if (begin != batchData->stagingKeys.end()) {
+		KeyRangeRef range(begin->first, keyAfter(batchData->stagingKeys.rbegin()->first));
 		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
-		                                         &batchData->counters));
+		                                         &batchData->counters, range));
 		batchData->counters.appliedBytes += txnSize;
 		batchData->appliedBytes += txnSize;
 		txnBatches++;
