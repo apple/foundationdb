@@ -20,6 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1207,13 +1208,60 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 						int minLoss = std::min(availLoss, dataLoss);
 						const char *faultDomain = machinesAreZones ? "machine" : "zone";
-						if (minLoss == 1)
-							outputString += format("1 %s", faultDomain);
-						else
-							outputString += format("%d %ss", minLoss, faultDomain);
+						outputString += format("%d %ss", minLoss, faultDomain);
 
 						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
+						}
+
+						// We may have data loss between accepting_commits and storage_recovered (exclusive).
+						if (dataLoss == -1) {
+							ASSERT(availLoss == -1);
+							outputString += format("\nThe database may have data loss and availability loss");
+							StatusObjectReader logs;
+							std::string missingLogs;
+							// StatusObjectReader recoveryState;
+							// std::string recoveryStage;
+							// if (statusObjCluster.get("recovery_state", recoveryState)) {
+							// 	recoveryState.get("name", recoveryStage);
+							// }
+
+							if (statusObjCluster.get("logs", logs)) {
+								for (auto logsObj : logs.obj()) {
+									StatusObjectReader logEpoch(logsObj.second);
+									bool possiblyLosingData;
+									if (logEpoch.get("possibly_losing_data", possiblyLosingData) &&
+									    !possiblyLosingData) {
+										continue;
+									}
+									int64_t epoch, beginVersion = invalidVersion, endVersion = invalidVersion;
+									bool current;
+									logEpoch.get("epoch", epoch);
+									logEpoch.get("begin_version", beginVersion);
+									logEpoch.get("end_version", endVersion);
+									logEpoch.get("current", current);
+									missingLogs += format("\nLog epoch: %ld current: %s begin: %ld end: %ld, missing "
+									                      "log interfaces(id,address):\n",
+									                      epoch, current ? "true" : "false", beginVersion, endVersion);
+									for (auto logEpochObj : logEpoch.obj()) {
+										StatusObjectReader logInterface(logEpochObj.second);
+										bool healthy;
+										std::string address, id;
+										if (logInterface.get("healthy", healthy) && !healthy &&
+										    logInterface.has("address")) {
+											logInterface.get("id", address);
+											logInterface.get("address", address);
+											missingLogs += format("%s,%s ", address.c_str());
+										}
+									}
+								}
+							}
+
+							if (!missingLogs.empty()) {
+								outputString += "\nPlease restart following tlog interfaces, otherwise storage "
+								                "servers may never be able to catch up:";
+								outputString += missingLogs;
+							}
 						}
 					}
 				}
