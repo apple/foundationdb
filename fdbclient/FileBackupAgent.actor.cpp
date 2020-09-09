@@ -557,18 +557,7 @@ namespace fileBackup {
 		if(rLen != len)
 			throw restore_bad_read();
 
-	    if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
-		    double i = deterministicRandom()->random01();
-		    if (i < 0.5) {
-			    throw http_request_failed();
-		    } else if (i < 0.7) {
-			    throw connection_failed();
-		    } else if (i < 0.8) {
-			    throw timed_out();
-		    } else if (i < 0.9) {
-			    throw lookup_failed();
-		    }
-	    }
+	    simulateBlobFailure();
 
 	    Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 		state StringRefReader reader(buf, restore_corrupted_data());

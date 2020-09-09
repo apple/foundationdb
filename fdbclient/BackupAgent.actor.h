@@ -944,5 +944,7 @@ Value makePadding(int size);
 ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                              Key addPrefix, Key removePrefix);
 
+void simulateBlobFailure();
+
 #include "flow/unactorcompiler.h"
 #endif
