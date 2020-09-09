@@ -177,7 +177,7 @@ function createClusterFile {
 
 # Stop the Cluster from running.
 function stopCluster {
-	# Add an audit entree, if enabled
+	# Add an audit entry, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
 		printf '%-15s (%6s)  Stopping cluster %-20s (%6s): %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${CLUSTERSTRING}" "${FDBSERVERID}" >> "${AUDITLOG}"
 	fi
@@ -202,7 +202,7 @@ function stopCluster {
 
 # Start the server running.
 function startFdbServer {
-	# Add an audit entree, if enabled
+	# Add an audit entry, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
 		printf '%-15s (%6s)  Starting cluster %-20s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${CLUSTERSTRING}" >> "${AUDITLOG}"
 	fi
@@ -217,8 +217,6 @@ function startFdbServer {
 	elif ! "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
 	then
 		log "Failed to start FDB Server"
-		# Maybe the server is already running
-		#FDBSERVERID="$(pidof fdbserver)"
 		let status="${status} + 1"
 	else
 		FDBSERVERID="${!}"
