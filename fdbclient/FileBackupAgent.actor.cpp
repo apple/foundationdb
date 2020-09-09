@@ -4965,3 +4965,18 @@ ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<K
 
 	return Void();
 }
+
+void simulateBlobFailure() {
+	if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
+		double i = deterministicRandom()->random01();
+		if (i < 0.5) {
+			throw http_request_failed();
+		} else if (i < 0.7) {
+			throw connection_failed();
+		} else if (i < 0.8) {
+			throw timed_out();
+		} else if (i < 0.9) {
+			throw lookup_failed();
+		}
+	}
+}
