@@ -155,8 +155,9 @@ The requirement of the new backup system raises several design challenges:
 
 **Transaction Logs (TLogs)**: The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the proxy in version order, and only respond to the proxy once the data has been written and fsync'ed to an append only mutation log on disk. Storage servers retrieve mutations from TLogs. Once the storage servers have persisted mutations, storage servers then pop the mutations from the TLogs.
 
-**Proxy**: The proxies are responsible for providing read versions, committing transactions, and tracking the storage servers responsible for each range of keys. In the old backup system, Proxies are responsible to group mutations into backup mutations and write them to the database.
+**Proxy**: The proxies are responsible for committing transactions, and tracking the storage servers responsible for each range of keys. In the old backup system, Proxies are responsible to group mutations into backup mutations and write them to the database.
 
+**GrvProxy**: The GRV proxies are responsible for providing read versions.
 ## System overview
 
 From an end-to-end perspective, the new backup system works in the following steps:

@@ -23,7 +23,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-Future<int64_t> AsyncFileBlobStoreRead::size() {
+Future<int64_t> AsyncFileBlobStoreRead::size() const {
 	if(!m_size.isValid())
 		m_size = m_bstore->objectSize(m_bucket, m_object);
 	return m_size;

@@ -73,6 +73,7 @@ ERROR( connection_idle, 1049, "Connection closed after idle timeout" )
 ERROR( disk_adapter_reset, 1050, "The disk queue adpater reset" )
 ERROR( batch_transaction_throttled, 1051, "Batch GRV request rate limit exceeded")
 ERROR( dd_cancelled, 1052, "Data distribution components cancelled")
+ERROR( dd_not_found, 1053, "Data distributor not found")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -93,6 +94,7 @@ ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver fail
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
 ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
 ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
+ERROR( grv_proxy_failed, 1214, "Master terminating because a GRV Proxy failed" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

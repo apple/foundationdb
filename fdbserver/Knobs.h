@@ -94,6 +94,11 @@ public:
 	double PEEK_STATS_INTERVAL;
 	double PEEK_STATS_SLOW_AMOUNT;
 	double PEEK_STATS_SLOW_RATIO;
+	double PUSH_RESET_INTERVAL;
+	double PUSH_MAX_LATENCY;
+	double PUSH_STATS_INTERVAL;
+	double PUSH_STATS_SLOW_AMOUNT;
+	double PUSH_STATS_SLOW_RATIO;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -243,6 +248,10 @@ public:
 	// KeyValueStoreMemory
 	int64_t REPLACE_CONTENTS_BYTES;
 
+	// KeyValueStoreRocksDB
+	int ROCKSDB_BACKGROUND_PARALLELISM;
+	int64_t ROCKSDB_MEMTABLE_BYTES;
+
 	// Leader election
 	int MAX_NOTIFICATIONS;
 	int MIN_NOTIFICATIONS;
@@ -295,6 +304,7 @@ public:
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
+	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -359,6 +369,7 @@ public:
 	int EXPECTED_TLOG_FITNESS;
 	int EXPECTED_LOG_ROUTER_FITNESS;
 	int EXPECTED_PROXY_FITNESS;
+	int EXPECTED_GRV_PROXY_FITNESS;
 	int EXPECTED_RESOLVER_FITNESS;
 	double RECRUITMENT_TIMEOUT;
 	int DBINFO_SEND_AMOUNT;
@@ -484,9 +495,9 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
-	int64_t MIN_TAG_PAGES_READ_RATE;
-	double READ_TAG_MEASUREMENT_INTERVAL;
-	int64_t OPERATION_COST_BYTE_FACTOR;
+	int64_t MIN_TAG_PAGES_RATE;
+	double TAG_MEASUREMENT_INTERVAL;
+	int64_t READ_COST_BYTE_FACTOR;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
 
 	//Wait Failure
@@ -546,7 +557,7 @@ public:
 	// FASTRESTORE_VB_PARALLELISM is the number of concurrently running version batches
 	int64_t FASTRESTORE_VB_PARALLELISM;
 	int64_t FASTRESTORE_VB_MONITOR_DELAY; // How quickly monitor finished version batch
-	int64_t FASTRESTORE_VB_LAUNCH_DELAY;
+	double FASTRESTORE_VB_LAUNCH_DELAY;
 	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
 	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
@@ -571,6 +582,16 @@ public:
 	bool FASTRESTORE_USE_RANGE_FILE; // use range file in backup
 	bool FASTRESTORE_USE_LOG_FILE; // use log file in backup
 	int64_t FASTRESTORE_SAMPLE_MSG_BYTES; // sample message desired size
+	double FASTRESTORE_SCHED_UPDATE_DELAY; // delay in seconds in updating process metrics
+	int FASTRESTORE_SCHED_TARGET_CPU_PERCENT; // release as many requests as possible when cpu usage is below the knob
+	int FASTRESTORE_SCHED_MAX_CPU_PERCENT; // max cpu percent when scheduler shall not release non-urgent requests
+	int FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS; // number of inflight requests to load backup files
+	int FASTRESTORE_SCHED_INFLIGHT_SEND_REQS; // number of inflight requests for loaders to  send mutations to appliers
+	int FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE; // number of load request to release at once
+	int FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD; // we can send future VB requests if it is less than this knob
+	int FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH; // number of future VB sendLoadingParam requests to process at once
+	int FASTRESTORE_NUM_TRACE_EVENTS;
+	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
