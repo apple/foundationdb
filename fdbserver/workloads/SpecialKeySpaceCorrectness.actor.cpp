@@ -713,7 +713,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				tx->set(Key("process/class_type/" + address)
 				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-				        LiteralStringRef("unset"));
+				        Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
+				                                                // class source will be changed
 				wait(tx->commit());
 				Optional<Value> class_source = wait(tx->get(
 				    Key("process/class_source/" + address)
