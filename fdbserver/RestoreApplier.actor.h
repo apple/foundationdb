@@ -170,13 +170,14 @@ struct StagingKey {
 				val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
 			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
-				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+				type = MutationRef::SetValue;
 				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			} else {
+				// TODO: Change to SevError
 				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)

@@ -490,7 +490,7 @@ ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
 		} catch (Error& e) {
 			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
 			    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
-				TraceEvent(SevError, "FileRestoreCorruptedPartitionedLogFileBlock").error(e);
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedPartitionedLogFileBlock").error(e);
 				throw;
 			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
@@ -499,6 +499,9 @@ ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
 				    .detail("Retries", ++readFileRetries)
 				    .error(e);
 				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParsePartitionedLogFileOnLoaderUnexpectedError").error(e);
+				throw;
 			}
 		}
 	}
@@ -1174,7 +1177,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		} catch (Error& e) {
 			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
 			    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
-				TraceEvent(SevError, "FileRestoreCorruptedRangeFileBlock").error(e);
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedRangeFileBlock").error(e);
 				throw;
 			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
@@ -1183,6 +1186,9 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 				    .detail("Retries", ++readFileRetries)
 				    .error(e);
 				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParseRangeFileOnLoaderUnexpectedError").error(e);
+				throw;
 			}
 		}
 	}
@@ -1294,7 +1300,7 @@ ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProc
 		} catch (Error& e) {
 			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
 			    e.code() == error_code_restore_corrupted_data_padding) { // non retriable error
-				TraceEvent(SevError, "FileRestoreCorruptedLogFileBlock").error(e);
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedLogFileBlock").error(e);
 				throw;
 			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
@@ -1303,6 +1309,9 @@ ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProc
 				    .detail("Retries", ++readFileRetries)
 				    .error(e);
 				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParseLogFileToMutationsOnLoaderUnexpectedError").error(e);
+				throw;
 			}
 		}
 	}
