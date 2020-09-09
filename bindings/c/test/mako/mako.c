@@ -720,7 +720,7 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	}
 
 	if(dotagging) {
-		tagstr = (char*)malloc(16);
+		tagstr = (char*)calloc(16, 1);
 		memcpy(tagstr, KEYPREFIX, KEYPREFIXLEN);
 		memcpy(tagstr + KEYPREFIXLEN, args->txntagging_prefix, TAGPREFIXLENGTH_MAX);
 	}
@@ -1392,7 +1392,7 @@ void usage() {
 	printf("%-24s %s\n", "    --tracepath=PATH", "Set trace file path");
 	printf("%-24s %s\n", "    --trace_format <xml|json>", "Set trace format (Default: json)");
 	printf("%-24s %s\n", "    --txntrace=sec", "Specify transaction tracing interval (Default: 0)");
-	printf("%-24s %s\n", "    --txntagging", "Specify the number of different transaction tag (Default: 0, max = 999)");
+	printf("%-24s %s\n", "    --txntagging", "Specify the number of different transaction tag (Default: 0, max = 1000)");
 	printf("%-24s %s\n", "    --txntagging_prefix", "Specify the prefix of transaction tag - mako${txntagging_prefix} (Default: '')");
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
@@ -1555,11 +1555,15 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 
 		case ARG_TXNTAGGING:
 			args->txntagging = atoi(optarg);
-			if(args->txntagging > 999) {
-				args->txntagging = 999;
+			if(args->txntagging > 1000) {
+				args->txntagging = 1000;
 			}
 			break;
 		case ARG_TXNTAGGINGPREFIX: {
+			if(strlen(optarg) > TAGPREFIXLENGTH_MAX) {
+				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
+				exit(0);
+			}
 			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
 			break;
 		}
@@ -1622,6 +1626,10 @@ int validate_args(mako_args_t* args) {
 		if ((args->seconds == 0) && (args->iteration == 0)) {
 			fprintf(stderr, "ERROR: Must specify either seconds or iteration\n");
 			return -1;
+		}
+		if(args->txntagging < 0) {
+            fprintf(stderr, "ERROR: --txntagging must be a non-negative integer\n");
+            return -1;
 		}
 	}
 	return 0;
