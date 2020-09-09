@@ -1220,12 +1220,6 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							outputString += format("\nThe database may have data loss and availability loss");
 							StatusObjectReader logs;
 							std::string missingLogs;
-							// StatusObjectReader recoveryState;
-							// std::string recoveryStage;
-							// if (statusObjCluster.get("recovery_state", recoveryState)) {
-							// 	recoveryState.get("name", recoveryStage);
-							// }
-
 							if (statusObjCluster.get("logs", logs)) {
 								for (auto logsObj : logs.obj()) {
 									StatusObjectReader logEpoch(logsObj.second);
@@ -1234,24 +1228,25 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 									    !possiblyLosingData) {
 										continue;
 									}
-									int64_t epoch, beginVersion = invalidVersion, endVersion = invalidVersion;
+									// Current epoch doesn't have an end version.
+									int64_t epoch, beginVersion, endVersion = invalidVersion;
 									bool current;
 									logEpoch.get("epoch", epoch);
 									logEpoch.get("begin_version", beginVersion);
 									logEpoch.get("end_version", endVersion);
 									logEpoch.get("current", current);
-									missingLogs += format("\nLog epoch: %ld current: %s begin: %ld end: %ld, missing "
+									missingLogs += format("\n%s Log epoch: %ld begin: %ld end: %ld%s, missing "
 									                      "log interfaces(id,address):\n",
-									                      epoch, current ? "true" : "false", beginVersion, endVersion);
+									                      current ? "Current" : "Old", epoch, beginVersion, endVersion,
+									                      endVersion == invalidVersion ? "(unknown)" : "");
 									for (auto logEpochObj : logEpoch.obj()) {
 										StatusObjectReader logInterface(logEpochObj.second);
 										bool healthy;
 										std::string address, id;
-										if (logInterface.get("healthy", healthy) && !healthy &&
-										    logInterface.has("address")) {
-											logInterface.get("id", address);
+										if (logInterface.get("healthy", healthy) && !healthy) {
+											logInterface.get("id", id);
 											logInterface.get("address", address);
-											missingLogs += format("%s,%s ", address.c_str());
+											missingLogs += format("%s,%s ", id.c_str(), address.c_str());
 										}
 									}
 								}
