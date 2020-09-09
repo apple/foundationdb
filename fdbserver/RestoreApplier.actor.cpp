@@ -483,6 +483,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->addWriteConflictRange(KeyRangeRef(begin->first, endKey)); // Reduce resolver load
 			std::map<Key, StagingKey>::iterator iter = begin;
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
