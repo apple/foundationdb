@@ -557,7 +557,20 @@ namespace fileBackup {
 		if(rLen != len)
 			throw restore_bad_read();
 
-		Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	    if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
+		    double i = deterministicRandom()->random01();
+		    if (i < 0.5) {
+			    throw http_request_failed();
+		    } else if (i < 0.7) {
+			    throw connection_failed();
+		    } else if (i < 0.8) {
+			    throw timed_out();
+		    } else if (i < 0.9) {
+			    throw lookup_failed();
+		    }
+	    }
+
+	    Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
@@ -596,19 +609,6 @@ namespace fileBackup {
 			for(auto b : reader.remainder())
 				if(b != 0xFF)
 					throw restore_corrupted_data_padding();
-
-		    if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
-			    double i = deterministicRandom()->random01();
-			    if (i < 0.5) {
-				    throw http_request_failed();
-			    } else if (i < 0.7) {
-				    throw connection_failed();
-			    } else if (i < 0.8) {
-				    throw timed_out();
-			    } else if (i < 0.9) {
-				    throw lookup_failed();
-			    }
-		    }
 
 		    return results;
 
