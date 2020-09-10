@@ -621,7 +621,6 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 							    .detail("DestSet", describe(destSet))
 							    .detail("IntendedTeam", describe(intendedTeam))
 							    .detail("KeyServers", keyServers);
-							//ASSERT( false );
 
 							ASSERT(!dest.empty()); //The range has already been moved, but to a different dest (or maybe dest was cleared)
 
