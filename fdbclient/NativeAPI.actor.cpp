@@ -3870,7 +3870,8 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 				&& e.code() != error_code_database_locked
 				&& e.code() != error_code_proxy_memory_limit_exceeded
 				&& e.code() != error_code_batch_transaction_throttled
-				&& e.code() != error_code_tag_throttled)
+				&& e.code() != error_code_tag_throttled
+				&& e.code() != error_code_split_transaction_timeout)
 			{
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
