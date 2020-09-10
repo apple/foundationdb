@@ -54,7 +54,7 @@ struct StagingKey {
 	LogMessageVersion version; // largest version of set or clear for the key
 	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
 
-	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
+	explicit StagingKey(Key key) : key(key), version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
@@ -294,7 +294,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	void addMutation(MutationRef m, LogMessageVersion ver) {
 		if (!isRangeMutation(m)) {
-			auto item = stagingKeys.emplace(m.param1, StagingKey());
+			auto item = stagingKeys.emplace(m.param1, StagingKey(m.param1));
 			item.first->second.add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));

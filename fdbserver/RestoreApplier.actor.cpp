@@ -89,9 +89,10 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 					break;
 				}
 			}
-			TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
+			//TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
+			bool isError = e.code() != error_code_operation_cancelled;
+			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreApplierError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
 			actors.clear(false);
@@ -477,13 +478,12 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
-	state Key endKey = begin->second.key;
+	state Key endKey = begin->first;
 	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->addWriteConflictRange(KeyRangeRef(begin->first, endKey)); // Reduce resolver load
 			std::map<Key, StagingKey>::iterator iter = begin;
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
@@ -508,7 +508,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 				} else {
 					ASSERT(false);
 				}
-				endKey = iter != end ? iter->second.key : endKey;
+				endKey = iter != end ? iter->first : endKey;
 				iter++;
 				if (sets > 10000000 || clears > 10000000) {
 					TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchInfiniteLoop", applierID)
@@ -522,6 +522,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			    .detail("End", endKey)
 			    .detail("Sets", sets)
 			    .detail("Clears", clears);
+			tr->addWriteConflictRange(KeyRangeRef(begin->first, keyAfter(endKey))); // Reduce resolver load
 			wait(tr->commit());
 			cc->appliedTxns += 1;
 			break;

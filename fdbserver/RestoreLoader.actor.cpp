@@ -282,8 +282,8 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
 			}
 		} catch (Error& e) {
-			TraceEvent(e.code() == error_code_broken_promise ? SevError : SevWarnAlways, "FastRestoreLoaderError",
-			           self->id())
+			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
+			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreLoaderError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
 			actors.clear(false);
