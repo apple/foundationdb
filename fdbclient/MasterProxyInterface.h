@@ -183,22 +183,19 @@ struct SplitTransaction {
 };
 
 /**
- * Check if a transaction is large and should be split.
- *
- * @param commitTxnRequest Commit transaction request
- * @param numProxies Number of proxies
+ * Flags for split transactions
  */
-extern bool shouldSplitCommitTransactionRequest(const CommitTransactionRequest&, const int);
+enum SplitTransactionFlags {
+	SPLIT_TRANSACTION_MASK = 0b1,
 
-/**
- * Evenly split mutations in a given transaction into multiple transactions
- * per proxy.
- *
- * @param commitTransactionRequest
- * @param numProxies Number of proxies
- */
-extern std::vector<CommitTransactionRequest> splitCommitTransactionRequest(
-    const CommitTransactionRequest& commitTxnRequest, const int numProxies);
+	DISABLE_SPLIT_TRANSACTION = 0b0,
+	ENABLE_SPLIT_TRANSACTION = 0b1,
+
+	CONFLICTS_MASK = 0b110,
+
+	CONFLICTS_EVENLY_DISTRIBUTE = 0b000,
+	CONFLICTS_TO_ONE_PROXY = 0b010
+};
 
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
