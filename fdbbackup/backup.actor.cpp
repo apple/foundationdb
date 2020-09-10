@@ -176,6 +176,11 @@ enum {
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_VERSION, "-v",        SO_NONE },
 	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_HELP,    "-?",        SO_NONE },
+	{ OPT_HELP,    "-h",        SO_NONE },
+	{ OPT_HELP,    "--help",    SO_NONE },
+
+	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
