@@ -1976,27 +1976,21 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<ServerDBInfo>> db,
                                     std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderArray tlogsArray;
-	if (db->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
-		JsonBuilderObject tlogsStatus;
-		tlogsStatus = tlogFetcher(logFaultTolerance, db->get().logSystemConfig.tLogs, address_workers);
-		tlogsStatus["epoch"] = db->get().logSystemConfig.epoch;
-		tlogsStatus["current"] = true;
-		if (db->get().logSystemConfig.recoveredAt.present()) {
-			tlogsStatus["begin_version"] = db->get().logSystemConfig.recoveredAt.get();
-		}
-		tlogsArray.push_back(tlogsStatus);
+	JsonBuilderObject tlogsStatus;
+	tlogsStatus = tlogFetcher(logFaultTolerance, db->get().logSystemConfig.tLogs, address_workers);
+	tlogsStatus["epoch"] = db->get().logSystemConfig.epoch;
+	tlogsStatus["current"] = true;
+	if (db->get().logSystemConfig.recoveredAt.present()) {
+		tlogsStatus["begin_version"] = db->get().logSystemConfig.recoveredAt.get();
 	}
-
-	if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
-	    db->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
-		for (auto it : db->get().logSystemConfig.oldTLogs) {
-			JsonBuilderObject oldTlogsStatus = tlogFetcher(logFaultTolerance, it.tLogs, address_workers);
-			oldTlogsStatus["epoch"] = it.epoch;
-			oldTlogsStatus["current"] = false;
-			oldTlogsStatus["begin_version"] = it.epochBegin;
-			oldTlogsStatus["end_version"] = it.epochEnd;
-			tlogsArray.push_back(oldTlogsStatus);
-		}
+	tlogsArray.push_back(tlogsStatus);
+	for (auto it : db->get().logSystemConfig.oldTLogs) {
+		JsonBuilderObject oldTlogsStatus = tlogFetcher(logFaultTolerance, it.tLogs, address_workers);
+		oldTlogsStatus["epoch"] = it.epoch;
+		oldTlogsStatus["current"] = false;
+		oldTlogsStatus["begin_version"] = it.epochBegin;
+		oldTlogsStatus["end_version"] = it.epochEnd;
+		tlogsArray.push_back(oldTlogsStatus);
 	}
 	return tlogsArray;
 }
@@ -2044,14 +2038,11 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 		zoneFailuresWithoutLosingData = std::min(zoneFailuresWithoutLosingData, minReplicasRemaining - 1);
 	}
 
-	// oldLogFaultTolerance means max failures we can tolerate to lose logs data.
-	zoneFailuresWithoutLosingData = std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance);
-	statusObj["max_zone_failures_without_losing_data"] =
-	    zoneFailuresWithoutLosingData < 0 ? -1 : zoneFailuresWithoutLosingData;
-
-	// without losing availablity
+	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or availability.
+	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
+	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
 	statusObj["max_zone_failures_without_losing_availability"] =
-	    std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData);
+	    std::max(std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData), -1);
 	return statusObj;
 }
 

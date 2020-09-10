@@ -1214,15 +1214,15 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							outputString += format(" (%d without data loss)", dataLoss);
 						}
 
-						// We may have data loss between accepting_commits and storage_recovered (exclusive).
 						if (dataLoss == -1) {
-							ASSERT(availLoss == -1);
-							outputString += format("\nThe database may have data loss and availability loss");
+							ASSERT_WE_THINK(availLoss == -1);
+							outputString += format(
+							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
+							    "following tlog interfaces, otherwise storage servers may never be able to catch "
+							    "up.\n");
 							StatusObjectReader logs;
-							std::string missingLogs;
-							if (statusObjCluster.get("logs", logs)) {
-								for (auto logsObj : logs.obj()) {
-									StatusObjectReader logEpoch(logsObj.second);
+							if (statusObjCluster.has("logs")) {
+								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
 									bool possiblyLosingData;
 									if (logEpoch.get("possibly_losing_data", possiblyLosingData) &&
 									    !possiblyLosingData) {
@@ -1235,27 +1235,25 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 									logEpoch.get("begin_version", beginVersion);
 									logEpoch.get("end_version", endVersion);
 									logEpoch.get("current", current);
-									missingLogs += format("\n%s Log epoch: %ld begin: %ld end: %ld%s, missing "
-									                      "log interfaces(id,address):\n",
-									                      current ? "Current" : "Old", epoch, beginVersion, endVersion,
-									                      endVersion == invalidVersion ? "(unknown)" : "");
-									for (auto logEpochObj : logEpoch.obj()) {
-										StatusObjectReader logInterface(logEpochObj.second);
-										bool healthy;
-										std::string address, id;
-										if (logInterface.get("healthy", healthy) && !healthy) {
-											logInterface.get("id", id);
-											logInterface.get("address", address);
-											missingLogs += format("%s,%s ", id.c_str(), address.c_str());
+									std::string missing_log_interfaces;
+									if (logEpoch.has("log_interfaces")) {
+										for (StatusObjectReader logInterface : logEpoch.last().get_array()) {
+											bool healthy;
+											std::string address, id;
+											if (logInterface.get("healthy", healthy) && !healthy) {
+												logInterface.get("id", id);
+												logInterface.get("address", address);
+												missing_log_interfaces += format("%s,%s ", id.c_str(), address.c_str());
+											}
 										}
 									}
+									outputString += format(
+									    "  %s log epoch: %ld begin: %ld end: %s, missing "
+									    "log interfaces(id,address): %s\n",
+									    current ? "Current" : "Old", epoch, beginVersion,
+									    endVersion == invalidVersion ? "(unknown)" : format("%ld", endVersion).c_str(),
+									    missing_log_interfaces.c_str());
 								}
-							}
-
-							if (!missingLogs.empty()) {
-								outputString += "\nPlease restart following tlog interfaces, otherwise storage "
-								                "servers may never be able to catch up:";
-								outputString += missingLogs;
 							}
 						}
 					}
