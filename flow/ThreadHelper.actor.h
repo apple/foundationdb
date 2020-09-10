@@ -331,6 +331,7 @@ private:
 	int32_t valueReferenceCount;
 
 protected:
+	// The caller of any of these *Unsafe functions should be holding |mutex|
 	bool isReadyUnsafe() const { return status >= Set; }
 	bool isErrorUnsafe() const { return status == ErrorSet; }
 	bool canBeSetUnsafe() const { return status == Unset; }
