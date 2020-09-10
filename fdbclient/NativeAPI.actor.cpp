@@ -135,6 +135,9 @@ std::vector<CommitTransactionRequest> prepareSplitTransactions(const CommitTrans
 		newRequest.transaction.mutations = VectorRef<MutationRef>();
 		newRequest.transaction.read_conflict_ranges = VectorRef<KeyRangeRef>();
 		newRequest.transaction.write_conflict_ranges = VectorRef<KeyRangeRef>();
+
+		// Since only references are copied
+		newRequest.arena.dependsOn(commitTxnRequest.arena);
 	}
 
 	// Distribute the conflicts to proxies
@@ -1173,12 +1176,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
     transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
     transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionsResourceConstrained("ResourceConstrained", cc), transactionsProcessBehind("ProcessBehind", cc),
+    transactionsThrottled("Throttled", cc), transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionsSplitTransactionTimeoutCount("SplitTransactionTimeoutCount", cc), outstandingWatches(0),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    internal(internal), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size())
@@ -1325,10 +1328,11 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
     transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false) {}
+    transactionsProcessBehind("ProcessBehind", cc),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
+    transactionsSplitTransactionTimeoutCount("SplitTransactionTimeout", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT), internal(false) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -3770,6 +3774,7 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
 		} else if (options.commitOnGivenProxy) {
+			ASSERT(req.splitTransaction.present());
 			const auto& proxies = cx->clientInfo->get().masterProxies;
 			const auto& proxy = proxies[req.splitTransaction.get().partIndex];
 			reply = throwErrorOr(brokenPromiseToMaybeDelivered(proxy.commit.tryGetReply(req)));
@@ -3855,11 +3860,13 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 				// We pick a key range which also intersects its write conflict ranges, since that avoids potentially creating conflicts where there otherwise would be none
 				// We make the range as small as possible (a single key range) to minimize conflicts
 				// The intersection will never be empty, because if it were (since !causalWriteRisky) makeSelfConflicting would have been applied automatically to req
-				KeyRangeRef selfConflictingRange = intersects( req.transaction.write_conflict_ranges, req.transaction.read_conflict_ranges ).get();
-
-				TEST(true);  // Waiting for dummy transaction to report commit_unknown_result
-
-				wait( commitDummyTransaction( cx, singleKeyRange(selfConflictingRange.begin), info, tr->options ) );
+				auto intersect =
+				    intersects(req.transaction.write_conflict_ranges, req.transaction.read_conflict_ranges);
+				if (intersect.present()) {
+					KeyRangeRef selfConflictingRange = intersect.get();
+					TEST(true); // Waiting for dummy transaction to report commit_unknown_result
+					wait(commitDummyTransaction(cx, singleKeyRange(selfConflictingRange.begin), info, tr->options));
+				}
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
@@ -4541,6 +4548,12 @@ Future<Void> Transaction::onError( Error const& e ) {
 		double maxBackoff = options.maxBackoff;
 		reset();
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), info.taskID);
+	}
+
+	if (e.code() == error_code_split_transaction_timeout) {
+		++cx->transactionsSplitTransactionTimeoutCount;
+
+		return e;
 	}
 
 	if(g_network->isSimulated() && ++numErrors % 10 == 0)
