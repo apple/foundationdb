@@ -583,6 +583,38 @@ void CommitBatchContext::evaluateBatchSize() {
 	}
 }
 
+ACTOR Future<GetCommitVersionReply> getVersion(CommitBatchContext* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state const bool isSplitTransaction = self->splitTransaction.present();
+	state uint64_t& requestNumber = isSplitTransaction ? pProxyCommitData->splitTransactionCommitVersionRequestNumber
+	                                                   : pProxyCommitData->commitVersionRequestNumber;
+	state uint64_t& mostRecentProcessedRequestNumber =
+	    isSplitTransaction ? pProxyCommitData->mostRecentProcessedSplitTransactionRequestNumber
+	                       : pProxyCommitData->mostRecentProcessedRequestNumber;
+
+	GetCommitVersionRequest req(self->span.context, requestNumber++, mostRecentProcessedRequestNumber,
+	                            pProxyCommitData->dbgid);
+	if (isSplitTransaction) {
+		req.splitTransaction = self->splitTransaction.get();
+	}
+
+	try {
+		state GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
+			pProxyCommitData->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)));
+
+		mostRecentProcessedRequestNumber = versionReply.requestNum;
+
+		return versionReply;
+	} catch(Error& error) {
+		// Pre-terminate the whole process if received a error_code_split_transaction_timeout
+		if (error.code() == error_code_split_transaction_timeout) {
+			self->trs[0].reply.sendError(error);
+		}
+		throw;
+	}
+
+}
+
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
@@ -607,18 +639,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		);
 	}
 
-	GetCommitVersionRequest req(self->span.context, pProxyCommitData->commitVersionRequestNumber++,
-	                            pProxyCommitData->mostRecentProcessedRequestNumber, pProxyCommitData->dbgid);
-	if (self->splitTransaction.present()) {
-		req.splitID = self->splitTransaction.get().id;
-	}
-	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
-		pProxyCommitData->master.getCommitVersion.getReply(
-			req, TaskPriority::ProxyMasterVersionReply
-		)
-	));
-
-	pProxyCommitData->mostRecentProcessedRequestNumber = versionReply.requestNum;
+	state GetCommitVersionReply versionReply = wait(getVersion(self));
 
 	pProxyCommitData->stats.txnCommitVersionAssigned += trs.size();
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;

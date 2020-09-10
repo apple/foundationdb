@@ -466,7 +466,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( SERVER_MEM_LIMIT,                                8LL << 30 );
 
 	// Split transaction
-	init( SPLIT_TRANSACTION_HISTORY_LENGTH,                      5e6 );
+	init( SPLIT_TRANSACTION_HISTORY_LENGTH,                      5.0 );  // Defines how long the cache of split transaction should be kept
 
 	//Ratekeeper
 	bool slowRatekeeper = randomize && BUGGIFY;

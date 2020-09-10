@@ -133,6 +133,7 @@ public:
 
 	using base::exists;
 	using base::get;
+	using base::erase;
 };
 
 #endif // FDBSERVER_PARTMERGER_H
