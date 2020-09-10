@@ -312,12 +312,12 @@ public:
 	}
 
 	virtual void cancel() {
-		// Cancels the action and decrements the reference count by 1
-		// The if statement is just an optimization. It's ok if we take the wrong path due to a race
-		if(isReadyUnsafe())
-			delref();
-		else
-			onMainThreadVoid( [this](){ this->cancelFuture.cancel(); this->delref(); }, NULL );
+		onMainThreadVoid(
+		    [this]() {
+			    this->cancelFuture.cancel();
+			    this->delref();
+		    },
+		    nullptr);
 	}
 
 	void releaseMemory() {
@@ -331,6 +331,7 @@ private:
 	int32_t valueReferenceCount;
 
 protected:
+	// The caller of any of these *Unsafe functions should be holding |mutex|
 	bool isReadyUnsafe() const { return status >= Set; }
 	bool isErrorUnsafe() const { return status == ErrorSet; }
 	bool canBeSetUnsafe() const { return status == Unset; }
