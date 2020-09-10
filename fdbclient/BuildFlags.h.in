@@ -25,6 +25,14 @@
 
 #include "fdbclient/JSONDoc.h"
 
+#ifdef __GLIBC__
+#define C_VERSION_MAJOR __GLIBC__
+#define C_VERSION_MINOR __GLIBC_MINOR__
+#else
+#define C_VERSION_MAJOR 0
+#define C_VERSION_MINOR 0
+#endif
+
 // FDB info.
 const std::string kGitHash = "@CURRENT_GIT_VERSION_WNL@";
 const std::string kFdbVersion = "@FDB_VERSION@";
@@ -42,8 +50,8 @@ const std::string kCMakeVersion = "@CMAKE_VERSION@";
 const std::string kCCacheEnabled = "@USE_CCACHE@";
 
 // GNU C library major and minor versions.
-constexpr int kCVersionMajor = __GLIBC__;
-constexpr int kCVersionMinor = __GLIBC_MINOR__;
+constexpr int kCVersionMajor = C_VERSION_MAJOR;
+constexpr int kCVersionMinor = C_VERSION_MINOR;
 
 // C++ standard. Possible values are 201402L, 201703L, etc...
 constexpr int kCppStandard = __cplusplus;
