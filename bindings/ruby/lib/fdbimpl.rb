@@ -848,7 +848,7 @@ module FDB
       Int64Future.new(FDBC.fdb_transaction_get_estimated_range_size_bytes(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize))
     end
 
-    def get_range_split_points(begin_key, end_key, chunkSize)
+    def get_range_split_points(begin_key, end_key, chunk_size)
       bkey = FDB.key_to_bytes(begin_key)
       ekey = FDB.key_to_bytes(end_key)
       FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunkSize))

@@ -97,7 +97,7 @@ func (s Snapshot) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	)
 }
 
-// GetRangeSplitPoints will return a list of keys that can devide the given range into
+// GetRangeSplitPoints will return a list of keys that can divide the given range into
 // chunks based on the chunk size provided.
 func (s Snapshot) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
 	beginKey, endKey := r.FDBRangeKeys()

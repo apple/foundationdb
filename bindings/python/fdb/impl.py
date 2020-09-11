@@ -472,7 +472,7 @@ class TransactionRead(_FDBBase):
             end_key, len(end_key)
             ))
     
-    def get_range_split_points(self, begin_key, end_key, chunkSize):
+    def get_range_split_points(self, begin_key, end_key, chunk_size):
         if begin_key is None or end_key is None:
             raise Exception('Invalid begin key or end key')
         return FutureKeyArray(self.capi.fdb_transaction_get_range_split_points(

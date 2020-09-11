@@ -348,7 +348,7 @@ func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize in
 	}
 }
 
-// GetRangeSplitPoints will return a list of keys that can devide the given range into
+// GetRangeSplitPoints will return a list of keys that can divide the given range into
 // chunks based on the chunk size provided.
 func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
 	beginKey, endKey := r.FDBRangeKeys()

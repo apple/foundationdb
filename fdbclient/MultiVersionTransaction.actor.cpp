@@ -347,7 +347,7 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
 	loadClientFunction(&api->futureGetStringArray, lib, fdbCPath, "fdb_future_get_string_array");
-	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array");
+	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
 	loadClientFunction(&api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array");
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback");
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel");
