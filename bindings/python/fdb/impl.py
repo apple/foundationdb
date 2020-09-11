@@ -462,10 +462,8 @@ class TransactionRead(_FDBBase):
         return self.get(key)
     
     def get_estimated_range_size_bytes(self, begin_key, end_key):
-        if begin_key is None:
-            begin_key = b''
-        if end_key is None:
-            end_key = b'\xff'
+        if begin_key is None or end_key is None:
+            raise Exception('Invalid begin key or end key')
         return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
             self.tpointer,
             begin_key, len(begin_key),
@@ -751,7 +749,7 @@ class FutureKeyArray(Future):
         ks = ctypes.pointer(KeyStruct())
         count = ctypes.c_int()
         self.capi.fdb_future_get_key_array(self.fpointer, ctypes.byref(ks), ctypes.byref(count))
-        return ([ctypes.string_at(x.key, x.key_length) for x in ks[0:count.value]], count.value)
+        return [ctypes.string_at(x.key, x.key_length) for x in ks[0:count.value]]
 
 
 class FutureStringArray(Future):

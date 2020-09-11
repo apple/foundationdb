@@ -488,10 +488,10 @@ module FDB
       FDBC.check_error FDBC.fdb_future_get_key_array(@fpointer, kvs, count)
       ks = ks.read_pointer
 
-      [(0..count.read_int-1).map{|i|
+      (0..count.read_int-1).map{|i|
         x = FDBC::KeyStruct.new(ks + (i * FDBC::KeyStruct.size))
         x[:key].read_bytes(x[:key_length])
-       }, count.read_int]
+       }
     end
   end
 
