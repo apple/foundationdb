@@ -1028,12 +1028,13 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 	state JsonBuilderObject message;
 	state Transaction tr(cx);
 	try {
-		std::vector<Future<TraceEventFields>> futures;
-		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0));
-		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0));
-		std::vector<TraceEventFields> msgs = wait(getAll(futures));
+		state Future<TraceEventFields> mdActiveGensF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
+		state Future<TraceEventFields> mdF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0);
+		state Future<Version> rvF = timeoutError(tr.getReadVersion(), 1.0);
 
-		const TraceEventFields& md = msgs[1];
+		wait(success(mdActiveGensF) && success(mdF) && success(rvF));
+
+		const TraceEventFields& md = mdF.get();
 		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -1041,11 +1042,11 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
 
+		Version rv = rvF.get();
 		std::string fullyRecoveredAtVersion;
 		if (mStatusCode == RecoveryStatus::fully_recovered && md.tryGetValue("FullyRecoveredAtVersion", fullyRecoveredAtVersion)) {
-			Version rv = wait(tr.getReadVersion());
 			int64_t fullyRecoveredAtVersion = md.getInt64("FullyRecoveredAtVersion");
-			double lastFullyRecoveredSecondsAgo = std::max(0, rv - fullyRecoveredAtVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+			double lastFullyRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv - fullyRecoveredAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 			message["time_since_last_fully_recovered_seconds"] = lastFullyRecoveredSecondsAgo;
 		} else {
 			message["time_since_last_fully_recovered_seconds"] = -1;
@@ -1070,7 +1071,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
-		const TraceEventFields& mdActiveGens = msgs[0];
+		const TraceEventFields& mdActiveGens = mdActiveGensF.get();
 		if(mdActiveGens.size()) {
 			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
@@ -2396,7 +2397,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int) RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state JsonBuilderObject recoveryStateStatus = wait(recoveryStateStatusFetcher(cx, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();

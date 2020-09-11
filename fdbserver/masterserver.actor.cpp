@@ -1274,7 +1274,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", RecoveryStatus::fully_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
-			.detail("FullyRecoveredAtVersion", self->version);
+			.detail("FullyRecoveredAtVersion", self->version)
 			.trackLatest("MasterRecoveryState");
 
 			TraceEvent("MasterRecoveryGenerations", self->dbgid)
