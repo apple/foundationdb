@@ -1024,9 +1024,9 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 	return clientStatus;
 }
 
-ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
+ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
 	state JsonBuilderObject message;
-
+	state Transaction tr(cx);
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0));
@@ -1041,12 +1041,11 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
 
-		std::string lastFullyRecoveredTimeS;
-		if (mStatusCode == RecoveryStatus::fully_recovered && md.tryGetValue("Time", lastFullyRecoveredTimeS)) {
-			double lastFullyRecoveredTime = atof(lastFullyRecoveredTimeS.c_str());
-			// `lastFullyRecoveredTime` is the timestamp taken on master so the time interval calculated below may not
-			// be accurate due to the clock skew across the network, but it's good enough for the purpose it's used.
-			message["time_since_last_fully_recovered_seconds"] = now() - lastFullyRecoveredTime;
+		if (mStatusCode == RecoveryStatus::fully_recovered) {
+			Version rv = wait(tr.getReadVersion());
+			int64_t fullyRecoveredAtVersion = md.getInt64("FullyRecoveredAtVersion");
+			double lastFullyRecoveredSecondsAgo = std::max(0, rv - fullyRecoveredAtVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+			message["time_since_last_fully_recovered_seconds"] = lastFullyRecoveredSecondsAgo;
 		} else {
 			message["time_since_last_fully_recovered_seconds"] = -1;
 		}
