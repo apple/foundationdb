@@ -24,6 +24,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 struct IncrementalBackupWorkload : TestWorkload {
 
@@ -32,12 +33,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 	FileBackupAgent backupAgent;
 	bool submitOnly;
 	bool restoreOnly;
+	bool checkBeginVersion;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
 		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
+		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
 
 	virtual std::string description() { return "IncrementalBackup"; }
@@ -73,11 +76,28 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (self->restoreOnly) {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
+			state Version beginVersion = invalidVersion;
 			TraceEvent("IBackupRestoreAttempt");
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			// TODO: add testing scenario for atomics and beginVersion
-			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
-			                                       true, -1, true, normalKeys, Key(), Key(), true, true)));
+			if (self->checkBeginVersion) {
+				TraceEvent("IBackupReadSystemKeys");
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				loop {
+					try {
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+						Optional<Value> versionValue = wait(tr->get(snapshotEndVersionKey));
+						beginVersion = BinaryReader::fromStringRef<Version>(versionValue.get(), Unversioned());
+						break;
+					} catch (Error& e) {
+						TraceEvent("IBackupReadSystemKeysError").error(e);
+						wait(tr->onError(e));
+					}
+				}
+			}
+			wait(
+			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
+			                                      true, -1, true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}
 		return Void();
