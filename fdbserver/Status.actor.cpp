@@ -1030,11 +1030,10 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 	try {
 		std::vector<Future<TraceEventFields>> futures;
 		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0));
-		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryFullyRecovered") ) ), 1.0));
 		futures.push_back(timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0));
 		std::vector<TraceEventFields> msgs = wait(getAll(futures));
 
-		const TraceEventFields& md = msgs[2];
+		const TraceEventFields& md = msgs[1];
 		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -1042,9 +1041,8 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
 
-		const TraceEventFields& mLastRecoveryMsg = msgs[1];
 		std::string lastFullyRecoveredTimeS;
-		if (mLastRecoveryMsg.tryGetValue("Time", lastFullyRecoveredTimeS)) {
+		if (mStatusCode == RecoveryStatus::fully_recovered && md.tryGetValue("Time", lastFullyRecoveredTimeS)) {
 			double lastFullyRecoveredTime = atof(lastFullyRecoveredTimeS.c_str());
 			// `lastFullyRecoveredTime` is the timestamp taken on master so the time interval calculated below may not
 			// be accurate due to the clock skew across the network, but it's good enough for the purpose it's used.
