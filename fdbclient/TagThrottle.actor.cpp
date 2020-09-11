@@ -326,6 +326,7 @@ namespace ThrottleApi {
 		loop {
 			try {
 				state Standalone<RangeResultRef> tags = wait(tr.getRange(begin, end, 1000));
+				state uint64_t unthrottledTags = 0;
 				uint64_t manualUnthrottledTags = 0;
 				for(auto tag : tags) {
 					if(onlyExpiredThrottles) {
@@ -346,13 +347,14 @@ namespace ThrottleApi {
 
 					removed = true;
 					tr.clear(tag.key);
+					unthrottledTags ++;
 				}
 
 				if(manualUnthrottledTags > 0) {
 					wait(updateThrottleCount(&tr, -manualUnthrottledTags));
 				}
 
-				if(removed) {
+				if(unthrottledTags > 0) {
 					signalThrottleChange(tr);
 				}
 
