@@ -812,7 +812,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 					if(tagValue.expirationTime == 0 || tagValue.expirationTime > now() + tagValue.initialDuration) {
 						TEST(true); // Converting tag throttle duration to absolute time
 						tagValue.expirationTime = now() + tagValue.initialDuration;
-						BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
+						BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 						wr << tagValue;
 						state Value value = wr.toValue();
 
@@ -906,6 +906,8 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 
 void tryAutoThrottleTag(RatekeeperData* self, TransactionTag tag, double rate, double busyness,
                         TagThrottledReason reason) {
+	// NOTE: before the comparison with MIN_TAG_COST, the busiest tag rate also compares with MIN_TAG_PAGES_RATE
+	// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
 	if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 		TEST(true); // Transaction tag auto-throttled
 		Optional<double> clientRate = self->throttledTags.autoThrottleTag(self->id, tag, busyness);
