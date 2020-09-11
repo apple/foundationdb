@@ -100,10 +100,7 @@ struct StorageServerInterface {
 				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
 				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
 				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
-				if(ar.protocolVersion().hasRangeSplit()) {
-					getRangeSplitPoints =
-						RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				}
+				getRangeSplitPoints = RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -113,6 +110,8 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
+			getReadHotRanges.getEndpoint();
+			getRangeSplitPoints.getEndpoint();
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
