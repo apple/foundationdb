@@ -851,7 +851,7 @@ module FDB
     def get_range_split_points(begin_key, end_key, chunk_size)
       bkey = FDB.key_to_bytes(begin_key)
       ekey = FDB.key_to_bytes(end_key)
-      FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunkSize))
+      FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunk_size))
     end
 
   end

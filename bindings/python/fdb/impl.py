@@ -477,7 +477,7 @@ class TransactionRead(_FDBBase):
             self.tpointer,
             begin_key, len(begin_key),
             end_key, len(end_key),
-            chunkSize
+            chunk_size
             ))
 
 class Transaction(TransactionRead):
