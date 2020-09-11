@@ -103,7 +103,10 @@ function displayMessage
 }
 
 # Create the directories used by the server.
-function createDirectories {
+function createDirectories
+{
+	local status=0
+
 	# Display user message
 	if ! displayMessage "Creating directories"
 	then
@@ -148,7 +151,10 @@ function createDirectories {
 }
 
 # Create a cluster file for the local cluster.
-function createClusterFile {
+function createClusterFile
+{
+	local status=0
+
 	if [ "${status}" -ne 0 ]; then
 		:
 	# Display user message
@@ -176,7 +182,10 @@ function createClusterFile {
 }
 
 # Stop the Cluster from running.
-function stopCluster {
+function stopCluster
+{
+	local status=0
+
 	# Add an audit entry, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
 		printf '%-15s (%6s)  Stopping cluster %-20s (%6s): %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${CLUSTERSTRING}" "${FDBSERVERID}" >> "${AUDITLOG}"
@@ -189,8 +198,15 @@ function stopCluster {
 		let status="${status} + 1"
 	elif "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec "kill; kill ${CLUSTERSTRING}; sleep 3" --timeout 120 &>> "${LOGDIR}/fdbcli-kill.log"
 	then
-		log "Killed cluster (${FDBSERVERID}) via cli"
-
+		# Ensure that process is dead
+		if ! kill -0 "${FDBSERVERID}" 2> /dev/null; then
+			log "Killed cluster (${FDBSERVERID}) via cli"
+		elif ! kill -9 "${FDBSERVERID}"; then
+			log "Failed to kill FDB Server process (${FDBSERVERID}) via cli or kill command"
+			let status="${status} + 1"
+		else
+			log "Forcibly killed FDB Server process (${FDBSERVERID}) since cli failed"
+		fi
 	elif ! kill -9 "${FDBSERVERID}"; then
 		log "Failed to forcibly kill FDB Server process (${FDBSERVERID})"
 		let status="${status} + 1"
@@ -201,7 +217,10 @@ function stopCluster {
 }
 
 # Start the server running.
-function startFdbServer {
+function startFdbServer
+{
+	local status=0
+
 	# Add an audit entry, if enabled
 	if [ "${AUDITCLUSTER}" -gt 0 ]; then
 		printf '%-15s (%6s)  Starting cluster %-20s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "${$}" "${CLUSTERSTRING}" >> "${AUDITLOG}"
@@ -226,14 +245,17 @@ function startFdbServer {
 		log "FDB Server start failed because no process"
 		let status="${status} + 1"
 	elif ! kill -0 "${FDBSERVERID}" ; then
-		log "FDB Server start failed because no perms"
+		log "FDB Server start failed because process terminated unexpectedly"
 		let status="${status} + 1"
 	fi
 
 	return ${status}
 }
 
-function getStatus {
+function getStatus
+{
+	local status=0
+
 	if [ "${status}" -ne 0 ]; then
 		:
 	elif ! date &>> "${LOGDIR}/fdbclient.log"
@@ -254,8 +276,10 @@ function getStatus {
 }
 
 # Verify that the cluster is available.
-function verifyAvailable {
+function verifyAvailable
+{
 	local status=0
+
 	if [ -z "${FDBSERVERID}" ]; then
 		log "FDB Server process is not defined."
 		let status="${status} + 1"
@@ -283,7 +307,10 @@ function verifyAvailable {
 }
 
 # Configure the database on the server.
-function createDatabase {
+function createDatabase
+{
+	local status=0
+
 	if [ "${status}" -ne 0 ]; then
 		:
 	# Ensure that the server is running
@@ -336,7 +363,10 @@ function createDatabase {
 }
 
 # Begin the local cluster from scratch.
-function startCluster {
+function startCluster
+{
+	local status=0
+
 	if [ "${status}" -ne 0 ]; then
 		:
 	elif ! createDirectories
