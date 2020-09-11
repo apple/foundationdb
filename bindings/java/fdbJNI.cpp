@@ -377,42 +377,6 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyArray_FutureKeyAr
 
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1getSummary(JNIEnv *jenv, jobject, jlong future) {
-	if( !future ) {
-		throwParamNotNull(jenv);
-		return JNI_NULL;
-	}
- 
-	FDBFuture *f = (FDBFuture *)future;
-
-	const FDBKeyValue *kvs;
-	int count;
-	fdb_bool_t more;
-	fdb_error_t err = fdb_future_get_keyvalue_array( f, &kvs, &count, &more );
-	if( err ) {
-		safeThrow( jenv, getThrowable( jenv, err ) );
-		return JNI_NULL;
-	}
-
-	jbyteArray lastKey = JNI_NULL;
-	if(count) {
-		lastKey = jenv->NewByteArray(kvs[count - 1].key_length);
-		if( !lastKey ) {
-			if( !jenv->ExceptionOccurred() )
-				throwOutOfMem(jenv);
-			return JNI_NULL;
-		}
-
-		jenv->SetByteArrayRegion(lastKey, 0, kvs[count - 1].key_length, (jbyte *)kvs[count - 1].key);
-	}
-
-	jobject result = jenv->NewObject(range_result_summary_class, range_result_summary_init, lastKey, count, (jboolean)more);
-	if( jenv->ExceptionOccurred() )
-		return JNI_NULL;
-
-	return result;
-}
-
 
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1get(JNIEnv *jenv, jobject, jlong future) {
