@@ -733,7 +733,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	bool generateFearless = simple ? false : (minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6 ) : deterministicRandom()->randomInt( 1, 4 ) );
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
-	if (deterministicRandom()->random01() < 0.25) db.proxyCount = deterministicRandom()->randomInt(1, 7);
+	if (deterministicRandom()->random01() < 0.25) db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
 	if (deterministicRandom()->random01() < 0.25) db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
@@ -770,7 +770,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	//  set_config("memory-radixtree-beta");
 	if(simple) {
 		db.desiredTLogCount = 1;
-		db.proxyCount = 1;
+		db.commitProxyCount = 1;
 		db.grvProxyCount = 1;
 		db.resolverCount = 1;
 	}

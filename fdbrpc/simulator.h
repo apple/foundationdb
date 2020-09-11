@@ -97,7 +97,8 @@ public:
 				case ProcessClass::StorageClass: return true;
 				case ProcessClass::TransactionClass: return true;
 				case ProcessClass::ResolutionClass: return false;
-				case ProcessClass::ProxyClass: return false;
+			    case ProcessClass::CommitProxyClass:
+				    return false;
 			    case ProcessClass::GrvProxyClass:
 				    return false;
 			    case ProcessClass::MasterClass:

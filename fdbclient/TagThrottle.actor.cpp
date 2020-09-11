@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/TagThrottle.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 
 #include "flow/actorcompiler.h" // has to be last include

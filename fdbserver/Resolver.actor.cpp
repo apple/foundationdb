@@ -243,7 +243,7 @@ ACTOR Future<Void> resolveBatch(
 		// SOMEDAY: This is O(n) in number of proxies. O(log n) solution using appropriate data structure?
 		Version oldestProxyVersion = req.version;
 		for(auto itr = self->proxyInfoMap.begin(); itr != self->proxyInfoMap.end(); ++itr) {
-			//TraceEvent("ResolveBatchProxyVersion", self->dbgid).detail("Proxy", itr->first).detail("Version", itr->second.lastVersion);
+			//TraceEvent("ResolveBatchProxyVersion", self->dbgid).detail("CommitProxy", itr->first).detail("Version", itr->second.lastVersion);
 			if(itr->first.isValid()) { // Don't consider the first master request
 				oldestProxyVersion = std::min(itr->second.lastVersion, oldestProxyVersion);
 			}
@@ -311,7 +311,7 @@ ACTOR Future<Void> resolverCore(
 	ResolverInterface resolver,
 	InitializeResolverRequest initReq)
 {
-	state Reference<Resolver> self( new Resolver(resolver.id(), initReq.proxyCount, initReq.resolverCount) );
+	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
 	state ActorCollection actors(false);
 	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
 	actors.add( waitFailureServer(resolver.waitFailure.getFuture()) );

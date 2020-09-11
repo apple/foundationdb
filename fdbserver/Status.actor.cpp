@@ -574,7 +574,7 @@ struct RolesInfo {
 			*pMetricVersion = metricVersion;
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
-	JsonBuilderObject& addRole(std::string const& role, MasterProxyInterface& iface, EventMap const& metrics) {
+	JsonBuilderObject& addRole(std::string const& role, CommitProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
@@ -646,11 +646,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
-    vector<std::pair<TLogInterface, EventMap>> tLogs,
-    vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
-    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
-    Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
+    vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
+    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies, ServerCoordinators coordinators, Database cx,
+    Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone,
+    std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
 
@@ -736,9 +735,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addCoordinatorRole(coordinator);
 	}
 
-	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
-	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
-		roles.addRole( "proxy", proxy->first, proxy->second );
+	state std::vector<std::pair<CommitProxyInterface, EventMap>>::iterator commit_proxy;
+	for (commit_proxy = commitProxies.begin(); commit_proxy != commitProxies.end(); ++commit_proxy) {
+		roles.addRole("commit_proxy", commit_proxy->first, commit_proxy->second);
 		wait(yield());
 	}
 
@@ -1064,14 +1063,14 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
 			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
-			int requiredProxies = atoi( md.getValue("RequiredProxies").c_str() );
+			int requiredProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
 			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
 			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
 			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredProxies));
 			//int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
-			message["required_proxies"] = requiredProxies;
+			message["required_commit_proxies"] = requiredProxies;
 			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
@@ -1669,9 +1668,11 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().client.masterProxies, address_workers, std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
+ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
+    Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	vector<std::pair<CommitProxyInterface, EventMap>> results =
+	    wait(getServerMetrics(db->get().client.commitProxies, address_workers,
+	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
 
 	return results;
 }
@@ -1755,16 +1756,18 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Writes and conflicts
 	try {
-		state vector<Future<TraceEventFields>> proxyStatFutures;
+		state vector<Future<TraceEventFields>> commitProxyStatFutures;
 		state vector<Future<TraceEventFields>> grvProxyStatFutures;
 		std::map<NetworkAddress, WorkerDetails> workersMap;
 		for (auto const& w : workers) {
 			workersMap[w.interf.address()] = w;
 		}
-		for (auto &p : db->get().client.masterProxies) {
+		for (auto& p : db->get().client.commitProxies) {
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
-				proxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))), 1.0));
+				commitProxyStatFutures.push_back(timeoutError(
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))),
+				    1.0));
 			else
 				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
 		}
@@ -1775,7 +1778,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			else
 				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
 		}
-		state vector<TraceEventFields> proxyStats = wait(getAll(proxyStatFutures));
+		state vector<TraceEventFields> commitProxyStats = wait(getAll(commitProxyStatFutures));
 		state vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
 
 		StatusCounter txnStartOut;
@@ -1798,14 +1801,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("TxnRequestErrors")));
 		}
 
-		for (auto &ps : proxyStats) {
-			mutations.updateValues( StatusCounter(ps.getValue("Mutations")) );
-			mutationBytes.updateValues( StatusCounter(ps.getValue("MutationBytes")) );
-			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
-			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
-			txnKeyLocationOut.updateValues( StatusCounter(ps.getValue("KeyServerLocationOut")) );
-			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("KeyServerLocationErrors")) );
-			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnCommitErrors")) );
+		for (auto& cps : commitProxyStats) {
+			mutations.updateValues(StatusCounter(cps.getValue("Mutations")));
+			mutationBytes.updateValues(StatusCounter(cps.getValue("MutationBytes")));
+			txnConflicts.updateValues(StatusCounter(cps.getValue("TxnConflicts")));
+			txnCommitOutSuccess.updateValues(StatusCounter(cps.getValue("TxnCommitOutSuccess")));
+			txnKeyLocationOut.updateValues(StatusCounter(cps.getValue("KeyServerLocationOut")));
+			txnMemoryErrors.updateValues(StatusCounter(cps.getValue("KeyServerLocationErrors")));
+			txnMemoryErrors.updateValues(StatusCounter(cps.getValue("TxnCommitErrors")));
 		}
 
 		operationsObj["writes"] = mutations.getStatus();
@@ -2440,7 +2443,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		    getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
 		state vector<std::pair<TLogInterface, EventMap>> tLogs;
-		state vector<std::pair<MasterProxyInterface, EventMap>> proxies;
+		state vector<std::pair<CommitProxyInterface, EventMap>> commit_proxies;
 		state vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
@@ -2504,7 +2507,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
-			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
+			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture = errorOr(getGrvProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
@@ -2587,13 +2591,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				messages.push_back(JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
 			}
 
-			// ...also proxies
-			ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>> _proxies = wait(proxyFuture);
-			if (_proxies.present()) {
-				proxies = _proxies.get();
-			}
-			else {
-				messages.push_back(JsonBuilder::makeMessage("proxies_error", "Timed out trying to retrieve proxies."));
+			// ...also commit proxies
+			ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>> _commit_proxies = wait(commitProxyFuture);
+			if (_commit_proxies.present()) {
+				commit_proxies = _commit_proxies.get();
+			} else {
+				messages.push_back(
+				    JsonBuilder::makeMessage("commit_proxies_error", "Timed out trying to retrieve commit proxies."));
 			}
 
 			// ...also grv proxies
@@ -2614,12 +2618,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
-		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies,
-		                                                            grvProxies, coordinators, cx, configuration,
-		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
-		                                                            &status_incomplete_reasons));
+		JsonBuilderObject processStatus = wait(processStatusFetcher(
+		    db, workers, pMetrics, mMetrics, networkMetrics, latestError, traceFileOpenErrors, programStarts,
+		    processIssues, storageServers, tLogs, commit_proxies, grvProxies, coordinators, cx, configuration,
+		    loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
 

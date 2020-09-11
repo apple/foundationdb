@@ -32,7 +32,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
@@ -3974,9 +3974,13 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.masterProxies) );
+		state Reference<CommitProxyInfo> proxies(new CommitProxyInfo(self->db->get().client.commitProxies));
 		choose {
-			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
+			when(GetStorageServerRejoinInfoReply _rep =
+			         wait(proxies->size()
+			                  ? basicLoadBalance(proxies, &CommitProxyInterface::getStorageServerRejoinInfo,
+			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
+			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 				try {
 					tr.reset();

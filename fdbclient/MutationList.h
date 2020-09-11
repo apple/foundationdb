@@ -151,7 +151,8 @@ public:
 		}
 	}
 
-	//FIXME: this is re-implemented on the master proxy to include a yield, any changes to this function should also done there
+	// FIXME: this is re-implemented on the commit proxy to include a yield, any changes to this function should also
+	// done there
 	template <class Ar>
 	void serialize_save( Ar& ar ) const {
 		serializer(ar, totalBytes);

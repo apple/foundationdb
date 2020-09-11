@@ -21,7 +21,7 @@
 #include "fdbclient/Notified.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -443,13 +443,13 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 							TEST(true); // Auto TPS rate is unlimited
 						}
 						else {
-							TEST(true); // Proxy returning tag throttle
+							TEST(true); // GRV proxy returning tag throttle
 							reply.tagThrottleInfo[tag.first] = tagItr->second;
 						}
 					}
 					else {
 						// This isn't required, but we might as well
-						TEST(true); // Proxy expiring tag throttle
+						TEST(true); // GRV proxy expiring tag throttle
 						priorityThrottledTags.erase(tagItr);
 					}
 				}

@@ -37,10 +37,11 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
+	                                  // often, so that versions always advance smoothly
 
 	// TLogs
-	double TLOG_TIMEOUT;  // tlog OR master proxy failure - master's reaction time
+	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
@@ -262,7 +263,7 @@ public:
 	double POLLING_FREQUENCY;
 	double HEARTBEAT_FREQUENCY;
 
-	// Master Proxy
+	// Commit CommitProxy
 	double START_TRANSACTION_BATCH_INTERVAL_MIN;
 	double START_TRANSACTION_BATCH_INTERVAL_MAX;
 	double START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;

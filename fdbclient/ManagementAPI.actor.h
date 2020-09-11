@@ -86,7 +86,7 @@ struct ConfigureAutoResult {
 	int32_t machines;
 
 	std::string old_replication;
-	int32_t old_proxies;
+	int32_t old_commit_proxies;
 	int32_t old_grv_proxies;
 	int32_t old_resolvers;
 	int32_t old_logs;
@@ -94,23 +94,24 @@ struct ConfigureAutoResult {
 	int32_t old_machines_with_transaction;
 
 	std::string auto_replication;
-	int32_t auto_proxies;
+	int32_t auto_commit_proxies;
 	int32_t auto_grv_proxies;
 	int32_t auto_resolvers;
 	int32_t auto_logs;
 	int32_t auto_processes_with_transaction;
 	int32_t auto_machines_with_transaction;
 
-	int32_t desired_proxies;
+	int32_t desired_commit_proxies;
 	int32_t desired_grv_proxies;
 	int32_t desired_resolvers;
 	int32_t desired_logs;
 
 	ConfigureAutoResult()
-	  : processes(-1), machines(-1), old_proxies(-1), old_grv_proxies(-1), old_resolvers(-1), old_logs(-1),
-	    old_processes_with_transaction(-1), old_machines_with_transaction(-1), auto_proxies(-1), auto_grv_proxies(-1),
-	    auto_resolvers(-1), auto_logs(-1), auto_processes_with_transaction(-1), auto_machines_with_transaction(-1),
-	    desired_proxies(-1), desired_grv_proxies(-1), desired_resolvers(-1), desired_logs(-1) {}
+	  : processes(-1), machines(-1), old_commit_proxies(-1), old_grv_proxies(-1), old_resolvers(-1), old_logs(-1),
+	    old_processes_with_transaction(-1), old_machines_with_transaction(-1), auto_commit_proxies(-1),
+	    auto_grv_proxies(-1), auto_resolvers(-1), auto_logs(-1), auto_processes_with_transaction(-1),
+	    auto_machines_with_transaction(-1), desired_commit_proxies(-1), desired_grv_proxies(-1), desired_resolvers(-1),
+	    desired_logs(-1) {}
 
 	bool isValid() const { return processes != -1; }
 };

@@ -753,20 +753,21 @@ public:
 			}
 		}
 
-		auto first_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit,
-		                                                req.configuration, id_used);
+		auto first_commit_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::CommitProxy,
+		                                                       ProcessClass::ExcludeFit, req.configuration, id_used);
 		auto first_grv_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit,
 		                                                    req.configuration, id_used);
 		auto first_resolver = getWorkerForRoleInDatacenter(dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit,
 		                                                   req.configuration, id_used);
 
-		auto proxies = getWorkersForRoleInDatacenter(dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(),
-		                                             req.configuration, id_used, first_proxy);
+		auto commit_proxies =
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::CommitProxy, req.configuration.getDesiredCommitProxies(),
+		                                  req.configuration, id_used, first_commit_proxy);
 		auto grv_proxies =
 		    getWorkersForRoleInDatacenter(dcId, ProcessClass::GrvProxy, req.configuration.getDesiredGrvProxies(),
 		                                  req.configuration, id_used, first_grv_proxy);
 		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
-		for (int i = 0; i < proxies.size(); i++) result.masterProxies.push_back(proxies[i].interf);
+		for (int i = 0; i < commit_proxies.size(); i++) result.commitProxies.push_back(commit_proxies[i].interf);
 		for (int i = 0; i < grv_proxies.size(); i++) result.grvProxies.push_back(grv_proxies[i].interf);
 		for(int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
@@ -800,9 +801,9 @@ public:
 		      RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId),
 		                  ProcessClass::TLog)
 		          .betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog))) ||
-		     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(),
-		                 ProcessClass::Proxy)
-		         .betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
+		                 ProcessClass::CommitProxy)
+		         .betterCount(RoleFitness(commit_proxies, ProcessClass::CommitProxy)) ||
 		     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS, req.configuration.getDesiredGrvProxies(),
 		                 ProcessClass::GrvProxy)
 		         .betterCount(RoleFitness(grv_proxies, ProcessClass::GrvProxy)) ||
@@ -911,22 +912,22 @@ public:
 				try {
 					//SOMEDAY: recruitment in other DCs besides the clusterControllerDcID will not account for the processes used by the master and cluster controller properly.
 					auto used = id_used;
-					auto first_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit,
-					                                                req.configuration, used);
+					auto first_commit_proxy = getWorkerForRoleInDatacenter(
+					    dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, req.configuration, used);
 					auto first_grv_proxy = getWorkerForRoleInDatacenter(
 					    dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, req.configuration, used);
 					auto first_resolver = getWorkerForRoleInDatacenter(
 					    dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used);
 
-					auto proxies =
-					    getWorkersForRoleInDatacenter(dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(),
-					                                  req.configuration, used, first_proxy);
+					auto commit_proxies = getWorkersForRoleInDatacenter(dcId, ProcessClass::CommitProxy,
+					                                                    req.configuration.getDesiredCommitProxies(),
+					                                                    req.configuration, used, first_commit_proxy);
 					auto grv_proxies = getWorkersForRoleInDatacenter(dcId, ProcessClass::GrvProxy,
 					                                                 req.configuration.getDesiredGrvProxies(),
 					                                                 req.configuration, used, first_grv_proxy);
 					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
 
-					RoleFitnessPair fitness(RoleFitness(proxies, ProcessClass::Proxy),
+					RoleFitnessPair fitness(RoleFitness(commit_proxies, ProcessClass::CommitProxy),
 					                        RoleFitness(grv_proxies, ProcessClass::GrvProxy),
 					                        RoleFitness(resolvers, ProcessClass::Resolver));
 
@@ -936,8 +937,8 @@ public:
 						for (int i = 0; i < resolvers.size(); i++) {
 							result.resolvers.push_back(resolvers[i].interf);
 						}
-						for (int i = 0; i < proxies.size(); i++) {
-							result.masterProxies.push_back(proxies[i].interf);
+						for (int i = 0; i < commit_proxies.size(); i++) {
+							result.commitProxies.push_back(commit_proxies[i].interf);
 						}
 						for (int i = 0; i < grv_proxies.size(); i++) {
 							result.grvProxies.push_back(grv_proxies[i].interf);
@@ -982,8 +983,8 @@ public:
 			    .detail("Replication", req.configuration.tLogReplicationFactor)
 			    .detail("DesiredLogs", req.configuration.getDesiredLogs())
 			    .detail("ActualLogs", result.tLogs.size())
-			    .detail("DesiredProxies", req.configuration.getDesiredProxies())
-			    .detail("ActualProxies", result.masterProxies.size())
+			    .detail("DesiredCommitProxies", req.configuration.getDesiredCommitProxies())
+			    .detail("ActualCommitProxies", result.commitProxies.size())
 			    .detail("DesiredGrvProxies", req.configuration.getDesiredGrvProxies())
 			    .detail("ActualGrvProxies", result.grvProxies.size())
 			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
@@ -993,8 +994,8 @@ public:
 			    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(),
 			                 ProcessClass::TLog)
 			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-			     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(),
-			                 ProcessClass::Proxy)
+			     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
+			                 ProcessClass::CommitProxy)
 			         .betterCount(bestFitness.proxy) ||
 			     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS, req.configuration.getDesiredGrvProxies(),
 			                 ProcessClass::GrvProxy)
@@ -1028,7 +1029,8 @@ public:
 			}
 
 			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
-			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
+			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit,
+			                             db.config, id_used, true);
 			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config,
 			                             id_used, true);
 
@@ -1129,15 +1131,13 @@ public:
 			}
 		}
 
-		// Get proxy classes
-		std::vector<WorkerDetails> proxyClasses;
-		for(auto& it : dbi.client.masterProxies) {
-			auto masterProxyWorker = id_worker.find(it.processId);
-			if ( masterProxyWorker == id_worker.end() )
-				return false;
-			if ( masterProxyWorker->second.priorityInfo.isExcluded )
-				return true;
-			proxyClasses.push_back(masterProxyWorker->second.details);
+		// Get commit proxy classes
+		std::vector<WorkerDetails> commitProxyClasses;
+		for (auto& it : dbi.client.commitProxies) {
+			auto commitProxyWorker = id_worker.find(it.processId);
+			if (commitProxyWorker == id_worker.end()) return false;
+			if (commitProxyWorker->second.priorityInfo.isExcluded) return true;
+			commitProxyClasses.push_back(commitProxyWorker->second.details);
 		}
 
 		// Get grv proxy classes
@@ -1285,25 +1285,25 @@ public:
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 
 		// Check proxy/grvProxy/resolver fitness
-		RoleFitnessPair oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy),
+		RoleFitnessPair oldInFit(RoleFitness(commitProxyClasses, ProcessClass::CommitProxy),
 		                         RoleFitness(grvProxyClasses, ProcessClass::GrvProxy),
 		                         RoleFitness(resolverClasses, ProcessClass::Resolver));
 
-		auto first_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Proxy,
-		                                                ProcessClass::ExcludeFit, db.config, id_used, true);
+		auto first_commit_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::CommitProxy,
+		                                                       ProcessClass::ExcludeFit, db.config, id_used, true);
 		auto first_grv_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::GrvProxy,
 		                                                    ProcessClass::ExcludeFit, db.config, id_used, true);
 		auto first_resolver = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Resolver,
 		                                                   ProcessClass::ExcludeFit, db.config, id_used, true);
-		auto proxies =
-		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(),
-		                                  db.config, id_used, first_proxy, true);
+		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::CommitProxy,
+		                                                    db.config.getDesiredCommitProxies(), db.config, id_used,
+		                                                    first_commit_proxy, true);
 		auto grv_proxies =
 		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::GrvProxy,
 		                                  db.config.getDesiredGrvProxies(), db.config, id_used, first_grv_proxy, true);
 		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
 
-		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy),
+		RoleFitnessPair newInFit(RoleFitness(commit_proxies, ProcessClass::CommitProxy),
 		                         RoleFitness(grv_proxies, ProcessClass::GrvProxy),
 		                         RoleFitness(resolvers, ProcessClass::Resolver));
 		if (oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.grvProxy.betterFitness(newInFit.grvProxy) ||
@@ -1358,7 +1358,7 @@ public:
 				if (tlog.present() && tlog.interf().filteredLocality.processId() == processId) return true;
 			}
 		}
-		for (const MasterProxyInterface& interf : dbInfo.client.masterProxies) {
+		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
 			if (interf.processId == processId) return true;
 		}
 		for (const GrvProxyInterface& interf : dbInfo.client.grvProxies) {
@@ -1393,7 +1393,7 @@ public:
 				}
 			}
 		}
-		for (const MasterProxyInterface& interf : dbInfo.client.masterProxies) {
+		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
 			ASSERT(interf.processId.present());
 			idUsed[interf.processId]++;
 		}
@@ -1967,7 +1967,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	    .detail("Resolvers", req.resolvers.size())
 	    .detail("RecoveryState", (int)req.recoveryState)
 	    .detail("RegistrationCount", req.registrationCount)
-	    .detail("MasterProxies", req.masterProxies.size())
+	    .detail("CommitProxies", req.commitProxies.size())
 	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
@@ -2022,11 +2022,12 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	// Construct the client information
-	if (db->clientInfo->get().masterProxies != req.masterProxies || db->clientInfo->get().grvProxies != req.grvProxies) {
+	if (db->clientInfo->get().commitProxies != req.commitProxies ||
+	    db->clientInfo->get().grvProxies != req.grvProxies) {
 		isChanged = true;
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
-		clientInfo.masterProxies = req.masterProxies;
+		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
