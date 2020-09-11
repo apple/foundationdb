@@ -812,7 +812,7 @@ ACTOR Future<Void> monitorThrottlingChanges(RatekeeperData *self) {
 					if(tagValue.expirationTime == 0 || tagValue.expirationTime > now() + tagValue.initialDuration) {
 						TEST(true); // Converting tag throttle duration to absolute time
 						tagValue.expirationTime = now() + tagValue.initialDuration;
-						BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
+						BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 						wr << tagValue;
 						state Value value = wr.toValue();
 
