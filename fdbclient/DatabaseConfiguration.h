@@ -149,9 +149,11 @@ struct DatabaseConfiguration {
 		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 	}
 
-	// MasterProxy Servers
-	int32_t masterProxyCount;
-	int32_t autoMasterProxyCount;
+	// Proxy Servers
+	int32_t proxyCount;
+	int32_t autoProxyCount;
+	int32_t grvProxyCount;
+	int32_t autoGrvProxyCount;
 
 	// Resolvers
 	int32_t resolverCount;
@@ -190,7 +192,11 @@ struct DatabaseConfiguration {
 	bool isExcludedServer( NetworkAddressList ) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 
-	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
+	int32_t getDesiredProxies() const { if(proxyCount == -1) return autoProxyCount; return proxyCount; }
+	int32_t getDesiredGrvProxies() const {
+		if (grvProxyCount == -1) return autoGrvProxyCount;
+		return grvProxyCount;
+	}
 	int32_t getDesiredResolvers() const { if(resolverCount == -1) return autoResolverCount; return resolverCount; }
 	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
 	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return getDesiredLogs(); return remoteDesiredTLogCount;  }

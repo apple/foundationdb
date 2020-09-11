@@ -90,7 +90,7 @@ public:
 			return ss.str();
 		}
 
-		// Returns true if the class represents an acceptable worker
+		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
 			switch (startingClass._class) {
 				case ProcessClass::UnsetClass: return true;
@@ -98,9 +98,13 @@ public:
 				case ProcessClass::TransactionClass: return true;
 				case ProcessClass::ResolutionClass: return false;
 				case ProcessClass::ProxyClass: return false;
-				case ProcessClass::MasterClass: return false;
-				case ProcessClass::TesterClass: return false;
-				case ProcessClass::StatelessClass: return false;
+			    case ProcessClass::GrvProxyClass:
+				    return false;
+			    case ProcessClass::MasterClass:
+				    return false;
+			    case ProcessClass::TesterClass:
+				    return false;
+			    case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;

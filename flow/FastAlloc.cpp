@@ -156,7 +156,7 @@ void recordAllocation( void *ptr, size_t size ) {
 
 		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
+			a = crc32c_append( 0xfdbeefdb, reinterpret_cast<uint8_t*>(buffer), nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);

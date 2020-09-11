@@ -27,8 +27,6 @@
 
 class ClientKnobs : public Knobs {
 public:
-	int BYTE_LIMIT_UNLIMITED;
-	int ROW_LIMIT_UNLIMITED;
 
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
@@ -48,7 +46,8 @@ public:
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_PROXY_CONNECTIONS;
+	int MAX_MASTER_PROXY_CONNECTIONS;
+	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
@@ -169,6 +168,7 @@ public:
 
 	// Configuration
 	int32_t DEFAULT_AUTO_PROXIES;
+	int32_t DEFAULT_AUTO_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 

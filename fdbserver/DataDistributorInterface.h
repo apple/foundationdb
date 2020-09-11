@@ -76,7 +76,7 @@ struct GetDataDistributorMetricsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,storageMetricsList, midShardSize);
+		serializer(ar, storageMetricsList, midShardSize);
 	}
 };
 

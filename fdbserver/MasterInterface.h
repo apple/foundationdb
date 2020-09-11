@@ -186,15 +186,17 @@ struct ReportRawCommittedVersionRequest {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+	Version minKnownCommittedVersion;
 
 	ReplyPromise<Void> reply;
 
-	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false) {}
-	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion) : version(version), locked(locked), metadataVersion(metadataVersion) {}
+	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
+	ReportRawCommittedVersionRequest(Version version, bool locked, Optional<Value> metadataVersion, Version minKnownCommittedVersion)
+	  : version(version), locked(locked), metadataVersion(metadataVersion), minKnownCommittedVersion(minKnownCommittedVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, reply);
 	}
 };
 

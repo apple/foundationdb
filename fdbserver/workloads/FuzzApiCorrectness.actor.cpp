@@ -1181,8 +1181,14 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				}
 				op = deterministicRandom()->randomInt(minval, maxval+1);
 			}
-			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
+
+			//do not test the following options since they are actually used by the workload
+			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS ||
+			   op == FDBTransactionOptions::READ_SYSTEM_KEYS ||
+			   op == FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES)
+			{
 				op = -1;
+			}
 
 			double orv = deterministicRandom()->random01();
 			if (orv >= 0.25) {
