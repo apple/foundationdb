@@ -1041,7 +1041,8 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
 
-		if (mStatusCode == RecoveryStatus::fully_recovered) {
+		std::string fullyRecoveredAtVersion;
+		if (mStatusCode == RecoveryStatus::fully_recovered && md.tryGetValue("FullyRecoveredAtVersion", fullyRecoveredAtVersion)) {
 			Version rv = wait(tr.getReadVersion());
 			int64_t fullyRecoveredAtVersion = md.getInt64("FullyRecoveredAtVersion");
 			double lastFullyRecoveredSecondsAgo = std::max(0, rv - fullyRecoveredAtVersion) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
