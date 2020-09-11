@@ -877,7 +877,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 				maxCost = cost;
 			}
 		}
-		if (maxRate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
+		if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
 			it->value.busiestWriteTag = busiestTag;
 			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
 			ASSERT(it->value.totalWriteCosts > 0);
