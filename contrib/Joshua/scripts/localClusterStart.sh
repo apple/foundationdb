@@ -5,7 +5,7 @@ WORKDIR="${WORKDIR:-${SCRIPTDIR}/tmp/fdb.work}"
 LOGDIR="${WORKDIR}/log"
 ETCDIR="${WORKDIR}/etc"
 BINDIR="${BINDIR:-${SCRIPTDIR}}"
-FDBSERVERPORT="${FDBSERVERPORT:-4500}"
+FDBPORTSTART="${FDBPORTSTART:-4000}"
 SERVERCHECKS="${SERVERCHECKS:-10}"
 CONFIGUREWAIT="${CONFIGUREWAIT:-240}"
 FDBCONF="${ETCDIR}/fdb.cluster"
@@ -20,9 +20,10 @@ messagecount=0
 let index2="${RANDOM} % 256"
 let index3="${RANDOM} % 256"
 let index4="(${RANDOM} % 255) + 1"
-# Define a random ip address on localhost
+let FDBPORT="(${RANDOM} % 1000) + ${FDBPORTSTART}"
+# Define a random ip address and port on localhost
 IPADDRESS="127.${index2}.${index3}.${index4}"
-CLUSTERSTRING="${IPADDRESS}:${FDBSERVERPORT}"
+CLUSTERSTRING="${IPADDRESS}:${FDBPORT}"
 
 
 function log
@@ -165,10 +166,7 @@ function createClusterFile
 	else
 		description=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom 2> /dev/null | head -c 8)
 		random_str=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom 2> /dev/null | head -c 8)
-		let index2="${RANDOM} % 256"
-		let index3="${RANDOM} % 256"
-		let index4="(${RANDOM} % 255) + 1"
-		echo "${description}:${random_str}@${IPADDRESS}:${FDBSERVERPORT}" > "${FDBCONF}"
+		echo "${description}:${random_str}@${CLUSTERSTRING}" > "${FDBCONF}"
 	fi
 
 	if [ "${status}" -ne 0 ]; then
@@ -233,7 +231,7 @@ function startFdbServer
 		log 'Failed to display user message'
 		let status="${status} + 1"
 
-	elif ! "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${IPADDRESS}:${FDBSERVERPORT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
+	elif ! "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${CLUSTERSTRING}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
 	then
 		log "Failed to start FDB Server"
 		let status="${status} + 1"

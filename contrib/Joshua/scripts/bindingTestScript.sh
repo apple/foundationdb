@@ -7,7 +7,7 @@ SCRIPTID="${$}"
 SAVEONERROR="${SAVEONERROR:-1}"
 PYTHONDIR="${BINDIR}/tests/python"
 testScript="${BINDIR}/tests/bindingtester/run_binding_tester.sh"
-VERSION="1.7"
+VERSION="1.8"
 
 source ${SCRIPTDIR}/localClusterStart.sh
 
@@ -23,14 +23,14 @@ cycles="${1}"
 
 if [ "${DEBUGLEVEL}" -gt 0 ]
 then
-	echo "Work dir:    ${WORKDIR}"
-	echo "Bin dir:     ${BINDIR}"
-	echo "Log dir:     ${LOGDIR}"
-	echo "Python path: ${PYTHONDIR}"
-	echo "Lib dir:     ${LIBDIR}"
-	echo "Server port: ${FDBSERVERPORT}"
-	echo "Script Id:   ${SCRIPTID}"
-	echo "Version:     ${VERSION}"
+	echo "Work dir:       ${WORKDIR}"
+	echo "Bin dir:        ${BINDIR}"
+	echo "Log dir:        ${LOGDIR}"
+	echo "Python path:    ${PYTHONDIR}"
+	echo "Lib dir:        ${LIBDIR}"
+	echo "Cluster String: ${CLUSTERSTRING}"
+	echo "Script Id:      ${SCRIPTID}"
+	echo "Version:        ${VERSION}"
 fi
 
 # Begin the cluster using the logic in localClusterStart.sh.
