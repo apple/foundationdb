@@ -146,12 +146,60 @@ struct CommitID {
 	    conflictingKRIndices(conflictingKRIndices) {}
 };
 
+/// Bad start mutation subversion for a split transaction. Basically for each split transaction, a
+constexpr int BAD_START_SUBVERSION = -1;
+
+/**
+ * @struct SplitTransaction
+ * @brief The data provides information about a split transaction
+ */
+struct SplitTransaction {
+	constexpr static FileIdentifier file_identifier = 973581;
+
+	/// The unique ID of the transaction that is split
+	UID id;
+
+	/// Total number of parts
+	int totalParts;
+
+	/// The index of the current part
+	int partIndex;
+
+	/// The indexes of mutation items
+	int startSubversion = BAD_START_SUBVERSION;
+
+	/// Number of mutations
+	int numMutations;
+
+	SplitTransaction() : id(), totalParts(1), partIndex(0), numMutations(0) {}
+
+	SplitTransaction(const UID& id_, const int totalParts_, const int partIndex_, const int numMutations_)
+	  : id(id_), totalParts(totalParts_), partIndex(partIndex_), numMutations(numMutations_) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, totalParts, partIndex, startSubversion, numMutations);
+	}
+};
+
+/**
+ * Flags for split transactions
+ */
+enum SplitTransactionFlags {
+	SPLIT_TRANSACTION_MASK = 0b1,
+
+	DISABLE_SPLIT_TRANSACTION = 0b0,
+	ENABLE_SPLIT_TRANSACTION = 0b1,
+
+	CONFLICTS_MASK = 0b110,
+
+	CONFLICTS_EVENLY_DISTRIBUTE = 0b000,
+	CONFLICTS_TO_ONE_PROXY = 0b010
+};
+
 struct CommitTransactionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 93948;
-	enum { 
-		FLAG_IS_LOCK_AWARE = 0x1,
-		FLAG_FIRST_IN_BATCH = 0x2
-	};
+	enum { FLAG_IS_LOCK_AWARE = 0x1, FLAG_FIRST_IN_BATCH = 0x2 };
 
 	bool isLockAware() const { return (flags & FLAG_IS_LOCK_AWARE) != 0; }
 	bool firstInBatch() const { return (flags & FLAG_FIRST_IN_BATCH) != 0; }
@@ -164,18 +212,20 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	Optional<SplitTransaction> splitTransaction;
 
-	CommitTransactionRequest() : flags(0) {}
+	CommitTransactionRequest() : flags(0), splitTransaction() {}
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
-		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext);
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext,
+		           splitTransaction);
 	}
 };
 
 static inline int getBytes( CommitTransactionRequest const& r ) {
 	// SOMEDAY: Optimize
-	//return r.arena.getSize(); // NOT correct because arena can be shared!
+	// return r.arena.getSize(); // NOT correct because arena can be shared!
 	int total = sizeof(r);
 	for(auto m = r.transaction.mutations.begin(); m != r.transaction.mutations.end(); ++m)
 		total += m->expectedSize() + CLIENT_KNOBS->PROXY_COMMIT_OVERHEAD_BYTES;
@@ -205,8 +255,9 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 struct GetReadVersionRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 838566;
-	enum { 
-		PRIORITY_SYSTEM_IMMEDIATE = 15 << 24,  // Highest possible priority, always executed even if writes are otherwise blocked
+	enum {
+		PRIORITY_SYSTEM_IMMEDIATE =
+		    15 << 24, // Highest possible priority, always executed even if writes are otherwise blocked
 		PRIORITY_DEFAULT = 8 << 24,
 		PRIORITY_BATCH = 1 << 24
 	};
@@ -251,8 +302,8 @@ struct GetReadVersionRequest : TimedRequest {
 
 	bool operator < (GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
 
 		if(ar.isDeserializing) {
@@ -299,7 +350,7 @@ struct GetKeyServerLocationsRequest {
 	  : spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse), arena(arena) {}
 
 	template <class Ar>
-	void serialize(Ar& ar) { 
+	void serialize(Ar& ar) {
 		serializer(ar, begin, end, limit, reverse, reply, spanContext, arena);
 	}
 };
@@ -373,8 +424,8 @@ struct TxnStateRequest {
 	std::vector<Endpoint> broadcastInfo;
 	ReplyPromise<Void> reply;
 
-	template <class Ar> 
-	void serialize(Ar& ar) { 
+	template <class Ar>
+	void serialize(Ar& ar) {
 		serializer(ar, data, sequence, last, broadcastInfo, reply, arena);
 	}
 };

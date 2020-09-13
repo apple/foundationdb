@@ -105,8 +105,13 @@ struct ProxyCommitData {
 	Promise<Void> validState; // Set once txnStateStore and version are valid
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;
+
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
+
+	uint64_t splitTransactionCommitVersionRequestNumber;
+	uint64_t mostRecentProcessedSplitTransactionRequestNumber;
+
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
 	KeyRangeMap<ServerCacheInfo> keyInfo;
 	KeyRangeMap<bool> cacheInfo;
@@ -200,8 +205,9 @@ struct ProxyCommitData {
 	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 	    logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
 	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
-	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
+	    mostRecentProcessedRequestNumber(0), splitTransactionCommitVersionRequestNumber(1),
+	    mostRecentProcessedSplitTransactionRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion),
+	    commit(commit), lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),
 	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), firstProxy(firstProxy),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0),

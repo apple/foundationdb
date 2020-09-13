@@ -127,6 +127,7 @@ struct TransactionOptions {
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
+	bool commitOnGivenProxy : 1;
 	bool debugDump : 1;
 	bool lockAware : 1;
 	bool readOnly : 1;
@@ -277,7 +278,8 @@ public:
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
-	Version getCommittedVersion() { return committedVersion; }   // May be called only after commit() returns success
+	Version& getCommittedVersion(); // May be called only after commit() returns success
+	const Version& getCommittedVersion() const;
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
@@ -327,6 +329,9 @@ public:
 	Standalone<VectorRef<KeyRangeRef>> writeConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
+
+	CommitTransactionRequest& getCommitTransactionRequest();
+	const CommitTransactionRequest& getCommitTransactionRequest() const;
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);

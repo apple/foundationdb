@@ -105,6 +105,12 @@ struct ResolutionRequestBuilder {
 		}
 	}
 
+	void setSplitTransaction(const SplitTransaction& splitTransaction) {
+		for (auto& request : requests) {
+			request.splitTransaction = splitTransaction;
+		}
+	}
+
 	CommitTransactionRef& getOutTransaction(int resolver, Version read_snapshot) {
 		CommitTransactionRef *& out = outTr[resolver];
 		if (!out) {
@@ -241,6 +247,11 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						}
 					}
 
+					// If a transaction is a split transaction, then all split parts should have the same prevVersion
+					// and version. The master server will ensure this by caching the version and the split ID. In this
+					// case, letting the split transaction being processed alone rather than in a batch prevents
+					// potential race condition with other transactions. Since the split transaction will always be
+					// flagged as firstInBatch, it ensures all previous transactions in the queue will be sent.
 					if((batchBytes + bytes > CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT || req.firstInBatch()) && batch.size()) {
 						out.send({ std::move(batch), batchBytes });
 						lastBatch = now();
@@ -249,9 +260,38 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 						batchBytes = 0;
 					}
 
-					batch.push_back(req);
-					batchBytes += bytes;
-					commitData->commitBatchesMemBytesCount += bytes;
+					if (req.splitTransaction.present()) {
+						// The transaction is a split transaction, or part of a big transaction. In this case, all parts
+						// of the transactions should have the same version. In some cases. Consider the following
+						// schema:
+						//                   /-   TS1 -- Proxy1 (TS1P1)
+						// 	 Transaction 1  ---   TS1 -- Proxy2 (TS1P2)
+						//                   \-   TS1 -- Proxy3 (TS1P3)
+						// Assume TS1P1 is processed with Version TS1V, it is expected that TS1V will be used for TS1P2
+						// and TS1P3. Now assume there is another transaction TS2, having similar distribution TS2P1,
+						// TS2P2 and TS2P3, with version TS2V. If TS1P2 and TS2P2 are batched now, then the master will
+						// be confused -- should it return TS1V or TS2V? A race condition is then introduced. The
+						// easiest way is simple -- do *NOT* batch any split transaction. This is acceptable since for
+						// split transaction, each part is already big enough.
+
+						// NOTE: In fdbclient/MasterProxyInterface.cpp, prepareSplitTransactions, it is guaranteed that
+						// the split transaction has flag FLAG_FIRST_IN_BATCH. In this
+
+						// NOTE: Since the bytes from the split request is not part of the batch, we have to manually
+						// add bytes to total batches count.
+						out.send({ { req }, bytes });
+						commitData->commitBatchesMemBytesCount += bytes;
+
+						lastBatch = now();
+						timeout = delayJittered(commitData->commitBatchInterval, TaskPriority::ProxyCommitBatcher);
+
+						batch.clear();
+						batchBytes = 0;
+					} else {
+						batch.push_back(req);
+						batchBytes += bytes;
+						commitData->commitBatchesMemBytesCount += bytes;
+					}
 				}
 				when(wait(timeout)) {}
 			}
@@ -357,13 +397,15 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 
 			auto& tags = self->tagsForKey(backupMutation.param1);
 			toCommit->addTags(tags);
-			toCommit->addTypedMessage(backupMutation);
+			toCommit->addMutationRef(backupMutation);
 
-//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
-//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
-//					.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", backupMutation.param1);
-//			}
+			//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
+			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
+			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 					.detail("BackupMutationSize",
+			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
+			//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
+			//backupMutation.param1);
+			//			}
 		}
 	}
 	return Void();
@@ -388,6 +430,8 @@ struct CommitBatchContext {
 	double startTime;
 
 	Optional<UID> debugID;
+
+	Optional<SplitTransaction> splitTransaction;
 
 	bool forceRecovery = false;
 
@@ -491,6 +535,21 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 		);
 	}
 
+	// trs.size() check is needed since there are commits with 0 trs.
+	if (trs.size() > 0 && trs[0].splitTransaction.present()) {
+		ASSERT(trs.size() == 1);
+		splitTransaction = trs[0].splitTransaction.get();
+
+		TraceEvent("SplitTransactionTriggered")
+		    .detail("SplitId", splitTransaction.get().id.toString())
+		    .detail("PartIndex", splitTransaction.get().partIndex)
+		    .detail("TotalParts", splitTransaction.get().totalParts);
+
+		const auto startSubversion = splitTransaction.get().startSubversion;
+		ASSERT(startSubversion != BAD_START_SUBVERSION);
+		toCommit.setSubsequence(startSubversion);
+	}
+
 	// since we are using just the former to limit the number of versions actually in flight!
 	ASSERT(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS <= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 }
@@ -502,11 +561,7 @@ void CommitBatchContext::setupTraceBatch() {
 				debugID = nondeterministicRandom()->randomUniqueID();
 			}
 
-			g_traceBatch.addAttach(
-				"CommitAttachID",
-				tr.debugID.get().first(),
-				debugID.get().first()
-			);
+			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
 		}
 		span.addParent(tr.spanContext);
 	}
@@ -526,6 +581,38 @@ void CommitBatchContext::evaluateBatchSize() {
 		batchOperations += mutations.size();
 		batchBytes += mutations.expectedSize();
 	}
+}
+
+ACTOR Future<GetCommitVersionReply> getVersion(CommitBatchContext* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state const bool isSplitTransaction = self->splitTransaction.present();
+	state uint64_t& requestNumber = isSplitTransaction ? pProxyCommitData->splitTransactionCommitVersionRequestNumber
+	                                                   : pProxyCommitData->commitVersionRequestNumber;
+	state uint64_t& mostRecentProcessedRequestNumber =
+	    isSplitTransaction ? pProxyCommitData->mostRecentProcessedSplitTransactionRequestNumber
+	                       : pProxyCommitData->mostRecentProcessedRequestNumber;
+
+	GetCommitVersionRequest req(self->span.context, requestNumber++, mostRecentProcessedRequestNumber,
+	                            pProxyCommitData->dbgid);
+	if (isSplitTransaction) {
+		req.splitTransaction = self->splitTransaction.get();
+	}
+
+	try {
+		state GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
+			pProxyCommitData->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)));
+
+		mostRecentProcessedRequestNumber = versionReply.requestNum;
+
+		return versionReply;
+	} catch(Error& error) {
+		// Pre-terminate the whole process if received a error_code_split_transaction_timeout
+		if (error.code() == error_code_split_transaction_timeout) {
+			self->trs[0].reply.sendError(error);
+		}
+		throw;
+	}
+
 }
 
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
@@ -552,15 +639,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		);
 	}
 
-	GetCommitVersionRequest req(self->span.context, pProxyCommitData->commitVersionRequestNumber++,
-	                            pProxyCommitData->mostRecentProcessedRequestNumber, pProxyCommitData->dbgid);
-	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
-		pProxyCommitData->master.getCommitVersion.getReply(
-			req, TaskPriority::ProxyMasterVersionReply
-		)
-	));
-
-	pProxyCommitData->mostRecentProcessedRequestNumber = versionReply.requestNum;
+	state GetCommitVersionReply versionReply = wait(getVersion(self));
 
 	pProxyCommitData->stats.txnCommitVersionAssigned += trs.size();
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;
@@ -592,13 +671,13 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 
-	ResolutionRequestBuilder requests(
-		pProxyCommitData,
-		self->commitVersion,
-		self->prevVersion,
-		pProxyCommitData->version,
-        self->span
-	);
+	ResolutionRequestBuilder requests(pProxyCommitData, self->commitVersion, self->prevVersion,
+	                                  pProxyCommitData->version, self->span);
+
+	if (self->splitTransaction.present()) {
+		requests.setSplitTransaction(self->splitTransaction.get());
+	}
+
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
@@ -857,7 +936,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if(pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.addTypedMessage(m);
+				self->toCommit.addMutationRef(m);
 			}
 			else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
@@ -908,7 +987,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if(pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.addTypedMessage(m);
+				self->toCommit.addMutationRef(m);
 			} else {
 				UNREACHABLE();
 			}
@@ -1062,9 +1141,18 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if ( self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
 
+	return Void();
+}
+
+ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
-	self->loggingComplete = pProxyCommitData->logSystem->push( self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(), pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->debugID );
+
+	self->loggingComplete = pProxyCommitData->logSystem->push(
+	    self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(),
+	    pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->debugID, self->splitTransaction);
 
 	if (!self->forceRecovery) {
 		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == self->localBatchNumber-1);
@@ -1080,12 +1168,6 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
 		}
 	}
-
-	return Void();
-}
-
-ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 
 	try {
 		choose {

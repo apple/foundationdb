@@ -18,17 +18,18 @@
  * limitations under the License.
  */
 
-#include "flow/ActorCollection.h"
-#include "fdbserver/LogSystem.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/DBCoreState.h"
-#include "fdbserver/WaitFailure.h"
 #include "fdbclient/SystemData.h"
-#include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/RecoveryState.h"
+#include "fdbrpc/simulator.h"
+#include "fdbserver/DBCoreState.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/WaitFailure.h"
+#include "flow/ActorCollection.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady(Future<Void> f, std::vector<Future<TLogCommitReply>> replies) {
@@ -526,11 +527,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return t;
 	}
 
-	Future<Version> push(Version prevVersion, Version version, Version knownCommittedVersion,
-	                     Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID) final {
+	virtual Future<Version> push(Version prevVersion, Version version, Version knownCommittedVersion,
+	                             Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID,
+	                             Optional<SplitTransaction> splitTransaction) override final {
 		// FIXME: Randomize request order as in LegacyLogSystem?
-		vector<Future<Void>> quorumResults;
-		vector<Future<TLogCommitReply>> allReplies;
+		std::vector<Future<Void>> quorumResults;
+		std::vector<Future<TLogCommitReply>> allReplies;
 		int location = 0;
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
@@ -542,7 +544,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				vector<Future<Void>> tLogCommitResults;
 				for(int loc=0; loc< it->logServers.size(); loc++) {
 					Standalone<StringRef> msg = data.getMessages(location);
-					allReplies.push_back( recordPushMetrics( it->connectionResetTrackers[loc], it->logServers[loc]->get().interf().address(), it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( msg.arena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, msg, debugID ), TaskPriority::ProxyTLogCommitReply ) ) );
+					allReplies.push_back(recordPushMetrics(
+					    it->connectionResetTrackers[loc], it->logServers[loc]->get().interf().address(),
+					    it->logServers[loc]->get().interf().commit.getReply(
+					        TLogCommitRequest(msg.arena(), prevVersion, version, knownCommittedVersion,
+					                          minKnownCommittedVersion, msg, debugID, splitTransaction),
+					        TaskPriority::ProxyTLogCommitReply)));
 					Future<Void> commitSuccess = success(allReplies.back());
 					addActor.get().send(commitSuccess);
 					tLogCommitResults.push_back(commitSuccess);

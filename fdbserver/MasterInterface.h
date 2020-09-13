@@ -54,12 +54,19 @@ struct MasterInterface {
 		}
 		serializer(ar, locality, waitFailure);
 		if( Archive::isDeserializing ) {
-			tlogRejoin = RequestStream< struct TLogRejoinRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(1) );
-			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(2) );
-			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(3) );
-			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
-			getLiveCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(5) );
-			reportLiveCommittedVersion = RequestStream< struct ReportRawCommittedVersionRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(6) );
+			int streamIndex = 0;
+			tlogRejoin =
+			    RequestStream<struct TLogRejoinRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(++streamIndex));
+			changeCoordinators = RequestStream<struct ChangeCoordinatorsRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(++streamIndex));
+			getCommitVersion = RequestStream<struct GetCommitVersionRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(++streamIndex));
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(++streamIndex));
+			getLiveCommittedVersion = RequestStream<struct GetRawCommittedVersionRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(++streamIndex));
+			reportLiveCommittedVersion = RequestStream<struct ReportRawCommittedVersionRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(++streamIndex));
 		}
 	}
 
@@ -168,6 +175,7 @@ struct GetCommitVersionRequest {
 	uint64_t mostRecentProcessedRequestNum;
 	UID requestingProxy;
 	ReplyPromise<GetCommitVersionReply> reply;
+	Optional<SplitTransaction> splitTransaction;
 
 	GetCommitVersionRequest() { }
 	GetCommitVersionRequest(SpanID spanContext, uint64_t requestNum, uint64_t mostRecentProcessedRequestNum,
@@ -177,7 +185,8 @@ struct GetCommitVersionRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext);
+		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext,
+		           splitTransaction);
 	}
 };
 

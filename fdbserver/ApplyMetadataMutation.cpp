@@ -102,7 +102,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 						.detail("TagKey", serverTagKeyFor( serverKeysDecodeServer(m.param1) )).detail("Tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
 
 					toCommit->addTag( decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ) );
-					toCommit->addTypedMessage(privatized);
+					toCommit->addMutationRef(privatized);
 				}
 			} else if (m.param1.startsWith(serverTagPrefix)) {
 				UID id = decodeServerTagKey(m.param1);
@@ -114,9 +114,9 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 					TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
 					toCommit->addTag(tag);
-					toCommit->addTypedMessage(LogProtocolMessage());
+					toCommit->addLogProtocolMessage();
 					toCommit->addTag(tag);
-					toCommit->addTypedMessage(privatized);
+					toCommit->addMutationRef(privatized);
 				}
 				if(!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -168,7 +168,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 					toCommit->addTag( cacheTag );
-					toCommit->addTypedMessage(privatized);
+					toCommit->addMutationRef(privatized);
 				}
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
@@ -285,13 +285,13 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 
 					if (m.param1 == lastEpochEndKey) {
 						toCommit->addTags(allTags);
-						toCommit->addTypedMessage(LogProtocolMessage());
+						toCommit->addLogProtocolMessage();
 					}
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					toCommit->addTags(allTags);
-					toCommit->addTypedMessage(privatized);
+					toCommit->addMutationRef(privatized);
 				}
 			}
 			else if (m.param1 == minRequiredCommitVersionKey) {
@@ -347,7 +347,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 							privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
 
 							toCommit->addTag(decodeServerTagValue(kv.value));
-							toCommit->addTypedMessage(privatized);
+							toCommit->addMutationRef(privatized);
 						}
 					}
 				}
@@ -538,9 +538,9 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 
 			// Add the tags to both begin and end mutations
 			toCommit->addTags(allTags);
-			toCommit->addTypedMessage(mutationBegin);
+			toCommit->addMutationRef(mutationBegin);
 			toCommit->addTags(allTags);
-			toCommit->addTypedMessage(mutationEnd);
+			toCommit->addMutationRef(mutationEnd);
 		}
 	}
 }

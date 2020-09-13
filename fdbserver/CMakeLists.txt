@@ -47,7 +47,7 @@ set(FDBSERVER_SRCS
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
   MasterProxyServer.actor.cpp
-  masterserver.actor.cpp
+  MasterServer.actor.cpp
   MutationTracking.h
   MutationTracking.cpp
   MoveKeys.actor.h
@@ -59,6 +59,7 @@ set(FDBSERVER_SRCS
   OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
   ProxyCommitData.actor.h
+  PartMerger.h
   pubsub.actor.cpp
   pubsub.h
   QuietDatabase.actor.cpp
@@ -97,6 +98,8 @@ set(FDBSERVER_SRCS
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
+  TimedKVCache.h
+  TimedKVCache.actor.cpp
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp

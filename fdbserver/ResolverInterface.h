@@ -20,15 +20,14 @@
 
 #ifndef FDBSERVER_RESOLVERINTERFACE_H
 #define FDBSERVER_RESOLVERINTERFACE_H
-#include "fdbclient/CommitTransaction.h"
-#include "fdbrpc/Locality.h"
-#include "fdbrpc/fdbrpc.h"
+
 #pragma once
 
-#include "fdbrpc/Locality.h"
-#include "fdbrpc/fdbrpc.h"
-#include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/MasterProxyInterface.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -105,11 +104,12 @@ struct ResolveTransactionBatchRequest {
 	VectorRef<int> txnStateTransactions;   // Offsets of elements of transactions that have (transaction subsystem state) mutations
 	ReplyPromise<ResolveTransactionBatchReply> reply;
 	Optional<UID> debugID;
+	Optional<SplitTransaction> splitTransaction;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
 		serializer(ar, prevVersion, version, lastReceivedVersion, transactions, txnStateTransactions, reply, arena,
-		           debugID, spanContext);
+		           debugID, spanContext, splitTransaction);
 	}
 };
 

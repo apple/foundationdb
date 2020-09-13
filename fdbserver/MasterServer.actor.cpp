@@ -1,5 +1,5 @@
 /*
- * masterserver.actor.cpp
+ * MasterServer.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,6 +19,7 @@
  */
 
 #include <iterator>
+#include <map>
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -38,9 +39,12 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
+#include "fdbserver/PartMerger.h"
+#include "fdbserver/TimedKVCache.h"
 #include "fdbserver/ProxyCommitData.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TimedKVCache.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -64,6 +68,21 @@ struct ProxyVersionReplies {
 	}
 
 	ProxyVersionReplies() : latestRequestNum(0) {}
+};
+
+/**
+ * This part merger will only be used to ensure all parts have sent the version request. No actual merging is done or
+ * necessary
+ */
+class SplitTransactionVersionRequestPartMerger : public PartMerger<SplitTransaction> {
+protected:
+	virtual void mergeFirstPart(const value_t& incoming) override { /* intended to be empty */
+	}
+	virtual void merge(const value_t& incoming) override { /* intended to be empty */
+	}
+
+public:
+	using PartMerger::PartMerger;
 };
 
 ACTOR Future<Void> masterTerminateOnConflict( UID dbgid, Promise<Void> fullyRecovered, Future<Void> onConflict, Future<Void> switchedState ) {
@@ -182,6 +201,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Optional<Value> proxyMetadataVersion;
 	Version minKnownCommittedVersion;
 
+	TimedMergingKVCache<UID, SplitTransactionVersionRequestPartMerger> splitTransactionVersionRequestMerger;
+	TimedKVCache<UID, Promise<std::pair<Version, Version>>> splitTransactionVersionResponse;
+
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
@@ -214,6 +236,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::vector<ResolverInterface> resolvers;
 
 	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
+	std::map<UID, ProxyVersionReplies> lastSplitTransactionProxyVersionReplies;
 
 	Standalone<StringRef> dbId;
 
@@ -240,41 +263,19 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
-	MasterData(
-		Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
-		MasterInterface const& myInterface,
-		ServerCoordinators const& coordinators,
-		ClusterControllerFullInterface const& clusterController,
-		Standalone<StringRef> const& dbId,
-		PromiseStream<Future<Void>> const& addActor,
-		bool forceRecovery
-		)
-		: dbgid(myInterface.id()),
-		  myInterface(myInterface),
-		  dbInfo(dbInfo),
-		  cstate(coordinators, addActor, dbgid),
-		  coordinators(coordinators),
-		  clusterController(clusterController),
-		  dbId(dbId),
-		  forceRecovery(forceRecovery),
-		  safeLocality(tagLocalityInvalid),
-		  primaryLocality(tagLocalityInvalid),
-		  neverCreated(false),
-		  lastEpochEnd(invalidVersion),
-		  liveCommittedVersion(invalidVersion),
-		  databaseLocked(false),
-		  minKnownCommittedVersion(invalidVersion),
-		  recoveryTransactionVersion(invalidVersion),
-		  lastCommitTime(0),
-		  registrationCount(0),
-		  version(invalidVersion),
-		  lastVersionTime(0),
-		  txnStateStore(0),
-		  memoryLimit(2e9),
-		  addActor(addActor),
-		  hasConfiguration(false),
-		  recruitmentStalled( Reference<AsyncVar<bool>>( new AsyncVar<bool>() ) )
-	{
+	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo, MasterInterface const& myInterface,
+	           ServerCoordinators const& coordinators, ClusterControllerFullInterface const& clusterController,
+	           Standalone<StringRef> const& dbId, PromiseStream<Future<Void>> const& addActor, bool forceRecovery)
+	  : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
+	    coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
+	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), databaseLocked(false),
+	    minKnownCommittedVersion(invalidVersion),
+	    splitTransactionVersionRequestMerger(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH),
+	    splitTransactionVersionResponse(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH),
+	    recoveryTransactionVersion(invalidVersion), lastCommitTime(0), registrationCount(0), version(invalidVersion),
+	    lastVersionTime(0), txnStateStore(0), memoryLimit(2e9), addActor(addActor), hasConfiguration(false),
+	    recruitmentStalled(Reference<AsyncVar<bool>>(new AsyncVar<bool>())) {
 		if(forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
 			forceRecovery = false;
@@ -971,6 +972,144 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 	return Void();
 }
 
+namespace {
+
+/**
+ * Get the version for the commit
+ * @param self MasterData
+ * @param req Incoming request
+ * @param rep Response
+ * @return pair of prevVersion and Version
+ */
+std::pair<Version, Version> tryGetVersion(Reference<MasterData> self, const GetCommitVersionRequest& req,
+                                          GetCommitVersionReply& rep) {
+
+	// Step the version
+	Version repPrevVersion;
+
+	if (self->version == invalidVersion) {
+		self->lastVersionTime = now();
+		self->version = self->recoveryTransactionVersion;
+		repPrevVersion = self->lastEpochEnd;
+	} else {
+		double t1 = now();
+		if (BUGGIFY) {
+			t1 = self->lastVersionTime;
+		}
+		repPrevVersion = self->version;
+		self->version +=
+		    std::max<Version>(1, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
+		                                           SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+
+		TEST(self->version - repPrevVersion == 1); // Minimum possible version gap
+		TEST(self->version - repPrevVersion ==
+		     SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS); // Maximum possible version gap
+		self->lastVersionTime = t1;
+
+		if (self->resolverNeedingChanges.count(req.requestingProxy)) {
+			rep.resolverChanges = self->resolverChanges.get();
+			rep.resolverChangesVersion = self->resolverChangesVersion;
+			self->resolverNeedingChanges.erase(req.requestingProxy);
+
+			if (self->resolverNeedingChanges.empty()) {
+				self->resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
+			}
+		}
+	}
+
+	return std::make_pair(repPrevVersion, self->version);
+}
+
+} // anonymous namespace
+
+/**
+ * Get version for a split transaction. The version is only evaluated when *all* parts of the split transaction are
+ * requesting for the version. If there are one or more parts are not sending such request, e.g. some parts are not sent
+ * to proxies properly, then a timeout error will be triggered.
+ */
+ACTOR Future<Void> getSplitTransactionVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+	state Span span("M:getVersion"_loc, { req.spanContext });
+	state std::map<UID, ProxyVersionReplies>::iterator proxyIter =
+	    self->lastSplitTransactionProxyVersionReplies.find(req.requestingProxy);
+	state const SplitTransaction& splitTransaction = req.splitTransaction.get();
+
+	if (proxyIter == self->lastSplitTransactionProxyVersionReplies.end()) {
+		req.reply.send(Never());
+		return Void();
+	}
+
+	auto& latestRequestNum = proxyIter->second.latestRequestNum;
+	TEST(latestRequestNum.get() < req.requestNum - 1);
+	wait(latestRequestNum.whenAtLeast(req.requestNum - 1));
+
+	// NOTE: after a wait, the same variable has to be redefined.
+	auto& latestRequestNum = proxyIter->second.latestRequestNum;
+	auto proxyVersionReply = proxyIter->second.replies.find(req.requestNum);
+	if (proxyVersionReply != proxyIter->second.replies.end()) {
+		// Duplicate request, for a split transaction, should reject it as an incomplete part will confuse other
+		// components, such as resolver or tLogServer
+		TEST(true);
+		req.reply.send(Never());
+		return Void();
+	}
+
+	if (req.requestNum <= latestRequestNum.get()) {
+		// Old request, should reject
+		TEST(true);
+		ASSERT(req.requestNum < latestRequestNum.get());
+		req.reply.send(Never());
+	}
+
+	ASSERT(latestRequestNum.get() == req.requestNum - 1);
+
+	state GetCommitVersionReply rep;
+
+	if (!self->splitTransactionVersionResponse.exists(splitTransaction.id)) {
+		self->splitTransactionVersionResponse.add(splitTransaction.id, Promise<std::pair<Version, Version>>());
+	}
+
+	self->splitTransactionVersionRequestMerger.add(splitTransaction.id, splitTransaction, splitTransaction.partIndex,
+	                                               splitTransaction.totalParts);
+	if (self->splitTransactionVersionRequestMerger.exists(splitTransaction.id) &&
+	    self->splitTransactionVersionRequestMerger.get(splitTransaction.id).ready()) {
+		// Retrieve the version
+		auto [prevVersion, version] = tryGetVersion(self, req, rep);
+		self->splitTransactionVersionResponse.get(splitTransaction.id).send(std::make_pair(prevVersion, version));
+	}
+
+	choose {
+		when(std::pair<Version, Version> versions =
+		         wait(self->splitTransactionVersionResponse.get(splitTransaction.id).getFuture())) {
+			auto& proxyVersionReplies = proxyIter->second;
+			auto& replies = proxyVersionReplies.replies;
+			auto& latestRequestNum = proxyVersionReplies.latestRequestNum;
+
+			replies.erase(replies.begin(), replies.upper_bound(req.mostRecentProcessedRequestNum));
+			replies[req.requestNum] = rep;
+			latestRequestNum.set(req.requestNum);
+
+			rep.prevVersion = versions.first;
+			rep.version = versions.second;
+			rep.requestNum = req.requestNum;
+
+			req.reply.send(rep);
+		}
+		when(wait(delay(SERVER_KNOBS->SPLIT_TRANSACTION_HISTORY_LENGTH))) {
+			// Consider the following situation, a split transaction has part A, B and C:
+			//	1. A and B enters proxy and master server
+			//	2. master server sends the timeout error
+			//	3. C comes in
+			// C will still trigger a version bump even A and B are already dropped by proxies. However, if
+			//     self->splitTransactionVersionRequestMerger
+			// does not have the item, then C will be treated as part of a new split transaction, the first part, and then get timed out.
+			self->splitTransactionVersionRequestMerger.erase(splitTransaction.id);
+			req.reply.sendError(split_transaction_timeout());
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, { req.spanContext });
 	state std::map<UID, ProxyVersionReplies>::iterator proxyItr = self->lastProxyVersionReplies.find(req.requestingProxy); // lastProxyVersionReplies never changes
@@ -995,45 +1134,20 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		req.reply.send(Never());
 	}
 	else {
+		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
+
 		GetCommitVersionReply rep;
 
-		if(self->version == invalidVersion) {
-			self->lastVersionTime = now();
-			self->version = self->recoveryTransactionVersion;
-			rep.prevVersion = self->lastEpochEnd;
-		}
-		else {
-			double t1 = now();
-			if(BUGGIFY) {
-				t1 = self->lastVersionTime;
-			}
-			rep.prevVersion = self->version;
-			self->version += std::max<Version>(1, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, SERVER_KNOBS->VERSIONS_PER_SECOND*(t1-self->lastVersionTime)));
-
-			TEST( self->version - rep.prevVersion == 1 );  // Minimum possible version gap
-			TEST( self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS );  // Maximum possible version gap
-			self->lastVersionTime = t1;
-
-			if(self->resolverNeedingChanges.count(req.requestingProxy)) {
-				rep.resolverChanges = self->resolverChanges.get();
-				rep.resolverChangesVersion = self->resolverChangesVersion;
-				self->resolverNeedingChanges.erase(req.requestingProxy);
-
-				if(self->resolverNeedingChanges.empty())
-					self->resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
-			}
-		}
-
-		rep.version = self->version;
+		std::tie(rep.prevVersion, rep.version) = tryGetVersion(self, req, rep);
 		rep.requestNum = req.requestNum;
+
+		ASSERT(rep.prevVersion >= 0);
 
 		proxyItr->second.replies.erase(proxyItr->second.replies.begin(), proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
-		ASSERT(rep.prevVersion >= 0);
-		req.reply.send(rep);
-
-		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
 		proxyItr->second.latestRequestNum.set(req.requestNum);
+
+		req.reply.send(rep);
 	}
 
 	return Void();
@@ -1042,13 +1156,19 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->masterProxies)
-		self->lastProxyVersionReplies[p.id()] = ProxyVersionReplies();
+	for (auto& p : self->masterProxies) {
+		auto id = p.id();
+		self->lastProxyVersionReplies[id] = ProxyVersionReplies();
+		self->lastSplitTransactionProxyVersionReplies[id] = ProxyVersionReplies();
+	}
 
 	loop {
 		choose {
 			when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
-				versionActors.add(getVersion(self, req));
+				if (!req.splitTransaction.present())
+					versionActors.add(getVersion(self, req));
+				else
+					versionActors.add(getSplitTransactionVersion(self, req));
 			}
 			when(wait(versionActors.getResult())) { }
 		}
