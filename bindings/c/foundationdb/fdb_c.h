@@ -98,7 +98,6 @@ extern "C" {
         const uint8_t* value;
         int value_length;
     } FDBKeyValue;
-
 #else
     typedef struct keyvalue {
         const void* key;
