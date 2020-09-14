@@ -50,27 +50,185 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self);
-ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int batchIndex, RestoreAsset asset,
-                                          bool isRangeFile, std::map<Key, UID>* pRangeToApplier,
-                                          std::map<UID, RestoreApplierInterface>* pApplierInterfaces);
+ACTOR Future<Void> sendMutationsToApplier(
+    std::priority_queue<RestoreLoaderSchedSendLoadParamRequest>* sendLoadParamQueue,
+    std::map<int, int>* inflightSendLoadParamReqs, NotifiedVersion* finishedBatch, VersionedMutationsMap* pkvOps,
+    int batchIndex, RestoreAsset asset, bool isRangeFile, std::map<Key, UID>* pRangeToApplier,
+    std::map<UID, RestoreApplierInterface>* pApplierInterfaces);
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
                                                            Reference<IBackupContainer> bc, RestoreAsset asset);
+ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
+                                                          SerializedMutationListMap* mutationMap,
+                                                          Reference<IBackupContainer> bc, RestoreAsset asset);
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
     std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
     Reference<IBackupContainer> bc, Version version, RestoreAsset asset);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
+// Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
+// Requests for earlier version batches are preferred; which is equivalent to
+// sendMuttionsRequests are preferred than loadingFileRequests
+ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
+	try {
+		state int curVBInflightReqs = 0;
+		state int sendLoadParams = 0;
+		state int lastLoadReqs = 0;
+		loop {
+			TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequests", self->id())
+			    .detail("SendingQueue", self->sendingQueue.size())
+			    .detail("LoadingQueue", self->loadingQueue.size())
+			    .detail("SendingLoadParamQueue", self->sendLoadParamQueue.size())
+			    .detail("InflightSendingReqs", self->inflightSendingReqs)
+			    .detail("InflightSendingReqsThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS)
+			    .detail("InflightLoadingReqs", self->inflightLoadingReqs)
+			    .detail("InflightLoadingReqsThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS)
+			    .detail("LastLoadFileRequests", lastLoadReqs)
+			    .detail("LoadFileRequestsBatchThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE)
+			    .detail("LastDispatchSendLoadParamReqsForCurrentVB", curVBInflightReqs)
+			    .detail("LastDispatchSendLoadParamReqsForFutureVB", sendLoadParams)
+			    .detail("CpuUsage", self->cpuUsage)
+			    .detail("TargetCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT)
+			    .detail("MaxCpuUsage", SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT);
+
+			// TODO: Pop old requests whose version batch <= finishedBatch.get()
+			// TODO2: Simulate delayed request can be too old by introducing artificial delay
+			if (SERVER_KNOBS->FASTRESTORE_EXPENSIVE_VALIDATION) {
+				// Sanity check: All requests before and in finishedBatch must have been processed; otherwise,
+				// those requests may cause segmentation fault after applier remove the batch data
+				if (!self->loadingQueue.empty() && self->loadingQueue.top().batchIndex <= self->finishedBatch.get()) {
+					// Still has pending requests from earlier batchIndex  and current batchIndex, which should not
+					// happen
+					TraceEvent(SevError, "FastRestoreLoaderSchedulerHasOldLoadFileRequests")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("PendingRequest", self->loadingQueue.top().toString());
+				}
+				if (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= self->finishedBatch.get()) {
+					TraceEvent(SevError, "FastRestoreLoaderSchedulerHasOldSendRequests")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("PendingRequest", self->sendingQueue.top().toString());
+				}
+				if (!self->sendLoadParamQueue.empty() &&
+				    self->sendLoadParamQueue.top().batchIndex <= self->finishedBatch.get()) {
+					TraceEvent(SevError, "FastRestoreLoaderSchedulerHasOldSendLoadParamRequests")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
+				}
+			}
+
+			if (!self->sendingQueue.empty()) {
+				// Only release one sendMutationRequest at a time because it sends all data for a version batch
+				// and it takes large amount of resource
+				const RestoreSendMutationsToAppliersRequest& req = self->sendingQueue.top();
+				// Dispatch the request if it is the next version batch to process or if cpu usage is low
+				if (req.batchIndex - 1 == self->finishedSendingVB ||
+				    self->cpuUsage < SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
+					self->addActor.send(handleSendMutationsRequest(req, self));
+					self->sendingQueue.pop();
+				}
+			}
+			// When shall the node pause the process of other requests, e.g., load file requests
+			// TODO: Revisit if we should have (self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0)
+			if ((self->inflightSendingReqs > 0 && self->inflightLoadingReqs > 0) &&
+			    (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS ||
+			     self->inflightLoadingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS ||
+			     (self->inflightSendingReqs >= 1 &&
+			      self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) ||
+			     self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT)) {
+				if (self->inflightSendingReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS) {
+					TraceEvent(SevWarn, "FastRestoreLoaderTooManyInflightRequests")
+					    .detail("VersionBatchesBlockedAtSendingMutationsToAppliers", self->inflightSendingReqs)
+					    .detail("CpuUsage", self->cpuUsage)
+					    .detail("InflightSendingReq", self->inflightSendingReqs)
+					    .detail("InflightSendingReqThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SEND_REQS)
+					    .detail("InflightLoadingReq", self->inflightLoadingReqs)
+					    .detail("InflightLoadingReqThreshold", SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_LOAD_REQS);
+				}
+				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
+				updateProcessStats(self);
+				continue;
+			}
+			// Dispatch queued requests of sending mutations per loading param
+			while (!self->sendLoadParamQueue.empty()) { // dispatch current VB first
+				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
+				if (req.batchIndex - 1 > self->finishedSendingVB) { // future VB
+					break;
+				} else {
+					req.toSched.send(Void());
+					self->sendLoadParamQueue.pop();
+				}
+			}
+			sendLoadParams = 0;
+			curVBInflightReqs = self->inflightSendLoadParamReqs[self->finishedSendingVB + 1];
+			while (!self->sendLoadParamQueue.empty()) {
+				const RestoreLoaderSchedSendLoadParamRequest& req = self->sendLoadParamQueue.top();
+				if (curVBInflightReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_INFLIGHT_SENDPARAM_THRESHOLD ||
+				    sendLoadParams >= SERVER_KNOBS->FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH) {
+					// Too many future VB requests are released
+					break;
+				} else {
+					req.toSched.send(Void());
+					self->sendLoadParamQueue.pop();
+					sendLoadParams++;
+				}
+			}
+
+			// Dispatch loading backup file requests
+			lastLoadReqs = 0;
+			while (!self->loadingQueue.empty()) {
+				if (lastLoadReqs >= SERVER_KNOBS->FASTRESTORE_SCHED_LOAD_REQ_BATCHSIZE) {
+					break;
+				}
+				const RestoreLoadFileRequest& req = self->loadingQueue.top();
+				if (req.batchIndex <= self->finishedBatch.get()) {
+					TraceEvent(SevError, "FastRestoreLoaderDispatchRestoreLoadFileRequestTooOld")
+					    .detail("FinishedBatchIndex", self->finishedBatch.get())
+					    .detail("RequestBatchIndex", req.batchIndex);
+					req.reply.send(RestoreLoadFileReply(req.param, true));
+					self->loadingQueue.pop();
+					ASSERT(false); // Check if this ever happens easily
+				} else {
+					self->addActor.send(handleLoadFileRequest(req, self));
+					self->loadingQueue.pop();
+					lastLoadReqs++;
+				}
+			}
+
+			if (self->cpuUsage >= SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT) {
+				wait(delay(SERVER_KNOBS->FASTRESTORE_SCHED_UPDATE_DELAY));
+			}
+			updateProcessStats(self);
+
+			if (self->loadingQueue.empty() && self->sendingQueue.empty() && self->sendLoadParamQueue.empty()) {
+				TraceEvent(SevDebug, "FastRestoreLoaderDispatchRequestsWaitOnRequests", self->id())
+				    .detail("HasPendingRequests", self->hasPendingRequests->get());
+				self->hasPendingRequests->set(false);
+				wait(self->hasPendingRequests->onChange()); // CAREFUL:Improper req release may cause restore stuck here
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "FastRestoreLoaderDispatchRequests").error(e, true);
+			throw e;
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
                                      RestoreControllerInterface ci) {
 	state Reference<RestoreLoaderData> self =
 	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex, ci));
-	state ActorCollection actors(false);
+	state Future<Void> error = actorCollection(self->addActor.getFuture());
+	state ActorCollection actors(false); // actors whose errors can be ignored
 	state Future<Void> exitRole = Never();
+	state bool hasQueuedRequests = false;
 
 	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreLoader"));
+
+	self->addActor.send(dispatchRequests(self));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -87,12 +245,20 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				}
 				when(RestoreLoadFileRequest req = waitNext(loaderInterf.loadFile.getFuture())) {
 					requestTypeStr = "loadFile";
+					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
 					self->initBackupContainer(req.param.url);
-					actors.add(handleLoadFileRequest(req, self));
+					self->loadingQueue.push(req);
+					if (!hasQueuedRequests) {
+						self->hasPendingRequests->set(true);
+					}
 				}
 				when(RestoreSendMutationsToAppliersRequest req = waitNext(loaderInterf.sendMutations.getFuture())) {
 					requestTypeStr = "sendMutations";
-					actors.add(handleSendMutationsRequest(req, self));
+					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
+					self->sendingQueue.push(req);
+					if (!hasQueuedRequests) {
+						self->hasPendingRequests->set(true);
+					}
 				}
 				when(RestoreVersionBatchRequest req = waitNext(loaderInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
@@ -114,10 +280,11 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 					TraceEvent("FastRestoreLoaderCoreExitRole", self->id());
 					break;
 				}
+				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
 			}
 		} catch (Error& e) {
-			TraceEvent(e.code() == error_code_broken_promise ? SevError : SevWarnAlways, "FastRestoreLoaderError",
-			           self->id())
+			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
+			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreLoaderError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
 			actors.clear(false);
@@ -190,8 +357,11 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
 	if (rLen != asset.len) throw restore_bad_read();
 
-	TraceEvent("FastRestoreLoader")
-	    .detail("DecodingLogFile", asset.filename)
+	simulateBlobFailure();
+
+	TraceEvent("FastRestoreLoaderDecodingLogFile")
+	    .detail("BatchIndex", asset.batchIndex)
+	    .detail("Filename", asset.filename)
 	    .detail("Offset", asset.offset)
 	    .detail("Length", asset.len);
 
@@ -285,12 +455,46 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
 		    .error(e)
+		    .detail("BatchIndex", asset.batchIndex)
 		    .detail("Filename", file->getFilename())
 		    .detail("BlockOffset", asset.offset)
 		    .detail("BlockLen", asset.len);
 		throw;
 	}
 	processedFileOffset->set(asset.offset + asset.len);
+	return Void();
+}
+
+// wrapper of _parsePartitionedLogFileOnLoader to retry on blob error
+ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
+    KeyRangeMap<Version>* pRangeVersions, NotifiedVersion* processedFileOffset,
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+    std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
+    Reference<IBackupContainer> bc, RestoreAsset asset) {
+	state int readFileRetries = 0;
+	loop {
+		try {
+			wait(_parsePartitionedLogFileOnLoader(pRangeVersions, processedFileOffset, kvOpsIter, samplesIter, cc, bc,
+			                                      asset));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
+			    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedPartitionedLogFileBlock").error(e);
+				throw;
+			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+				// blob http request failure, retry
+				TraceEvent(SevWarnAlways, "FastRestoreDecodedPartitionedLogFileConnectionFailure")
+				    .detail("Retries", ++readFileRetries)
+				    .error(e);
+				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParsePartitionedLogFileOnLoaderUnexpectedError").error(e);
+				throw;
+			}
+		}
+	}
 	return Void();
 }
 
@@ -306,8 +510,9 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 	state std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsPerLPIter = batchData->kvOpsPerLP.end();
 	state std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter = batchData->sampleMutations.end();
 
-	// Q: How to record the  param's fields inside LoadingParam Refer to storageMetrics
-	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID).detail("LoadingParam", param.toString());
+	TraceEvent("FastRestoreLoaderProcessLoadingParam", loaderID)
+	    .detail("BatchIndex", param.asset.batchIndex)
+	    .detail("LoadingParam", param.toString());
 	ASSERT(param.blockSize > 0);
 	ASSERT(param.asset.offset % param.blockSize == 0); // Parse file must be at block boundary.
 	ASSERT(batchData->kvOpsPerLP.find(param) == batchData->kvOpsPerLP.end());
@@ -329,12 +534,12 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
-				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(pRangeVersions, &processedFileOffset,
-				                                                             kvOpsPerLPIter, samplesIter,
-				                                                             &batchData->counters, bc, subAsset));
+				fileParserFutures.push_back(parsePartitionedLogFileOnLoader(pRangeVersions, &processedFileOffset,
+				                                                            kvOpsPerLPIter, samplesIter,
+				                                                            &batchData->counters, bc, subAsset));
 			} else {
 				fileParserFutures.push_back(
-				    _parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, bc, subAsset));
+				    parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, bc, subAsset));
 			}
 		}
 	}
@@ -345,7 +550,9 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 		                         param.asset);
 	}
 
-	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID).detail("LoadingParam", param.toString());
+	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID)
+	    .detail("BatchIndex", param.asset.batchIndex)
+	    .detail("LoadingParam", param.toString());
 
 	return Void();
 }
@@ -356,6 +563,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	state bool isDuplicated = true;
 	state bool printTrace = false;
 	ASSERT(batchData.isValid());
+	ASSERT(req.batchIndex > self->finishedBatch.get());
 	bool paramExist = batchData->processedFileParams.find(req.param) != batchData->processedFileParams.end();
 	bool isReady = paramExist ? batchData->processedFileParams[req.param].isReady() : false;
 
@@ -380,6 +588,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] =
 		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
+		self->inflightLoadingReqs++;
 		isDuplicated = false;
 	} else {
 		TraceEvent(SevFRDebugInfo, "FastRestoreLoadFile", self->id())
@@ -415,15 +624,17 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		state int samplesMessages = fSendSamples.size();
 		wait(waitForAll(fSendSamples));
 	} catch (Error& e) { // In case ci.samples throws broken_promise due to unstable network
-		if (e.code() == error_code_broken_promise) {
+		if (e.code() == error_code_broken_promise || e.code() == error_code_operation_cancelled) {
 			TraceEvent(SevWarnAlways, "FastRestoreLoaderPhaseLoadFileSendSamples")
-			    .detail("SamplesMessages", samplesMessages);
+			    .detail("SamplesMessages", samplesMessages)
+			    .error(e, true);
 		} else {
 			TraceEvent(SevError, "FastRestoreLoaderPhaseLoadFileSendSamplesUnexpectedError").error(e, true);
 		}
 	}
 
 	// Ack restore controller the param is processed
+	self->inflightLoadingReqs--;
 	req.reply.send(RestoreLoadFileReply(req.param, isDuplicated));
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
@@ -436,16 +647,29 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 // Do not need to block on low memory usage because this actor should not increase memory usage.
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self) {
-	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
-	state Reference<LoaderBatchStatus> batchStatus = self->status[req.batchIndex];
+	state Reference<LoaderBatchData> batchData;
+	state Reference<LoaderBatchStatus> batchStatus;
 	state bool isDuplicated = true;
 
+	if (req.batchIndex <= self->finishedBatch.get()) {
+		TraceEvent(SevWarn, "FastRestoreLoaderRestoreSendMutationsToAppliersRequestTooOld")
+		    .detail("FinishedBatchIndex", self->finishedBatch.get())
+		    .detail("RequestBatchIndex", req.batchIndex);
+		req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
+		return Void();
+	}
+
+	batchData = self->batch[req.batchIndex];
+	batchStatus = self->status[req.batchIndex];
+	ASSERT(batchData.isValid() && batchStatus.isValid());
+	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
+	ASSERT(req.batchIndex > self->finishedBatch.get());
 	TraceEvent("FastRestoreLoaderPhaseSendMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
-	// Loader destroy batchData once the batch finishes and self->finishedBatch.set(req.batchIndex);
-	ASSERT(self->finishedBatch.get() < req.batchIndex);
+	// The VB must finish loading phase before it can send mutations; update finishedLoadingVB for scheduler
+	self->finishedLoadingVB = std::max(self->finishedLoadingVB, req.batchIndex);
 
 	// Ensure each file is sent exactly once by using batchStatus->sendAllLogs and batchStatus->sendAllRanges
 	if (!req.useRangeFile) {
@@ -485,17 +709,20 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 	}
 
 	if (!isDuplicated) {
+		self->inflightSendingReqs++;
 		vector<Future<Void>> fSendMutations;
 		batchData->rangeToApplier = req.rangeToApplier;
 		for (auto& [loadParam, kvOps] : batchData->kvOpsPerLP) {
 			if (loadParam.isRangeFile == req.useRangeFile) {
 				// Send the parsed mutation to applier who will apply the mutation to DB
-				fSendMutations.push_back(sendMutationsToApplier(&kvOps, req.batchIndex, loadParam.asset,
-				                                                loadParam.isRangeFile, &batchData->rangeToApplier,
-				                                                &self->appliersInterf));
+				fSendMutations.push_back(
+				    sendMutationsToApplier(&self->sendLoadParamQueue, &self->inflightSendLoadParamReqs,
+				                           &self->finishedBatch, &kvOps, req.batchIndex, loadParam.asset,
+				                           loadParam.isRangeFile, &batchData->rangeToApplier, &self->appliersInterf));
 			}
 		}
 		wait(waitForAll(fSendMutations));
+		self->inflightSendingReqs--;
 		if (req.useRangeFile) {
 			batchStatus->sendAllRanges = Void(); // Finish sending kvs parsed from range files
 		} else {
@@ -504,6 +731,7 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 		if ((batchStatus->sendAllRanges.present() && batchStatus->sendAllRanges.get().isReady()) &&
 		    (batchStatus->sendAllLogs.present() && batchStatus->sendAllLogs.get().isReady())) {
 			// Both log and range files have been sent.
+			self->finishedSendingVB = std::max(self->finishedSendingVB, req.batchIndex);
 			batchData->kvOpsPerLP.clear();
 		}
 	}
@@ -534,9 +762,11 @@ void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToA
 //   isRangeFile: is pkvOps from range file? Let receiver (applier) know if the mutation is log mutation;
 //   pRangeToApplier: range to applierID mapping, deciding which applier is responsible for which range
 //   pApplierInterfaces: applier interfaces to send the mutations to
-ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int batchIndex, RestoreAsset asset,
-                                          bool isRangeFile, std::map<Key, UID>* pRangeToApplier,
-                                          std::map<UID, RestoreApplierInterface>* pApplierInterfaces) {
+ACTOR Future<Void> sendMutationsToApplier(
+    std::priority_queue<RestoreLoaderSchedSendLoadParamRequest>* sendLoadParamQueue,
+    std::map<int, int>* inflightSendLoadParamReqs, NotifiedVersion* finishedBatch, VersionedMutationsMap* pkvOps,
+    int batchIndex, RestoreAsset asset, bool isRangeFile, std::map<Key, UID>* pRangeToApplier,
+    std::map<UID, RestoreApplierInterface>* pApplierInterfaces) {
 	state VersionedMutationsMap& kvOps = *pkvOps;
 	state VersionedMutationsMap::iterator kvOp = kvOps.begin();
 	state int kvCount = 0;
@@ -544,6 +774,20 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	state Version msgIndex = 1; // Monotonically increased index for send message, must start at 1
 	state std::vector<UID> applierIDs = getApplierIDs(*pRangeToApplier);
 	state double msgSize = 0; // size of mutations in the message
+
+	// Wait for scheduler to kick it off
+	Promise<Void> toSched;
+	sendLoadParamQueue->push(RestoreLoaderSchedSendLoadParamRequest(batchIndex, toSched, now()));
+	wait(toSched.getFuture());
+	if (finishedBatch->get() >= batchIndex) {
+		TraceEvent(SevError, "FastRestoreLoaderSendMutationToApplierLateRequest")
+		    .detail("FinishedBatchIndex", finishedBatch->get())
+		    .detail("RequestBatchIndex", batchIndex);
+		ASSERT(false);
+		return Void();
+	}
+
+	(*inflightSendLoadParamReqs)[batchIndex]++;
 
 	TraceEvent("FastRestoreLoaderSendMutationToApplier")
 	    .detail("IsRangeFile", isRangeFile)
@@ -641,7 +885,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 					    applierID, RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
 					                                                    applierVersionedMutationsBuffer[applierID]));
 				}
-				TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+				TraceEvent(SevInfo, "FastRestoreLoaderSendMutationToApplier")
 				    .detail("MessageIndex", msgIndex)
 				    .detail("RestoreAsset", asset.toString())
 				    .detail("Requests", requests.size());
@@ -665,7 +909,7 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 			                      RestoreSendVersionedMutationsRequest(batchIndex, asset, msgIndex, isRangeFile,
 			                                                           applierVersionedMutationsBuffer[applierID]));
 		}
-		TraceEvent(SevDebug, "FastRestoreLoaderSendMutationToApplier")
+		TraceEvent(SevInfo, "FastRestoreLoaderSendMutationToApplier")
 		    .detail("MessageIndex", msgIndex)
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("Requests", requests.size());
@@ -674,11 +918,22 @@ ACTOR Future<Void> sendMutationsToApplier(VersionedMutationsMap* pkvOps, int bat
 	}
 	wait(waitForAll(fSends));
 
-	kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
-	TraceEvent("FastRestoreLoaderSendMutationToAppliers")
-	    .detail("BatchIndex", batchIndex)
-	    .detail("RestoreAsset", asset.toString())
-	    .detail("Mutations", kvCount);
+	(*inflightSendLoadParamReqs)[batchIndex]--;
+
+	if (finishedBatch->get() < batchIndex) {
+		kvOps = VersionedMutationsMap(); // Free memory for parsed mutations at the restore asset.
+		TraceEvent("FastRestoreLoaderSendMutationToApplierDone")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("RestoreAsset", asset.toString())
+		    .detail("Mutations", kvCount);
+	} else {
+		TraceEvent(SevWarnAlways, "FastRestoreLoaderSendMutationToApplierDoneTooLate")
+		    .detail("BatchIndex", batchIndex)
+		    .detail("FinishedBatchIndex", finishedBatch->get())
+		    .detail("RestoreAsset", asset.toString())
+		    .detail("Mutations", kvCount);
+	}
+
 	return Void();
 }
 
@@ -779,6 +1034,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 	SerializedMutationListMap& mutationMap = *pmutationMap;
 
 	TraceEvent(SevFRMutationInfo, "FastRestoreLoaderParseSerializedLogMutation")
+	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("RestoreAsset", asset.toString());
 
 	Arena tempArena;
@@ -881,6 +1137,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
 	TraceEvent(SevFRDebugInfo, "FastRestoreDecodedRangeFile")
+	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("Filename", asset.filename)
 	    .detail("Version", version)
 	    .detail("BeginVersion", asset.beginVersion)
@@ -889,19 +1146,39 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	// Sanity check the range file is within the restored version range
 	ASSERT_WE_THINK(asset.isInVersionRange(version));
 
-	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
-	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 	state Standalone<VectorRef<KeyValueRef>> blockData;
-	try {
-		Standalone<VectorRef<KeyValueRef>> kvs =
-		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
-		TraceEvent("FastRestoreLoader")
-		    .detail("DecodedRangeFile", asset.filename)
-		    .detail("DataSize", kvs.contents().size());
-		blockData = kvs;
-	} catch (Error& e) {
-		TraceEvent(SevError, "FileRestoreCorruptRangeFileBlock").error(e);
-		throw;
+	// should retry here
+	state int readFileRetries = 0;
+	loop {
+		try {
+			// The set of key value version is rangeFile.version. the key-value set in the same range file has the same
+			// version
+			Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
+			Standalone<VectorRef<KeyValueRef>> kvs =
+			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+			TraceEvent("FastRestoreLoaderDecodedRangeFile")
+			    .detail("BatchIndex", asset.batchIndex)
+			    .detail("Filename", asset.filename)
+			    .detail("DataSize", kvs.contents().size());
+			blockData = kvs;
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
+			    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedRangeFileBlock").error(e);
+				throw;
+			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+				// blob http request failure, retry
+				TraceEvent(SevWarnAlways, "FastRestoreDecodedRangeFileConnectionFailure")
+				    .detail("Retries", ++readFileRetries)
+				    .error(e);
+				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParseRangeFileOnLoaderUnexpectedError").error(e);
+				throw;
+			}
+		}
 	}
 
 	// First and last key are the range for this file
@@ -951,6 +1228,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 		// We cache all kv operations into kvOps, and apply all kv operations later in one place
 		auto it = kvOps.insert(std::make_pair(msgVersion, MutationsVec()));
 		TraceEvent(SevFRMutationInfo, "FastRestoreDecodeRangeFile")
+		    .detail("BatchIndex", asset.batchIndex)
 		    .detail("CommitVersion", version)
 		    .detail("ParsedMutationKV", m.toString());
 
@@ -980,6 +1258,7 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 	state Standalone<VectorRef<KeyValueRef>> data =
 	    wait(parallelFileRestore::decodeLogFileBlock(inFile, asset.offset, asset.len));
 	TraceEvent("FastRestoreLoaderDecodeLogFile")
+	    .detail("BatchIndex", asset.batchIndex)
 	    .detail("RestoreAsset", asset.toString())
 	    .detail("DataSize", data.contents().size());
 
@@ -994,6 +1273,36 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 		pProcessedFileOffset->set(asset.offset + asset.len);
 	}
 
+	return Void();
+}
+
+// retry on _parseLogFileToMutationsOnLoader
+ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
+                                                          SerializedMutationListMap* pMutationMap,
+                                                          Reference<IBackupContainer> bc, RestoreAsset asset) {
+	state int readFileRetries = 0;
+	loop {
+		try {
+			wait(_parseLogFileToMutationsOnLoader(pProcessedFileOffset, pMutationMap, bc, asset));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
+			    e.code() == error_code_restore_corrupted_data_padding) { // non retriable error
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedLogFileBlock").error(e);
+				throw;
+			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+				// blob http request failure, retry
+				TraceEvent(SevWarnAlways, "FastRestoreDecodedLogFileConnectionFailure")
+				    .detail("Retries", ++readFileRetries)
+				    .error(e);
+				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParseLogFileToMutationsOnLoaderUnexpectedError").error(e);
+				throw;
+			}
+		}
+	}
 	return Void();
 }
 
@@ -1017,6 +1326,25 @@ ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest re
 	    .detail("RequestedBatchIndex", req.batchIndex);
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
+		// Sanity check: All requests before and in this batchIndex must have been processed; otherwise,
+		// those requests may cause segmentation fault after applier remove the batch data
+		while (!self->loadingQueue.empty() && self->loadingQueue.top().batchIndex <= req.batchIndex) {
+			// Still has pending requests from earlier batchIndex  and current batchIndex, which should not happen
+			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingLoadFileRequests")
+			    .detail("PendingRequest", self->loadingQueue.top().toString());
+			self->loadingQueue.pop();
+		}
+		while (!self->sendingQueue.empty() && self->sendingQueue.top().batchIndex <= req.batchIndex) {
+			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendRequests")
+			    .detail("PendingRequest", self->sendingQueue.top().toString());
+			self->sendingQueue.pop();
+		}
+		while (!self->sendLoadParamQueue.empty() && self->sendLoadParamQueue.top().batchIndex <= req.batchIndex) {
+			TraceEvent(SevWarn, "FastRestoreLoaderHasPendingSendLoadParamRequests")
+			    .detail("PendingRequest", self->sendLoadParamQueue.top().toString());
+			self->sendLoadParamQueue.pop();
+		}
+
 		self->finishedBatch.set(req.batchIndex);
 		// Clean up batchData
 		self->batch.erase(req.batchIndex);

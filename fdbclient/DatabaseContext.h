@@ -68,7 +68,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	}
 };
 
-typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+using ProxyInfo = ModelInterface<MasterProxyInterface>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -160,11 +161,14 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	bool sampleReadTags();
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
+	void updateProxies();
 	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
-	Future<Void> onMasterProxiesChanged();
+	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
@@ -217,11 +221,12 @@ public:
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
-	AsyncTrigger masterProxiesChangeTrigger;
-	Future<Void> monitorMasterProxiesInfoChange;
+	AsyncTrigger proxiesChangeTrigger;
+	Future<Void> monitorProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
-	bool provisional;
-	UID masterProxiesLastChange;
+	Reference<GrvProxyInfo> grvProxies;
+	bool proxyProvisional;
+	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
@@ -309,6 +314,7 @@ public:
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
+	Counter transactionsExpensiveClearCostEstCount;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -341,6 +347,7 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothMidShardSize;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 

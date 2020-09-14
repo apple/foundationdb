@@ -25,6 +25,7 @@ runSetup = true
     numClearRanges = 10
     maxTransactionBytes = 500000
     randomTestDuration = 60
+    resetDBTimeout = 7200
 
     [[test.workload]]
     testName = 'AtomicRestore'

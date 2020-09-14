@@ -286,11 +286,19 @@ public:
 	//   - submit a restore on the given tagName
 	//   - Optionally wait for the restore's completion.  Will restore_error if restore fails or is aborted.
 	// restore() will return the targetVersion which will be either the valid version passed in or the max restorable version for the given url.
-	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true);
-	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, bool waitForComplete = true, Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true) {
+	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url,
+	                        Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete = true,
+	                        Version targetVersion = -1, bool verbose = true, Key addPrefix = Key(),
+	                        Key removePrefix = Key(), bool lockDB = true, bool incrementalBackupOnly = false,
+	                        Version beginVersion = -1);
+	Future<Version> restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, bool waitForComplete = true,
+	                        Version targetVersion = -1, bool verbose = true, KeyRange range = normalKeys,
+	                        Key addPrefix = Key(), Key removePrefix = Key(), bool lockDB = true,
+	                        bool incrementalBackupOnly = false, Version beginVersion = -1) {
 		Standalone<VectorRef<KeyRangeRef>> rangeRef;
 		rangeRef.push_back_deep(rangeRef.arena(), range);
-		return restore(cx, cxOrig, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB);
+		return restore(cx, cxOrig, tagName, url, rangeRef, waitForComplete, targetVersion, verbose, addPrefix,
+		               removePrefix, lockDB, incrementalBackupOnly, beginVersion);
 	}
 	Future<Version> atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix = Key(), Key removePrefix = Key());
 	Future<Version> atomicRestore(Database cx, Key tagName, KeyRange range = normalKeys, Key addPrefix = Key(), Key removePrefix = Key()) {
@@ -315,13 +323,14 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds,
 	                          std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool stopWhenDone = true, bool partitionedLog = false);
+	                          bool stopWhenDone = true, bool partitionedLog = false,
+	                          bool incrementalBackupOnly = false);
 	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true,
-	                          bool partitionedLog = false) {
+	                          bool partitionedLog = false, bool incrementalBackupOnly = false) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone,
-			                    partitionedLog);
+			                    partitionedLog, incrementalBackupOnly);
 		});
 	}
 
@@ -810,6 +819,11 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Set to true if only requesting incremental backup without base snapshot.
+	KeyBackedProperty<bool> incrementalBackupOnly() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Latest version for which all prior versions have saved by backup workers.
 	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -847,17 +861,25 @@ public:
 		auto workerEnabled = backupWorkerEnabled().get(tr);
 		auto plogEnabled = partitionedLogEnabled().get(tr);
 		auto workerVersion = latestBackupWorkerSavedVersion().get(tr);
-		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) && success(workerVersion), [=](Void) -> Optional<Version> {
-			// The latest log greater than the oldest snapshot is the restorable version
-			Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
-			                                       plogEnabled.get().present() && plogEnabled.get().get()
-			                                   ? workerVersion.get()
-			                                   : lastLog.get();
-			if (logVersion.present() && firstSnapshot.get().present() && logVersion.get() > firstSnapshot.get().get()) {
-				return std::max(logVersion.get() - 1, firstSnapshot.get().get());
-			}
-			return {};
-		});
+		auto incrementalBackup = incrementalBackupOnly().get(tr);
+		return map(success(lastLog) && success(firstSnapshot) && success(workerEnabled) && success(plogEnabled) &&
+		               success(workerVersion) && success(incrementalBackup),
+		           [=](Void) -> Optional<Version> {
+			           // The latest log greater than the oldest snapshot is the restorable version
+			           Optional<Version> logVersion = workerEnabled.get().present() && workerEnabled.get().get() &&
+			                                                  plogEnabled.get().present() && plogEnabled.get().get()
+			                                              ? workerVersion.get()
+			                                              : lastLog.get();
+			           if (logVersion.present() && firstSnapshot.get().present() &&
+			               logVersion.get() > firstSnapshot.get().get()) {
+				           return std::max(logVersion.get() - 1, firstSnapshot.get().get());
+			           }
+			           if (logVersion.present() && incrementalBackup.isReady() && incrementalBackup.get().present() &&
+			               incrementalBackup.get().get()) {
+				           return logVersion.get() - 1;
+			           }
+			           return {};
+		           });
 	}
 
 	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {
@@ -935,6 +957,8 @@ Value makePadding(int size);
 // Assume: DB is locked
 ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                              Key addPrefix, Key removePrefix);
+
+void simulateBlobFailure();
 
 #include "flow/unactorcompiler.h"
 #endif

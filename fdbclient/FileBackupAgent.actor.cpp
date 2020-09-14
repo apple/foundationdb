@@ -131,6 +131,9 @@ public:
 	KeyBackedProperty<Key> removePrefix() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
+	KeyBackedProperty<bool> incrementalBackupOnly() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
@@ -139,6 +142,9 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 	KeyBackedProperty<Key> batchFuture() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+	KeyBackedProperty<Version> beginVersion() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 	KeyBackedProperty<Version> restoreVersion() {
@@ -557,7 +563,9 @@ namespace fileBackup {
 		if(rLen != len)
 			throw restore_bad_read();
 
-		Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	    simulateBlobFailure();
+
+	    Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
@@ -597,17 +605,17 @@ namespace fileBackup {
 				if(b != 0xFF)
 					throw restore_corrupted_data_padding();
 
-			return results;
+		    return results;
 
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
-				.error(e)
-				.detail("Filename", file->getFilename())
-				.detail("BlockOffset", offset)
-				.detail("BlockLen", len)
-				.detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-			throw;
+		    TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
+		        .error(e)
+		        .detail("Filename", file->getFilename())
+		        .detail("BlockOffset", offset)
+		        .detail("BlockLen", len)
+		        .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
+		        .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		    throw;
 		}
 	}
 
@@ -2474,7 +2482,8 @@ namespace fileBackup {
 			state Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
 			state Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
 			state Future<Optional<bool>> partitionedLog = config.partitionedLogEnabled().get(tr);
-			wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog));
+			state Future<Optional<bool>> incrementalBackupOnly = config.incrementalBackupOnly().get(tr);
+			wait(success(backupRangesFuture) && success(destUidValueFuture) && success(partitionedLog) && success(incrementalBackupOnly));
 			std::vector<KeyRange> backupRanges = backupRangesFuture.get();
 			Key destUidValue = destUidValueFuture.get();
 
@@ -2494,7 +2503,10 @@ namespace fileBackup {
 			wait(config.initNewSnapshot(tr, 0));
 
 			// Using priority 1 for both of these to at least start both tasks soon
-			wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			// Do not add snapshot task if we only want the incremental backup
+			if (!incrementalBackupOnly.get().present() || !incrementalBackupOnly.get().get()) {
+				wait(success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			}
 			wait(success(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
@@ -3008,8 +3020,10 @@ namespace fileBackup {
 			state int64_t remainingInBatch = Params.remainingInBatch().get(task);
 			state bool addingToExistingBatch = remainingInBatch > 0;
 			state Version restoreVersion;
+			state Future<Optional<bool>> incrementalBackupOnly = restore.incrementalBackupOnly().get(tr);
 
 			wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr))
+						&& success(incrementalBackupOnly)
 						&& checkTaskVersion(tr->getDatabase(), task, name, version));
 
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
@@ -3398,6 +3412,7 @@ namespace fileBackup {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			state RestoreConfig restore(task);
 			state Version restoreVersion;
+			state Version beginVersion;
 			state Reference<IBackupContainer> bc;
 
 			loop {
@@ -3408,6 +3423,8 @@ namespace fileBackup {
 					wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 					Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
 					restoreVersion = _restoreVersion;
+					Optional<Version> _beginVersion = wait(restore.beginVersion().get(tr));
+					beginVersion = _beginVersion.present() ? _beginVersion.get() : invalidVersion;
 					wait(taskBucket->keepRunning(tr, task));
 
 					ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -3447,14 +3464,21 @@ namespace fileBackup {
 					wait(tr->onError(e));
 				}
 			}
-
-			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion));
+			Optional<bool> _incremental = wait(restore.incrementalBackupOnly().get(tr));
+			state bool incremental = _incremental.present() ? _incremental.get() : false;
+			if (beginVersion == invalidVersion) {
+				beginVersion = 0;
+			}
+			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, incremental, beginVersion));
+			if (!incremental) {
+				beginVersion = restorable.get().snapshot.beginVersion;
+			}
 
 			if(!restorable.present())
 				throw restore_missing_data();
 
 			// First version for which log data should be applied
-			Params.firstVersion().set(task, restorable.get().snapshot.beginVersion);
+			Params.firstVersion().set(task, beginVersion);
 
 			// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 			// Order does not matter, they will be put in order when written to the restoreFileMap below.
@@ -3463,6 +3487,7 @@ namespace fileBackup {
 			for(const RangeFile &f : restorable.get().ranges) {
 				files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
 			}
+
 			for(const LogFile &f : restorable.get().logs) {
 				files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
 			}
@@ -3526,6 +3551,7 @@ namespace fileBackup {
 			restore.stateEnum().set(tr, ERestoreState::RUNNING);
 
 			// Set applyMutation versions
+
 			restore.setApplyBeginVersion(tr, firstVersion);
 			restore.setApplyEndVersion(tr, firstVersion);
 
@@ -3533,6 +3559,14 @@ namespace fileBackup {
 			wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 			wait(taskBucket->finish(tr, task));
+			state Future<Optional<bool>> logsOnly = restore.incrementalBackupOnly().get(tr);
+			wait(success(logsOnly));
+			if (logsOnly.get().present() && logsOnly.get().get()) {
+				// If this is an incremental restore, we need to set the applyMutationsMapPrefix
+				// to the earliest log version so no mutations are missed
+				Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
+				wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
+			}
 			return Void();
 		}
 
@@ -3760,7 +3794,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer, int snapshotIntervalSeconds, std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
-	                                       bool partitionedLog) {
+	                                       bool partitionedLog, bool incrementalBackupOnly) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -3863,13 +3897,17 @@ public:
 		config.backupRanges().set(tr, normalizedRanges);
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
+		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> submitRestore(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName, Key backupURL, Standalone<VectorRef<KeyRangeRef>> ranges, Version restoreVersion, Key addPrefix, Key removePrefix, bool lockDB, UID uid) {
+	ACTOR static Future<Void> submitRestore(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr,
+	                                        Key tagName, Key backupURL, Standalone<VectorRef<KeyRangeRef>> ranges,
+	                                        Version restoreVersion, Key addPrefix, Key removePrefix, bool lockDB,
+	                                        bool incrementalBackupOnly, Version beginVersion, UID uid) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -3917,7 +3955,7 @@ public:
 		for (index = 0; index < restoreRanges.size(); index++) {
 			KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end).removePrefix(removePrefix).withPrefix(addPrefix);
 			Standalone<RangeResultRef> existingRows = wait(tr->getRange(restoreIntoRange, 1));
-			if (existingRows.size() > 0) {
+			if (existingRows.size() > 0 && !incrementalBackupOnly) {
 				throw restore_destination_not_empty();
 			}
 		}
@@ -3934,6 +3972,8 @@ public:
 		restore.sourceContainer().set(tr, bc);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
+		restore.incrementalBackupOnly().set(tr, incrementalBackupOnly);
+		restore.beginVersion().set(tr, beginVersion);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		}
@@ -4451,7 +4491,8 @@ public:
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Optional<Database> cxOrig,
 	                                     Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                     bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix,
-	                                     Key removePrefix, bool lockDB, UID randomUid) {
+	                                     Key removePrefix, bool lockDB, bool incrementalBackupOnly,
+	                                     Version beginVersion, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
 		state BackupDescription desc = wait(bc->describeBackup());
@@ -4463,7 +4504,12 @@ public:
 		if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+		if (targetVersion == invalidVersion && incrementalBackupOnly && desc.contiguousLogEnd.present()) {
+			targetVersion = desc.contiguousLogEnd.get() - 1;
+		}
+
+		Optional<RestorableFileSet> restoreSet =
+		    wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly, beginVersion));
 
 		if(!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -4482,7 +4528,8 @@ public:
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(submitRestore(backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix, lockDB, randomUid));
+				wait(submitRestore(backupAgent, tr, tagName, url, ranges, targetVersion, addPrefix, removePrefix,
+				                   lockDB, incrementalBackupOnly, beginVersion, randomUid));
 				wait(tr->commit());
 				break;
 			} catch(Error &e) {
@@ -4619,7 +4666,7 @@ public:
 		} else {
 			TraceEvent("AS_StartRestore");
 			Version ver = wait(restore(backupAgent, cx, cx, tagName, KeyRef(bc->getURL()), ranges, true, -1, true,
-			                           addPrefix, removePrefix, true, randomUid));
+			                           addPrefix, removePrefix, true, false, invalidVersion, randomUid));
 			return ver;
 		}
 	}
@@ -4656,8 +4703,13 @@ Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, St
 	return FileBackupAgentImpl::atomicParallelRestore(this, cx, tagName, ranges, addPrefix, removePrefix);
 }
 
-Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url, Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete, Version targetVersion, bool verbose, Key addPrefix, Key removePrefix, bool lockDB) {
-	return FileBackupAgentImpl::restore(this, cx, cxOrig, tagName, url, ranges, waitForComplete, targetVersion, verbose, addPrefix, removePrefix, lockDB, deterministicRandom()->randomUniqueID());
+Future<Version> FileBackupAgent::restore(Database cx, Optional<Database> cxOrig, Key tagName, Key url,
+                                         Standalone<VectorRef<KeyRangeRef>> ranges, bool waitForComplete,
+                                         Version targetVersion, bool verbose, Key addPrefix, Key removePrefix,
+                                         bool lockDB, bool incrementalBackupOnly, Version beginVersion) {
+	return FileBackupAgentImpl::restore(this, cx, cxOrig, tagName, url, ranges, waitForComplete, targetVersion, verbose,
+	                                    addPrefix, removePrefix, lockDB, incrementalBackupOnly, beginVersion,
+	                                    deterministicRandom()->randomUniqueID());
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges, Key addPrefix, Key removePrefix) {
@@ -4683,9 +4735,9 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer,
                                            int snapshotIntervalSeconds, std::string tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone,
-                                           bool partitionedLog) {
+                                           bool partitionedLog, bool incrementalBackupOnly) {
 	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges,
-	                                         stopWhenDone, partitionedLog);
+	                                         stopWhenDone, partitionedLog, incrementalBackupOnly);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName){
@@ -4962,4 +5014,19 @@ ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<K
 	}
 
 	return Void();
+}
+
+void simulateBlobFailure() {
+	if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
+		double i = deterministicRandom()->random01();
+		if (i < 0.5) {
+			throw http_request_failed();
+		} else if (i < 0.7) {
+			throw connection_failed();
+		} else if (i < 0.8) {
+			throw timed_out();
+		} else if (i < 0.9) {
+			throw lookup_failed();
+		}
+	}
 }

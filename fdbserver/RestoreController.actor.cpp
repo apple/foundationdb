@@ -84,6 +84,7 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 			ASSERT(req.batchIndex <= self->batch.size()); // batchIndex starts from 1
 
 			Reference<ControllerBatchData> batch = self->batch[req.batchIndex];
+			ASSERT(batch.isValid());
 			if (batch->sampleMsgs.find(req.id) != batch->sampleMsgs.end()) {
 				req.reply.send(RestoreCommonReply(req.id));
 				continue;
@@ -164,7 +165,10 @@ ACTOR Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWo
 			break;
 		}
 
-		TraceEvent("FastRestoreController", controllerData->id()).detail("WorkerNode", workerInterf.first);
+		TraceEvent("FastRestoreController", controllerData->id())
+		    .detail("WorkerNode", workerInterf.first)
+		    .detail("NodeRole", role)
+		    .detail("NodeIndex", nodeIndex);
 		requests.emplace_back(workerInterf.first,
 		                      RestoreRecruitRoleRequest(controllerWorker->controllerInterf.get(), role, nodeIndex));
 		nodeIndex++;
@@ -300,7 +304,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
 	state Version minRangeVersion = MAX_VERSION;
-	state ActorCollection actors(false);
+	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	self->initBackupContainer(request.url);
 
@@ -356,7 +360,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 		}
 	}
 
-	actors.add(monitorFinishedVersion(self, request));
+	self->addActor.send(monitorFinishedVersion(self, request));
 	state std::vector<VersionBatch>::iterator versionBatch = versionBatches.begin();
 	for (; versionBatch != versionBatches.end(); versionBatch++) {
 		while (self->runningVersionBatches.get() >= SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM && !releaseVBOutOfOrder) {
@@ -378,7 +382,11 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_LAUNCH_DELAY));
 	}
 
-	wait(waitForAll(fBatches));
+	try {
+		wait(waitForAll(fBatches) || error);
+	} catch (Error& e) {
+		TraceEvent(SevError, "FastRestoreControllerDispatchVersionBatchesUnexpectedError").error(e);
+	}
 
 	TraceEvent("FastRestoreController").detail("RestoreToVersion", request.targetVersion);
 	return request.targetVersion;
@@ -436,6 +444,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batc
 		                             : std::min(versionBatch.endVersion, request.targetVersion + 1);
 		param.asset.addPrefix = request.addPrefix;
 		param.asset.removePrefix = request.removePrefix;
+		param.asset.batchIndex = batchIndex;
 
 		TraceEvent("FastRestoreControllerPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)

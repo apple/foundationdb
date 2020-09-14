@@ -785,14 +785,14 @@ public:
 	void sendError(const E& exc) const { sav->sendError(exc); }
 
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
-	bool isSet() { return sav->isSet(); }
-	bool canBeSet() { return sav->canBeSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isSet() const { return sav->isSet(); }
+	bool canBeSet() const { return sav->canBeSet(); }
+	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) {
 		sav->addPromiseRef();
 	}
-	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(Promise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 
 	~Promise() { if (sav) sav->delPromiseRef(); }
 

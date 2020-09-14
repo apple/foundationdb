@@ -66,12 +66,16 @@ public:
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
 
+		UID uid;
+
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
 		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
 		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-		    fault_injection_r(0), machine(0), cleared(false) {}
+		    fault_injection_r(0), machine(0), cleared(false) {
+			uid = deterministicRandom()->randomUniqueID();
+		}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -86,7 +90,7 @@ public:
 			return ss.str();
 		}
 
-		// Returns true if the class represents an acceptable worker
+		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
 			switch (startingClass._class) {
 				case ProcessClass::UnsetClass: return true;
@@ -94,9 +98,13 @@ public:
 				case ProcessClass::TransactionClass: return true;
 				case ProcessClass::ResolutionClass: return false;
 				case ProcessClass::ProxyClass: return false;
-				case ProcessClass::MasterClass: return false;
-				case ProcessClass::TesterClass: return false;
-				case ProcessClass::StatelessClass: return false;
+			    case ProcessClass::GrvProxyClass:
+				    return false;
+			    case ProcessClass::MasterClass:
+				    return false;
+			    case ProcessClass::TesterClass:
+				    return false;
+			    case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
