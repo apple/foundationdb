@@ -563,7 +563,9 @@ namespace fileBackup {
 		if(rLen != len)
 			throw restore_bad_read();
 
-		Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	    simulateBlobFailure();
+
+	    Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 		state StringRefReader reader(buf, restore_corrupted_data());
 
 		try {
@@ -603,17 +605,17 @@ namespace fileBackup {
 				if(b != 0xFF)
 					throw restore_corrupted_data_padding();
 
-			return results;
+		    return results;
 
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
-				.error(e)
-				.detail("Filename", file->getFilename())
-				.detail("BlockOffset", offset)
-				.detail("BlockLen", len)
-				.detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
-			throw;
+		    TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
+		        .error(e)
+		        .detail("Filename", file->getFilename())
+		        .detail("BlockOffset", offset)
+		        .detail("BlockLen", len)
+		        .detail("ErrorRelativeOffset", reader.rptr - buf.begin())
+		        .detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
+		    throw;
 		}
 	}
 
@@ -5012,4 +5014,19 @@ ACTOR Future<Void> transformRestoredDatabase(Database cx, Standalone<VectorRef<K
 	}
 
 	return Void();
+}
+
+void simulateBlobFailure() {
+	if (BUGGIFY && deterministicRandom()->random01() < 0.01) { // Simulate blob failures
+		double i = deterministicRandom()->random01();
+		if (i < 0.5) {
+			throw http_request_failed();
+		} else if (i < 0.7) {
+			throw connection_failed();
+		} else if (i < 0.8) {
+			throw timed_out();
+		} else if (i < 0.9) {
+			throw lookup_failed();
+		}
+	}
 }
