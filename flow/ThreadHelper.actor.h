@@ -197,12 +197,12 @@ public:
 	};
 
 	void blockUntilReady() {
-		if(isReadyUnsafe()) {
-			ThreadSpinLockHolder holder(mutex);
-			ASSERT(isReadyUnsafe());
+		if (g_network->isOnMainThread()) {
+			TraceEvent(SevWarnAlways, "AttemptToBlockOnMainThread").error(client_invalid_operation());
+			throw client_invalid_operation();
 		}
-		else {
-			BlockCallback cb( *this );
+		if (!isReady()) {
+			BlockCallback cb(*this);
 		}
 	}
 
