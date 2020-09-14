@@ -4524,7 +4524,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	return (ddCheck && coordinatorCheck);
 }
 
-ACTOR Future<Void> addInterface( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
+ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
 	wait(connectLock->take());
 	state FlowLock::Releaser releaser(*connectLock);
 	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
@@ -4556,7 +4556,7 @@ ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool ch
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 	std::vector<Future<Void>> addInterfs;
 	for( auto it : kvs ) {
-		addInterfs.push_back(addInterface(&address_interface, connectLock, it));
+		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
 	}
 	wait( waitForAll(addInterfs) );
 	if (!address_interface.count(addr))
