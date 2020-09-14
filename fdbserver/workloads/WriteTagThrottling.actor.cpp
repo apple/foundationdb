@@ -220,7 +220,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		state int availableRange = std::max(int(self->rangeEachBadActor * self->hotRangeRate), 1);
 		state double lastTime = now();
 		state double opStart;
-		state StringRef key;
+		state Key key;
 		try {
 			loop {
 				wait(poisson(&lastTime, self->trInterval));
