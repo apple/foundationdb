@@ -245,7 +245,7 @@ std::string BackupDescription::toJSON() const {
  *     file written will be after the start version of the snapshot's execution.
  *
  *   Log files are at file paths like
- *       /plogs/...log,startVersion,endVersion,UID,tagID-of-N,blocksize
+ *       /plogs/.../log,startVersion,endVersion,UID,tagID-of-N,blocksize
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
  *     unique folder per day containing about 5,000 files. Logs after FDB 6.3 are stored in "plogs"
@@ -1411,8 +1411,9 @@ public:
 				}
 			}
 			// 'latestVersion' represents using the minimum restorable version in a snapshot.
+			// MX: Isn't "latestVersion" the earliest restorable version? so below should be minKeyRangeVersion
 			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
-			if (restorable.targetVersion < maxKeyRangeVersion) continue;
+			if (restorable.targetVersion < maxKeyRangeVersion) continue; // Q: Isn't this always true?
 
 			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
