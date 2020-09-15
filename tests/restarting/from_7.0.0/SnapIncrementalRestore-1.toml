@@ -1,0 +1,38 @@
+[[test]] 
+testTitle = 'SubmitBackup'
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    submitOnly = true
+
+[[test]]
+testTitle = 'SnapRunWorkloads'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 3000.0
+    testDuration = 20.0
+    expectedRate = 0
+
+[[test]]
+testTitle = 'SnapPostWorkloads'
+clearAfterTest = false
+
+    [[test.workload]]
+    testName = 'AtomicOps'
+    transactionsPerSecond = 2500.0
+    testDuration = 20.0
+    opType = 0
+    nodeCount = 1000
+
+[[test]]
+testTitle = 'SnapShutdown'
+
+    [[test.workload]]
+    testName = 'SaveAndKill'
+    restartInfoLocation = 'simfdb/restartInfo.ini'
+    testDuration = 10.0

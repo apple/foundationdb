@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -86,8 +87,13 @@ struct IncrementalBackupWorkload : TestWorkload {
 					try {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-						Optional<Value> versionValue = wait(tr->get(snapshotEndVersionKey));
+						state Optional<Value> writeFlag = wait(tr->get(writeRecoveryKey));
+						state Optional<Value> versionValue = wait(tr->get(snapshotEndVersionKey));
+						TraceEvent("IBackupCheckSpecialKeys")
+							.detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
+							.detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
 						beginVersion = BinaryReader::fromStringRef<Version>(versionValue.get(), Unversioned());
+						TraceEvent("IBackupCheckBeginVersion").detail("Version", beginVersion);
 						break;
 					} catch (Error& e) {
 						TraceEvent("IBackupReadSystemKeysError").error(e);
