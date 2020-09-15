@@ -843,12 +843,18 @@ module FDB
     end
 
     def get_estimated_range_size_bytes(begin_key, end_key)
+      if begin_key.nil? || end_key.nil?
+        raise ArgumentError, "Invalid begin key or end key"
+      end
       bkey = FDB.key_to_bytes(begin_key)
       ekey = FDB.key_to_bytes(end_key)
       Int64Future.new(FDBC.fdb_transaction_get_estimated_range_size_bytes(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize))
     end
 
     def get_range_split_points(begin_key, end_key, chunk_size)
+      if begin_key.nil? || end_key.nil? || chunk_size <=0
+        raise ArgumentError, "Invalid begin key, end key or chunk size"
+      end
       bkey = FDB.key_to_bytes(begin_key)
       ekey = FDB.key_to_bytes(end_key)
       FutureKeyArray.new(FDBC.fdb_transaction_get_range_split_points(@tpointer, bkey, bkey.bytesize, ekey, ekey.bytesize, chunk_size))
