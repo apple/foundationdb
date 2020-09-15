@@ -21,6 +21,7 @@
 #include <fstream>
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/ClusterInterface.h"
@@ -372,6 +373,24 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				.detail("DataHall", localities.dataHallId());
 
 			{
+				// Tell storage engines that perform I/O in non-flow thread pools (e.g., RocksDB)
+				// to cleanly shutdown.  Otherwise, they could write invalid data on top of future
+				// instantiations of themselves.
+				auto stores = g_simulator.getMachineById(localities.machineId())->nonFlowStores;
+				std::vector<IKeyValueStore*> store_vec;
+				// copy to vector to avoid concurrent modification
+				for(auto store : stores) {
+					printf("RAW PTR: %lx\n", store.second);
+					store_vec.push_back(static_cast<IKeyValueStore*>(store.second));
+				}
+
+				for(IKeyValueStore* store : store_vec) {
+					printf("CAST PTR: %lx\n", store);
+					fflush(stdout);
+					store->preSimulatedCrashHookForNonFlowStorageEngines();
+					ASSERT(false);
+				}
+
 				//Kill all open files, which may cause them to write invalid data.
 				auto& machineCache = g_simulator.getMachineById(localities.machineId())->openFiles;
 
@@ -413,6 +432,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 
 			ISimulator::MachineInfo* machine = g_simulator.getMachineById(localities.machineId());
 			machine->closingFiles = filenames;
+			g_simulator.getMachineById(localities.machineId())->nonFlowStores.clear();
 			g_simulator.getMachineById(localities.machineId())->openFiles.clear();
 
 			// During a reboot:
@@ -520,6 +540,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 			//this machine is rebooting = false;
 		}
 	} catch( Error &e ) {
+		g_simulator.getMachineById(localities.machineId())->nonFlowStores.clear();
 		g_simulator.getMachineById(localities.machineId())->openFiles.clear();
 		throw;
 	}
@@ -734,7 +755,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+/*	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -758,8 +779,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		}
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
-	}
-	//	set_config("ssd-rocksdb-experimental"); // not really working yet.  uncomment this line, and commment the above switch to test with RocksDB
+	}*/
+	set_config("ssd-rocksdb-experimental"); // not really working yet.  uncomment this line, and commment the above switch to test with RocksDB
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {

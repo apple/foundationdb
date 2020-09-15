@@ -69,6 +69,7 @@ public:
 template <class Object, class ActionType>
 class TypedAction : public ThreadAction {
 public:
+	using Receiver = Object;
 	virtual void operator()(IThreadPoolReceiver* p) {
 		Object* o = (Object*)p;
 		o->action(*(ActionType*)this);
