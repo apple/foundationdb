@@ -1137,7 +1137,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion, self->lockedAfter, self->metadataVersionAfter,
-		                                     pProxyCommitData->minKnownCommittedVersion),
+		                                     pProxyCommitData->minKnownCommittedVersion, self->rangeLockVersionAfter),
 		    TaskPriority::ProxyMasterVersionReply));
 	}
 	if( self->commitVersion > pProxyCommitData->committedVersion.get() ) {
