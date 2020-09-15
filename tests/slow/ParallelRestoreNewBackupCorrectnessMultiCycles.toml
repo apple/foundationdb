@@ -52,7 +52,7 @@ timeout = 360000
     backupAfter = 10.0
     restoreAfter = 60.0
     # backupRangesCount<0 means backup the entire normal keyspace
-    backupRangesCount = -1
+    backupRangesCount = 10
     usePartitionedLogs = true
 
     [[test.workload]]

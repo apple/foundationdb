@@ -21,6 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Status.h"
@@ -3662,32 +3663,39 @@ public:
 	}
 
 	ACTOR static Future<Void> submitParallelRestore(Database cx, Key backupTag,
-	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
-	                                                Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
-	                                                Key removePrefix) {
+	                                                std::vector<FileBackupAgent::RestoreKeyRangesVersion> requests, Key bcUrl,
+	                                                bool lockDB, UID randomUID, Key addPrefix, Key removePrefix) {
 		// Sanity check backup is valid
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString());
 		state BackupDescription desc = wait(bc->describeBackup());
 		wait(desc.resolveVersionTimes(cx));
 
-		if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
-			targetVersion = desc.maxRestorableVersion.get();
-			TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
-			    .detail("OverrideTargetVersion", targetVersion);
-		}
+		state std::vector<Version> actualTargetVersions;
+		state int requestIndex;
+		for (requestIndex = 0; requestIndex < requests.size(); requestIndex++) {
+			state Version targetVersion = requests[requestIndex].second;
+			if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
+				targetVersion = desc.maxRestorableVersion.get();
+				TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
+					.detail("OverrideTargetVersion", targetVersion);
+			}
+			
+			Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
-
-		if (!restoreSet.present()) {
-			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
-			    .detail("BackupContainer", bc->getURL())
-			    .detail("TargetVersion", targetVersion);
-			throw restore_invalid_version();
+			if (!restoreSet.present()) {
+				TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
+					.detail("BackupContainer", bc->getURL())
+					.detail("TargetVersion", targetVersion);
+				throw restore_invalid_version();
+			}
+			actualTargetVersions.push_back(targetVersion);
+			TraceEvent("FastRestoreSubmitSingleRestoreRequest")
+				.detail("KeyRanges", printable(requests[requestIndex].first))
+				.detail("Version", targetVersion);
 		}
 
 		TraceEvent("FastRestoreSubmitRestoreRequest")
-		    .detail("BackupDesc", desc.toString())
-		    .detail("TargetVersion", targetVersion);
+		    .detail("BackupDesc", desc.toString());
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state int restoreIndex = 0;
@@ -3720,17 +3728,19 @@ public:
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
-				for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
-					auto range = backupRanges[restoreIndex];
-					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
-					// Register the request request in DB, which will be picked up by restore worker leader
-					struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, targetVersion, range,
-					                                     deterministicRandom()->randomUniqueID(), addPrefix,
-					                                     removePrefix);
-					tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
+				for (int i = 0; i < requests.size(); i++) {
+					for (const auto& range : requests[i].first) {
+						Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
+						// Register the request request in DB, which will be picked up by restore worker leader
+						struct RestoreRequest restoreRequest(restoreIndex, restoreTag, bcUrl, actualTargetVersions[i], range,
+															deterministicRandom()->randomUniqueID(), addPrefix,
+															removePrefix);
+						tr->set(restoreRequestKeyFor(restoreRequest.index), restoreRequestValue(restoreRequest));
+						restoreIndex++;
+					}
 				}
 				tr->set(restoreRequestTriggerKey,
-				        restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), backupRanges.size()));
+				        restoreRequestTriggerValue(deterministicRandom()->randomUniqueID(), restoreIndex));
 				wait(tr->commit()); // Trigger restore
 				break;
 			} catch (Error& e) {
@@ -3738,6 +3748,7 @@ public:
 				    .detail("RestoreIndex", restoreIndex)
 				    .error(e);
 				numTries++;
+				restoreIndex = 0;
 				wait(tr->onError(e));
 			}
 		}
@@ -4652,7 +4663,7 @@ public:
 			TraceEvent("AtomicParallelRestoreStartRestore");
 			Version targetVersion = -1;
 			bool lockDB = true;
-			wait(submitParallelRestore(cx, tagName, ranges, KeyRef(bc->getURL()), targetVersion, lockDB, randomUid,
+			wait(submitParallelRestore(cx, tagName, {{ranges, targetVersion}}, KeyRef(bc->getURL()), lockDB, randomUid,
 			                           addPrefix, removePrefix));
 			state bool hasPrefix = (addPrefix.size() > 0 || removePrefix.size() > 0);
 			TraceEvent("AtomicParallelRestoreWaitForRestoreFinish").detail("HasPrefix", hasPrefix);
@@ -4694,8 +4705,14 @@ Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges, Key bcUrl,
                                                     Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
                                                     Key removePrefix) {
-	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB,
+	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, {{backupRanges, targetVersion}}, bcUrl, lockDB,
 	                                                  randomUID, addPrefix, removePrefix);
+}
+
+Future<Void> FileBackupAgent::submitParallelRestore(Database cx, Key backupTag,
+                                                    std::vector<RestoreKeyRangesVersion> requests, Key bcUrl,
+                                                    bool lockDB, UID randomUID, Key addPrefix, Key removePrefix) {
+	return FileBackupAgentImpl::submitParallelRestore(cx, backupTag, requests, bcUrl, lockDB, randomUID, addPrefix, removePrefix);
 }
 
 Future<Void> FileBackupAgent::atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
