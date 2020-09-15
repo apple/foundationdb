@@ -198,8 +198,7 @@ public:
 
 	void blockUntilReady() {
 		if (g_network->isOnMainThread()) {
-			TraceEvent(SevWarnAlways, "AttemptToBlockOnMainThread").error(client_invalid_operation());
-			throw client_invalid_operation();
+			throw blocked_from_network_thread();
 		}
 		if (!isReady()) {
 			BlockCallback cb(*this);
