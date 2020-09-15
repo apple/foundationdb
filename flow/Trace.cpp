@@ -473,7 +473,11 @@ public:
 			barriers->push(f);
 			writer->post( new WriterThread::Barrier );
 
-			f.getBlocking();
+			if (g_network->isSimulated()) {
+				ASSERT(f.isReady());
+			} else {
+				f.getBlocking();
+			}
 
 			opened = false;
 		}
