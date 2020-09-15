@@ -925,7 +925,7 @@ void tryAutoThrottleTag(RatekeeperData* self, TransactionTag tag, double rate, d
 void tryAutoThrottleTag(RatekeeperData* self, StorageQueueInfo& ss, int64_t storageQueue,
                         int64_t storageDurabilityLag) {
 	// NOTE: we just keep it simple and don't differentiate write-saturation and read-saturation at the moment. In most of situation, this works.
-	// More indicators besides SQ and NDV could be investigated in the future
+	// More indicators besides queue size and durability lag could be investigated in the future
 	if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
 		if(ss.busiestWriteTag.present()) {
 			tryAutoThrottleTag(self, ss.busiestWriteTag.get(), ss.busiestWriteTagRate,
