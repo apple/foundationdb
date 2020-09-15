@@ -747,7 +747,11 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc, 
 		std::cout << "Restore to version: " << request.targetVersion << "\nBackupDesc: \n" << desc.toString() << "\n\n";
 	}
 
-	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion));
+	// NOTE: If correctness fails and it is hard to fix, do not add restoreRanges in the current PR.
+	// We should open a new PR to fix correctness failures.
+	state Standalone<KeyRangeRef> restoreRanges;
+	restoreRanges.push_back(request.range);
+	Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(request.targetVersion, restoreRanges));
 
 	if (!restorable.present()) {
 		TraceEvent(SevWarn, "FastRestoreControllerPhaseCollectBackupFiles")

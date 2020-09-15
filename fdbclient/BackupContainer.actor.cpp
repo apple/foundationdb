@@ -1410,8 +1410,7 @@ public:
 					throw backup_not_overlapped_with_keys_filter();
 				}
 			}
-			// 'latestVersion' represents using the minimum restorable version in a snapshot.
-			// MX: Isn't "latestVersion" the earliest restorable version? so below should be minKeyRangeVersion
+			// 'latestVersion' represents using the maximum restorable version in a snapshot.
 			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
 			if (restorable.targetVersion < maxKeyRangeVersion) continue; // Q: Isn't this always true?
 
@@ -1432,6 +1431,7 @@ public:
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
+				// TODO: Add a Trace here
 				return Optional<RestorableFileSet>(restorable);
 			}
 
