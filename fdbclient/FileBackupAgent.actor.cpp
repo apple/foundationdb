@@ -3677,7 +3677,8 @@ public:
 			if (targetVersion == invalidVersion && desc.maxRestorableVersion.present()) {
 				targetVersion = desc.maxRestorableVersion.get();
 				TraceEvent(SevWarn, "FastRestoreSubmitRestoreRequestWithInvalidTargetVersion")
-					.detail("OverrideTargetVersion", targetVersion);
+					.detail("OverrideTargetVersion", targetVersion)
+					.detail("RequestIndex", requestIndex);
 			}
 			
 			Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
@@ -3691,7 +3692,8 @@ public:
 			actualTargetVersions.push_back(targetVersion);
 			TraceEvent("FastRestoreSubmitSingleRestoreRequest")
 				.detail("KeyRanges", printable(requests[requestIndex].first))
-				.detail("Version", targetVersion);
+				.detail("Version", targetVersion)
+				.detail("RequestIndex", requestIndex);
 		}
 
 		TraceEvent("FastRestoreSubmitRestoreRequest")

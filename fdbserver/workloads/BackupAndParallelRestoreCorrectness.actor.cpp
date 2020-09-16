@@ -29,6 +29,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define TEST_ABORT_FASTRESTORE	0
@@ -113,7 +114,16 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			else
 				backupRanges.push_back_deep(backupRanges.arena(),
 				                            KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
-		} else if (backupRangesCount <= 0) {
+		} else if (backupRangesCount == -2) {
+			if (deterministicRandom()->random01() < 0.3) {
+				backupRangesCount = -1;
+			} else {
+				backupRangesCount = deterministicRandom()->randomInt(1, 11);
+			}
+			TraceEvent("BackupAndParallelRestoreWorkload").detail("BackupRangesCountOverride", backupRangesCount);
+		}
+
+		if (backupRangesCount == -1) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
 			// Add backup ranges

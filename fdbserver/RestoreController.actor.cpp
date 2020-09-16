@@ -562,7 +562,7 @@ ACTOR static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreCon
 	    .detail("BatchIndex", batchIndex)
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get());
-	
+
 	self->runningVersionBatches.set(self->runningVersionBatches.get() + 1);
 
 	// In case sampling data takes too much memory on controller

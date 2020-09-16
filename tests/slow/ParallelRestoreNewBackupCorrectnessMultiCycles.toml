@@ -51,8 +51,9 @@ timeout = 360000
     testName = 'BackupAndParallelRestoreCorrectness'
     backupAfter = 10.0
     restoreAfter = 60.0
-    # backupRangesCount<0 means backup the entire normal keyspace
-    backupRangesCount = 10
+    # backupRangesCount -1 means backup the entire normal keyspace
+    # backupRangesCount -2 means number backup ranges is randomly generated in [-1, 10]
+    backupRangesCount = -2
     usePartitionedLogs = true
 
     [[test.workload]]
