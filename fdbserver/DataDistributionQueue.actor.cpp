@@ -32,6 +32,8 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#include "debug.h"
+
 #define WORK_FULL_UTILIZATION 10000   // This is not a knob; it is a fixed point scaling factor!
 
 struct RelocateData {
@@ -898,6 +900,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	state std::vector<std::pair<Reference<IDataDistributionTeam>,bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
+
+	// COUT << "entering dataDistributionRelocator" << std::endl;
 
 	try {
 		if(now() - self->lastInterval < 1.0) {

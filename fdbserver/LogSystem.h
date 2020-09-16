@@ -840,7 +840,9 @@ struct CompareFirst {
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
-	explicit LogPushData(Reference<ILogSystem> logSystem, uint32_t subsequence_ = 1)
+	using subsequence_t = uint32_t;
+
+	explicit LogPushData(Reference<ILogSystem> logSystem, subsequence_t subsequence_ = 1)
 	  : logSystem(logSystem), subsequence(subsequence_) {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
@@ -851,7 +853,7 @@ struct LogPushData : NonCopyable {
 		}
 	}
 
-	void setSubsequence(const int64_t subsequence_) { subsequence = subsequence_; }
+	void setSubsequence(const subsequence_t subsequence_) { subsequence = subsequence_; }
 
 	void addTxsTag() {
 		if ( logSystem->getTLogVersion() >= TLogVersion::V4 ) {
@@ -943,7 +945,7 @@ private:
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
-	uint32_t subsequence;
+	subsequence_t subsequence;
 };
 
 #endif

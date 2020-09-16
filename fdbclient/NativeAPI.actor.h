@@ -127,7 +127,6 @@ struct TransactionOptions {
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
 	bool commitOnFirstProxy : 1;
-	bool commitOnGivenProxy : 1;
 	bool debugDump : 1;
 	bool lockAware : 1;
 	bool readOnly : 1;

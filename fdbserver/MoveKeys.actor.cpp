@@ -25,6 +25,8 @@
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#include "debug.h"
+
 using std::min;
 using std::max;
 
@@ -534,6 +536,8 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 	state int retries = 0;
 	state FlowLock::Releaser releaser;
 
+	// COUT << "entering finishMoveKeys" << std::endl;
+
 	ASSERT (!destinationTeam.empty());
 
 	try {
@@ -583,6 +587,20 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					for(currentIndex = 0; currentIndex < keyServers.size() - 1 && alreadyMoved; currentIndex++) {
 						decodeKeyServersValue( UIDtoTagMap, keyServers[currentIndex].value, src, dest );
 
+						// COUT << "UID to tag map: " << UIDtoTagMap.toString() << std::endl;
+						// COUT << "src: ";
+						// {
+						// for(int i = 0; i < src.size(); ++i) {
+						// 	std::cout << src[i] << " ";
+						// }
+						// std::cout<<std::endl;
+
+						// COUT << "dest: ";
+						// for(int i = 0; i < dest.size(); ++i) {
+						// 	std::cout << dest[i] << " ";
+						// }
+						// std::cout<<std::endl;
+						// } 
 						std::set<UID> srcSet;
 						for(int s = 0; s < src.size(); s++) {
 							srcSet.insert(src[s]);
@@ -1057,6 +1075,7 @@ ACTOR Future<Void> moveKeys(
 	bool hasRemote,
 	UID relocationIntervalId)
 {
+	// COUT << "entering moveKeys" << std::endl;
 	ASSERT( destinationTeam.size() );
 	std::sort( destinationTeam.begin(), destinationTeam.end() );
 	wait( startMoveKeys( cx, keys, destinationTeam, lock, startMoveKeysParallelismLock, relocationIntervalId ) );
@@ -1069,6 +1088,8 @@ ACTOR Future<Void> moveKeys(
 	completionSignaller.cancel();
 	if(!dataMovementComplete.isSet())
 		dataMovementComplete.send(Void());
+
+	// COUT << "exitting moveKeys" << std::endl;
 
 	return Void();
 }

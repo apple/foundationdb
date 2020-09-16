@@ -53,6 +53,8 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#include "debug.h"
+
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
 	state ReplyPromise<Void> reply = req.reply;
 	resetReply( req );
@@ -330,11 +332,14 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 }
 
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
-                                      LogPushData* toCommit, Version commitVersion, double* computeDuration, double* computeStart) {
+                                      LogPushData* toCommit, Version commitVersion, double* computeDuration,
+									  double* computeStart) {
 	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
+
+	COUT << "addBackupMutations triggered" << std::endl;
 
 	// Serialize the log range mutations within the map
 	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
@@ -371,7 +376,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 
 		MutationRef backupMutation;
 		backupMutation.type = MutationRef::SetValue;
-		uint32_t* partBuffer = NULL;
+		uint32_t* partBuffer = nullptr;
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 
@@ -399,13 +404,17 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 			toCommit->addTags(tags);
 			toCommit->addMutationRef(backupMutation);
 
-			//			if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
-			//				TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To",
-			//describe(tags)).detail("BackupMutation", backupMutation.toString()) 					.detail("BackupMutationSize",
-			//val.size()).detail("Version", commitVersion).detail("DestPath", logRangeMutation.first)
-			//					.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData",
-			//backupMutation.param1);
-			//			}
+			// if (DEBUG_MUTATION("BackupProxyCommit", commitVersion, backupMutation)) {
+			// 	TraceEvent("BackupProxyCommitTo", self->dbgid)
+			// 	    .detail("To", describe(tags))
+			// 	    .detail("BackupMutation", backupMutation.toString())
+			// 	    .detail("BackupMutationSize", val.size())
+			// 	    .detail("Version", commitVersion)
+			// 	    .detail("DestPath", logRangeMutation.first)
+			// 	    .detail("PartIndex", part)
+			// 	    .detail("PartIndexEndian", bigEndian32(part))
+			// 	    .detail("PartData", backupMutation.param1);
+			// }
 		}
 	}
 	return Void();
@@ -491,7 +500,6 @@ struct CommitBatchContext {
 	std::map<Key, MutationListRef> logRangeMutations;
 	Arena logRangeMutationsArena;
 
-	int transactionNum = 0;
 	int yieldBytes = 0;
 
 	LogSystemDiskQueueAdapter::CommitMessage msg;
@@ -539,13 +547,14 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
 	if (trs.size() > 0 && trs[0].splitTransaction.present()) {
 		ASSERT(trs.size() == 1);
 		splitTransaction = trs[0].splitTransaction.get();
+		const auto startSubversion = splitTransaction.get().startSubversion;
 
 		TraceEvent("SplitTransactionTriggered")
 		    .detail("SplitId", splitTransaction.get().id.toString())
 		    .detail("PartIndex", splitTransaction.get().partIndex)
-		    .detail("TotalParts", splitTransaction.get().totalParts);
+		    .detail("TotalParts", splitTransaction.get().totalParts)
+			.detail("StartSubversion", startSubversion);
 
-		const auto startSubversion = splitTransaction.get().startSubversion;
 		ASSERT(startSubversion != BAD_START_SUBVERSION);
 		toCommit.setSubsequence(startSubversion);
 	}
@@ -606,10 +615,21 @@ ACTOR Future<GetCommitVersionReply> getVersion(CommitBatchContext* self) {
 
 		return versionReply;
 	} catch(Error& error) {
-		// Pre-terminate the whole process if received a error_code_split_transaction_timeout
-		if (error.code() == error_code_split_transaction_timeout) {
-			self->trs[0].reply.sendError(error);
+		// Pre-terminate the whole process if received an error_code_split_transaction_timeout
+
+		if (error.code() == error_code_operation_cancelled) {
+			throw;
 		}
+
+		COUT << " error split id: " << self->splitTransaction.get() << std::endl;
+		ASSERT(isSplitTransaction);
+		ASSERT_EQ(error.code(), error_code_split_transaction_timeout);
+
+		// If it is a split transaction, it should has one exact transaction
+		self->trs[0].reply.sendError(error);
+
+		// TODO: Add a TraceEvent
+
 		throw;
 	}
 
@@ -639,8 +659,8 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		);
 	}
 
+	if (self->splitTransaction.present()) COUT << "Sending " << self->splitTransaction.get().id << " to master" << std::endl;
 	state GetCommitVersionReply versionReply = wait(getVersion(self));
-
 	pProxyCommitData->stats.txnCommitVersionAssigned += trs.size();
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;
 
@@ -872,16 +892,21 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
+	state int transactionNum = 0;
 
-	for (; self->transactionNum < trs.size(); self->transactionNum++) {
-		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted && (!self->locked || trs[self->transactionNum].isLockAware()))) {
+	/*if (self->splitTransaction.present()) {
+		raise(SIGTRAP);
+	} */
+
+	for (; transactionNum < trs.size(); transactionNum++) {
+		if (!(self->committed[transactionNum] == ConflictBatch::TransactionCommitted && (!self->locked || trs[transactionNum].isLockAware()))) {
 			continue;
 		}
 
-		state bool checkSample = trs[self->transactionNum].commitCostEstimation.present();
-		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
+		state bool checkSample = trs[transactionNum].commitCostEstimation.present();
+		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[transactionNum].commitCostEstimation;
 		state int mutationNum = 0;
-		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
+		state VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
 		for (; mutationNum < pMutations->size(); mutationNum++) {
 			if(self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 				self->yieldBytes = 0;
@@ -899,7 +924,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			// Determine the set of tags (responsible storage servers) for the mutation, splitting it
 			// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
 
-			if (isSingleKeyMutation((MutationRef::Type) m.type)) {
+			if (isSingleKeyMutation(static_cast<MutationRef::Type>(m.type))) {
+				// COUT << "isSingleKeyMutation " << m.param1.toString() << std::endl;
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 
 				// sample single key mutation based on cost
@@ -916,7 +942,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							auto id = ssInfo->interf.id();
 							// scale cost
 							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, cost);
+							pProxyCommitData->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, cost);
 						}
 					}
 				}
@@ -955,7 +981,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					    trCost->get().clearIdxCosts[0].first == mutationNum) {
 						for (const auto& ssInfo : ranges.begin().value().src_info) {
 							auto id = ssInfo->interf.id();
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m,
+							pProxyCommitData->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m,
 							                                  trCost->get().clearIdxCosts[0].second);
 						}
 						trCost->get().clearIdxCosts.pop_front();
@@ -973,7 +999,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    trCost->get().clearIdxCosts[0].first == mutationNum) {
 							for (const auto& ssInfo : r.value().src_info) {
 								auto id = ssInfo->interf.id();
-								pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m,
+								pProxyCommitData->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m,
 								                                  trCost->get().clearIdxCosts[0].second);
 							}
 							trCost->get().clearIdxCosts.pop_front();
@@ -1029,7 +1055,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 		if (checkSample) {
 			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
-			    trs[self->transactionNum].commitCostEstimation.get().expensiveCostEstCount;
+			    trs[transactionNum].commitCostEstimation.get().expensiveCostEstCount;
 		}
 	}
 
@@ -1150,6 +1176,8 @@ ACTOR Future<Void> transactionLogging(CommitBatchContext* self) {
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 
+	if(self->splitTransaction.present())
+	COUT << self->splitTransaction.get().startSubversion << "\t" << self->trs[0].transaction.mutations.size()<<std::endl;
 	self->loggingComplete = pProxyCommitData->logSystem->push(
 	    self->prevVersion, self->commitVersion, pProxyCommitData->committedVersion.get(),
 	    pProxyCommitData->minKnownCommittedVersion, self->toCommit, self->debugID, self->splitTransaction);
@@ -1251,9 +1279,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
 			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
+			if (tr.splitTransaction.present()) std::cout << "Split transaction " << tr.splitTransaction.get().id.toString() << " committed with version " << self->commitVersion << std::endl;
 		}
 		else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
+			if (tr.splitTransaction.present()) std::cout << "Split transaction " << tr.splitTransaction.get().id.toString() << " failed with transaction_too_old" << std::endl;
 		}
 		else {
 			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
@@ -1277,6 +1307,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 				                           Optional<Standalone<VectorRef<int>>>(conflictingKRIndices)));
 			} else {
 				tr.reply.sendError(not_committed());
+				if (tr.splitTransaction.present()) std::cout << "Split transaction " << tr.splitTransaction.get().id.toString() << " rejected with conflicting keys" << std::endl;
 			}
 		}
 
@@ -1345,20 +1376,42 @@ ACTOR Future<Void> commitBatch(
 	++context.pProxyCommitData->stats.commitBatchIn;
 	context.setupTraceBatch();
 
+	if (context.splitTransaction.present() && context.splitTransaction.get().id.toString() == "67ac4b664a8339ab0d90e46c0f85a975") {
+		COUT << " split transaction 67ac4b664a8339ab0d90e46c0f85a975 with mutations " << context.trs[0].transaction.mutations.size() << std::endl;
+	}
+
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
-	wait(CommitBatch::preresolutionProcessing(&context));
+	if (context.splitTransaction.present()) { std::cout << "CommitBatch::Phase 1 " << context.splitTransaction.get().id.toString()<<std::endl; }
+
+	try {
+		wait(CommitBatch::preresolutionProcessing(&context));
+	} catch (Error& error) {
+	if (error.code() == error_code_split_transaction_timeout) {
+		COUT << "timeout " <<std::endl;
+	return Void();
+	} else {
+		COUT <<" Throw"<<std::endl;
+	throw;
+	}
+	}
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
+	if (context.splitTransaction.present()) { std::cout << "CommitBatch::Phase 2 " << context.splitTransaction.get().id.toString()<<std::endl; }
 	wait(CommitBatch::getResolution(&context));
 
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but doesn't need to be)
+	if (context.splitTransaction.present()) { std::cout << "CommitBatch::Phase 3 " << context.splitTransaction.get().id.toString()<<std::endl; }
 	wait(CommitBatch::postResolution(&context));
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
+	if (context.splitTransaction.present()) { std::cout << "CommitBatch::Phase 4 " << context.splitTransaction.get().id.toString()<<std::endl; }
 	wait(CommitBatch::transactionLogging(&context));
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
+	if (context.splitTransaction.present()) { std::cout << "CommitBatch::Phase 5 " << context.splitTransaction.get().id.toString()<<std::endl; }
 	wait(CommitBatch::reply(&context));
+
+	if (context.splitTransaction.present()) { std::cout << "CommitBatch::Final " << context.splitTransaction.get().id.toString()<<std::endl; }
 
 	return Void();
 }

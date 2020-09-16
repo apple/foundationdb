@@ -35,6 +35,8 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#include "debug.h"
+
 namespace {
 
 class ResolveTransactionBatchRequestMerger : public PartMerger<ResolveTransactionBatchRequest> {
@@ -53,6 +55,8 @@ protected:
 
 		ASSERT(current.read_snapshot == incoming.read_snapshot);
 		ASSERT(current.report_conflicting_keys == incoming.report_conflicting_keys);
+
+		// COUT << "Received " << incomingRequest.splitTransaction.get().id << " part " << incomingRequest.splitTransaction.get().partIndex << std::endl;
 
 		merged.arena.dependsOn(incomingRequest.arena);
 
@@ -360,7 +364,7 @@ ACTOR Future<Void> resolveBatch(
 }
 
 ACTOR Future<Void> splitTransactionResolver(Reference<Resolver> self, ResolveTransactionBatchRequest batch) {
-	state const SplitTransaction& splitTransaction = batch.splitTransaction.get();
+	state const SplitTransaction splitTransaction = batch.splitTransaction.get();
 	state const UID splitID = splitTransaction.id;
 
 	TraceEvent("SplitTransactionResolver")
@@ -384,6 +388,7 @@ ACTOR Future<Void> splitTransactionResolver(Reference<Resolver> self, ResolveTra
 	if (self->splitTransactionMerger.exists(splitID) && self->splitTransactionMerger.get(splitID).ready()) {
 		const auto& merged = self->splitTransactionMerger.get(splitID).get();
 		wait(resolveBatch(self, merged));
+		self->splitTransactionMerger.erase(splitID);
 	}
 
 	state Optional<ResolveTransactionBatchReply> reply = wait(self->splitTransactionResponse.get(splitID).getFuture());

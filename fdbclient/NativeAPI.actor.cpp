@@ -24,8 +24,8 @@
 #include <iterator>
 #include <numeric>
 #include <regex>
-#include <unordered_set>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -68,6 +68,8 @@
 #include "flow/Tracing.h"
 #include "flow/UnitTest.h"
 #include "flow/serialize.h"
+
+#include "debug.h"
 
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -277,10 +279,10 @@ public:
 		totalBytes += mutationBytes;
 	}
 
-	std::vector<int> evaluate() {
+	std::vector<uint32_t> evaluate() {
 		ASSERT(numMutations > 0);
 
-		std::vector<int> result;
+		std::vector<uint32_t> result;
 		result.reserve(NUM_PROXIES);
 
 		// If there are more number of proxies than number of mutations, distribute N mutations to first N proxies and
@@ -337,7 +339,7 @@ public:
  */
 void distributeMutationsInSequence(const CommitTransactionRequest& request,
                                    std::vector<CommitTransactionRequest>& splitCommitTxnRequests,
-                                   std::vector<int>& requestMutationStartSubversion) {
+                                   std::vector<uint32_t>& requestMutationStartSubversion) {
 	ASSERT(splitCommitTxnRequests.size() > 0);
 
 	const int NUM_PROXIES = splitCommitTxnRequests.size();
@@ -351,6 +353,12 @@ void distributeMutationsInSequence(const CommitTransactionRequest& request,
 	}
 
 	requestMutationStartSubversion = distributor.evaluate();
+
+	COUT << " Num mutations: " << mutations.size() << " ";
+	for(auto i: requestMutationStartSubversion) {
+		std::cout << i << ' ';
+	}
+	std::cout<<std::endl;
 
 	for (int currentSplit = 0; currentSplit < NUM_PROXIES; ++currentSplit) {
 		// NOTE: Here START and END are both used as indexes rather than subversions, and subversions start with 1 while
@@ -374,6 +382,8 @@ void distributeMutationsInSequence(const CommitTransactionRequest& request,
  */
 bool shouldSplitCommitTransactionRequest(const CommitTransactionRequest& commitTxnRequest, const int numProxies) {
 
+	// return false;
+
 	if (numProxies < 2 || commitTxnRequest.transaction.mutations.size() < 2 ||
 	    ((CLIENT_KNOBS->TRANSACTION_SPLIT_MODE & SPLIT_TRANSACTION_MASK) == DISABLE_SPLIT_TRANSACTION)) {
 		return false;
@@ -382,6 +392,12 @@ bool shouldSplitCommitTransactionRequest(const CommitTransactionRequest& commitT
 	const int size =
 	    std::accumulate(commitTxnRequest.transaction.mutations.begin(), commitTxnRequest.transaction.mutations.end(), 0,
 	                    [](int total, const MutationRef& ref) { return total + ref.param2.expectedSize(); });
+
+	for (int i = 0; i < commitTxnRequest.transaction.mutations.size(); ++i) {
+		if (commitTxnRequest.transaction.mutations[i].param1.toString() == "do_split") {
+			return true;
+		}
+	}
 
 	TraceEvent("ShouldSplitCommitTransaction")
 	    .detail("Size", size)
@@ -397,14 +413,20 @@ std::vector<CommitTransactionRequest> splitCommitTransactionRequest(const Commit
                                                                     const int numProxies) {
 
 	std::vector<CommitTransactionRequest> result(prepareSplitTransactions(commitTxnRequest, numProxies));
-	std::vector<int> requestMutationStartSubversion;
+	std::vector<uint32_t> requestMutationStartSubversion;
 
 	distributeMutationsInSequence(commitTxnRequest, result, requestMutationStartSubversion);
 
 	for (int i = 0; i < numProxies; ++i) {
 		auto& splitTransaction = result[i].splitTransaction.get();
-		const auto& subversion = requestMutationStartSubversion[i];
+
+		// Proxies will introduce additional mutations for backup/metadata purpose, need to bring gaps between split transactions.
+		const auto& subversion = requestMutationStartSubversion[i] + 512 * i;
+
 		splitTransaction.startSubversion = subversion;
+		TraceEvent("SplitCommitTransaction")
+			.detail("ProxyIndex", i)
+			.detail("StartSubversion", subversion);
 	}
 
 	return result;
@@ -3442,7 +3464,6 @@ void TransactionOptions::clear() {
 	checkWritesEnabled = false;
 	causalWriteRisky = false;
 	commitOnFirstProxy = false;
-	commitOnGivenProxy = false;
 	debugDump = false;
 	lockAware = false;
 	readOnly = false;
@@ -3740,6 +3761,7 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 	req.spanContext = span.context;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
+
 	try {
 		if(CLIENT_BUGGIFY) {
 			throw deterministicRandom()->randomChoice(std::vector<Error>{
@@ -3766,20 +3788,24 @@ ACTOR static Future<Void> tryCommitSingleTransaction(Transaction* tr, Future<Ver
 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
-		if (options.commitOnFirstProxy) {
-			if(cx->clientInfo->get().firstProxy.present()) {
-				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
+
+		if (!req.splitTransaction.present()) {
+			if (options.commitOnFirstProxy) {
+				if(cx->clientInfo->get().firstProxy.present()) {
+					reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
+				} else {
+					const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().masterProxies;
+					reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+				}
 			} else {
-				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().masterProxies;
-				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+				reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
 			}
-		} else if (options.commitOnGivenProxy) {
-			ASSERT(req.splitTransaction.present());
-			const auto& proxies = cx->clientInfo->get().masterProxies;
-			const auto& proxy = proxies[req.splitTransaction.get().partIndex];
-			reply = throwErrorOr(brokenPromiseToMaybeDelivered(proxy.commit.tryGetReply(req)));
 		} else {
-			reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
+			const auto& proxies = cx->clientInfo->get().masterProxies;
+			const auto& proxyIndex = req.splitTransaction.get().partIndex;
+
+			ASSERT(proxyIndex < proxies.size());
+			reply = throwErrorOr(brokenPromiseToMaybeDelivered(proxies[proxyIndex].commit.tryGetReply(req)));
 		}
 
 		choose {
@@ -3893,7 +3919,7 @@ ACTOR Future<Void> tryCommit(Transaction* tr, Future<Version> readVersion) {
 	state CommitTransactionRequest commitTxnRequest = tr->getCommitTransactionRequest();
 	state const int numProxies = tr->getDatabase()->clientInfo->get().masterProxies.size();
 
-	if (!shouldSplitCommitTransactionRequest(tr->getCommitTransactionRequest(), numProxies)) {
+	if (!shouldSplitCommitTransactionRequest(tr->getCommitTransactionRequest(), numProxies) || tr->options.commitOnFirstProxy) {
 		wait(tryCommitSingleTransaction(tr, readVersion));
 		return Void();
 	}
@@ -3906,16 +3932,20 @@ ACTOR Future<Void> tryCommit(Transaction* tr, Future<Version> readVersion) {
 	state std::vector<Promise<Standalone<StringRef>>> versionstampPromises(numProxies);
 	state std::vector<Future<Void>> responses;
 
-	tr->options.commitOnGivenProxy = true;
+	state std::string splitId = commitTransactionRequests[0].splitTransaction.get().id.toString();
 
+	COUT << "Using split transaction " << commitTransactionRequests[0].splitTransaction.get().id.toString()<< std::endl;
+	std::cout << " mutations: " << commitTxnRequest.transaction.mutations.size() << std::endl;
 	for (int i = 0; i < numProxies; ++i) {
 		responses.emplace_back(tryCommitSingleTransaction(tr, readVersion, &commitTransactionRequests[i],
 		                                                  &committedVersions[i], &versionstampPromises[i]));
+		std::cout << " part " << i << " mutations: " << commitTransactionRequests[i].transaction.mutations.size() << std::endl;
 	}
 
 	try {
 		wait(waitForAll(responses));
 	} catch (Error& e) {
+		COUT << splitId <<'\t'<< e.what() << std::endl;
 		throw;
 	}
 
@@ -3925,6 +3955,7 @@ ACTOR Future<Void> tryCommit(Transaction* tr, Future<Version> readVersion) {
 	for (int i = 1; i < numProxies; ++i) {
 		ASSERT(tr->getCommittedVersion() == committedVersions[i]);
 	}
+	// COUT << "Split transaction " << commitTransactionRequests[0].splitTransaction.get().id << " completed"<< std::endl;
 
 	return Void();
 }
@@ -4005,11 +4036,14 @@ Future<Void> Transaction::commitMutations() {
 
 		Future<Void> commitResult = tryCommit(this, readVersion);
 
+		// COUT << "tryCommit" << std::endl;
+
 		if (isCheckingWrites) {
 			Promise<Void> committed;
 			checkWrites( cx, commitResult, committed, tr, this );
 			return committed.getFuture();
 		}
+		// COUT << "after if (isCheckingWRites)" << std::endl;
 		return commitResult;
 	} catch( Error& e ) {
 		TraceEvent("ClientCommitError").error(e);
@@ -4030,6 +4064,8 @@ ACTOR Future<Void> commitAndWatch(Transaction *self) {
 		}
 
 		self->reset();
+
+		// COUT << "finish commitAndWatch " << std::endl;
 		return Void();
 	}
 	catch(Error &e) {
@@ -4049,6 +4085,7 @@ ACTOR Future<Void> commitAndWatch(Transaction *self) {
 Future<Void> Transaction::commit() {
 	ASSERT(!committing.isValid());
 	committing = commitAndWatch(this);
+	// COUT << "commit done." << std::endl;
 	return committing;
 }
 
@@ -4510,36 +4547,42 @@ uint32_t Transaction::getSize() {
 }
 
 Future<Void> Transaction::onError( Error const& e ) {
-	if (e.code() == error_code_success) {
+	static const std::unordered_set<int> ERROR_WITH_BACKOFF{
+		error_code_not_committed, error_code_commit_unknown_result, error_code_database_locked,
+		error_code_proxy_memory_limit_exceeded, error_code_process_behind, error_code_batch_transaction_throttled,
+		error_code_tag_throttled, error_code_split_transaction_timeout
+	};
+	static const std::unordered_set<int> ERROR_WITH_MAXIMUM_BACKOFF{
+		error_code_transaction_too_old, error_code_future_version
+	};
+
+	const auto errorCode = e.code();
+
+	if (errorCode == error_code_success) {
 		return client_invalid_operation();
 	}
-	if (e.code() == error_code_not_committed ||
-		e.code() == error_code_commit_unknown_result ||
-		e.code() == error_code_database_locked ||
-		e.code() == error_code_proxy_memory_limit_exceeded ||
-		e.code() == error_code_process_behind ||
-		e.code() == error_code_batch_transaction_throttled ||
-		e.code() == error_code_tag_throttled)
-	{
-		if(e.code() == error_code_not_committed)
-			++cx->transactionsNotCommitted;
-		else if (e.code() == error_code_commit_unknown_result)
-			++cx->transactionsMaybeCommitted;
-		else if (e.code() == error_code_proxy_memory_limit_exceeded)
-			++cx->transactionsResourceConstrained;
-		else if (e.code() == error_code_process_behind)
-			++cx->transactionsProcessBehind;
-		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
-			++cx->transactionsThrottled;
+
+	if (ERROR_WITH_BACKOFF.find(errorCode) != ERROR_WITH_BACKOFF.end()) {
+		switch(errorCode) {
+			case error_code_not_committed: { ++cx->transactionsNotCommitted; break; }
+			case error_code_commit_unknown_result: { ++cx->transactionsMaybeCommitted; break; }
+			case error_code_proxy_memory_limit_exceeded: { ++cx->transactionsResourceConstrained; break; }
+			case error_code_process_behind: { ++cx->transactionsProcessBehind; break; }
+			case error_code_batch_transaction_throttled:
+			case error_code_tag_throttled:
+				++cx->transactionsThrottled;
+				break;
+			case error_code_split_transaction_timeout: { 
+				COUT << "split transaction timeout"	 << std::endl;
+				++cx->transactionsSplitTransactionTimeoutCount; break; }
 		}
 
-		double backoff = getBackoff(e.code());
+		double backoff = getBackoff(errorCode);
 		reset();
 		return delay(backoff, info.taskID);
 	}
-	if (e.code() == error_code_transaction_too_old ||
-		e.code() == error_code_future_version)
-	{
+
+	if (ERROR_WITH_MAXIMUM_BACKOFF.find(errorCode) != ERROR_WITH_MAXIMUM_BACKOFF.end()) {
 		if( e.code() == error_code_transaction_too_old )
 			++cx->transactionsTooOld;
 		else if( e.code() == error_code_future_version )
@@ -4550,17 +4593,13 @@ Future<Void> Transaction::onError( Error const& e ) {
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), info.taskID);
 	}
 
-	if (e.code() == error_code_split_transaction_timeout) {
-		++cx->transactionsSplitTransactionTimeoutCount;
-
-		return e;
-	}
-
-	if(g_network->isSimulated() && ++numErrors % 10 == 0)
+	if(g_network->isSimulated() && ++numErrors % 10 == 0) {
 		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", numErrors);
+	}
 
 	return e;
 }
+
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys);
 
 ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Reference<LocationInfo> locationInfo) {

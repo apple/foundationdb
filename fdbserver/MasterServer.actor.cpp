@@ -1022,6 +1022,8 @@ std::pair<Version, Version> tryGetVersion(Reference<MasterData> self, const GetC
 
 } // anonymous namespace
 
+#include "debug.h"
+
 /**
  * Get version for a split transaction. The version is only evaluated when *all* parts of the split transaction are
  * requesting for the version. If there are one or more parts are not sending such request, e.g. some parts are not sent
@@ -1031,7 +1033,7 @@ ACTOR Future<Void> getSplitTransactionVersion(Reference<MasterData> self, GetCom
 	state Span span("M:getVersion"_loc, { req.spanContext });
 	state std::map<UID, ProxyVersionReplies>::iterator proxyIter =
 	    self->lastSplitTransactionProxyVersionReplies.find(req.requestingProxy);
-	state const SplitTransaction& splitTransaction = req.splitTransaction.get();
+	state const SplitTransaction splitTransaction = req.splitTransaction.get();
 
 	if (proxyIter == self->lastSplitTransactionProxyVersionReplies.end()) {
 		req.reply.send(Never());
@@ -1075,7 +1077,12 @@ ACTOR Future<Void> getSplitTransactionVersion(Reference<MasterData> self, GetCom
 		// Retrieve the version
 		auto [prevVersion, version] = tryGetVersion(self, req, rep);
 		self->splitTransactionVersionResponse.get(splitTransaction.id).send(std::make_pair(prevVersion, version));
+		COUT << "Version retrieved for " << splitTransaction.id << "\t" << prevVersion << "\t" << version << std::endl;
+		self->splitTransactionVersionRequestMerger.erase(splitTransaction.id);
 	}
+
+	COUT << " Current undergoing version requests: " << std::endl;
+	std::cout<< self->splitTransactionVersionRequestMerger << std::endl;
 
 	choose {
 		when(std::pair<Version, Version> versions =
@@ -1083,6 +1090,7 @@ ACTOR Future<Void> getSplitTransactionVersion(Reference<MasterData> self, GetCom
 			auto& proxyVersionReplies = proxyIter->second;
 			auto& replies = proxyVersionReplies.replies;
 			auto& latestRequestNum = proxyVersionReplies.latestRequestNum;
+			COUT << req << std::endl;
 
 			replies.erase(replies.begin(), replies.upper_bound(req.mostRecentProcessedRequestNum));
 			replies[req.requestNum] = rep;
@@ -1091,6 +1099,8 @@ ACTOR Future<Void> getSplitTransactionVersion(Reference<MasterData> self, GetCom
 			rep.prevVersion = versions.first;
 			rep.version = versions.second;
 			rep.requestNum = req.requestNum;
+
+			COUT << "responding version: " << rep.prevVersion << "," << rep.version << " for " <<splitTransaction<<std::endl;
 
 			req.reply.send(rep);
 		}
@@ -1102,7 +1112,14 @@ ACTOR Future<Void> getSplitTransactionVersion(Reference<MasterData> self, GetCom
 			// C will still trigger a version bump even A and B are already dropped by proxies. However, if
 			//     self->splitTransactionVersionRequestMerger
 			// does not have the item, then C will be treated as part of a new split transaction, the first part, and then get timed out.
-			self->splitTransactionVersionRequestMerger.erase(splitTransaction.id);
+
+			// The item might be already erased by other coroutine
+			COUT<<req<<std::endl;
+			COUT << " sending timeout error for " << splitTransaction << " address:" <<&splitTransaction<<" request address: " << &req << std::endl;
+			if (self->splitTransactionVersionRequestMerger.exists(splitTransaction.id)) {
+				self->splitTransactionVersionRequestMerger.erase(splitTransaction.id);
+				// COUT << &splitTransaction << " sending timeout: " << splitTransaction.id.toString() << "  " << splitTransaction.partIndex << std::endl;
+			}
 			req.reply.sendError(split_transaction_timeout());
 		}
 	}

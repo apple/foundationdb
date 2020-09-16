@@ -22,6 +22,8 @@
 #define FDBSERVER_MASTERINTERFACE_H
 #pragma once
 
+#include <iosfwd>
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -187,6 +189,17 @@ struct GetCommitVersionRequest {
 	void serialize(Ar& ar) {
 		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply, spanContext,
 		           splitTransaction);
+	}
+
+	friend std::ostream& operator<<(std::ostream& stream, const GetCommitVersionRequest& req) {
+		stream << " requestNum="<<req.requestNum <<" mostRecentProcessedRequestNum" << req.mostRecentProcessedRequestNum;
+		if (req.splitTransaction.present()) {
+			stream << " splitTransaction("<<&req.splitTransaction.get()<<")=" << req.splitTransaction.get();
+		} else {
+			stream << " no split transaction";
+		}
+		stream << "\t" << "address: req="<<&req;
+		return stream;
 	}
 };
 

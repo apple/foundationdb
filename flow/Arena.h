@@ -329,6 +329,8 @@ template <class T>
 class Standalone : private Arena, public T {
 public:
 	// T must have no destructor
+	static_assert(std::is_trivially_destructible<T>::value);
+
 	Arena& arena() { return *(Arena*)this; }
 	const Arena& arena() const { return *(const Arena*)this; }
 

@@ -24,6 +24,7 @@
 #pragma once
 
 #include <algorithm>
+#include <iosfwd>
 #include <vector>
 
 #include "fdbserver/TimedKVCache.h"
@@ -131,9 +132,16 @@ public:
 		get(k).insert(partIndex, part);
 	}
 
+	using base::erase;
 	using base::exists;
 	using base::get;
-	using base::erase;
+	using base::size;
 };
+
+template <typename K, typename Merger>
+std::ostream& operator<< (std::ostream& stream, const TimedMergingKVCache<K, Merger>& merger) {
+	stream << *reinterpret_cast<const TimedKVCache<K, Merger>*>(&merger);
+	return stream;
+}
 
 #endif // FDBSERVER_PARTMERGER_H

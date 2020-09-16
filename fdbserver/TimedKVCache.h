@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <iosfwd>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -103,6 +104,15 @@ public:
 
 	const value_t& get(const key_t& key) const { return const_cast<TimedKVCache*>(this)->get(key); }
 
+	int size() const noexcept { return kvMapper.size(); }
+
+	friend std::ostream& operator<< (std::ostream& stream, const TimedKVCache& timedKVCache) {
+		for(auto& kv: timedKVCache.kvMapper) {
+			stream << kv.first << std::endl; // << "\t" << kv.second << std::endl;
+		}
+		return stream;
+	}
+
 private:
 	std::list<std::pair<double, key_t>> timestampedKey;
 	std::unordered_map<key_t, value_t> kvMapper;
@@ -117,5 +127,6 @@ protected:
 		}
 	}
 };
+
 
 #endif // FDBSERVER_TIMED_KVCACHE_H

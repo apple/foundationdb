@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <map>
 #include <vector>
 
 #include "fdbclient/FDBTypes.h"
@@ -56,20 +57,36 @@ using std::make_pair;
 using std::min;
 using std::max;
 
+#include "debug.h"
+
 namespace {
 
-void readMessages(std::vector<TagsAndMessage>& tagsAndMessages, const Arena& arena, const StringRef& rawMessages) {
+void readMessages(std::map<LogPushData::subsequence_t, TagsAndMessage>& tagsAndMessages, const Arena& arena, const StringRef& rawMessages) {
 	ArenaReader rd(arena, rawMessages, Unversioned());
 
+	uint32_t svstart(999999999), svend(0);
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMsg;
 		tagsAndMsg.loadFromArena(&rd, nullptr);
 
 		const auto subversion = tagsAndMsg.getVersionSub();
+		svstart = min(svstart, subversion);
+		svend = max(svend, subversion);
+
+		// COUT << "Retrieving messages with subversion: " << subversion << std::endl;//" msg= " << tagsAndMsg.getRawMessage().toString() << std::endl;
+
 		// Verify that this subversion is not used
-		ASSERT(tagsAndMessages[subversion - 1].message.size() == 0);
+		/*
+		COUT << "current subversion: " << subversion << std::endl;
+		if (tagsAndMessages[subversion - 1].message.size() != 0) {
+			COUT << " Old value: " << tagsAndMessages[subversion - 1].message.toHexString() << std::endl;
+			COUT << " New value: " << tagsAndMsg.message.toHexString() << std::endl;
+		} */
+
+		ASSERT(tagsAndMessages.find(subversion - 1) == tagsAndMessages.end());
 		tagsAndMessages[subversion - 1] = tagsAndMsg;
 	}
+	COUT <<" Start/end = " << svstart <<"/"<<svend<<std::endl;
 }
 
 } // anonymous namespace
@@ -77,14 +94,13 @@ void readMessages(std::vector<TagsAndMessage>& tagsAndMessages, const Arena& are
 class TLogCommitRequestMerger : public PartMerger<TLogCommitRequest> {
 
 private:
-	std::vector<TagsAndMessage> tagsAndMessages;
+	std::map<LogPushData::subsequence_t, TagsAndMessage> tagsAndMessages;
 
 protected:
 	virtual void mergeFirstPart(const value_t& incomingRequest) override {
 		merged = incomingRequest;
 
-		tagsAndMessages.resize(incomingRequest.splitTransaction.get().numMutations);
-
+		COUT << incomingRequest.splitTransaction.get().id << std::endl;
 		readMessages(tagsAndMessages, merged.arena, merged.messages);
 	}
 
@@ -93,7 +109,7 @@ protected:
 		ASSERT(merged.prevVersion == incomingRequest.prevVersion);
 		ASSERT(merged.version == incomingRequest.version);
 
-		// TODO -- verify it is reasonable
+		// TODO -- verify if it is reasonable
 		merged.knownCommittedVersion = std::max(merged.knownCommittedVersion, incomingRequest.knownCommittedVersion);
 		merged.minKnownCommittedVersion =
 		    std::max(merged.minKnownCommittedVersion, incomingRequest.minKnownCommittedVersion);
@@ -102,14 +118,21 @@ protected:
 		// is not fully committed.
 		merged.arena.dependsOn(incomingRequest.arena);
 
-		// The messages are merged separately into a map, for future use.
+		COUT << incomingRequest.splitTransaction.get().id << std::endl;
 		readMessages(tagsAndMessages, incomingRequest.arena, incomingRequest.messages);
 	}
 
 public:
 	using PartMerger::PartMerger;
 
-	std::vector<TagsAndMessage>& getOrderedTagsAndMsgs() { return tagsAndMessages; }
+	auto getOrderedTagsAndMsgs() {
+		std::vector<TagsAndMessage> result;
+		result.reserve(tagsAndMessages.size());
+		for (const auto& versionedMessage: tagsAndMessages) {
+			result.push_back(versionedMessage.second);
+		}
+		return result;
+	}
 };
 
 struct TLogQueueEntryRef {
@@ -2022,8 +2045,10 @@ ACTOR Future<Void> tLogCommit(
 ACTOR Future<Void> tLogCommitSplitTransactions(TLogData* self, TLogCommitRequest req, Reference<LogData> logData,
                                                PromiseStream<Void> warningCollectorInput) {
 
-	state const SplitTransaction& splitTransaction = req.splitTransaction.get();
+	state const SplitTransaction splitTransaction = req.splitTransaction.get();
 	state const UID splitID = splitTransaction.id;
+
+	COUT << "Instance ID:" << self->instanceID << " split id: " << req.splitTransaction.get().id <<std::endl;
 
 	if (!self->splitTransactionResponse.exists(splitID)) {
 		self->splitTransactionResponse.add(splitID, Promise<Version>());
@@ -2039,11 +2064,12 @@ ACTOR Future<Void> tLogCommitSplitTransactions(TLogData* self, TLogCommitRequest
 
 		// NOTE this invalidates the messages in self->splitTransactionMerger.get(splitID)! Yet the data is used only
 		// once here.
-		std::vector<TagsAndMessage>& tagsAndMessages =
-		    self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs();
+		std::vector<TagsAndMessage>tagsAndMessages(self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs());
 		self->mergedTagMessages.swap(tagsAndMessages);
 
 		wait(tLogCommit(self, merged, logData, warningCollectorInput));
+
+		self->splitTransactionMerger.erase(splitID);
 		self->mergedTagMessages.clear();
 	}
 

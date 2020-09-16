@@ -26,15 +26,14 @@
 #include <utility>
 #include <vector>
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbserver/RatekeeperInterface.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.h"
-
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "GrvProxyInterface.h"
+#include "fdbserver/RatekeeperInterface.h"
 
 struct MasterProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -181,6 +180,11 @@ struct SplitTransaction {
 		serializer(ar, id, totalParts, partIndex, startSubversion, numMutations);
 	}
 };
+
+inline std::ostream& operator<<(std::ostream& stream, const SplitTransaction& splitTransaction) {
+	stream << "{\"id\": \"" << splitTransaction.id << "\", \"partIndex\": " << splitTransaction.partIndex << ", \"totalParts\": " << splitTransaction.totalParts << "}";
+	return stream;
+}
 
 /**
  * Flags for split transactions
