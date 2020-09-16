@@ -3173,12 +3173,7 @@ void platformInit() {
 
 void terminationHandler(int sig) {
 #ifdef __linux__
-	TraceEvent(SevInfo, "ProcessTerminated")
-		.detail("Signal", sig)
-		.detail("Name", strsignal(sig));
-
-	flushTraceFileVoid();
-	_exit(sig + 128);
+	g_network->stop();
 #else
 	// No termination handler for other platforms!
 #endif
