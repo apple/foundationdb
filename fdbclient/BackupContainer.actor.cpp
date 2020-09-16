@@ -245,7 +245,7 @@ std::string BackupDescription::toJSON() const {
  *     file written will be after the start version of the snapshot's execution.
  *
  *   Log files are at file paths like
- *       /plogs/...log,startVersion,endVersion,UID,tagID-of-N,blocksize
+ *       /plogs/.../log,startVersion,endVersion,UID,tagID-of-N,blocksize
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
  *     unique folder per day containing about 5,000 files. Logs after FDB 6.3 are stored in "plogs"
@@ -1410,9 +1410,9 @@ public:
 					throw backup_not_overlapped_with_keys_filter();
 				}
 			}
-			// 'latestVersion' represents using the minimum restorable version in a snapshot.
+			// 'latestVersion' represents using the maximum restorable version in a snapshot.
 			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
-			if (restorable.targetVersion < maxKeyRangeVersion) continue;
+			if (restorable.targetVersion < maxKeyRangeVersion) continue; // Q: Isn't this always true?
 
 			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
@@ -1431,6 +1431,7 @@ public:
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
+				// TODO: Add a Trace here
 				return Optional<RestorableFileSet>(restorable);
 			}
 
