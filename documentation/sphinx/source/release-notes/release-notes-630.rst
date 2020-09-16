@@ -7,6 +7,8 @@ Release Notes
 6.3.5
 =====
 
+* Report missing old tlogs information when in recovery before storage servers are fully recovered. `(PR #3706) <https://github.com/apple/foundationdb/pull/3706>`_
+
 Features
 --------
 
