@@ -112,7 +112,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | invalid_cache_eviction_policy                 | 2024| Invalid cache eviction policy, only random and lru are supported               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
-| blocked_from_network_thread                   | 2025| Attempted to block in a callback called from the network thread.               |
+| blocked_from_network_thread                   | 2025| Attempted to block in a callback called from the network thread                |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | incompatible_protocol_version                 | 2100| Incompatible protocol version                                                  |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
