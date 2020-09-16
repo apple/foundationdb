@@ -197,10 +197,10 @@ public:
 	};
 
 	void blockUntilReady() {
-		if (g_network->isOnMainThread()) {
-			throw blocked_from_network_thread();
-		}
 		if (!isReady()) {
+			if (g_network->isOnMainThread()) {
+				throw blocked_from_network_thread();
+			}
 			BlockCallback cb(*this);
 		}
 	}
