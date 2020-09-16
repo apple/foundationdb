@@ -1063,14 +1063,14 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
 			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
-			int requiredProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
+			int requiredCommitProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
 			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
 			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
-			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredProxies));
+			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredCommitProxies));
 			//int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
-			message["required_commit_proxies"] = requiredProxies;
+			message["required_commit_proxies"] = requiredCommitProxies;
 			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
@@ -2443,7 +2443,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		    getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
 		state vector<std::pair<TLogInterface, EventMap>> tLogs;
-		state vector<std::pair<CommitProxyInterface, EventMap>> commit_proxies;
+		state vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
@@ -2592,9 +2592,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also commit proxies
-			ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>> _commit_proxies = wait(commitProxyFuture);
-			if (_commit_proxies.present()) {
-				commit_proxies = _commit_proxies.get();
+			ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
+			if (_commitProxies.present()) {
+				commitProxies = _commitProxies.get();
 			} else {
 				messages.push_back(
 				    JsonBuilder::makeMessage("commit_proxies_error", "Timed out trying to retrieve commit proxies."));
@@ -2620,7 +2620,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		JsonBuilderObject processStatus = wait(processStatusFetcher(
 		    db, workers, pMetrics, mMetrics, networkMetrics, latestError, traceFileOpenErrors, programStarts,
-		    processIssues, storageServers, tLogs, commit_proxies, grvProxies, coordinators, cx, configuration,
+		    processIssues, storageServers, tLogs, commitProxies, grvProxies, coordinators, cx, configuration,
 		    loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);

@@ -527,7 +527,7 @@ struct RatekeeperLimits {
 	{}
 };
 
-struct CommitProxyInfo {
+struct GrvProxyInfo {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
 	uint64_t lastThrottledTagChangeId;
@@ -535,7 +535,7 @@ struct CommitProxyInfo {
 	double lastUpdateTime;
 	double lastTagPushTime;
 
-	CommitProxyInfo()
+	GrvProxyInfo()
 	  : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {
 	}
 };
@@ -547,7 +547,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, CommitProxyInfo> commitProxyInfo;
+	std::map<UID, GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -1269,7 +1269,7 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		    .detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
 		    .detail("TPSBasis", actualTps)
 		    .detail("StorageServers", sscount)
-		    .detail("GrvProxies", self->commitProxyInfo.size())
+		    .detail("GrvProxies", self->grvProxyInfo.size())
 		    .detail("TLogs", tlcount)
 		    .detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
 		    .detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
@@ -1371,9 +1371,9 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
-				for (auto p = self.commitProxyInfo.begin(); p != self.commitProxyInfo.end();) {
+				for (auto p = self.grvProxyInfo.begin(); p != self.grvProxyInfo.end();) {
 					if (p->second.lastUpdateTime < tooOld)
-						p = self.commitProxyInfo.erase(p);
+						p = self.grvProxyInfo.erase(p);
 					else
 						++p;
 				}
@@ -1382,7 +1382,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 			when (GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture())) {
 				GetRateInfoReply reply;
 
-				auto& p = self.commitProxyInfo[req.requesterID];
+				auto& p = self.grvProxyInfo[req.requesterID];
 				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
 				if (p.totalTransactions > 0) {
 					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.totalTransactions );
@@ -1399,8 +1399,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				p.batchTransactions = req.batchReleasedTransactions;
 				p.lastUpdateTime = now();
 
-				reply.transactionRate = self.normalLimits.tpsLimit / self.commitProxyInfo.size();
-				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.commitProxyInfo.size();
+				reply.transactionRate = self.normalLimits.tpsLimit / self.grvProxyInfo.size();
+				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.grvProxyInfo.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
 				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {

@@ -221,7 +221,7 @@ public:
 	Future<Void> monitorProxiesInfoChange;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
-	bool proxyProvisional;
+	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
 	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;

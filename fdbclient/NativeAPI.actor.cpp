@@ -1597,9 +1597,9 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxie
 // Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not NULL
 ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx, bool useProvisionalProxies) {
 	loop{
-		Reference<CommitProxyInfo> proxies = cx->getCommitProxies(useProvisionalProxies);
-		if (proxies)
-			return proxies;
+		Reference<CommitProxyInfo> commitProxies = cx->getCommitProxies(useProvisionalProxies);
+		if (commitProxies)
+			return commitProxies;
 		wait( cx->onProxiesChanged() );
 	}
 }

@@ -88,14 +88,14 @@ struct TargetedKillWorkload : TestWorkload {
 		if( self->machineToKill == "master" ) {
 			machine = self->dbInfo->get().master.address();
 		} else if (self->machineToKill == "commitproxy") {
-			auto proxies = cx->getCommitProxies(false);
-			int o = deterministicRandom()->randomInt(0, proxies->size());
-			for( int i = 0; i < proxies->size(); i++) {
-				CommitProxyInterface mpi = proxies->getInterface(o);
+			auto commitProxies = cx->getCommitProxies(false);
+			int o = deterministicRandom()->randomInt(0, commitProxies->size());
+			for( int i = 0; i < commitProxies->size(); i++) {
+				CommitProxyInterface mpi = commitProxies->getInterface(o);
 				machine = mpi.address();
 				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
-				o = ++o%proxies->size();
+				o = ++o%commitProxies->size();
 			}
 		} else if (self->machineToKill == "grvproxy") {
 			auto grvProxies = cx->getGrvProxies(false);

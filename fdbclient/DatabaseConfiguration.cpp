@@ -164,24 +164,40 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 }
 
 bool DatabaseConfiguration::isValid() const {
-	if (!(initialized && tLogWriteAntiQuorum >= 0 && tLogWriteAntiQuorum <= tLogReplicationFactor / 2 &&
-	      tLogReplicationFactor >= 1 && storageTeamSize >= 1 && getDesiredCommitProxies() >= 1 &&
-	      getDesiredGrvProxies() >= 1 && getDesiredLogs() >= 1 && getDesiredResolvers() >= 1 &&
-	      tLogVersion != TLogVersion::UNSET && tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-	      tLogVersion <= TLogVersion::MAX_SUPPORTED && tLogDataStoreType != KeyValueStoreType::END &&
-	      tLogSpillType != TLogSpillType::UNSET &&
-	      !(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
-	      storageServerStoreType != KeyValueStoreType::END && autoCommitProxyCount >= 1 && autoGrvProxyCount >= 1 &&
-	      autoResolverCount >= 1 && autoDesiredTLogCount >= 1 && storagePolicy && tLogPolicy &&
-	      getDesiredRemoteLogs() >= 1 && remoteTLogReplicationFactor >= 0 && repopulateRegionAntiQuorum >= 0 &&
-	      repopulateRegionAntiQuorum <= 1 && usableRegions >= 1 && usableRegions <= 2 && regions.size() <= 2 &&
-	      (usableRegions == 1 || regions.size() == 2) && (regions.size() == 0 || regions[0].priority >= 0) &&
-	      (regions.size() == 0 ||
-	       tLogPolicy->info() !=
-	           "dcid^2 x zoneid^2 x 1"))) { // We cannot specify regions with three_datacenter replication
+	if( !(initialized &&
+ 		tLogWriteAntiQuorum >= 0 &&
+ 		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
+ 		tLogReplicationFactor >= 1 &&
+ 		storageTeamSize >= 1 &&
+ 		getDesiredCommitProxies() >= 1 &&
+ 		getDesiredGrvProxies() >= 1 &&
+ 		getDesiredLogs() >= 1 &&
+ 		getDesiredResolvers() >= 1 &&
+ 		tLogVersion != TLogVersion::UNSET &&
+ 		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
+ 		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
+ 		tLogDataStoreType != KeyValueStoreType::END &&
+ 		tLogSpillType != TLogSpillType::UNSET &&
+ 		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
+ 		storageServerStoreType != KeyValueStoreType::END &&
+ 		autoCommitProxyCount >= 1 &&
+ 		autoGrvProxyCount >= 1 &&
+ 		autoResolverCount >= 1 &&
+ 		autoDesiredTLogCount >= 1 &&
+ 		storagePolicy &&
+ 		tLogPolicy &&
+ 		getDesiredRemoteLogs() >= 1 &&
+ 		remoteTLogReplicationFactor >= 0 &&
+ 		repopulateRegionAntiQuorum >= 0 &&
+ 		repopulateRegionAntiQuorum <= 1 &&
+ 		usableRegions >= 1 &&
+ 		usableRegions <= 2 &&
+ 		regions.size() <= 2 &&
+ 		( usableRegions == 1 || regions.size() == 2 ) &&
+ 		( regions.size() == 0 || regions[0].priority >= 0 ) &&
+ 		( regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") ) ) { //We cannot specify regions with three_datacenter replication
 		return false;
 	}
-
 	std::set<Key> dcIds;
 	dcIds.insert(Key());
 	for(auto& r : regions) {

@@ -3974,11 +3974,11 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<CommitProxyInfo> proxies(new CommitProxyInfo(self->db->get().client.commitProxies));
+		state Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(self->db->get().client.commitProxies));
 		choose {
 			when(GetStorageServerRejoinInfoReply _rep =
-			         wait(proxies->size()
-			                  ? basicLoadBalance(proxies, &CommitProxyInterface::getStorageServerRejoinInfo,
+			         wait(commitProxies->size()
+			                  ? basicLoadBalance(commitProxies, &CommitProxyInterface::getStorageServerRejoinInfo,
 			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;

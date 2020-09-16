@@ -471,8 +471,7 @@ void initHelp() {
 	helpMap["configure"] = CommandHelp(
 	    "configure [new] "
 	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|commit_proxies=<"
-	    "COMMIT_PROXIES>|grv_"
-	    "proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -481,15 +480,13 @@ void initHelp() {
 	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
 	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
 	    "datasets.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. Must "
-	    "be at least 1, or set "
-	    "to -1 which restores the number of commit proxies to the default value.\n\ngrv_proxies=<GRV_PROXIES>: Sets "
-	    "the "
-	    "desired number of GRV proxies in the cluster. Must be at least 1, or set to -1 which restores the number of "
-	    "GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must "
-	    "be "
-	    "at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: "
-	    "Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the "
-	    "number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	    "be at least 1, or set to -1 which restores the number of commit proxies to the default "
+	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
+	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
+	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
+	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the "
+	    "FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
 		"fileconfigure [new] <FILENAME>",
 		"change the database configuration from a file",

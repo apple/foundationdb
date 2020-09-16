@@ -77,7 +77,6 @@ public:
 		if (s=="storage") _class = StorageClass;
 		else if (s=="transaction") _class = TransactionClass;
 		else if (s=="resolution") _class = ResolutionClass;
-//		else if (s=="proxy") _class = CommitProxyClass;
 		else if (s=="commit_proxy") _class = CommitProxyClass;
 		else if (s=="grv_proxy") _class = GrvProxyClass;
 		else if (s=="master") _class = MasterClass;
@@ -100,7 +99,6 @@ public:
 		if (classStr=="storage") _class = StorageClass;
 		else if (classStr=="transaction") _class = TransactionClass;
 		else if (classStr=="resolution") _class = ResolutionClass;
-//		else if (classStr=="proxy") _class = CommitProxyClass;
 		else if (classStr=="commit_proxy") _class = CommitProxyClass;
 		else if (classStr=="grv_proxy") _class = GrvProxyClass;
 		else if (classStr=="master") _class = MasterClass;
@@ -344,7 +342,6 @@ struct LBLocalityData {
 template <class Interface>
 struct LBLocalityData<Interface, typename std::enable_if< Interface::LocationAwareLoadBalance >::type> {
 	enum { Present = 1 };
-	// TODO: figure out why some interfaces don't have locality.
 	static LocalityData getLocality( Interface const& i ) { return i.locality; }
 	static NetworkAddress getAddress( Interface const& i ) { return i.address(); }
 	static bool alwaysFresh() { return Interface::AlwaysFresh; }

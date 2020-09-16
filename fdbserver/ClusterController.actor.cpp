@@ -801,7 +801,7 @@ public:
 		      RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId),
 		                  ProcessClass::TLog)
 		          .betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog))) ||
-		     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
+		     RoleFitness(SERVER_KNOBS->EXPECTED_COMMIT_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
 		                 ProcessClass::CommitProxy)
 		         .betterCount(RoleFitness(commit_proxies, ProcessClass::CommitProxy)) ||
 		     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS, req.configuration.getDesiredGrvProxies(),
@@ -994,7 +994,7 @@ public:
 			    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(),
 			                 ProcessClass::TLog)
 			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-			     RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
+			     RoleFitness(SERVER_KNOBS->EXPECTED_COMMIT_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
 			                 ProcessClass::CommitProxy)
 			         .betterCount(bestFitness.proxy) ||
 			     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS, req.configuration.getDesiredGrvProxies(),

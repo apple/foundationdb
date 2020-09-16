@@ -52,18 +52,18 @@ using std::vector;
 using std::min;
 using std::max;
 
-struct ProxyVersionReplies {
+struct CommitProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
 
-	ProxyVersionReplies(ProxyVersionReplies&& r) noexcept
+	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(ProxyVersionReplies&& r) noexcept {
+	void operator=(CommitProxyVersionReplies&& r) noexcept {
 		replies = std::move(r.replies);
 		latestRequestNum = std::move(r.latestRequestNum);
 	}
 
-	ProxyVersionReplies() : latestRequestNum(0) {}
+	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
 
 ACTOR Future<Void> masterTerminateOnConflict( UID dbgid, Promise<Void> fullyRecovered, Future<Void> onConflict, Future<Void> switchedState ) {
@@ -177,7 +177,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		recoveryTransactionVersion;  // The first version in this epoch
 	double lastCommitTime;
 
-	Version liveCommittedVersion; // The largest live committed version reported by proxies.
+	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 	Version minKnownCommittedVersion;
@@ -213,7 +213,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::vector<GrvProxyInterface> provisionalGrvProxies;
 	std::vector<ResolverInterface> resolvers;
 
-	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
+	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
 	Standalone<StringRef> dbId;
 
@@ -299,7 +299,7 @@ ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfi
 	}
 
 	vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
-	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->proxies[0] is the firstCommitProxy.
+	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
 	self->commitProxies = newRecruits;
 
 	return Void();
@@ -502,14 +502,14 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 }
 
 Future<Void> sendMasterRegistration(MasterData* self, LogSystemConfig const& logSystemConfig,
-                                    vector<CommitProxyInterface> proxies, vector<GrvProxyInterface> grvProxies,
+                                    vector<CommitProxyInterface> commitProxies, vector<GrvProxyInterface> grvProxies,
                                     vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount,
                                     vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
 	masterReq.logSystemConfig = logSystemConfig;
-	masterReq.commitProxies = proxies;
+	masterReq.commitProxies = commitProxies;
 	masterReq.grvProxies = grvProxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
@@ -978,9 +978,9 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, { req.spanContext });
-	state std::map<UID, ProxyVersionReplies>::iterator proxyItr = self->lastProxyVersionReplies.find(req.requestingProxy); // lastProxyVersionReplies never changes
+	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr = self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
-	if (proxyItr == self->lastProxyVersionReplies.end()) {
+	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
 		req.reply.send(Never());
 		return Void();
@@ -1047,7 +1047,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->commitProxies) self->lastProxyVersionReplies[p.id()] = ProxyVersionReplies();
+	for (auto& p : self->commitProxies) self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 
 	loop {
 		choose {
@@ -1626,7 +1626,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send( self->logSystem->onError() );
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
-	self->addActor.send(waitCommitProxyFailure(self->commitProxies));
+	self->addActor.send( waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send( waitGrvProxyFailure( self->grvProxies ) );
 	self->addActor.send( provideVersions(self) );
 	self->addActor.send( serveLiveCommittedVersion(self) );

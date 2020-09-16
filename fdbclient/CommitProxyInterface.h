@@ -100,10 +100,10 @@ struct CommitProxyInterface {
 struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
-	vector< GrvProxyInterface > grvProxies;
+	vector<GrvProxyInterface> grvProxies;
 	vector<CommitProxyInterface> commitProxies;
 	Optional<CommitProxyInterface>
-	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
+	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;

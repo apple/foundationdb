@@ -747,7 +747,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		proxyCount = result.old_commit_proxies;
 	}
 
-	// Need to configure a good number.
 	result.desired_grv_proxies = std::max(std::min(4, processCount / 20), 1);
 	int grvProxyCount;
 	if (!statusObjConfig.get("grv_proxies", result.old_grv_proxies)) {
