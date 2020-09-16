@@ -463,7 +463,13 @@ class TransactionRead(_FDBBase):
     
     def get_estimated_range_size_bytes(self, begin_key, end_key):
         if begin_key is None or end_key is None:
-            raise Exception('Invalid begin key or end key')
+            if fdb.get_api_version() >= 700:
+                raise Exception('Invalid begin key or end key')
+            else:
+                if begin_key is None:
+                    begin_key = b''
+                if end_key is None:
+                    end_key = b'\xff'
         return FutureInt64(self.capi.fdb_transaction_get_estimated_range_size_bytes(
             self.tpointer,
             begin_key, len(begin_key),
