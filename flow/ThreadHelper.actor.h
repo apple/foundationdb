@@ -197,12 +197,11 @@ public:
 	};
 
 	void blockUntilReady() {
-		if(isReadyUnsafe()) {
-			ThreadSpinLockHolder holder(mutex);
-			ASSERT(isReadyUnsafe());
-		}
-		else {
-			BlockCallback cb( *this );
+		if (!isReady()) {
+			if (g_network->isOnMainThread()) {
+				throw blocked_from_network_thread();
+			}
+			BlockCallback cb(*this);
 		}
 	}
 
