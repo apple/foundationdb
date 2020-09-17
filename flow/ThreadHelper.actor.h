@@ -198,6 +198,12 @@ public:
 
 	void blockUntilReady() {
 		if (!isReady()) {
+			BlockCallback cb(*this);
+		}
+	}
+
+	void blockUntilReadyCheckOnMainThread() {
+		if (!isReady()) {
 			if (g_network->isOnMainThread()) {
 				throw blocked_from_network_thread();
 			}
@@ -427,6 +433,8 @@ public:
 	void blockUntilReady() {
 		sav->blockUntilReady();
 	}
+
+	void blockUntilReadyCheckOnMainThread() { sav->blockUntilReadyCheckOnMainThread(); }
 
 	bool isValid() const {
 		return sav != 0;
