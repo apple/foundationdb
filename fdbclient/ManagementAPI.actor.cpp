@@ -33,6 +33,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"

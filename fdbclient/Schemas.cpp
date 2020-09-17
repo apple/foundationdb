@@ -278,15 +278,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "run_loop_busy":0.2
          }
       },
-      "old_logs":[
+      "logs":[
          {
-            "logs":[
+            "log_interfaces":[
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
                   "address":"1.2.3.4:1234"
                }
             ],
+            "epoch":1,
+            "current":false,
+            "begin_version":23,
+            "end_version":112315141,
+            "possibly_losing_data":true,
             "log_replication_factor":3,
             "log_write_anti_quorum":0,
             "log_fault_tolerance":2,
