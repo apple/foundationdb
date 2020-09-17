@@ -11,7 +11,7 @@ RUN yum install -y yum-utils &&\
     devtoolset-8-libubsan-devel devtoolset-8-valgrind-devel \
     rh-python36-python-devel rh-ruby24 golang python27 rpm-build \
     mono-core debbuild python-pip dos2unix valgrind-devel ccache \
-    distcc wget git lz4 &&\
+    distcc wget git lz4 lz4-static &&\
   pip install boto3==1.1.1
 
 USER root
