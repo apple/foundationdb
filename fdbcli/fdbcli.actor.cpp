@@ -470,8 +470,8 @@ void initHelp() {
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
 	    "configure [new] "
-	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|grv_"
-	    "proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|commit_proxies=<"
+	    "COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -479,13 +479,14 @@ void initHelp() {
 	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
 	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
 	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
-	    "datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set "
-	    "to -1 which restores the number of proxies to the default value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the "
-	    "desired number of GRV proxies in the cluster. Must be at least 1, or set to -1 which restores the number of "
-	    "proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be "
-	    "at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: "
-	    "Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the "
-	    "number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	    "datasets.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. Must "
+	    "be at least 1, or set to -1 which restores the number of commit proxies to the default "
+	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
+	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
+	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
+	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the "
+	    "FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
 		"fileconfigure [new] <FILENAME>",
 		"change the database configuration from a file",
@@ -871,12 +872,13 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers across unique zones, %d proxies, "
-								                      "%d GRV proxies and %d resolvers.",
-								                      recoveryState["required_logs"].get_int(),
-								                      recoveryState["required_proxies"].get_int(),
-								                      recoveryState["required_grv_proxies"].get_int(),
-								                      recoveryState["required_resolvers"].get_int());
+								description +=
+								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
+								           "%d GRV proxies and %d resolvers.",
+								           recoveryState["required_logs"].get_int(),
+								           recoveryState["required_commit_proxies"].get_int(),
+								           recoveryState["required_grv_proxies"].get_int(),
+								           recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
 									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
@@ -1026,8 +1028,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)", excludedServersArr.size());
 				}
 
-				if (statusObjConfig.get("proxies", intVal))
-					outputString += format("\n  Desired Proxies        - %d", intVal);
+				if (statusObjConfig.get("commit_proxies", intVal))
+					outputString += format("\n  Desired Commit Proxies - %d", intVal);
 
 				if (statusObjConfig.get("grv_proxies", intVal))
 					outputString += format("\n  Desired GRV Proxies    - %d", intVal);
@@ -1790,14 +1792,14 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
 			                 conf.get().old_logs == conf.get().auto_logs &&
-			                 conf.get().old_proxies == conf.get().auto_proxies &&
+			                 conf.get().old_commit_proxies == conf.get().auto_commit_proxies &&
 			                 conf.get().old_grv_proxies == conf.get().auto_grv_proxies &&
 			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
 			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
 			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
 			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
-			                        conf.get().old_proxies == conf.get().desired_proxies &&
+			                        conf.get().old_commit_proxies == conf.get().desired_commit_proxies &&
 			                        conf.get().old_grv_proxies == conf.get().desired_grv_proxies &&
 			                        conf.get().old_resolvers == conf.get().desired_resolvers;
 
@@ -1816,8 +1818,11 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += format("| replication                 | %16s | %16s |\n", conf.get().old_replication.c_str(), conf.get().auto_replication.c_str());
 			outputString += format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
 			outputString += conf.get().auto_logs != conf.get().desired_logs ? format(" (manually set; would be %d)\n", conf.get().desired_logs) : "\n";
-			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies, conf.get().auto_proxies);
-			outputString += conf.get().auto_proxies != conf.get().desired_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_proxies) : "\n";
+			outputString += format("| commit_proxies              | %16d | %16d |", conf.get().old_commit_proxies,
+			                       conf.get().auto_commit_proxies);
+			outputString += conf.get().auto_commit_proxies != conf.get().desired_commit_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_commit_proxies)
+			                    : "\n";
 			outputString += format("| grv_proxies                 | %16d | %16d |", conf.get().old_grv_proxies,
 			                       conf.get().auto_grv_proxies);
 			outputString += conf.get().auto_grv_proxies != conf.get().desired_grv_proxies
@@ -2531,11 +2536,24 @@ void onOffGenerator(const char* text, const char *line, std::vector<std::string>
 }
 
 void configureGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {
-		"new",          "single", "double",     "triple",   "three_data_hall", "three_datacenter",      "ssd",
-		"ssd-1",        "ssd-2",  "memory",     "memory-1", "memory-2",        "memory-radixtree-beta", "proxies=",
-		"grv_proxies=", "logs=",  "resolvers=", nullptr
-	};
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 

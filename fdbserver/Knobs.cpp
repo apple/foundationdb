@@ -38,7 +38,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_VERSIONS_IN_FLIGHT_FORCED,         6e5 * VERSIONS_PER_SECOND ); //one week of versions
 	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
 	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_WRITE_TRANSACTION_LIFE_VERSIONS=std::max<int>(1, 1 * VERSIONS_PER_SECOND);
-	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
 
 	// TLogs
@@ -328,7 +328,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( POLLING_FREQUENCY,                                     2.0 ); if( longLeaderElection ) POLLING_FREQUENCY = 8.0;
 	init( HEARTBEAT_FREQUENCY,                                   0.5 ); if( longLeaderElection ) HEARTBEAT_FREQUENCY = 1.0;
 
-	// Master Proxy and GRV Proxy
+	// Commit CommitProxy and GRV CommitProxy
 	init( START_TRANSACTION_BATCH_INTERVAL_MIN,                 1e-6 );
 	init( START_TRANSACTION_BATCH_INTERVAL_MAX,                0.010 );
 	init( START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.5 );
@@ -438,7 +438,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
 	init( EXPECTED_TLOG_FITNESS,              ProcessClass::UnsetFit );
 	init( EXPECTED_LOG_ROUTER_FITNESS,        ProcessClass::UnsetFit );
-	init( EXPECTED_PROXY_FITNESS,             ProcessClass::UnsetFit );
+	init( EXPECTED_COMMIT_PROXY_FITNESS,      ProcessClass::UnsetFit );
 	init( EXPECTED_GRV_PROXY_FITNESS,         ProcessClass::UnsetFit );
 	init( EXPECTED_RESOLVER_FITNESS,          ProcessClass::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && BUGGIFY ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;

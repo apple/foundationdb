@@ -527,7 +527,7 @@ struct RatekeeperLimits {
 	{}
 };
 
-struct ProxyInfo {
+struct GrvProxyInfo {
 	int64_t totalTransactions;
 	int64_t batchTransactions;
 	uint64_t lastThrottledTagChangeId;
@@ -535,7 +535,9 @@ struct ProxyInfo {
 	double lastUpdateTime;
 	double lastTagPushTime;
 
-	ProxyInfo() : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {}
+	GrvProxyInfo()
+	  : totalTransactions(0), batchTransactions(0), lastUpdateTime(0), lastThrottledTagChangeId(0), lastTagPushTime(0) {
+	}
 };
 
 struct RatekeeperData {
@@ -545,7 +547,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, ProxyInfo> proxyInfo;
+	std::map<UID, GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -1262,31 +1264,31 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	if (deterministicRandom()->random01() < 0.1) {
 		std::string name = "RkUpdate" + limits->context;
 		TraceEvent(name.c_str(), self->id)
-			.detail("TPSLimit", limits->tpsLimit)
-			.detail("Reason", limitReason)
-			.detail("ReasonServerID", reasonID==UID() ? std::string() : Traceable<UID>::toString(reasonID))
-			.detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
-			.detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
-			.detail("TPSBasis", actualTps)
-			.detail("StorageServers", sscount)
-			.detail("GrvProxies", self->proxyInfo.size())
-			.detail("TLogs", tlcount)
-			.detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
-			.detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
-			.detail("WorstStorageServerQueue", worstStorageQueueStorageServer)
-			.detail("LimitingStorageServerQueue", limitingStorageQueueStorageServer)
-			.detail("WorstTLogQueue", worstStorageQueueTLog)
-			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
-			.detail("WorstStorageServerVersionLag", worstVersionLag)
-			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
-			.detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
-			.detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-			.detail("TagsAutoThrottled", self->throttledTags.autoThrottleCount())
-			.detail("TagsAutoThrottledBusyRead", self->throttledTags.busyReadTagCount)
-			.detail("TagsAutoThrottledBusyWrite", self->throttledTags.busyWriteTagCount)
-			.detail("TagsManuallyThrottled", self->throttledTags.manualThrottleCount())
-			.detail("AutoThrottlingEnabled", self->autoThrottlingEnabled)
-			.trackLatest(name);
+		    .detail("TPSLimit", limits->tpsLimit)
+		    .detail("Reason", limitReason)
+		    .detail("ReasonServerID", reasonID == UID() ? std::string() : Traceable<UID>::toString(reasonID))
+		    .detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
+		    .detail("ReleasedBatchTPS", self->smoothBatchReleasedTransactions.smoothRate())
+		    .detail("TPSBasis", actualTps)
+		    .detail("StorageServers", sscount)
+		    .detail("GrvProxies", self->grvProxyInfo.size())
+		    .detail("TLogs", tlcount)
+		    .detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
+		    .detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
+		    .detail("WorstStorageServerQueue", worstStorageQueueStorageServer)
+		    .detail("LimitingStorageServerQueue", limitingStorageQueueStorageServer)
+		    .detail("WorstTLogQueue", worstStorageQueueTLog)
+		    .detail("TotalDiskUsageBytes", totalDiskUsageBytes)
+		    .detail("WorstStorageServerVersionLag", worstVersionLag)
+		    .detail("LimitingStorageServerVersionLag", limitingVersionLag)
+		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
+		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
+		    .detail("TagsAutoThrottled", self->throttledTags.autoThrottleCount())
+		    .detail("TagsAutoThrottledBusyRead", self->throttledTags.busyReadTagCount)
+		    .detail("TagsAutoThrottledBusyWrite", self->throttledTags.busyWriteTagCount)
+		    .detail("TagsManuallyThrottled", self->throttledTags.manualThrottleCount())
+		    .detail("AutoThrottlingEnabled", self->autoThrottlingEnabled)
+		    .trackLatest(name);
 	}
 }
 
@@ -1371,9 +1373,9 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 				lastLimited = self.smoothReleasedTransactions.smoothRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
 				double tooOld = now() - 1.0;
-				for(auto p=self.proxyInfo.begin(); p!=self.proxyInfo.end(); ) {
+				for (auto p = self.grvProxyInfo.begin(); p != self.grvProxyInfo.end();) {
 					if (p->second.lastUpdateTime < tooOld)
-						p = self.proxyInfo.erase(p);
+						p = self.grvProxyInfo.erase(p);
 					else
 						++p;
 				}
@@ -1382,7 +1384,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 			when (GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture())) {
 				GetRateInfoReply reply;
 
-				auto& p = self.proxyInfo[ req.requesterID ];
+				auto& p = self.grvProxyInfo[req.requesterID];
 				//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
 				if (p.totalTransactions > 0) {
 					self.smoothReleasedTransactions.addDelta( req.totalReleasedTransactions - p.totalTransactions );
@@ -1399,8 +1401,8 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 				p.batchTransactions = req.batchReleasedTransactions;
 				p.lastUpdateTime = now();
 
-				reply.transactionRate = self.normalLimits.tpsLimit / self.proxyInfo.size();
-				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.proxyInfo.size();
+				reply.transactionRate = self.normalLimits.tpsLimit / self.grvProxyInfo.size();
+				reply.batchTransactionRate = self.batchLimits.tpsLimit / self.grvProxyInfo.size();
 				reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
 				if(p.lastThrottledTagChangeId != self.throttledTagChangeId || now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {

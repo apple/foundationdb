@@ -40,7 +40,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | external_client_already_loaded                | 1040| External client has already been loaded                                        |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
-| proxy_memory_limit_exceeded                   | 1042| Proxy commit memory limit exceeded                                             |
+| proxy_memory_limit_exceeded                   | 1042| CommitProxy commit memory limit exceeded                                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | batch_transaction_throttled                   | 1051| Batch GRV request rate limit exceeded                                          |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

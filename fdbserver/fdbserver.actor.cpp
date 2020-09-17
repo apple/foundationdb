@@ -542,9 +542,9 @@ static void printUsage( const char *name, bool devhelp ) {
 	       "                 The default value is 2GiB. When specified without a unit,\n"
 	       "                 MiB is assumed.\n");
 	printf("  -c CLASS, --class CLASS\n"
-		   "                 Machine class (valid options are storage, transaction,\n"
-		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
-		   "                 and cluster_controller).\n");
+	       "                 Machine class (valid options are storage, transaction,\n"
+	       "                 resolution, grv_proxy, proxy, master, test, unset, stateless, log, router,\n"
+	       "                 and cluster_controller).\n");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
@@ -2028,7 +2028,8 @@ int main(int argc, char* argv[]) {
 	}
 
 	static_assert( LBLocalityData<StorageServerInterface>::Present, "Storage server interface should be load balanced" );
-	static_assert( LBLocalityData<MasterProxyInterface>::Present, "Master proxy interface should be load balanced" );
+	static_assert(LBLocalityData<CommitProxyInterface>::Present, "Commit proxy interface should be load balanced");
+	static_assert(LBLocalityData<GrvProxyInterface>::Present, "GRV proxy interface should be load balanced");
 	static_assert( LBLocalityData<TLogInterface>::Present, "TLog interface should be load balanced" );
 	static_assert( !LBLocalityData<MasterInterface>::Present, "Master interface should not be load balanced" );
 }

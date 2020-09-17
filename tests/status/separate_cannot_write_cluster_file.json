@@ -140,7 +140,7 @@
                     },
                     {
                         "id" : "00e48601e43045c9",
-                        "role" : "proxy"
+                        "role" : "commit_proxy"
                     },
                     {
                         "id" : "0df71fd71bbc14ee",
@@ -181,7 +181,7 @@
                     },
                     {
                         "id" : "07b3f5362cfec06b",
-                        "role" : "proxy"
+                        "role" : "commit_proxy"
                     },
                     {
                         "id" : "bb25c74aca56ccf7",
@@ -222,7 +222,7 @@
                 "roles" : [
                     {
                         "id" : "361d515d63a595ad",
-                        "role" : "proxy"
+                        "role" : "commit_proxy"
                     },
                     {
                         "id" : "4022c037e26868ae",

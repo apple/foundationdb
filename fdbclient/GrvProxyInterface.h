@@ -27,6 +27,8 @@
 // with RateKeeper to gather health information of the cluster.
 struct GrvProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8743216;
+	enum { LocationAwareLoadBalance = 1 };
+	enum { AlwaysFresh = 1 };
 
 	Optional<Key> processId;
 	bool provisional;
