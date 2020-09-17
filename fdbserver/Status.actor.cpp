@@ -1030,9 +1030,10 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 	try {
 		state Future<TraceEventFields> mdActiveGensF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
 		state Future<TraceEventFields> mdF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0);
+		state Future<TraceEventFields> mDBAvailableF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoverFDBAvailable") ) ), 1.0);
 		state Future<Version> rvF = timeoutError(tr.getReadVersion(), 1.0);
 
-		wait(success(mdActiveGensF) && success(mdF) && success(rvF));
+		wait(success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
 
 		const TraceEventFields& md = mdF.get();
 		int mStatusCode = md.getInt("StatusCode");
@@ -1043,13 +1044,16 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		*statusCode = mStatusCode;
 
 		Version rv = rvF.get();
-		std::string fullyRecoveredAtVersion;
-		if (mStatusCode == RecoveryStatus::fully_recovered && md.tryGetValue("FullyRecoveredAtVersion", fullyRecoveredAtVersion)) {
-			int64_t fullyRecoveredAtVersion = md.getInt64("FullyRecoveredAtVersion");
-			double lastFullyRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv - fullyRecoveredAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-			message["time_since_last_fully_recovered_seconds"] = lastFullyRecoveredSecondsAgo;
+		const TraceEventFields& dbAvailableMsg = mDBAvailableF.get();
+		if (dbAvailableMsg.size() > 0) {
+			int64_t availabelAtVersion = dbAvailableMsg.getInt64("AvailabelAtVersion");
+			int numOfOldGensOfLogs = dbAvailableMsg.getInt("NumOfOldGensOfLogs");
+			double lastFullyRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv - availabelAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+			message["time_since_last_db_turned_available_seconds"] = lastFullyRecoveredSecondsAgo;
+			message["number_of_old_generations_of_tlogs"] = numOfOldGensOfLogs;
 		} else {
-			message["time_since_last_fully_recovered_seconds"] = -1;
+			message["time_since_last_db_turned_available_seconds"] = -1;
+			message["number_of_old_generations_of_tlogs"] = -1;
 		}
 
 		// Add additional metadata for certain statuses
