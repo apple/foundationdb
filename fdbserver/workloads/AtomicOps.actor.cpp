@@ -93,12 +93,15 @@ struct AtomicOpsWorkload : TestWorkload {
 		case 8:
 			TEST(true); // Testing atomic MinV2
 			opType = MutationRef::MinV2;
+			break;
 		case 9:
 			TEST(true); // Testing atomic AndV2
 			opType = MutationRef::AndV2;
+			break;
 		// case 10:
 		// 	TEST(true); // Testing atomic CompareAndClear Not supported yet
 		// 	opType = MutationRef::CompareAndClear
+		// 	break;
 		default:
 			ASSERT(false);
 		}
