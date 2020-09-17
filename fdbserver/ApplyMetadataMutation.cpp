@@ -387,6 +387,9 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 			if (range.contains(mustContainSystemMutationsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(mustContainSystemMutationsKey));
 			}
+			if (range.contains(writeRecoveryKey)) {
+				if(!initialCommit) txnStateStore->clear(singleKeyRange(writeRecoveryKey));
+			}
 			if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
 				if(!initialCommit) txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
 			}
