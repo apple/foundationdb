@@ -879,7 +879,7 @@ Future<Void> refreshStorageServerCommitCost(RatekeeperData* self) {
 				maxCost = cost;
 			}
 		}
-		if (maxRate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
+		if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
 			it->value.busiestWriteTag = busiestTag;
 			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
 			ASSERT(it->value.totalWriteCosts > 0);
@@ -926,18 +926,17 @@ void tryAutoThrottleTag(RatekeeperData* self, TransactionTag tag, double rate, d
 
 void tryAutoThrottleTag(RatekeeperData* self, StorageQueueInfo& ss, int64_t storageQueue,
                         int64_t storageDurabilityLag) {
-	// TODO: reasonable criteria for write satuation should be investigated in experiment
-	//	if (ss.busiestWriteTag.present() && storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES &&
-	//	    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-	//		// write-saturated
-	//		tryAutoThrottleTag(self, ss.busiestWriteTag.get(), ss.busiestWriteTagRate,
-	//ss.busiestWriteTagFractionalBusyness); 	} else
-	if (ss.busiestReadTag.present() &&
-	    (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
-	     storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS)) {
-		// read saturated
-		tryAutoThrottleTag(self, ss.busiestReadTag.get(), ss.busiestReadTagRate, ss.busiestReadTagFractionalBusyness,
-		                   TagThrottledReason::BUSY_READ);
+	// NOTE: we just keep it simple and don't differentiate write-saturation and read-saturation at the moment. In most of situation, this works.
+	// More indicators besides queue size and durability lag could be investigated in the future
+	if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES || storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+		if(ss.busiestWriteTag.present()) {
+			tryAutoThrottleTag(self, ss.busiestWriteTag.get(), ss.busiestWriteTagRate,
+			                   ss.busiestWriteTagFractionalBusyness, TagThrottledReason::BUSY_WRITE);
+		}
+		if(ss.busiestReadTag.present()) {
+			tryAutoThrottleTag(self, ss.busiestReadTag.get(), ss.busiestReadTagRate,
+			                   ss.busiestReadTagFractionalBusyness, TagThrottledReason::BUSY_READ);
+		}
 	}
 }
 

@@ -500,7 +500,7 @@ public:
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-				if (rate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
+				if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
