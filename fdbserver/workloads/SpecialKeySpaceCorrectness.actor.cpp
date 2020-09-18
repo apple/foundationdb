@@ -630,36 +630,42 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(self->getRangeResultInOrder(result));
 				// check correctness of classType of each process
 				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				for (const auto& worker : workers) {
-					Key addr =
+				if (workers.size()) {
+					for (const auto& worker : workers) {
+						Key addr =
+						    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
+						        .withPrefix(
+						            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+						bool found = false;
+						for (const auto& kv : result) {
+							if (kv.key == addr) {
+								ASSERT(kv.value.toString() == worker.processClass.toString());
+								found = true;
+								break;
+							}
+						}
+						// Each process should find its corresponding element
+						ASSERT(found);
+					}
+					state ProcessData worker = deterministicRandom()->randomChoice(workers);
+					state Key addr =
 					    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
-					bool found = false;
-					for (const auto& kv : result) {
-						if (kv.key == addr) {
-							ASSERT(kv.value.toString() == worker.processClass.toString());
-							found = true;
-							break;
-						}
-					}
-					// Each process should find its corresponding element
-					ASSERT(found);
+					tx->set(addr, LiteralStringRef("InvalidProcessType"));
+					// test ryw
+					Optional<Value> processType = wait(tx->get(addr));
+					ASSERT(processType.present() && processType.get() == LiteralStringRef("InvalidProcessType"));
+					// test ryw disabled
+					tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					Optional<Value> originalProcessType = wait(tx->get(addr));
+					ASSERT(originalProcessType.present() &&
+					       originalProcessType.get() == worker.processClass.toString());
+					// test error handling (invalid value type)
+					wait(tx->commit());
+					ASSERT(false);
+				} else {
+					TraceEvent(SevDebug, "SpecialKeyCorrectnessTestGetZeroWorkers");
 				}
-				state ProcessData worker = deterministicRandom()->randomChoice(workers);
-				state Key addr =
-				    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
-				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
-				tx->set(addr, LiteralStringRef("InvalidProcessType"));
-				// test ryw
-				Optional<Value> processType = wait(tx->get(addr));
-				ASSERT(processType.present() && processType.get() == LiteralStringRef("InvalidProcessType"));
-				// test ryw disabled
-				tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-				Optional<Value> originalProcessType = wait(tx->get(addr));
-				ASSERT(originalProcessType.present() && originalProcessType.get() == worker.processClass.toString());
-				// test error handling (invalid value type)
-				wait(tx->commit());
-				ASSERT(false);
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
 				if (e.code() == error_code_special_keys_api_failure) {
@@ -691,36 +697,43 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(self->getRangeResultInOrder(class_source_result));
 				// check correctness of classType of each process
 				vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
-				for (const auto& worker : workers) {
-					Key addr =
-					    Key("process/class_source/" + formatIpPort(worker.address.ip, worker.address.port))
-					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
-					bool found = false;
-					for (const auto& kv : class_source_result) {
-						if (kv.key == addr) {
-							ASSERT(kv.value.toString() == worker.processClass.sourceString());
-							// Default source string is command_line
-							ASSERT(kv.value == LiteralStringRef("command_line"));
-							found = true;
-							break;
+				if (workers.size()) {
+					for (const auto& worker : workers) {
+						Key addr =
+						    Key("process/class_source/" + formatIpPort(worker.address.ip, worker.address.port))
+						        .withPrefix(
+						            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+						bool found = false;
+						for (const auto& kv : class_source_result) {
+							if (kv.key == addr) {
+								ASSERT(kv.value.toString() == worker.processClass.sourceString());
+								// Default source string is command_line
+								ASSERT(kv.value == LiteralStringRef("command_line"));
+								found = true;
+								break;
+							}
 						}
+						// Each process should find its corresponding element
+						ASSERT(found);
 					}
-					// Each process should find its corresponding element
-					ASSERT(found);
+					ProcessData worker = deterministicRandom()->randomChoice(workers);
+					state std::string address = formatIpPort(worker.address.ip, worker.address.port);
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(
+					    Key("process/class_type/" + address)
+					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
+					    Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
+					                                            // class source will be changed
+					wait(tx->commit());
+					Optional<Value> class_source = wait(tx->get(
+					    Key("process/class_source/" + address)
+					        .withPrefix(
+					            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
+					ASSERT(class_source.present() && class_source.get() == LiteralStringRef("set_class"));
+					tx->reset();
+				} else {
+					TraceEvent(SevDebug, "SpecialKeyCorrectnessTestGetZeroWorkers");
 				}
-				ProcessData worker = deterministicRandom()->randomChoice(workers);
-				state std::string address = formatIpPort(worker.address.ip, worker.address.port);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tx->set(Key("process/class_type/" + address)
-				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-				        Value(worker.processClass.toString())); // Set it as the same class type as before, thus only
-				                                                // class source will be changed
-				wait(tx->commit());
-				Optional<Value> class_source = wait(tx->get(
-				    Key("process/class_source/" + address)
-				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
-				ASSERT(class_source.present() && class_source.get() == LiteralStringRef("set_class"));
-				tx->reset();
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
