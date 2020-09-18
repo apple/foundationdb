@@ -18,34 +18,32 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/HealthMonitor.h"
+#include "flow/Knobs.h"
 
-void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
-	purgeOutdatedHistory();
-	peerClosedHistory.push_back(std::make_pair(now(), peerAddress));
-	peerClosedNum[peerAddress] += 1;
+HealthMonitor::HealthMonitor() : peerClosedNum(FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS) {
 }
 
-void HealthMonitor::purgeOutdatedHistory() {
-	for (auto it : peerClosedHistory) {
-		if (it.first < now() - FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS) {
-			peerClosedNum[it.second] -= 1;
-			ASSERT(peerClosedNum[it.second] >= 0);
-			peerClosedHistory.pop_front();
-		} else {
-			break;
-		}
+void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
+	if (peerClosedNum.exists(peerAddress)) {
+		peerClosedNum.get(peerAddress) += 1;
+	} else {
+		peerClosedNum.add(peerAddress, 1);
 	}
 }
 
 bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) {
-	purgeOutdatedHistory();
-	return peerClosedNum[peerAddress] > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+	if (peerClosedNum.exists(peerAddress)) {
+		return peerClosedNum.get(peerAddress) > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+	} else {
+		return false;
+	}
 }
 
 int HealthMonitor::closedConnectionsCount(const NetworkAddress& peerAddress) {
-	purgeOutdatedHistory();
-	return peerClosedNum[peerAddress];
+	if (peerClosedNum.exists(peerAddress)) {
+		return peerClosedNum.get(peerAddress);
+	} else {
+		return 0;
+	}
 }

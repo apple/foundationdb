@@ -21,21 +21,18 @@
 #ifndef FDBRPC_HEALTH_MONITOR_H
 #define FDBRPC_HEALTH_MONITOR_H
 
-#include <deque>
-#include <unordered_map>
-
-#include <flow/flow.h>
+#include "flow/flow.h"
+#include "flow/TimedKVCache.h"
 
 class HealthMonitor {
 public:
+	HealthMonitor();
+
 	void reportPeerClosed(const NetworkAddress& peerAddress);
 	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
 	int closedConnectionsCount(const NetworkAddress& peerAddress);
 private:
-	void purgeOutdatedHistory();
-
-	std::deque<std::pair<double, NetworkAddress>> peerClosedHistory;
-	std::unordered_map<NetworkAddress, int> peerClosedNum;
+	TimedKVCache<NetworkAddress, int> peerClosedNum;
 };
 
 #endif // FDBRPC_HEALTH_MONITOR_H
