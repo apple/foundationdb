@@ -159,9 +159,11 @@ public:
 	FlowTransport(uint64_t transportId);
 	~FlowTransport();
 
+	/**
+	 * Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
+	 * so it will be private to a simulation.
+	 */
 	static void createInstance(bool isClient, uint64_t transportId);
-	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global() variables,
-	// so it will be private to a simulation.
 
 	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 
@@ -221,16 +223,20 @@ public:
 
 	bool incompatibleOutgoingConnectionsPresent();
 
+	/**
+	 * Return the FlowTransport instance
+	 */
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
+
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
 
-	HealthMonitor* healthMonitor();
+	HealthMonitor& getHealthMonitor();
 
 private:
-	class TransportData* self;
+	class TransportData* const self;
 };
 
 inline bool Endpoint::isLocal() const {

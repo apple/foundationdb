@@ -435,13 +435,14 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 	state double start = now();
 	state bool delayed = false;
 	loop {
+		auto& healthMonitor = FlowTransport::transport().getHealthMonitor();
 		if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
-		    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
+		    healthMonitor.tooManyConnectionsClosed(address) && address.isPublic()) {
 			if (!delayed) {
 				TraceEvent("TooManyConnectionsClosedMarkFailed")
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
-				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+				    .detail("ClosedCount", healthMonitor.closedConnectionsCount(address));
 				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
 			}
 			delayed = true;
@@ -452,7 +453,7 @@ ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
 				    .detail("TimeElapsed", now() - start)
-				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+				    .detail("ClosedCount", healthMonitor.closedConnectionsCount(address));
 			}
 			IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
 			break;
@@ -641,7 +642,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 			if (conn) {
 				if (self->destination.isPublic() && e.code() == error_code_connection_failed) {
-					FlowTransport::transport().healthMonitor()->reportPeerClosed(self->destination);
+					FlowTransport::transport().getHealthMonitor().reportPeerClosed(self->destination);
 				}
 
 				conn->close();
@@ -1454,6 +1455,6 @@ void FlowTransport::createInstance(bool isClient, uint64_t transportId) {
 	g_network->setGlobal(INetwork::enClientFailureMonitor, isClient ? (flowGlobalType)1 : nullptr);
 }
 
-HealthMonitor* FlowTransport::healthMonitor() {
-	return &self->healthMonitor;
+HealthMonitor& FlowTransport::getHealthMonitor() {
+	return self->healthMonitor;
 }
