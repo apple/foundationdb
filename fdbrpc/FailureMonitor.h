@@ -28,8 +28,27 @@
 #include "fdbrpc/FlowTransport.h"
 #include "flow/flow.h"
 
-/*
+class FailureStatus {
+private:
+	bool failed;
 
+public:
+	FailureStatus() : failed(true) {}
+	explicit FailureStatus(bool failed) : failed(failed) {}
+
+	bool isFailed() const { return failed; }
+	bool isAvailable() const { return !failed; }
+
+	bool operator==(FailureStatus const& other) const { return other.failed == this->failed; }
+	bool operator!=(FailureStatus const& other) const { return !(other == *this); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, failed);
+	}
+};
+
+/*
 IFailureMonitor is used by load balancing, data distribution and other components
 to report on which other machines are unresponsive or experiencing other failures.
 This is vital both to reconfigure the system in response to failures and to prevent
@@ -66,23 +85,6 @@ a missing endpoint on a non-failed machine, this information is reported back to
 machine and tracked at the endpoint level.
 
 */
-
-struct FailureStatus {
-	bool failed;
-
-	FailureStatus() : failed(true) {}
-	explicit FailureStatus(bool failed) : failed(failed) {}
-	bool isFailed() const { return failed; }
-	bool isAvailable() const { return !failed; }
-
-	bool operator==(FailureStatus const& r) const { return failed == r.failed; }
-	bool operator!=(FailureStatus const& r) const { return failed != r.failed; }
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, failed);
-	}
-};
-
 class IFailureMonitor {
 public:
 	// Returns the currently known status for the endpoint

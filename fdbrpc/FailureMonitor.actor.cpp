@@ -97,7 +97,7 @@ void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatu
 		else
 			addressStatus.erase(it);
 		if(triggerEndpoint) {
-			if(status.failed) {
+			if(status.isFailed()) {
 				TraceEvent("NotifyAddressFailed").suppressFor(1.0).detail("Address", address);
 			} else {
 				TraceEvent("NotifyAddressHealthyPresent").suppressFor(1.0).detail("Address", address);
@@ -184,7 +184,7 @@ bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
 	if (a == addressStatus.end())
 		return true;
 	else
-		return !a->second.failed;
+		return !a->second.isFailed();
 }
 
 bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) {

@@ -211,7 +211,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 			
 			RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
-			if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
+			if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).isFailed()) {
 				auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
 				if(now() > qd.failedUntil) {
 					double thisMetric = qd.smoothOutstanding.smoothTotal();
@@ -244,7 +244,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		if( nextMetric > 1e8 ) {
 			for(int i=alternatives->countBest(); i<alternatives->size(); i++) {
 				RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
-				if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
+				if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).isFailed()) {
 					auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
 					if(now() > qd.failedUntil) {
 						double thisMetric = qd.smoothOutstanding.smoothTotal();
@@ -290,7 +290,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				ev.log();
 				for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
 					RequestStream<Request> const* thisStream = &alternatives->get( alternativeNum, channel );
-					TraceEvent(SevWarn, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed);
+					TraceEvent(SevWarn, "LoadBalanceTooLongEndpoint").detail("Addr", thisStream->getEndpoint().getPrimaryAddress()).detail("Token", thisStream->getEndpoint().token).detail("Failed", IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).isFailed());
 				}
 			}
 		}
@@ -305,7 +305,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				useAlt = (nextAlt+alternatives->size()-1) % alternatives->size();
 			
 			stream = &alternatives->get( useAlt, channel );
-			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed && (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
+			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).isFailed() && (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
 			nextAlt = (nextAlt+1) % alternatives->size();
 			if(nextAlt == startAlt) triedAllOptions = true;
@@ -502,7 +502,7 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 				useAlt = (nextAlt+alternatives->size()-1) % alternatives->size();
 			
 			stream = &alternatives->get( useAlt, channel );
-			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed)
+			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).isFailed())
 				break;
 			nextAlt = (nextAlt+1) % alternatives->size();
 			stream=NULL;

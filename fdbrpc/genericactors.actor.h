@@ -27,6 +27,7 @@
 	#define RPCGENERICACTORS_ACTOR_H
 
 #include "flow/genericactors.actor.h"
+#include "fdbrpc/FailureMonitor.h" // Needed for the call to endpointNotFound()
 #include "fdbrpc/fdbrpc.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -174,9 +175,6 @@ Future<Void> incrementalBroadcastWithError(Future<T> input, std::vector<Promise<
 	}
 	return Void();
 }
-
-// Needed for the call to endpointNotFound()
-#include "fdbrpc/FailureMonitor.h"
 
 struct PeerHolder {
 	Reference<Peer> peer;
