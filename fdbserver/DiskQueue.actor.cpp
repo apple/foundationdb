@@ -306,11 +306,11 @@ public:
 	}
 #endif
 
-	Future<Future<Void>> push(StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+	Future<Future<Void>> push(StringRef pageData, std::vector<Reference<SyncQueue>>* toSync) {
 		return push( this, pageData, toSync );
 	}
 
-	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
+	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, std::vector<Reference<SyncQueue>>* toSync) {
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT( self->readingFile == 2 );
@@ -319,7 +319,7 @@ public:
 		ASSERT( self->writingPos % _PAGE_SIZE == 0 );
 		ASSERT( self->files[0].size % _PAGE_SIZE == 0 && self->files[1].size % _PAGE_SIZE == 0 );
 
-		state vector<Future<Void>> waitfor;
+		state std::vector<Future<Void>> waitfor;
 
 		if (pageData.size() + self->writingPos > self->files[1].size) {
 			if ( self->files[0].popped == self->files[0].size ) {
@@ -395,7 +395,7 @@ public:
 		state Promise<Void> errorPromise = self->error;
 		state std::string filename = self->files[0].dbgFilename;
 		state UID dbgid = self->dbgid;
-		state vector<Reference<SyncQueue>> syncFiles;
+		state std::vector<Reference<SyncQueue>> syncFiles;
 		state Future<Void> lastCommit = self->lastCommit;
 		try {
 			// pushing might need to wait for previous pushes to start (to maintain order) or for
@@ -479,7 +479,7 @@ public:
 	}
 
 	ACTOR static Future<Void> openFiles( RawDiskQueue_TwoFiles* self ) {
-		state vector<Future<Reference<IAsyncFile>>> fs;
+		state std::vector<Future<Reference<IAsyncFile>>> fs;
 		for(int i=0; i<2; i++)
 			fs.push_back( IAsyncFileSystem::filesystem()->open( self->filename(i), IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0 ) );
 		wait( waitForAllReady(fs) );
@@ -515,7 +515,7 @@ public:
 		// It also permits the recovery code to assume that whatever it reads is durable.  Otherwise a prior
 		// process could have written (but not synchronized) data to the file which we will read but which
 		// might not survive a reboot.  The recovery code assumes otherwise and could corrupt the disk.
-		vector<Future<Void>> syncs;
+		std::vector<Future<Void>> syncs;
 		for(int i=0; i<fs.size(); i++)
 			syncs.push_back( fs[i].get()->sync() );
 		wait(waitForAll(syncs));
@@ -572,10 +572,10 @@ public:
 			wait( openFiles(self) );
 
 			// Get the file sizes
-			vector<Future<int64_t>> fsize;
+			std::vector<Future<int64_t>> fsize;
 			for(int i=0; i<2; i++)
 				fsize.push_back( self->files[i].f->size() );
-			vector<int64_t> file_sizes = wait( getAll(fsize) );
+			std::vector<int64_t> file_sizes = wait( getAll(fsize) );
 			for(int i=0; i<2; i++) {
 				// SOMEDAY: If the file size is not a multiple of page size, it may never be shortened.  Change this?
 				self->files[i].size = file_sizes[i] - file_sizes[i] % sizeof(Page);
@@ -583,7 +583,7 @@ public:
 			}
 
 			// Read the first pages
-			vector<Future<int>> reads;
+			std::vector<Future<int>> reads;
 			for(int i=0; i<2; i++)
 				if( self->files[i].size > 0)
 					reads.push_back( self->files[i].f->read( self->firstPages[i], sizeof(Page), 0 ) );
@@ -605,7 +605,7 @@ public:
 
 				//Truncate both files, since perhaps only the first pages are corrupted.  This avoids cases where overwritting the first page and then terminating makes
 				//subsequent pages valid upon recovery.
-				vector<Future<Void>> truncates;
+				std::vector<Future<Void>> truncates;
 				for(int i = 0; i < 2; ++i)
 					if(self->files[i].size > 0)
 						truncates.push_back(self->truncateFile(self, i, 0));
@@ -747,7 +747,7 @@ public:
 		try {
 			state int file = self->readingFile;
 			state int64_t pos = (self->readingPage - self->readingBuffer.size()/sizeof(Page) - 1) * sizeof(Page);
-			state vector<Future<Void>> commits;
+			state std::vector<Future<Void>> commits;
 			state bool swap = file==0;
 
 			TEST( file==0 ); // truncate before last read page on file 0

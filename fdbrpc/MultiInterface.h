@@ -86,7 +86,7 @@ struct AlternativeInfo {
 template <class T>
 class ModelInterface : public ReferenceCounted<ModelInterface<T>> {
 public:
-	ModelInterface( const vector<T>& v ) {
+	ModelInterface( const std::vector<T>& v ) {
 		for(int i = 0; i < v.size(); i++) {
 			alternatives.push_back(AlternativeInfo(v[i], 1.0/v.size(), (i+1.0)/v.size()));
 		}
@@ -158,13 +158,13 @@ public:
 		return describe( alternatives );
 	}
 private:
-	vector<AlternativeInfo<T>> alternatives;
+	std::vector<AlternativeInfo<T>> alternatives;
 	Future<Void> updater;
 };
 
 template <class T>
 class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
-	MultiInterface( const vector<T>& v, LocalityData const& locality = LocalityData() ) {
+	MultiInterface( const std::vector<T>& v, LocalityData const& locality = LocalityData() ) {
 		//This version of MultInterface is no longer used, but was kept around because of templating
 		ASSERT(false); 
 	}

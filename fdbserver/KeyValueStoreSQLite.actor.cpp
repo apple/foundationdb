@@ -844,7 +844,7 @@ struct RawCursor {
 		}
 	}
 	void fastClear( KeyRangeRef keys, bool& freeTableEmpty ) {
-		vector<int> clearBuffer( SERVER_KNOBS->CLEAR_BUFFER_SIZE );
+		std::vector<int> clearBuffer( SERVER_KNOBS->CLEAR_BUFFER_SIZE );
 		clearBuffer[0] = 0;
 
 		while (true) {
@@ -875,7 +875,7 @@ struct RawCursor {
 		}
 	}
 	int lazyDelete( int desiredPages ) {
-		vector<int> clearBuffer( SERVER_KNOBS->CLEAR_BUFFER_SIZE );
+		std::vector<int> clearBuffer( SERVER_KNOBS->CLEAR_BUFFER_SIZE );
 		clearBuffer[0] = 0;
 
 		IntKeyCursor fc(db, db.freetable, true);
@@ -1489,7 +1489,7 @@ private:
 	volatile int64_t diskBytesUsed;
 	volatile int64_t freeListPages;
 
-	vector< Reference<ReadCursor> > readCursors;
+	std::vector< Reference<ReadCursor> > readCursors;
 
 	struct Reader : IThreadPoolReceiver {
 		SQLiteDB conn;
@@ -1581,11 +1581,11 @@ private:
 		volatile int64_t& diskBytesUsed;
 		volatile int64_t& freeListPages;
 		UID dbgid;
-		vector<Reference<ReadCursor>>& readThreads;
+		std::vector<Reference<ReadCursor>>& readThreads;
 		bool checkAllChecksumsOnOpen;
 		bool checkIntegrityOnOpen;
 
-		explicit Writer( std::string const& filename, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
+		explicit Writer( std::string const& filename, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, std::vector<Reference<ReadCursor>>* pReadThreads )
 			: conn( filename, isBtreeV2, isBtreeV2 ),
 			  commits(), setsThisCommit(),
 			  freeTableEmpty(false),

@@ -365,7 +365,7 @@ private:
 	//Passes along reads straight to the underlying file, waiting for any outstanding changes that could affect the results
 	ACTOR Future<int> onRead(AsyncFileNonDurable *self, void *data, int length, int64_t offset) {
 		wait(checkKilled(self, "Read"));
-		vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
+		std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
 		wait(waitForAll(priorModifications));
 		state Future<int> readFuture = self->file->read(data, length, offset);
 		wait( success( readFuture ) || self->killed.getFuture() );
@@ -455,7 +455,7 @@ private:
 		int pageLength = saveDurable ? length : 4096;
 		int sectorLength = saveDurable ? length : 512;
 
-		vector<Future<Void>> writeFutures;
+		std::vector<Future<Void>> writeFutures;
 		for(int writeOffset = 0; writeOffset < length; writeOffset += pageLength) {
 			//choose a random action to perform on this page write (write correctly, corrupt, or don't write)
 			KillMode pageKillMode = (KillMode)deterministicRandom()->randomInt(0, self->killMode + 1);

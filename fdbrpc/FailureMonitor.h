@@ -22,12 +22,11 @@
 #define FLOW_FAILUREMONITOR_H
 #pragma once
 
-#include "flow/flow.h"
-#include "fdbrpc/FlowTransport.h" // Endpoint
 #include <unordered_map>
 #include <unordered_set>
 
-using std::vector;
+#include "fdbrpc/FlowTransport.h"
+#include "flow/flow.h"
 
 /*
 
