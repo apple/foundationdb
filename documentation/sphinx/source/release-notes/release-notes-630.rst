@@ -8,6 +8,7 @@ Release Notes
 =====
 
 * Report missing old tlogs information when in recovery before storage servers are fully recovered. `(PR #3706) <https://github.com/apple/foundationdb/pull/3706>`_
+* Support query command in backup CLI that allows users to query restorable files by key ranges. `(PR #3703) <https://github.com/apple/foundationdb/pull/3703>`_
 
 Features
 --------

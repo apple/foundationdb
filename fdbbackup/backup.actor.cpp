@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbclient/JsonBuilder.h"
+#include "flow/Arena.h"
+#include "flow/Error.h"
+#include "flow/Trace.h"
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -81,7 +85,22 @@ enum enumProgramExe {
 };
 
 enum enumBackupType {
-	BACKUP_UNDEFINED=0, BACKUP_START, BACKUP_MODIFY, BACKUP_STATUS, BACKUP_ABORT, BACKUP_WAIT, BACKUP_DISCONTINUE, BACKUP_PAUSE, BACKUP_RESUME, BACKUP_EXPIRE, BACKUP_DELETE, BACKUP_DESCRIBE, BACKUP_LIST, BACKUP_DUMP, BACKUP_CLEANUP
+	BACKUP_UNDEFINED = 0,
+	BACKUP_START,
+	BACKUP_MODIFY,
+	BACKUP_STATUS,
+	BACKUP_ABORT,
+	BACKUP_WAIT,
+	BACKUP_DISCONTINUE,
+	BACKUP_PAUSE,
+	BACKUP_RESUME,
+	BACKUP_EXPIRE,
+	BACKUP_DELETE,
+	BACKUP_DESCRIBE,
+	BACKUP_LIST,
+	BACKUP_QUERY,
+	BACKUP_DUMP,
+	BACKUP_CLEANUP
 };
 
 enum enumDBType {
@@ -104,7 +123,7 @@ enum {
 	OPT_USE_PARTITIONED_LOG,
 
 	// Backup and Restore constants
-	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
+	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE, OPT_BACKUPKEYS_FILTER,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL, OPT_MOD_VERIFY_UID,
@@ -585,6 +604,40 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
+CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_RESTORE_TIMESTAMP, "--query_restore_timestamp", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
+	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
+	{ OPT_RESTORE_VERSION, "-qrv", SO_REQ_SEP },
+	{ OPT_RESTORE_VERSION, "--query_restore_version", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILTER, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILTER, "--keys", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_VERSION, "--version", SO_NONE },
+	{ OPT_CRASHONERROR, "--crash", SO_NONE },
+	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
+	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_HELP, "-?", SO_NONE },
+	{ OPT_HELP, "-h", SO_NONE },
+	{ OPT_HELP, "--help", SO_NONE },
+	{ OPT_DEVHELP, "--dev-help", SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
 // g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
 #ifdef _WIN32
@@ -918,13 +971,16 @@ void printBackupContainerInfo() {
 
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list | cleanup) [OPTIONS]\n\n", exeBackup.toString().c_str());
+	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | "
+	       "list | query | cleanup) [OPTIONS]\n\n",
+	       exeBackup.toString().c_str());
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 		   "                 FoundationDB cluster. The default is first the value of the\n"
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  -d, --destcontainer URL\n"
-	       "                 The Backup container URL for start, modify, describe, expire, and delete operations.\n");
+	       "                 The Backup container URL for start, modify, describe, query, expire, and delete "
+	       "operations.\n");
 	printBackupContainerInfo();
 	printf("  -b, --base_url BASEURL\n"
 		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
@@ -938,6 +994,12 @@ static void printBackupUsage(bool devhelp) {
 	printf("  --delete_before_days NUM_DAYS\n"
 		   "                 Another way to specify version cutoff for expire operations.  Deletes data files containing no data at or after a\n"
 		   "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in the backup.\n");
+	printf("  -qrv --query_restore_version VERSION\n"
+	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
+	       "                 restorable version (default) and -2 for minimum restorable version.\n");
+	printf("  --query_restore_timestamp DATETIME\n"
+	       "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n", BackupAgentBase::timeFormat().c_str());
+	printf("                 and it will be converted to a version from that time using metadata in the cluster file.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
 		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
 	printf("  --restorable_after_version VERSION\n"
@@ -956,8 +1018,8 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction\n"
 	       "                 which sets the new backup parameters (if the UID matches).\n");
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
-	printf("  -k KEYS        List of key ranges to backup.\n"
-		   "                 If not specified, the entire database will be backed up.\n");
+	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
+	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
 	printf("  --partitioned_log_experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
@@ -1273,6 +1335,7 @@ enumBackupType	getBackupType(std::string backupType)
 		values["delete"] = BACKUP_DELETE;
 		values["describe"] = BACKUP_DESCRIBE;
 		values["list"] = BACKUP_LIST;
+		values["query"] = BACKUP_QUERY;
 		values["dump"] = BACKUP_DUMP;
 		values["modify"] = BACKUP_MODIFY;
 	}
@@ -2400,6 +2463,135 @@ ACTOR Future<Void> describeBackup(const char *name, std::string destinationConta
 	return Void();
 }
 
+static void reportBackupQueryError(UID operationId, JsonBuilderObject& result, std::string errorMessage) {
+	result["error"] = errorMessage;
+	printf("%s\n", result.getJson().c_str());
+	TraceEvent("BackupQueryFailure").detail("OperationId", operationId).detail("Reason", errorMessage);
+}
+
+// If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
+// selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overriden to the version
+// resolved to that timestamp.
+ACTOR Future<Void> queryBackup(const char* name, std::string destinationContainer,
+                               Standalone<VectorRef<KeyRangeRef>> keyRangesFilter, Version restoreVersion,
+                               std::string originalClusterFile, std::string restoreTimestamp, bool verbose) {
+	state UID operationId = deterministicRandom()->randomUniqueID();
+	state JsonBuilderObject result;
+	state std::string errorMessage;
+	result["key_ranges_filter"] = printable(keyRangesFilter);
+	result["destination_container"] = destinationContainer;
+
+	TraceEvent("BackupQueryStart")
+	    .detail("OperationId", operationId)
+	    .detail("DestinationContainer", destinationContainer)
+	    .detail("KeyRangesFilter", printable(keyRangesFilter))
+	    .detail("SpecifiedRestoreVersion", restoreVersion)
+	    .detail("RestoreTimestamp", restoreTimestamp)
+	    .detail("BackupClusterFile", originalClusterFile);
+
+	// Resolve restoreTimestamp if given
+	if (!restoreTimestamp.empty()) {
+		if (originalClusterFile.empty()) {
+			reportBackupQueryError(
+			    operationId, result,
+			    format("an original cluster file must be given in order to resolve restore target timestamp '%s'",
+			           restoreTimestamp.c_str()));
+			return Void();
+		}
+
+		if (!fileExists(originalClusterFile)) {
+			reportBackupQueryError(operationId, result,
+			                       format("The specified original source database cluster file '%s' does not exist\n",
+			                              originalClusterFile.c_str()));
+			return Void();
+		}
+
+		Database origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		Version v = wait(timeKeeperVersionFromDatetime(restoreTimestamp, origDb));
+		result["restore_timestamp"] = restoreTimestamp;
+		result["restore_timestamp_resolved_version"] = v;
+		restoreVersion = v;
+	}
+
+	try {
+		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer);
+		if (restoreVersion == invalidVersion) {
+			BackupDescription desc = wait(bc->describeBackup());
+			if (desc.maxRestorableVersion.present()) {
+				restoreVersion = desc.maxRestorableVersion.get();
+				// Use continuous log end version for the maximum restorable version for the key ranges.
+			} else if (keyRangesFilter.size() && desc.contiguousLogEnd.present()) {
+				restoreVersion = desc.contiguousLogEnd.get();
+			} else {
+				reportBackupQueryError(
+				    operationId, result,
+				    errorMessage = format("the backup for the specified key ranges is not restorable to any version"));
+			}
+		}
+
+		if (restoreVersion < 0 && restoreVersion != latestVersion) {
+			reportBackupQueryError(operationId, result,
+			                       errorMessage =
+			                           format("the specified restorable version %ld is not valid", restoreVersion));
+			return Void();
+		}
+		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+		if (fileSet.present()) {
+			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
+			result["restore_version"] = fileSet.get().targetVersion;
+			JsonBuilderArray rangeFilesJson;
+			JsonBuilderArray logFilesJson;
+			for (const auto& rangeFile : fileSet.get().ranges) {
+				JsonBuilderObject object;
+				object["file_name"] = rangeFile.fileName;
+				object["file_size"] = rangeFile.fileSize;
+				object["version"] = rangeFile.version;
+				object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+				                          ? "none"
+				                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
+				rangeFilesJson.push_back(object);
+				totalRangeFilesSize += rangeFile.fileSize;
+			}
+			for (const auto& log : fileSet.get().logs) {
+				JsonBuilderObject object;
+				object["file_name"] = log.fileName;
+				object["file_size"] = log.fileSize;
+				object["begin_version"] = log.beginVersion;
+				object["end_version"] = log.endVersion;
+				logFilesJson.push_back(object);
+				totalLogFilesSize += log.fileSize;
+			}
+
+			result["total_range_files_size"] = totalRangeFilesSize;
+			result["total_log_files_size"] = totalLogFilesSize;
+
+			if (verbose) {
+				result["ranges"] = rangeFilesJson;
+				result["logs"] = logFilesJson;
+			}
+
+			TraceEvent("BackupQueryReceivedRestorableFilesSet")
+			    .detail("DestinationContainer", destinationContainer)
+			    .detail("KeyRangesFilter", printable(keyRangesFilter))
+			    .detail("ActualRestoreVersion", fileSet.get().targetVersion)
+			    .detail("NumRangeFiles", fileSet.get().ranges.size())
+			    .detail("NumLogFiles", fileSet.get().logs.size())
+			    .detail("RangeFilesBytes", totalRangeFilesSize)
+			    .detail("LogFilesBytes", totalLogFilesSize);
+		} else {
+			reportBackupQueryError(operationId, result, "no restorable files set found for specified key ranges");
+			return Void();
+		}
+
+	} catch (Error& e) {
+		reportBackupQueryError(operationId, result, e.what());
+		return Void();
+	}
+
+	printf("%s\n", result.getJson().c_str());
+	return Void();
+}
+
 ACTOR Future<Void> listBackup(std::string baseUrl) {
 	try {
 		std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl));
@@ -2769,6 +2961,9 @@ int main(int argc, char* argv[]) {
 				case BACKUP_LIST:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT);
 					break;
+				case BACKUP_QUERY:
+					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupQueryOptions, SO_O_EXACT);
+					break;
 				case BACKUP_MODIFY:
 					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT);
 					break;
@@ -2908,6 +3103,7 @@ int main(int argc, char* argv[]) {
 		std::string addPrefix;
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
+		Standalone<VectorRef<KeyRangeRef>> backupKeysFilter;
 		int maxErrors = 20;
 		Version restoreVersion = invalidVersion;
 		std::string restoreTimestamp;
@@ -3122,6 +3318,15 @@ int main(int argc, char* argv[]) {
 				case OPT_BACKUPKEYS:
 					try {
 						addKeyRange(args->OptionArg(), backupKeys);
+					}
+					catch (Error &) {
+						printHelpTeaser(argv[0]);
+						return FDB_EXIT_ERROR;
+					}
+					break;
+				case OPT_BACKUPKEYS_FILTER:
+					try {
+						addKeyRange(args->OptionArg(), backupKeysFilter);
 					}
 					catch (Error &) {
 						printHelpTeaser(argv[0]);
@@ -3659,6 +3864,12 @@ int main(int argc, char* argv[]) {
 			case BACKUP_LIST:
 				initTraceFile();
 				f = stopAfter( listBackup(baseUrl) );
+				break;
+
+			case BACKUP_QUERY:
+				initTraceFile();
+				f = stopAfter(queryBackup(argv[0], destinationContainer, backupKeysFilter, restoreVersion,
+				                          restoreClusterFileOrig, restoreTimestamp, !quietDisplay));
 				break;
 
 			case BACKUP_DUMP:
