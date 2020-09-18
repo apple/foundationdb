@@ -20,6 +20,7 @@
 
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/Trace.h"
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
@@ -2516,14 +2517,19 @@ ACTOR Future<Void> queryBackup(const char* name, std::string destinationContaine
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer);
 		if (restoreVersion == invalidVersion) {
 			BackupDescription desc = wait(bc->describeBackup());
-			// TODO: If the keyRangeFilter is restorable but the normalKeys is not, maxRestorableVersion will not be
-			// present, but we should still provide a restorable version for the keyRangeFilter
-			if (!desc.maxRestorableVersion.present()) {
-				reportBackupQueryError(operationId, result, "the specified backup is not restorable to any version");
-				return Void();
+			if (desc.maxRestorableVersion.present()) {
+				restoreVersion = desc.maxRestorableVersion.get();
+				// Use continuous log end version for the maximum restorable version for the key ranges.
+			} else if (keyRangesFilter.size() && desc.contiguousLogEnd.present()) {
+				restoreVersion = desc.contiguousLogEnd.get();
+			} else {
+				reportBackupQueryError(
+				    operationId, result,
+				    errorMessage = format("the backup for the specified key ranges is not restorable to any version"));
 			}
-			restoreVersion = desc.maxRestorableVersion.get();
-		} else if (restoreVersion < 0 && restoreVersion != latestVersion) {
+		}
+
+		if (restoreVersion < 0 && restoreVersion != latestVersion) {
 			reportBackupQueryError(operationId, result,
 			                       errorMessage =
 			                           format("the specified restorable version %ld is not valid", restoreVersion));
