@@ -4,6 +4,10 @@
 Release Notes
 #############
 
+6.2.26
+======
+* Attempt to detect when calling :func:`fdb_future_block_until_ready` would cause a deadlock, and throw ``blocked_from_network_thread`` if it would definitely cause a deadlock.
+
 6.2.25
 ======
 
