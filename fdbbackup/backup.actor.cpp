@@ -2516,7 +2516,7 @@ ACTOR Future<Void> queryBackup(const char* name, std::string destinationContaine
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer);
 		if (restoreVersion == invalidVersion) {
 			BackupDescription desc = wait(bc->describeBackup());
-			// TODO: If the keyRangeFilter is restorable but the normalKeys is not, maxRestorableVersion will not
+			// TODO: If the keyRangeFilter is restorable but the normalKeys is not, maxRestorableVersion will not be
 			// present, but we should still provide a restorable version for the keyRangeFilter
 			if (!desc.maxRestorableVersion.present()) {
 				reportBackupQueryError(operationId, result, "the specified backup is not restorable to any version");

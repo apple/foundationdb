@@ -1435,9 +1435,10 @@ public:
 					throw backup_not_overlapped_with_keys_filter();
 				}
 			}
-			// 'latestVersion' represents using the maximum restorable version in a snapshot.
+			// 'latestVersion' represents using the minimum restorable version in a snapshot.
 			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
-			if (restorable.targetVersion < maxKeyRangeVersion) continue; // Q: Isn't this always true?
+			// Any version < maxKeyRangeVersion is not restorable.
+			if (restorable.targetVersion < maxKeyRangeVersion) continue;
 
 			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
@@ -1456,7 +1457,10 @@ public:
 			// No logs needed if there is a complete filtered key space snapshot at the target version.
 			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
-				// TODO: Add a Trace here
+				TraceEvent("BackupContainerGetRestorableFilesWithoutLogs")
+				    .detail("KeyRangeVersion", restorable.targetVersion)
+				    .detail("NumberOfRangeFiles", restorable.ranges.size())
+				    .detail("KeyRangesFilter", printable(keyRangesFilter));
 				return Optional<RestorableFileSet>(restorable);
 			}
 
