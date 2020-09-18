@@ -62,10 +62,10 @@ struct AlternativeInfo {
 	T interf;
 	double probability;
 	double cumulativeProbability;
-	int recentRequests;
+	int processBusyTime;
 	double lastUpdate;
 
-	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), recentRequests(-1), lastUpdate(0) {}
+	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), processBusyTime(-1), lastUpdate(0) {}
 
 	bool operator < (double const& r) const {
 		return cumulativeProbability < r;
@@ -100,26 +100,28 @@ public:
 		return std::lower_bound( alternatives.begin(), alternatives.end(), deterministicRandom()->random01() ) - alternatives.begin();
 	}
 
-	void updateRecent( int index, int recentRequests ) {
-		alternatives[index].recentRequests = recentRequests;
+	void updateRecent( int index, int processBusyTime ) {
+		alternatives[index].processBusyTime = processBusyTime;
 		alternatives[index].lastUpdate = now();
 	}
 
 	void updateProbabilities() {
-		double totalRequests = 0;
+		double totalBusyTime = 0;
 		for(auto& it : alternatives) {
-			totalRequests += it.recentRequests;
+			totalBusyTime += it.processBusyTime;
 			if(now() - it.lastUpdate > FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/2.0) {
 				return;
 			}
 		}
-		if(totalRequests < 1000) {
+
+		//Do not update probabilities if the average proxy busyness is less than 5%
+		if(totalBusyTime < FLOW_KNOBS->BASIC_LOAD_BALANCE_MIN_AMOUNT*alternatives.size()) {
 			return;
 		}
 		
 		double totalProbability = 0;
 		for(auto& it : alternatives) {
-			it.probability += (1.0/alternatives.size()-(it.recentRequests/totalRequests))*FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
+			it.probability += (1.0/alternatives.size()-(it.processBusyTime/totalBusyTime))*FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
 			it.probability = std::max(it.probability, 1/(FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB*alternatives.size()));
 			it.probability = std::min(it.probability, FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB/alternatives.size());
 			totalProbability += it.probability;

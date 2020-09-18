@@ -347,7 +347,7 @@ struct VersionStampWorkload : TestWorkload {
 				}
 				catch (Error &e) {
 					err = e;
-					if (err.code() == error_code_database_locked) {
+					if (err.code() == error_code_database_locked && g_simulator.extraDB != nullptr) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);

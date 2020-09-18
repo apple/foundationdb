@@ -560,6 +560,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				}
 			} else {
 				self->outgoingConnectionIdle = false;
+				self->lastConnectTime = now();
 			}
 
 			firstConnFailedTime.reset();
@@ -733,7 +734,7 @@ void Peer::onIncomingConnection( Reference<Peer> self, Reference<IConnection> co
 		compatibleAddr = transport->localAddresses.secondaryAddress.get();
 	}
 
-	if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ) {
+	if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr || (lastConnectTime > 1.0 && now() - lastConnectTime > FLOW_KNOBS->ALWAYS_ACCEPT_DELAY) ) {
 		// Keep the new connection
 		TraceEvent("IncomingConnection", conn->getDebugID())
 			.suppressFor(1.0)

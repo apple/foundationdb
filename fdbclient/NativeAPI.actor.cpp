@@ -3895,13 +3895,22 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			}
 
 			wait(waitForAll(fReplies));
-			Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
 
-			for (int i = 0; i < nLocs; i++)
-				results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
-				               fReplies[i].get().readHotRanges.size());
+			if(nLocs == 1) {
+				TEST(true); // Single-shard read hot range request
+				return fReplies[0].get().readHotRanges;
+			}
+			else {
+				TEST(true); // Multi-shard read hot range request
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> results;
+				for (int i = 0; i < nLocs; i++) {
+					results.append(results.arena(), fReplies[i].get().readHotRanges.begin(),
+								fReplies[i].get().readHotRanges.size());
+					results.arena().dependsOn(fReplies[i].get().readHotRanges.arena());
+				}
 
-			return results;
+				return results;
+			}
 		} catch (Error& e) {
 			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
 				TraceEvent(SevError, "GetReadHotSubRangesError").error(e);

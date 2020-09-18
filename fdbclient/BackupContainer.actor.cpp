@@ -1343,19 +1343,44 @@ public:
 
 	ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
 	                                                           RangeFile file) {
-		state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+		state int readFileRetries = 0;
 		state bool beginKeySet = false;
 		state Key beginKey;
 		state Key endKey;
-		state int64_t j = 0;
-		for (; j < file.fileSize; j += file.blockSize) {
-			int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
-			Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
-			if (!beginKeySet) {
-				beginKey = blockData.front().key;
-				beginKeySet = true;
+		loop {
+			try {
+				state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+				beginKeySet = false;
+				state int64_t j = 0;
+				for (; j < file.fileSize; j += file.blockSize) {
+					int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
+					Standalone<VectorRef<KeyValueRef>> blockData =
+					    wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
+					if (!beginKeySet) {
+						beginKey = blockData.front().key;
+						beginKeySet = true;
+					}
+					endKey = blockData.back().key;
+				}
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_restore_bad_read ||
+				    e.code() == error_code_restore_unsupported_file_version ||
+				    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
+					TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRange").error(e);
+					throw;
+				} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+				           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+					// blob http request failure, retry
+					TraceEvent(SevWarnAlways, "BackupContainerGetSnapshotFileKeyRangeConnectionFailure")
+					    .detail("Retries", ++readFileRetries)
+					    .error(e);
+					wait(delayJittered(0.1));
+				} else {
+					TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRangeUnexpectedError").error(e);
+					throw;
+				}
 			}
-			endKey = blockData.back().key;
 		}
 		return KeyRange(KeyRangeRef(beginKey, endKey));
 	}

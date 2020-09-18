@@ -2559,6 +2559,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.lock );
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
+		DUMPTOKEN( recruited.waitFailure );
+		DUMPTOKEN( recruited.recoveryFinished );
+		DUMPTOKEN( recruited.disablePopRequest );
+		DUMPTOKEN( recruited.enablePopRequest );
+		DUMPTOKEN( recruited.snapRequest );
 
 		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
 		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>( fTLogSpillTypes.get()[idx].value, AssumeVersion(protocolVersion) );
@@ -2767,6 +2772,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	DUMPTOKEN( recruited.lock );
 	DUMPTOKEN( recruited.getQueuingMetrics );
 	DUMPTOKEN( recruited.confirmRunning );
+	DUMPTOKEN( recruited.waitFailure );
+	DUMPTOKEN( recruited.recoveryFinished );
+	DUMPTOKEN( recruited.disablePopRequest );
+	DUMPTOKEN( recruited.enablePopRequest );
+	DUMPTOKEN( recruited.snapRequest );
 
 	stopAllTLogs(self, recruited.id());
 

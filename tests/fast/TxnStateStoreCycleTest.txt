@@ -30,3 +30,5 @@ testTitle=Clogged
     machinesToLeave=3
     reboot=true
     testDuration=10.0
+
+    testName=LockDatabaseFrequently

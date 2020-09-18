@@ -444,6 +444,7 @@ ACTOR static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batc
 		                             : std::min(versionBatch.endVersion, request.targetVersion + 1);
 		param.asset.addPrefix = request.addPrefix;
 		param.asset.removePrefix = request.removePrefix;
+		param.asset.batchIndex = batchIndex;
 
 		TraceEvent("FastRestoreControllerPhaseLoadFiles")
 		    .detail("BatchIndex", batchIndex)
@@ -624,7 +625,7 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
 	ASSERT(batchData->samplesSize >= 0);
 	// Sanity check: samples should not be used after freed
 	ASSERT((batchData->samplesSize > 0 && !batchData->samples.empty()) ||
-	       batchData->samplesSize == 0 && batchData->samples.empty());
+	       (batchData->samplesSize == 0 && batchData->samples.empty()));
 	int numAppliers = appliersInterf.size();
 	double slotSize = std::max(batchData->samplesSize / numAppliers, 1.0);
 	double cumulativeSize = slotSize;
