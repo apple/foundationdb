@@ -42,17 +42,6 @@ struct GenerationRegVal {
 	}
 };
 
-// The order of UIDs here must match the order in which makeWellKnownEndpoint is called.
-// UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 ); // from fdbclient/MonitorLeader.actor.cpp
-// UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 ); // from fdbclient/MonitorLeader.actor.cpp
-UID WLTOKEN_LEADERELECTIONREG_CANDIDACY( -1, 4 );
-UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT( -1, 5 );
-UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT( -1, 6 );
-UID WLTOKEN_LEADERELECTIONREG_FORWARD( -1, 7 );
-UID WLTOKEN_GENERATIONREG_READ( -1, 8 );
-UID WLTOKEN_GENERATIONREG_WRITE( -1, 9 );
-
-
 GenerationRegInterface::GenerationRegInterface( NetworkAddress remote )
 	: read( Endpoint({remote}, WLTOKEN_GENERATIONREG_READ) ),
 	  write( Endpoint({remote}, WLTOKEN_GENERATIONREG_WRITE) )

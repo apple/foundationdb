@@ -371,10 +371,6 @@ ClientCoordinators::ClientCoordinators( Key clusterKey, std::vector<NetworkAddre
 	ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile( ClusterConnectionString( coordinators, clusterKey ) ) );
 }
 
-
-UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 );
-UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 );
-
 ClientLeaderRegInterface::ClientLeaderRegInterface( NetworkAddress remote )
 	: getLeader( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_GETLEADER) ),
     openDatabase( Endpoint({remote}, WLTOKEN_CLIENTLEADERREG_OPENDATABASE) )
