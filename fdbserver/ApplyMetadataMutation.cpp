@@ -58,7 +58,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
 
-		if (m.param1.size() && m.param1[0] == systemKeys.begin[0] && m.type == MutationRef::SetValue) {
+		if (m.type == MutationRef::SetValue && systemKeys.contains(m.param1)) {
 			if(m.param1.startsWith(keyServersPrefix)) {
 				if(keyInfo) {
 					KeyRef k = m.param1.removePrefix(keyServersPrefix);
@@ -301,8 +301,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 				confChange = true;
 				TEST(true);  // Recovering at a higher version.
 			}
-		}
-		else if (m.param2.size() && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
+		} else if (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(systemKeys)) {
 			KeyRangeRef range(m.param1, m.param2);
 
 			if (keyServersKeys.intersects(range)) {
