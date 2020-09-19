@@ -1792,6 +1792,16 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 	}
 }
 
+ACTOR Future<Void> serveProtocolInfo() {
+	state RequestStream<ProtocolInfoRequest> protocolInfo(
+	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
+	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
+	loop {
+		ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
+		req.reply.send(ProtocolInfoReply{ currentProtocolVersion });
+	}
+}
+
 ACTOR Future<Void> fdbd(
 	Reference<ClusterConnectionFile> connFile,
 	LocalityData localities,
@@ -1806,6 +1816,8 @@ ACTOR Future<Void> fdbd(
 {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+
+	actors.push_back(serveProtocolInfo());
 
 	try {
 		ServerCoordinators coordinators( connFile );

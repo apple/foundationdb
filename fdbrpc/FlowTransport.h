@@ -115,11 +115,22 @@ namespace std
 	};
 }
 
+enum class RequirePeer { Exactly, AtLeast };
+
+struct PeerCompatibilityPolicy {
+	RequirePeer requirement;
+	ProtocolVersion version;
+};
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
+	virtual PeerCompatibilityPolicy peerCompatibilityPolicy() const {
+		// TODO(anoyes) Add "this process's protocol version" to INetwork interface and use that here instead.
+		return { RequirePeer::Exactly, currentProtocolVersion };
+	}
 };
 
 struct TransportData;

@@ -66,7 +66,7 @@ class UID {
 public:
 	constexpr static FileIdentifier file_identifier = 15597147;
 	UID() { part[0] = part[1] = 0; }
-	UID( uint64_t a, uint64_t b ) { part[0]=a; part[1]=b; }
+	constexpr UID(uint64_t a, uint64_t b) : part{ a, b } {}
 	std::string toString() const;
 	std::string shortString() const;
 	bool isValid() const { return part[0] || part[1]; }
