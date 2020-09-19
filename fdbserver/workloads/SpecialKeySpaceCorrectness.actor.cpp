@@ -664,7 +664,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					wait(tx->commit());
 					ASSERT(false);
 				} else {
-					TraceEvent(SevDebug, "SpecialKeyCorrectnessTestGetZeroWorkers");
+					// If no worker process returned, skip the test
+					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
@@ -732,7 +733,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(class_source.present() && class_source.get() == LiteralStringRef("set_class"));
 					tx->reset();
 				} else {
-					TraceEvent(SevDebug, "SpecialKeyCorrectnessTestGetZeroWorkers");
+					// If no worker process returned, skip the test
+					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
