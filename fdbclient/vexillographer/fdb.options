@@ -37,7 +37,7 @@ description is not currently required but encouraged.
             paramType="String" paramDescription="path to cluster file"
             description="Deprecated"/>
     <Option name="trace_enable" code="30"
-            paramType="String" paramDescription="path to output directory (or NULL for current working directory)"
+            paramType="String" paramDescription="path to output directory (or nullptr for current working directory)"
             description="Enables trace output to a file in a directory of the clients choosing"/>
     <Option name="trace_roll_size" code="31"
             paramType="Int" paramDescription="max size of a single trace output file"

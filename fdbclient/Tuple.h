@@ -47,7 +47,7 @@ struct Tuple {
 		return append(t);
 	}
 
-	enum ElementType { NULL_TYPE, INT, BYTES, UTF8 };
+	enum ElementType { nullptr_TYPE, INT, BYTES, UTF8 };
 
 	// this is number of elements, not length of data
 	size_t size() const { return offsets.size(); }

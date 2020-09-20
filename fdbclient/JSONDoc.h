@@ -67,11 +67,11 @@
 //    // The following would throw if a.b.c did not exist, or if it was not an int.
 //    int x = r["a.b.c"].get_int();
 struct JSONDoc {
-	JSONDoc() : pObj(NULL) {}
+	JSONDoc() : pObj(nullptr) {}
 
 	// Construction from const json_spirit::mObject, trivial and will never throw.
 	// Resulting JSONDoc will not allow modifications.
-	JSONDoc(const json_spirit::mObject &o) : pObj(&o), wpObj(NULL) {}
+	JSONDoc(const json_spirit::mObject &o) : pObj(&o), wpObj(nullptr) {}
 
 	// Construction from json_spirit::mObject.  Allows modifications.
 	JSONDoc(json_spirit::mObject &o) : pObj(&o), wpObj(&o) {}
@@ -79,7 +79,7 @@ struct JSONDoc {
 	// Construction from const json_spirit::mValue (which is a Variant type) which will try to
 	// convert it to an mObject.  This will throw if that fails, just as it would
 	// if the caller called get_obj() itself and used the previous constructor instead.
-	JSONDoc(const json_spirit::mValue &v) : pObj(&v.get_obj()), wpObj(NULL) {}
+	JSONDoc(const json_spirit::mValue &v) : pObj(&v.get_obj()), wpObj(nullptr) {}
 
 	// Construction from non-const json_spirit::mValue - will convert the mValue to
 	// an object if it isn't already and then attach to it.
@@ -98,13 +98,13 @@ struct JSONDoc {
 	// path into on the "dot" character.
 	// When a path is found, pLast is updated.
 	bool has(std::string path, bool split=true) {
-		if (pObj == NULL)
+		if (pObj == nullptr)
 			return false;
 
 		if (path.empty())
 			return false;
 		size_t start = 0;
-		const json_spirit::mValue *curVal = NULL;
+		const json_spirit::mValue *curVal = nullptr;
 		while (start < path.size())
 		{
 			// If a path segment is found then curVal must be an object
@@ -140,7 +140,7 @@ struct JSONDoc {
 	// Creates the given path (forcing Objects to exist along its depth, replacing whatever else might have been there)
 	// and returns a reference to the Value at that location.
 	json_spirit::mValue & create(std::string path, bool split=true) {
-		if (wpObj == NULL || path.empty())
+		if (wpObj == nullptr || path.empty())
 			throw std::runtime_error("JSON Object not writable or bad JSON path");
 
 		size_t start = 0;
@@ -280,7 +280,7 @@ struct JSONDoc {
 	}
 
 	const json_spirit::mValue & last() const { return *pLast; }
-	bool valid() const { return pObj != NULL; }
+	bool valid() const { return pObj != nullptr; }
 
 	const json_spirit::mObject & obj() {
 		// This dummy object is necessary to make working with obj() easier when this does not currently
@@ -304,7 +304,7 @@ struct JSONDoc {
 	static uint64_t expires_reference_version;
 private:
 	const json_spirit::mObject *pObj;
-	// Writeable pointer to the same object.  Will be NULL if initialized from a const object.
+	// Writeable pointer to the same object.  Will be nullptr if initialized from a const object.
 	json_spirit::mObject *wpObj;
 	const json_spirit::mValue *pLast;
 };

@@ -224,7 +224,7 @@ ThreadFuture<int64_t> DLTransaction::getApproximateSize() {
 }
 
 void DLTransaction::setOption(FDBTransactionOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->transactionSetOption(tr, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 
 ThreadFuture<Void> DLTransaction::onError(Error const& e) {
@@ -262,14 +262,14 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 }
 
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 	
 // DLApi
 template<class T>
 void loadClientFunction(T *fp, void *lib, std::string libPath, const char *functionName, bool requireFunction = true) {
 	*(void**)(fp) = loadFunction(lib, functionName);
-	if(*fp == NULL && requireFunction) {
+	if(*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
 		throw platform_error();
 	}
@@ -283,7 +283,7 @@ void DLApi::init() {
 	}
 
 	void* lib = loadLibrary(fdbCPath.c_str());
-	if(lib == NULL) {
+	if(lib == nullptr) {
 		TraceEvent(SevError, "ErrorLoadingExternalClientLibrary").detail("LibraryPath", fdbCPath);
 		throw platform_error();
 	}
@@ -347,7 +347,7 @@ void DLApi::selectApiVersion(int apiVersion) {
 
 	init();
 	throwIfError(api->selectApiVersion(apiVersion, headerVersion));
-	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, NULL, 0));
+	throwIfError(api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT, nullptr, 0));
 }
 
 const char* DLApi::getClientVersion() {
@@ -359,7 +359,7 @@ const char* DLApi::getClientVersion() {
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
-	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : NULL, value.present() ? value.get().size() : 0));
+	throwIfError(api->setNetworkOption(option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 
 void DLApi::setupNetwork() {
@@ -786,7 +786,7 @@ void MultiVersionDatabase::Connector::connect() {
 		else {
 			delref();
 		}
-	}, NULL);
+	}, nullptr);
 }
 
 // Only called from main thread
@@ -805,7 +805,7 @@ void MultiVersionDatabase::Connector::fire(const Void &unused, int& userParam) {
 			dbState->stateChanged();
 		}
 		delref();
-	}, NULL);
+	}, nullptr);
 }
 
 void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
@@ -820,7 +820,7 @@ void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState()
-	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(NULL))), currentClientIndex(-1) {}
+	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), currentClientIndex(-1) {}
 
 // Only called from main thread
 void MultiVersionDatabase::DatabaseState::stateChanged() {
@@ -898,7 +898,7 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 		connectionAttempts.clear();
 		clients.clear();
 		delref();
-	}, NULL);
+	}, nullptr);
 }
 
 // MultiVersionApi
@@ -1043,7 +1043,7 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 	// This option must be set on the main thread because it modifes structures that can be used concurrently by the main thread
 	onMainThreadVoid([this, versions](){
 		localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
-	}, NULL);
+	}, nullptr);
 
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([versions](Reference<ClientInfo> client) {
@@ -1654,7 +1654,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 
 		onMainThreadVoid([done](){
 			*done = true;
-		}, NULL);
+		}, nullptr);
 	}
 	catch(Error &e) {
 		printf("Caught error in test: %s\n", e.name());

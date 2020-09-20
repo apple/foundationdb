@@ -130,7 +130,7 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 	uint8_t code = data[offsets[index]];
 
 	if(code == '\x00') {
-		return ElementType::NULL_TYPE;
+		return ElementType::nullptr_TYPE;
 	}
 	else if(code == '\x01') {
 		return ElementType::BYTES;
