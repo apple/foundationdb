@@ -7,7 +7,7 @@ ADD artifacts /mnt/artifacts
 
 # Install build tools for building via make
 RUN \
-	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm cgdb
+	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm cgdb jq
 
 # Download and install llvm-10.0.0
 RUN cd / &&\
