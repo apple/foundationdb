@@ -21,7 +21,11 @@
 #ifndef FDBRPC_HEALTH_MONITOR_H
 #define FDBRPC_HEALTH_MONITOR_H
 
+#include <map>
+#include <set>
+
 #include "flow/flow.h"
+#include "flow/SlideWindow.h"
 #include "flow/TimedKVCache.h"
 
 class HealthMonitor {
@@ -33,6 +37,63 @@ public:
 	int closedConnectionsCount(const NetworkAddress& peerAddress);
 private:
 	TimedKVCache<NetworkAddress, int> peerClosedNum;
+};
+
+class TimeoutReport : public std::map<NetworkAddress, int> {
+	/**
+	 * Add a timeout record while accessing a remote instance
+	 * @param addr
+	 */
+	TimeoutReport& operator+= (const NetworkAddress& addr) {
+		if (this->find(addr) == this->end()) {
+			(*this)[addr] = 0;
+		}
+		++(*this)[addr];
+		return *this;
+	}
+
+	/**
+	 * Remove a timeout record
+	 * @param addr
+	 */
+	TimeoutReport& operator-= (const NetworkAddress& addr) {
+		ASSERT(this->find(addr) != this->end());
+		--(*this)[addr];
+		if ((*this)[addr] == 0) {
+			this->erase(addr);
+		}
+		return *this;
+	}
+
+	/**
+	 * Evaluate the difference between a newer timeout report and an older timeout
+	 * @param newer
+	 * @param older
+	 * @return TimeoutReport
+	 */
+	static TimeoutReport diff(const TimeoutReport& newer, const TimeoutReport& older) {
+		std::set<NetworkAddress> allKeys;
+		for (const auto& [key, _]: newer) allKeys.insert(key);
+		for (const auto& [key, _]: older) allKeys.insert(key);
+
+		TimeoutReport result;
+		for (const auto& key: allKeys) {
+			int newValue = 0;
+			if (newer.find(key) != newer.end()) newValue = newer.at(key);
+
+			int oldValue = 0;
+			if (older.find(key) != older.end()) oldValue == older.at(key);
+
+			result[key] = newValue - oldValue;
+		}
+
+		return result;
+	}
+};
+
+class ClusterHealthStatus: public SlideWindow<NetworkAddress, TimeoutReport> {
+public:
+	using SlideWindow::SlideWindow;
 };
 
 #endif // FDBRPC_HEALTH_MONITOR_H
