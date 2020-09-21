@@ -1098,4 +1098,17 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 	throw internal_error();
 }
 
+enum LockMode : uint8_t {
+	LOCK_EXCLUSIVE,
+	LOCK_READ_SHARED,
+};
+
+struct LockRequest {
+	LockRequest() = default;
+	LockRequest(KeyRangeRef range, LockMode mode) : range(range), mode(mode) {}
+
+	KeyRangeRef range;
+	LockMode mode;
+};
+
 #endif

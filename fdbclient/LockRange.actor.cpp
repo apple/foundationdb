@@ -27,8 +27,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-
-ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock) {
+ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -40,7 +39,7 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLoc
 		}
 	}
 
-	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::LockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(LockRequest(range, mode)), MutationRef::LockRange);
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	}
@@ -48,11 +47,11 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLoc
 	return Void();
 }
 
-ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range) {
+ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range, LockMode mode) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			wait(lockRange(&tr, range, true));
+			wait(lockRange(&tr, range, true, mode));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -62,7 +61,7 @@ ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range) {
 	}
 }
 
-ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges) {
+ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode) {
 	if (ranges.size() > 1) {
 		// Check ranges are disjoint
 		std::sort(ranges.begin(), ranges.end(), [](const KeyRangeRef& a, const KeyRangeRef& b) {
@@ -80,7 +79,7 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges) {
 		try {
 			state bool checkDBLock = true;
 			for (const auto& range : ranges) {
-				wait(lockRange(&tr, range, checkDBLock));
+				wait(lockRange(&tr, range, checkDBLock, mode));
 				checkDBLock = false;
 			}
 			wait(tr.commit());
@@ -92,7 +91,7 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges) {
 	}
 }
 
-ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock) {
+ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -104,7 +103,7 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 		}
 	}
 
-	tr->atomicOp(rangeLockKey, encodeRangeLock(range), MutationRef::UnlockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(LockRequest(range, mode)), MutationRef::UnlockRange);
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	}
@@ -112,11 +111,11 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 	return Void();
 }
 
-ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range) {
+ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			wait(unlockRange(&tr, range, true));
+			wait(unlockRange(&tr, range, true, mode));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -126,7 +125,7 @@ ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range) {
 	}
 }
 
-ACTOR Future<Void> unlockRange(Database cx, std::vector<KeyRangeRef> ranges) {
+ACTOR Future<Void> unlockRange(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode) {
 	if (ranges.size() > 1) {
 		// Check ranges are disjoint
 		std::sort(ranges.begin(), ranges.end(), [](const KeyRangeRef& a, const KeyRangeRef& b) {
@@ -144,7 +143,7 @@ ACTOR Future<Void> unlockRange(Database cx, std::vector<KeyRangeRef> ranges) {
 		try {
 			state bool checkDBLock = true;
 			for (const auto& range : ranges) {
-				wait(unlockRange(&tr, range, checkDBLock));
+				wait(unlockRange(&tr, range, checkDBLock, mode));
 				checkDBLock = false;
 			}
 			wait(tr.commit());
