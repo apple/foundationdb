@@ -271,12 +271,15 @@ public:
 
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
+	using RestoreKeyRangesVersion = std::pair<Standalone<VectorRef<KeyRangeRef>>, Version>;
 
 	// parallel restore
 	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
 	Future<Void> submitParallelRestore(Database cx, Key backupTag, Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   Key bcUrl, Version targetVersion, bool lockDB, UID randomUID, Key addPrefix,
 	                                   Key removePrefix);
+	Future<Void> submitParallelRestore(Database cx, Key backupTag, std::vector<RestoreKeyRangesVersion> requests,
+	                                   Key bcUrl, bool lockDB, UID randomUID, Key addPrefix, Key removePrefix);
 	Future<Void> atomicParallelRestore(Database cx, Key tagName, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                   Key addPrefix, Key removePrefix);
 

@@ -183,6 +183,10 @@ inline std::string describe( const int item ) {
 	return format("%d", item);
 }
 
+inline std::string describe( const Version item ) {
+	return format("%ld", item);
+}
+
 // Allows describeList to work on a vector of std::string
 static std::string describe(const std::string& s) {
 	return s;
@@ -260,6 +264,7 @@ std::string printable( const KeyRangeRef& range );
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
+std::string printable( const VectorRef<KeyRangeRef>& val );
 
 template <class T>
 std::string printable( const Optional<T>& val ) {

@@ -189,6 +189,13 @@ std::string printable( const KeyRangeRef& range ) {
 	return printable(range.begin) + " - " + printable(range.end);
 }
 
+std::string printable( const VectorRef<KeyRangeRef>& val ) {
+	std::string s;
+	for(int i=0; i<val.size(); i++)
+		s = s + printable(val[i]) + " ";
+	return s;
+}
+
 int unhex( char c ) {
 	if (c >= '0' && c <= '9')
 		return c-'0';

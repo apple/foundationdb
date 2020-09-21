@@ -224,6 +224,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		batch.clear();
 		status.clear();
 		finishedBatch = NotifiedVersion(0);
+		versionBatchId = NotifiedVersion(0);
 	}
 
 	void initBackupContainer(Key url) {

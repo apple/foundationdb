@@ -27,6 +27,9 @@
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define TEST_ABORT_FASTRESTORE	0
@@ -111,7 +114,16 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			else
 				backupRanges.push_back_deep(backupRanges.arena(),
 				                            KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
-		} else if (backupRangesCount <= 0) {
+		} else if (backupRangesCount == -2) {
+			if (deterministicRandom()->random01() < 0.3) {
+				backupRangesCount = -1;
+			} else {
+				backupRangesCount = deterministicRandom()->randomInt(1, 11);
+			}
+			TraceEvent("BackupAndParallelRestoreWorkload").detail("BackupRangesCountOverride", backupRangesCount);
+		}
+
+		if (backupRangesCount == -1) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
 			// Add backup ranges
@@ -358,6 +370,30 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
+	// TODO: Support using key ranges to filter the restorable files set and get a smaller version than keyspace's
+	// minimum restorable version.
+	static Version pickRandomTargetVersion(const BackupDescription& desc) {
+		Version targetVersion = -1;
+		if (desc.maxRestorableVersion.present()) {
+			if (deterministicRandom()->random01() < 0.1) {
+				targetVersion = desc.minRestorableVersion.get();
+			} else if (deterministicRandom()->random01() < 0.1) {
+				targetVersion = desc.maxRestorableVersion.get();
+			} else if (deterministicRandom()->random01() < 0.5 &&
+						desc.minRestorableVersion.get() < desc.contiguousLogEnd.get()) {
+				// The assertion may fail because minRestorableVersion may be decided by snapshot version.
+				// ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
+				// This assertion can fail when contiguousLogEnd < maxRestorableVersion and
+				// the snapshot version > contiguousLogEnd. I.e., there is a gap between
+				// contiguousLogEnd and snapshot version.
+				// ASSERT_WE_THINK(desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get());
+				targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
+																	desc.contiguousLogEnd.get());
+			}
+		}
+		return targetVersion;
+	}
+
 	ACTOR static Future<Void> _start(Database cx, BackupAndParallelRestoreCorrectnessWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
@@ -474,42 +510,43 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				ASSERT(self->usePartitionedLogs == desc.partitioned);
 				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
 
-				state Version targetVersion = -1;
-				if (desc.maxRestorableVersion.present()) {
-					if (deterministicRandom()->random01() < 0.1) {
-						targetVersion = desc.minRestorableVersion.get();
-					} else if (deterministicRandom()->random01() < 0.1) {
-						targetVersion = desc.maxRestorableVersion.get();
-					} else if (deterministicRandom()->random01() < 0.5 &&
-					           desc.minRestorableVersion.get() < desc.contiguousLogEnd.get()) {
-						// The assertion may fail because minRestorableVersion may be decided by snapshot version.
-						// ASSERT_WE_THINK(desc.minRestorableVersion.get() <= desc.contiguousLogEnd.get());
-						// This assertion can fail when contiguousLogEnd < maxRestorableVersion and
-						// the snapshot version > contiguousLogEnd. I.e., there is a gap between
-						// contiguousLogEnd and snapshot version.
-						// ASSERT_WE_THINK(desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get());
-						targetVersion = deterministicRandom()->randomInt64(desc.minRestorableVersion.get(),
-						                                                   desc.contiguousLogEnd.get());
-					}
-				}
 
 				TraceEvent("BAFRW_Restore", randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("MinRestorableVersion", desc.minRestorableVersion.get())
 				    .detail("MaxRestorableVersion", desc.maxRestorableVersion.get())
-				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get())
-				    .detail("TargetVersion", targetVersion);
+				    .detail("ContiguousLogEnd", desc.contiguousLogEnd.get());
 
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
 
+				// Either restore all backup ranges to single target version or break the backup ranges into several
+				// splits and restore each split to its own target version.
+				// TODO: Support restoring key ranges to a smaller version than whole backup's minimum restotable version.
+				std::vector<FileBackupAgent::RestoreKeyRangesVersion> restoreRequests;
+				if (deterministicRandom()->random01() < 0.1) {
+					restoreRequests.emplace_back(self->backupRanges, pickRandomTargetVersion(desc));
+				} else {
+					int beginIndex = 0;
+					while (beginIndex < self->backupRanges.size()) {
+						Standalone<VectorRef<KeyRangeRef>> keyRanges;
+						int size = deterministicRandom()->randomInt(0, self->backupRanges.size() - beginIndex) + 1;
+						keyRanges.append(self->backupRanges.arena(), self->backupRanges.begin() + beginIndex, size);
+						restoreRequests.emplace_back(keyRanges, pickRandomTargetVersion(desc));
+						beginIndex += size;
+					}
+					ASSERT(beginIndex == self->backupRanges.size());
+				}
+
 				// Submit parallel restore requests
 				TraceEvent("BackupAndParallelRestoreWorkload")
-				    .detail("PrepareRestores", self->backupRanges.size())
+				    .detail("PrepareRestoresTotalNumKeyRanges", self->backupRanges.size())
+					.detail("PrepareRestoresTotalNumSplits", restoreRequests.size())
 				    .detail("AddPrefix", self->addPrefix)
 				    .detail("RemovePrefix", self->removePrefix);
-				wait(backupAgent.submitParallelRestore(cx, self->backupTag, self->backupRanges,
-				                                       KeyRef(lastBackupContainer->getURL()), targetVersion,
+
+				wait(backupAgent.submitParallelRestore(cx, self->backupTag, restoreRequests,
+				                                       KeyRef(lastBackupContainer->getURL()),
 				                                       self->locked, randomID, self->addPrefix, self->removePrefix));
 				TraceEvent("BackupAndParallelRestoreWorkload")
 				    .detail("TriggerRestore", "Setting up restoreRequestTriggerKey");

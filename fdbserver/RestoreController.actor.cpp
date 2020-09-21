@@ -35,6 +35,7 @@
 #include "fdbserver/RestoreLoader.actor.h"
 
 #include "flow/Platform.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> clearDB(Database cx);
@@ -76,7 +77,7 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
 ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControllerInterface ci) {
 	loop {
 		try {
-			RestoreSamplesRequest req = waitNext(ci.samples.getFuture());
+			RestoreSamplesRequest req = waitNext(ci.samples.getFuture()); 
 			TraceEvent(SevDebug, "FastRestoreControllerSampleBackups")
 			    .detail("SampleID", req.id)
 			    .detail("BatchIndex", req.batchIndex)
@@ -111,18 +112,19 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 	ASSERT(controllerWorker->controllerInterf.present());
 	state Reference<RestoreControllerData> self =
 	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.get().id()));
+	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	try {
 		// recruitRestoreRoles must come after controllerWorker has finished collectWorkerInterface
 		wait(recruitRestoreRoles(controllerWorker, self));
 
-		actors.add(updateHeartbeatTime(self));
-		actors.add(checkRolesLiveness(self));
-		actors.add(updateProcessMetrics(self));
-		actors.add(traceProcessMetrics(self, "RestoreController"));
-		actors.add(sampleBackups(self, controllerWorker->controllerInterf.get()));
+		self->addActor.send(updateHeartbeatTime(self));
+		self->addActor.send(checkRolesLiveness(self));
+		self->addActor.send(updateProcessMetrics(self));
+		self->addActor.send(traceProcessMetrics(self, "RestoreController"));
+		self->addActor.send(sampleBackups(self, controllerWorker->controllerInterf.get()));
 
-		wait(startProcessRestoreRequests(self, cx));
+		wait(startProcessRestoreRequests(self, cx) || error);
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
 			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
@@ -304,7 +306,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
 	state Version minRangeVersion = MAX_VERSION;
-	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	self->initBackupContainer(request.url);
 
@@ -383,7 +384,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	}
 
 	try {
-		wait(waitForAll(fBatches) || error);
+		wait(waitForAll(fBatches));
 	} catch (Error& e) {
 		TraceEvent(SevError, "FastRestoreControllerDispatchVersionBatchesUnexpectedError").error(e);
 	}
@@ -689,7 +690,6 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
 
 ACTOR static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx) {
 	state std::vector<RestoreRequest> restoreRequests;
-	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 
 	// restoreRequestTriggerKey should already been set
@@ -1086,7 +1086,13 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> s
 		}
 
 		fTimeout = delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_DELAY);
-		wait(waitForAll(fReplies) || fTimeout);
+		// Here we have to handle error, otherwise controller worker will fail and exit.
+		try {
+			wait(waitForAll(fReplies) || fTimeout);
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "FastRestoreUpdateHeartbeatError").error(e);
+		}
+
 		// Update the most recent heart beat time for each role
 		for (int i = 0; i < fReplies.size(); ++i) {
 			if (fReplies[i].isReady()) {
