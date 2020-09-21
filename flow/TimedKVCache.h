@@ -18,12 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_TIMED_KVCACHE_H
-#define FDBSERVER_TIMED_KVCACHE_H
+#ifndef FLOW_TIMED_KVCACHE_H
+#define FLOW_TIMED_KVCACHE_H
 
 #pragma once
 
-#include <iosfwd>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -35,11 +34,13 @@
  * @class TimedKVCache
  * @brief A key/value based cache that expires its key after a given time
  */
-template <typename K, typename V>
+template <typename K, typename V, class queue_type=std::list<std::pair<double, K>>, class map_type=std::unordered_map<K, V>>
 class TimedKVCache {
 public:
 	using key_t = K;
 	using value_t = V;
+	using queue_t = queue_type;
+	using map_t = map_type;
 
 	const double CACHE_EXPIRING_TIME_LENGTH;
 
@@ -114,8 +115,8 @@ public:
 	}
 
 private:
-	std::list<std::pair<double, key_t>> timestampedKey;
-	std::unordered_map<key_t, value_t> kvMapper;
+	queue_t timestampedKey;
+	map_t kvMapper;
 
 protected:
 	void sweep() {
@@ -129,4 +130,4 @@ protected:
 };
 
 
-#endif // FDBSERVER_TIMED_KVCACHE_H
+#endif // FLOW_TIMED_KVCACHE_H
