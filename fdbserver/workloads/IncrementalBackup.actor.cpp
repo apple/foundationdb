@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -32,12 +33,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 	FileBackupAgent backupAgent;
 	bool submitOnly;
 	bool restoreOnly;
+	bool waitVersion;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
 		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
+		waitVersion = getOption(options, LiteralStringRef("waitVersion"), false);
 	}
 
 	virtual std::string description() { return "IncrementalBackup"; }
@@ -76,6 +79,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 			TraceEvent("IBackupRestoreAttempt");
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
 			// TODO: add testing scenario for atomics and beginVersion
+			if (self->waitVersion) {
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				state Version v = wait(tr->getReadVersion());
+				loop {
+					BackupDescription desc = wait(backupContainer->describeBackup());
+					if (desc.maxLogEnd.get() >= v) break;
+					// Avoid spamming requests with a delay
+					wait(delay(3.0));
+				}
+
+			}
 			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
 			                                       true, -1, true, normalKeys, Key(), Key(), true, true)));
 			TraceEvent("IBackupRestoreSuccess");
