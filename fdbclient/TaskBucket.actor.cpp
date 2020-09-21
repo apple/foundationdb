@@ -513,15 +513,19 @@ public:
 	}
 
 	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+		TraceEvent("CheckpointTaskRun");
 		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 		taskBucket->metricLogger = traceCounters("TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &taskBucket->cc);
 		loop {
+			TraceEvent("CheckpointTaskRun0").detail("Paused", paused->get());
 			while(paused->get()) {
 				wait(paused->onChange() || watchPausedFuture);
 			}
+			TraceEvent("CheckpointTaskRun1").detail("Paused", paused->get());
 
 			wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() || watchPausedFuture);
+			TraceEvent("CheckpointTaskRun2").detail("Paused", paused->get());
 		}
 	}
 
@@ -847,18 +851,21 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 	// If scheduledVersion is valid then place the task directly into the timeout
 	// space for its scheduled time, otherwise place it in the available space by priority.
 	Version scheduledVersion = ReservedTaskParams::scheduledVersion().getOrDefault(task, invalidVersion);
+	TraceEvent("CheckpointAddTask0").detail("ScheduledVersion", scheduledVersion);
 	if(scheduledVersion != invalidVersion) {
 		taskSpace = timeouts.get(scheduledVersion).get(key);
 	}
 	else {
 		taskSpace = getAvailableSpace(task->getPriority()).get(key);
 	}
-
+	TraceEvent("CheckpointAddTask1");
 	for (auto & param : task->params)
 		tr->set(taskSpace.pack(param.key), param.value);
 
+	TraceEvent("CheckpointAddTask2");
 	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\x01\x00\x00\x00\x00\x00\x00\x00"), MutationRef::AddValue);
 
+	TraceEvent("CheckpointAddTask3");
 	return key;
 }
 

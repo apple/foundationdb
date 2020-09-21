@@ -3412,7 +3412,7 @@ namespace fileBackup {
 			state Version restoreVersion;
 			state Version beginVersion;
 			state Reference<IBackupContainer> bc;
-
+			TraceEvent("Checkpoint2");
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3436,13 +3436,14 @@ namespace fileBackup {
 					restore.fileCount().clear(tr);
 					Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
 					bc = _bc;
-
+					TraceEvent("Checkpoint2.1");
 					wait(tr->commit());
 					break;
 				} catch(Error &e) {
 					wait(tr->onError(e));
 				}
 			}
+			TraceEvent("Checkpoint2.2");
 
 			tr->reset();
 			loop {
@@ -3554,6 +3555,7 @@ namespace fileBackup {
 			restore.setApplyEndVersion(tr, firstVersion);
 
 			// Apply range data and log data in order
+			TraceEvent("Checkpoint3");
 			wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 
 			wait(taskBucket->finish(tr, task));
@@ -3572,19 +3574,24 @@ namespace fileBackup {
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
+			TraceEvent("CheckpointTask1");
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
 			state Reference<Task> task(new Task(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey));
 
+			TraceEvent("CheckpointTask2");
 			state RestoreConfig restore(uid);
 			// Bind the restore config to the new task
 			wait(restore.toTask(tr, task));
 
+			TraceEvent("CheckpointTask3");
 			if (!waitFor) {
+				TraceEvent("CheckpointTask4");
 				return taskBucket->addTask(tr, task);
 			}
 
+			TraceEvent("CheckpointTask5");
 			wait(waitFor->onSetAddTask(tr, taskBucket, task));
+			TraceEvent("CheckpointTask6");
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -3906,6 +3913,7 @@ public:
 	                                        Key tagName, Key backupURL, Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                        Version restoreVersion, Key addPrefix, Key removePrefix, bool lockDB,
 	                                        bool incrementalBackupOnly, Version beginVersion, UID uid) {
+		TraceEvent("Checkpoint0");
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -3980,9 +3988,9 @@ public:
 		}
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix);
-
+		TraceEvent("Checkpoint1");
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
-
+		TraceEvent("Checkpoint1.1").detail("TaskKey", taskKey);
 		if (lockDB)
 			wait(lockDatabase(tr, uid));
 		else

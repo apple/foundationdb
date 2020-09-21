@@ -57,7 +57,7 @@ T simulate( const T& in ) {
 
 ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 	state std::vector<Future<Void>> agentFutures;
-
+	TraceEvent("CheckpointFileAgentRun");
 	while (g_simulator.backupAgents == ISimulator::WaitForType) {
 		wait(delay(1.0));
 	}
@@ -188,6 +188,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind( n, n ));
 				}
+				TraceEvent("CheckpointSimulator").detail("AgentMode", runBackupAgents);
 				if(runBackupAgents != AgentOnly) {
 					futures.push_back( fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "", -1, whitelistBinPaths) );
 				}
@@ -640,9 +641,10 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
 			// SOMEDAY: parse backup agent from test file
+			TraceEvent("CheckpointAgentRun").detail("EnableExtraDB", enableExtraDB);
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true,
-			                     i == useSeedForMachine, enableExtraDB ? AgentAddition : AgentNone,
+			                     i == useSeedForMachine, enableExtraDB ? AgentOnly : AgentAddition,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass), whitelistBinPaths),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}

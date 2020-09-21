@@ -103,7 +103,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 			wait(
 			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
-			                                      true, -1, true, normalKeys, Key(), Key(), true, true, beginVersion)));
+			                                      true, invalidVersion, true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}
 		return Void();
