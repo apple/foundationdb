@@ -202,7 +202,7 @@ struct StagingKey {
 		return pendingMutations.empty() || version >= pendingMutations.rbegin()->first;
 	}
 
-	int expectedMutationSize() { return key.size() + val.size(); }
+	int totalSize() { return MutationRef::OVERHEAD_BYTES + key.size() + val.size(); }
 };
 
 // The range mutation received on applier.
@@ -248,6 +248,11 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	std::map<Key, StagingKey> stagingKeys;
 	std::set<StagingKeyRange> stagingKeyRanges;
 	FlowLock applyStagingKeysBatchLock;
+	double targetWriteRateMB; // target amount of data outstanding for DB;
+	double currentWriteMB; // current write BW;
+	double dataMbToWrite; // total amount of data in MB to write
+	double applyingDataBytes; // amount of data in flight of committing
+	AsyncTrigger releaseTxnTrigger; // trigger to release more txns
 
 	Future<Void> pollMetrics;
 
@@ -256,8 +261,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	long receiveMutationReqs;
 
 	// Stats
-	long receivedBytes;
-	long appliedBytes;
+	double receivedBytes; // received mutation size
+	double appliedBytes; // after coalesce, how many bytes to write to DB
 
 	// Status counters
 	struct Counters {
@@ -284,7 +289,9 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
-	    vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
+	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
+	    currentWriteMB(0), dataMbToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
+	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
 		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));

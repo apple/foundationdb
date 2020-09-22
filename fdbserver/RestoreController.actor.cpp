@@ -910,6 +910,49 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 	return Void();
 }
 
+// Calculate the amount of data each applier should keep outstanding to DB;
+// This is the amount of data that are in in-progress transactions.
+ACTOR static Future<Void> updateApplierWriteBW(Reference<ControllerBatchData> batchData,
+                                               std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex) {
+	state std::map<UID, double> applierRemainMB;
+	state double totalRemainMB = SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB;
+	state double standardAvgBW = SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS;
+	state int loopCount = 0;
+	state std::vector<RestoreUpdateRateReply> replies;
+	state std::vector<std::pair<UID, RestoreUpdateRateRequest>> requests;
+	for (auto& applier : appliersInterf) {
+		applierRemainMB[applier.first] = SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS;
+	}
+
+	loop {
+		requests.clear();
+		for (auto& applier : appliersInterf) {
+			double writeRate = totalRemainMB > 1 ? (applierRemainMB[applier.first] / totalRemainMB) *
+			                                           SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB
+			                                     : standardAvgBW;
+			requests.emplace_back(applier.first, RestoreUpdateRateRequest(batchIndex, writeRate));
+		}
+		replies.clear();
+		wait(getBatchReplies(
+		    &RestoreApplierInterface::updateRate, appliersInterf, requests, &replies,
+		    TaskPriority::DefaultEndpoint)); // DefaultEndpoint has higher priority than fast restore endpoints
+		ASSERT(replies.size() == requests.size());
+		totalRemainMB = 0;
+		for (int i = 0; i < replies.size(); i++) {
+			UID& applierID = requests[i].first;
+			applierRemainMB[applierID] = replies[i].remainMB;
+			totalRemainMB += replies[i].remainMB;
+		}
+		ASSERT(totalRemainMB >= 0);
+		double delayTime = SERVER_KNOBS->FASTRESTORE_RATE_UPDATE_SECONDS;
+		if (loopCount == 0) { // First loop: Need to update writeRate quicker
+			delayTime = 0.2;
+		}
+		loopCount++;
+		wait(delay(delayTime));
+	}
+}
+
 // Ask each applier to apply its received mutations to DB
 // NOTE: Controller cannot start applying mutations at batchIndex until all appliers have applied for (batchIndex - 1)
 //       because appliers at different batchIndex may have overlapped key ranges.
@@ -922,6 +965,8 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<ControllerBatc
 	    .detail("FinishedBatch", finishedBatch->get());
 
 	wait(finishedBatch->whenAtLeast(batchIndex - 1));
+
+	state Future<Void> updateRate;
 
 	if (finishedBatch->get() == batchIndex - 1) {
 		// Prepare the applyToDB requests
@@ -942,6 +987,7 @@ ACTOR static Future<Void> notifyApplierToApplyMutations(Reference<ControllerBatc
 			batchData->applyToDB = Never();
 			batchData->applyToDB = getBatchReplies(&RestoreApplierInterface::applyToDB, appliersInterf, requests,
 			                                       &replies, TaskPriority::RestoreApplierWriteDB);
+			updateRate = updateApplierWriteBW(batchData, appliersInterf, batchIndex);
 		} else {
 			TraceEvent(SevError, "FastRestoreControllerPhaseApplyToDB")
 			    .detail("BatchIndex", batchIndex)
