@@ -685,7 +685,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	state bool isDuplicated = true;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
 		// duplicate request from earlier version batch will be ignored
-		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
 		ASSERT(batchData.isValid());
 		TraceEvent("FastRestoreApplierPhaseHandleApplyToDBRunning", self->id())
 		    .detail("BatchIndex", req.batchIndex)
