@@ -259,7 +259,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	double receivedBytes; // received mutation size
 	double appliedBytes; // after coalesce, how many bytes to write to DB
 	double targetWriteRateMB; // target amount of data outstanding for DB;
-	double dataMbToWrite; // total amount of data in MB to write
+	double totalBytesToWrite; // total amount of data in bytes to write
 	double applyingDataBytes; // amount of data in flight of committing
 	AsyncTrigger releaseTxnTrigger; // trigger to release more txns
 	Future<Void> rateTracer; // trace transaction rate control info
@@ -290,8 +290,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
-	    dataMbToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0),
-	    receivedBytes(0), appliedBytes(0) {
+	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
+	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
 		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
