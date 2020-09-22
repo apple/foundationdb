@@ -420,13 +420,6 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	return Void();
 }
 
-ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDelay, int64_t localBatchNumber) {
-	wait(releaseDelay);
-	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber-1);
-	self->latestLocalCommitBatchResolving.set(localBatchNumber);
-	return Void();
-}
-
 namespace CommitBatch {
 
 struct CommitBatchContext {
@@ -643,15 +636,22 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	state const int latencyBucket = self->latencyBucket;
 	state const Optional<UID>& debugID = self->debugID;
 
+	COUT << "step 1" << " latestLocalCOmmitBatchResolving " << 
+		pProxyCommitData->latestLocalCommitBatchResolving.get() <<
+		"      localBatchNumber=" << localBatchNumber<< "    Proxy ID="
+		<< std::endl;
+
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
+	// TODO What does this time delay mean?
 	self->releaseDelay = delay(
 		std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE,
 			self->batchOperations * pProxyCommitData->commitComputePerOperation[latencyBucket]),
 		TaskPriority::ProxyMasterVersionReply
 	);
 
+	COUT << "step 2" << std::endl;
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
 			"CommitDebug", debugID.get().first(),
@@ -682,6 +682,13 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		);
 	}
 
+	return Void();
+}
+
+ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> releaseDelay, int64_t localBatchNumber) {
+	wait(releaseDelay);
+	ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber-1);
+	self->latestLocalCommitBatchResolving.set(localBatchNumber);
 	return Void();
 }
 
@@ -1386,13 +1393,16 @@ ACTOR Future<Void> commitBatch(
 	try {
 		wait(CommitBatch::preresolutionProcessing(&context));
 	} catch (Error& error) {
-	if (error.code() == error_code_split_transaction_timeout) {
-		COUT << "timeout " <<std::endl;
-	return Void();
-	} else {
-		COUT <<" Throw"<<std::endl;
-	throw;
-	}
+		if (error.code() == error_code_split_transaction_timeout) {
+			COUT << "timeout " <<std::endl;
+			ASSERT(context.pProxyCommitData->latestLocalCommitBatchResolving.get() == context.localBatchNumber-1);
+			context.pProxyCommitData->latestLocalCommitBatchResolving.set(context.localBatchNumber);
+
+			return Void();
+		} else {
+			COUT <<" Throw " << error.what() <<std::endl;
+			throw;
+		}
 	}
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
