@@ -30,10 +30,10 @@
 
 class FailureStatus {
 private:
-	bool failed;
+	bool failed = true;
 
 public:
-	FailureStatus() : failed(true) {}
+	FailureStatus() = default;
 	explicit FailureStatus(bool failed) : failed(failed) {}
 
 	bool isFailed() const { return failed; }
