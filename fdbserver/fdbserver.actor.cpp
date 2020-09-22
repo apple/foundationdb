@@ -631,7 +631,7 @@ static void printUsage( const char *name, bool devhelp ) {
 			   "                 A multitester will wait for NUM testers before starting\n"
 			   "                 (defaults to 1).\n");
 #ifdef __linux__
-		printOptionUsage("  --rsssize SIZE\n"
+		printOptionUsage("  --rsssize SIZE\n",
 			   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
 			   "                 the given threshold. fdbserver needs to be compiled with\n"
 			   "                 USE_GPERFTOOLS flag in order to use this feature.\n");
