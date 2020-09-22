@@ -651,6 +651,25 @@ void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreAppl
 	return;
 }
 
+ACTOR static Future<Void> traceRate(Reference<ApplierBatchData> batchData, int batchIndex, UID nodeID) {
+	ASSERT(batchData.isValid());
+	loop {
+		if (!batchData.isValid()) {
+			break;
+		}
+		TraceEvent("FastRestoreApplierTransactionRateControl", nodeID)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("TotalDataToWriteMB", batchData->dataMbToWrite)
+		    .detail("ApplierBytesMB", batchData->appliedBytes / 1024 / 1024)
+		    .detail("TargetBytesMB", batchData->targetWriteRateMB)
+		    .detail("InflightBytesMB", batchData->applyingDataBytes)
+		    .detail("ReceivedBytes", batchData->receivedBytes);
+		wait(delay(5.0));
+	}
+
+	return Void();
+}
+
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx) {
 	TraceEvent("FastRestoreApplierPhaseHandleApplyToDBStart", self->id())
@@ -679,6 +698,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 			batchData->dbApplier = Never();
 			batchData->dbApplier = writeMutationsToDB(self->id(), req.batchIndex, batchData, cx);
 			batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
+			batchData->rateTracer = traceRate(batchData, req.batchIndex, self->id());
 		}
 
 		ASSERT(batchData->dbApplier.present());
