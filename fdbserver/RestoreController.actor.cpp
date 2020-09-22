@@ -105,8 +105,6 @@ ACTOR Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreC
 }
 
 ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
-	state ActorCollection actors(false);
-
 	ASSERT(controllerWorker.isValid());
 	ASSERT(controllerWorker->controllerInterf.present());
 	state Reference<RestoreControllerData> self =
@@ -305,7 +303,6 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state std::vector<RestoreFileFR> logFiles;
 	state std::vector<RestoreFileFR> allFiles;
 	state Version minRangeVersion = MAX_VERSION;
-	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	self->initBackupContainer(request.url);
 
@@ -1147,7 +1144,7 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> s
 
 		// Update the most recent heart beat time for each role
 		for (int i = 0; i < fReplies.size(); ++i) {
-			if (fReplies[i].isReady()) {
+			if (!fReplies[i].isError() && fReplies[i].isReady()) {
 				double currentTime = now();
 				auto item = self->rolesHeartBeatTime.emplace(nodes[i], currentTime);
 				item.first->second = currentTime;
