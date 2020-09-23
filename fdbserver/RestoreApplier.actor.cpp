@@ -469,14 +469,14 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	return Void();
 }
 
-bool notEnoughOutstandingTxns(double targetMB, double applyingDataBytes) {
+bool okToReleaseTxns(double targetMB, double applyingDataBytes) {
 	return applyingDataBytes < targetMB * 1024 * 1024;
 }
 
 ACTOR static Future<Void> shouldReleaseTransaction(double* targetMB, double* applyingDataBytes,
                                                    AsyncTrigger* releaseTxns) {
 	loop {
-		if (notEnoughOutstandingTxns(*targetMB, *applyingDataBytes)) {
+		if (okToReleaseTxns(*targetMB, *applyingDataBytes)) {
 			break;
 		} else {
 			wait(releaseTxns->onTrigger());
@@ -505,10 +505,12 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 	state int clears = 0;
 	state Key endKey = begin->first;
 	state double txnSize = 0;
+	state double txnSizeUsed = 0; // txn size accounted in applyingDataBytes
 	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
 			txnSize = 0;
+			txnSizeUsed = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			std::map<Key, StagingKey>::iterator iter = begin;
@@ -552,20 +554,21 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			    .detail("Sets", sets)
 			    .detail("Clears", clears);
 			tr->addWriteConflictRange(KeyRangeRef(begin->first, keyAfter(endKey))); // Reduce resolver load
-			*applyingDataBytes += txnSize; // Must account for applying bytes before wait for write traffic control
+			txnSizeUsed = txnSize;
+			*applyingDataBytes += txnSizeUsed; // Must account for applying bytes before wait for write traffic control
 			wait(tr->commit());
 			cc->appliedTxns += 1;
 			cc->appliedBytes += txnSize;
 			*appliedBytes += txnSize;
-			*applyingDataBytes -= txnSize;
-			if (notEnoughOutstandingTxns(*targetMB, *applyingDataBytes)) {
+			*applyingDataBytes -= txnSizeUsed;
+			if (okToReleaseTxns(*targetMB, *applyingDataBytes)) {
 				releaseTxnTrigger->trigger();
 			}
 			break;
 		} catch (Error& e) {
 			cc->appliedTxnRetries += 1;
 			wait(tr->onError(e));
-			*applyingDataBytes -= txnSize;
+			*applyingDataBytes -= txnSizeUsed;
 		}
 	}
 	return Void();
