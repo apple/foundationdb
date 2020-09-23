@@ -515,151 +515,151 @@ static void printOptionUsage(std::string option, std::string description) {
 static void printUsage( const char *name, bool devhelp ) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s -p ADDRESS [OPTIONS]\n\n", name);
-	printOptionUsage("  -p ADDRESS, --public_address ADDRESS",
-		   "                 Public address, specified as `IP_ADDRESS:PORT' or `auto:PORT'.\n");
-	printOptionUsage("  -l ADDRESS, --listen_address ADDRESS\n",
-		   "                 Listen address, specified as `IP_ADDRESS:PORT' (defaults to\n"
-		   "                 public address).\n");
-	printOptionUsage("  -C CONNFILE, --cluster_file CONNFILE\n",
-		   "                 The path of a file containing the connection string for the\n"
-		   "                 FoundationDB cluster. The default is first the value of the\n"
-		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-		   "                 then `" + platform::getDefaultClusterFilePath() + "'.");
-	printOptionUsage("  --seed_cluster_file SEEDCONNFILE\n",
-		   "                 The path of a seed cluster file which will be used to connect\n"
-		   "                 if the -C cluster file does not exist. If the server connects\n"
-		   "                 successfully using the seed file, then it copies the file to\n"
-		   "                 the -C file location.\n");
-	printOptionUsage("  --seed_connection_string SEEDCONNSTRING\n",
-		   "                 The path of a seed connection string which will be used to connect\n"
-		   "                 if the -C cluster file does not exist. If the server connects\n"
-		   "                 successfully using the seed string, then it copies the string to\n"
-		   "                 the -C file location.\n");
+	printOptionUsage("-p ADDRESS, --public_address ADDRESS",
+		   " Public address, specified as `IP_ADDRESS:PORT' or `auto:PORT'.");
+	printOptionUsage("-l ADDRESS, --listen_address ADDRESS",
+		   " Listen address, specified as `IP_ADDRESS:PORT' (defaults to"
+		   " public address).");
+	printOptionUsage("-C CONNFILE, --cluster_file CONNFILE",
+		   " The path of a file containing the connection string for the"
+		   " FoundationDB cluster. The default is first the value of the"
+		   " FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',"
+		   " then `" + platform::getDefaultClusterFilePath() + "'.");
+	printOptionUsage("--seed_cluster_file SEEDCONNFILE",
+		   " The path of a seed cluster file which will be used to connect"
+		   " if the -C cluster file does not exist. If the server connects"
+		   " successfully using the seed file, then it copies the file to"
+		   " the -C file location.");
+	printOptionUsage("--seed_connection_string SEEDCONNSTRING",
+		   " The path of a seed connection string which will be used to connect"
+		   " if the -C cluster file does not exist. If the server connects"
+		   " successfully using the seed string, then it copies the string to"
+		   " the -C file location.");
 #ifdef __linux__
-	printOptionUsage("  --data_filesystem PATH\n",
-		   "                 Turns on validation that all data files are written to a drive\n"
-		   "                 mounted at the specified PATH. This checks that the device at PATH\n"
-		   "                 is currently mounted and that any data files get written to the\n"
-		   "                 same device.\n");
+	printOptionUsage("--data_filesystem PATH",
+		   " Turns on validation that all data files are written to a drive"
+		   " mounted at the specified PATH. This checks that the device at PATH"
+		   " is currently mounted and that any data files get written to the"
+		   " same device.");
 #endif
-	printOptionUsage("  -d PATH, --datadir PATH\n",
-		   "                 Store data files in the given folder (must be unique for each\n"
-		   "                 fdbserver instance on a given machine).\n");
-	printOptionUsage("  -L PATH, --logdir PATH\n",
-		   "                 Store log files in the given folder (default is `.').\n");
-	printOptionUsage("  --logsize SIZE",
-		   "Roll over to a new log file after the current log file\n"
-		   "                 exceeds SIZE bytes. The default value is 10MiB.\n");
-	printOptionUsage("  --maxlogs SIZE, --maxlogssize SIZE\n",
-		   "                 Delete the oldest log file when the total size of all log\n"
-		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
-		   "                 be deleted. The default value is 100MiB.\n");
-	printOptionUsage("  --loggroup LOG_GROUP\n",
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n");
-	printOptionUsage("  --trace_format FORMAT\n",
-	       "                 Select the format of the log files. xml (the default) and json\n"
-	       "                 are supported.\n");
-	printOptionUsage("  --tracer       TRACER\n",
-		   "                 Select a tracer for transaction tracing. Currently disabled\n"
-		   "                 (the default) and log_file are supported.\n");
-	printOptionUsage("  -i ID, --machine_id ID\n",
-	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
-	       "                 Defaults to a random value shared by all fdbserver processes\n"
-	       "                 on this machine.\n");
-	printOptionUsage("  -a ID, --datacenter_id ID\n",
-		   "                 Data center identifier key (up to 16 hex characters).\n");
-	printOptionUsage("  --locality_LOCALITYKEY LOCALITYVALUE\n",
-	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
-	       "                 LOCALITYVALUE is not.\n");
-	printOptionUsage("  -m SIZE, --memory SIZE\n",
-	       "                 Memory limit. The default value is 8GiB. When specified\n"
-	       "                 without a unit, MiB is assumed.\n");
-	printOptionUsage("  -M SIZE, --storage_memory SIZE\n",
-	       "                 Maximum amount of memory used for storage. The default\n"
-	       "                 value is 1GiB. When specified without a unit, MB is\n"
-	       "                 assumed.\n");
-	printOptionUsage("  --cache_memory SIZE\n",
-	       "                 The amount of memory to use for caching disk pages.\n"
-	       "                 The default value is 2GiB. When specified without a unit,\n"
-	       "                 MiB is assumed.\n");
-	printOptionUsage("  -c CLASS, --class CLASS\n",
-	       "                 Machine class (valid options are storage, transaction,\n"
-	       "                 resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,\n"
-	       "                 and cluster_controller).\n");
+	printOptionUsage("-d PATH, --datadir PATH",
+		   " Store data files in the given folder (must be unique for each"
+		   " fdbserver instance on a given machine).");
+	printOptionUsage("-L PATH, --logdir PATH",
+		   " Store log files in the given folder (default is `.').");
+	printOptionUsage("--logsize SIZE",
+		   "Roll over to a new log file after the current log file"
+		   " exceeds SIZE bytes. The default value is 10MiB.");
+	printOptionUsage("--maxlogs SIZE, --maxlogssize SIZE",
+		   " Delete the oldest log file when the total size of all log"
+		   " files exceeds SIZE bytes. If set to 0, old log files will not"
+		   " be deleted. The default value is 100MiB.");
+	printOptionUsage("--loggroup LOG_GROUP",
+	       " Sets the LogGroup field with the specified value for all"
+	       " events in the trace output (defaults to `default').");
+	printOptionUsage("--trace_format FORMAT",
+	       " Select the format of the log files. xml (the default) and json"
+	       " are supported.");
+	printOptionUsage("--tracer       TRACER",
+		   " Select a tracer for transaction tracing. Currently disabled"
+		   " (the default) and log_file are supported.");
+	printOptionUsage("-i ID, --machine_id ID",
+	       " Machine and zone identifier key (up to 16 hex characters)."
+	       " Defaults to a random value shared by all fdbserver processes"
+	       " on this machine.");
+	printOptionUsage("-a ID, --datacenter_id ID",
+		   " Data center identifier key (up to 16 hex characters).");
+	printOptionUsage("--locality_LOCALITYKEY LOCALITYVALUE",
+	       " Define a locality key. LOCALITYKEY is case-insensitive though"
+	       " LOCALITYVALUE is not.");
+	printOptionUsage("-m SIZE, --memory SIZE",
+	       " Memory limit. The default value is 8GiB. When specified"
+	       " without a unit, MiB is assumed.");
+	printOptionUsage("-M SIZE, --storage_memory SIZE",
+	       " Maximum amount of memory used for storage. The default"
+	       " value is 1GiB. When specified without a unit, MB is"
+	       " assumed.");
+	printOptionUsage("--cache_memory SIZE",
+	       " The amount of memory to use for caching disk pages."
+	       " The default value is 2GiB. When specified without a unit,"
+	       " MiB is assumed.");
+	printOptionUsage("-c CLASS, --class CLASS",
+	       " Machine class (valid options are storage, transaction,"
+	       " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
+	       " and cluster_controller).");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
-	printOptionUsage("  -v, --version", "Print version information and exit.\n");
-	printOptionUsage("  -h, -?, --help", "Display this help and exit.\n");
+	printOptionUsage("-v, --version", "Print version information and exit.");
+	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if( devhelp ) {
-		printOptionUsage("  -r ROLE, --role ROLE\n",
-			   "                 Server role (valid options are fdbd, test, multitest,\n"
-			   "                 simulation, networktestclient, networktestserver, restore\n"
-			   "                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
+		printOptionUsage("-r ROLE, --role ROLE",
+			   " Server role (valid options are fdbd, test, multitest,"
+			   " simulation, networktestclient, networktestserver, restore"
+			   " consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.");
 #ifdef _WIN32
-		printOptionUsage("  -n, --newconsole\n",
-			   "                 Create a new console.\n");
-		printOptionUsage("  -q, --no_dialog\n",
-			   "                 Disable error dialog on crash.\n");
-		printOptionUsage("  --parentpid PID\n",
-			   "                 Specify a process after whose termination to exit.\n");
+		printOptionUsage("-n, --newconsole",
+			   " Create a new console.");
+		printOptionUsage("-q, --no_dialog",
+			   " Disable error dialog on crash.");
+		printOptionUsage("--parentpid PID",
+			   " Specify a process after whose termination to exit.");
 #endif
-		printOptionUsage("  -f TESTFILE, --testfile\n",
-			   "                 Testfile to run, defaults to `tests/default.txt'.\n");
-		printOptionUsage("  -R, --restarting\n",
-			   "                 Restart a previous simulation that was cleanly shut down.\n");
-		printOptionUsage("  -s SEED, --seed SEED\n",
-			   "                 Random seed.\n");
-		printOptionUsage("  -k KEY, --key KEY", "Target key for search role.\n");
-		printOptionUsage("  --kvfile FILE", 
-			   "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printOptionUsage("  -b [on,off], --buggify [on,off]\n",
-			   "                 Sets Buggify system state, defaults to `off'.\n");
-		printOptionUsage("  --crash", "Crash on serious errors instead of continuing.\n");
-		printOptionUsage("  -N NETWORKIMPL, --network NETWORKIMPL\n",
-			   "                 Select network implementation, `net2' (default),\n"
-			   "                 `net2-threadpool'.\n");
-		printOptionUsage("  --unbufferedout\n",
-			   "                 Do not buffer stdout and stderr.\n");
-		printOptionUsage("  --bufferedout\n",
-			   "                 Buffer stdout and stderr.\n");
-		printOptionUsage("  --traceclock CLOCKIMPL\n",
-			   "                 Select clock source for trace files, `now' (default) or\n"
-			   "                 `realtime'.\n");
-		printOptionUsage("  --num_testers NUM\n",
-			   "                 A multitester will wait for NUM testers before starting\n"
-			   "                 (defaults to 1).\n");
+		printOptionUsage("-f TESTFILE, --testfile",
+			   " Testfile to run, defaults to `tests/default.txt'.");
+		printOptionUsage("-R, --restarting",
+			   " Restart a previous simulation that was cleanly shut down.");
+		printOptionUsage("-s SEED, --seed SEED",
+			   " Random seed.");
+		printOptionUsage("-k KEY, --key KEY", "Target key for search role.");
+		printOptionUsage("--kvfile FILE",
+			   "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
+		printOptionUsage("-b [on,off], --buggify [on,off]",
+			   " Sets Buggify system state, defaults to `off'.");
+		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
+		printOptionUsage("-N NETWORKIMPL, --network NETWORKIMPL",
+			   " Select network implementation, `net2' (default),"
+			   " `net2-threadpool'.");
+		printOptionUsage("--unbufferedout",
+			   " Do not buffer stdout and stderr.");
+		printOptionUsage("--bufferedout",
+			   " Buffer stdout and stderr.");
+		printOptionUsage("--traceclock CLOCKIMPL",
+			   " Select clock source for trace files, `now' (default) or"
+			   " `realtime'.");
+		printOptionUsage("--num_testers NUM",
+			   " A multitester will wait for NUM testers before starting"
+			   " (defaults to 1).");
 #ifdef __linux__
-		printOptionUsage("  --rsssize SIZE\n",
-			   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
-			   "                 the given threshold. fdbserver needs to be compiled with\n"
-			   "                 USE_GPERFTOOLS flag in order to use this feature.\n");
+		printOptionUsage("--rsssize SIZE",
+			   " Turns on automatic heap profiling when RSS memory size exceeds"
+			   " the given threshold. fdbserver needs to be compiled with"
+			   " USE_GPERFTOOLS flag in order to use this feature.");
 #endif
-		printOptionUsage("  --testservers ADDRESSES\n",
-			   "                 The addresses of networktestservers\n"
-			   "                 specified as ADDRESS:PORT,ADDRESS:PORT...\n");
-		printOptionUsage("  --testonservers\n",
-			   "                 Testers are recruited on servers.\n");
-		printOptionUsage("  --metrics_cluster CONNFILE\n",
-			   "                 The cluster file designating where this process will\n"
-			   "                 store its metric data. By default metrics will be stored\n"
-			   "                 in the same database the process is participating in.\n");
-		printOptionUsage("  --metrics_prefix PREFIX\n",
-			   "                 The prefix where this process will store its metric data.\n"
-			   "                 Must be specified if using a different database for metrics.\n");
-		printOptionUsage("  --knob_KNOBNAME KNOBVALUE\n",
-			   "                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printOptionUsage("  --io_trust_seconds SECONDS\n",
-			   "                 Sets the time in seconds that a read or write operation is allowed to take\n"
-		       "                 before timing out with an error. If an operation times out, all future\n"
-		       "                 operations on that file will fail with an error as well. Only has an effect\n"
-		       "                 when using AsyncFileKAIO in Linux.\n");
-		printOptionUsage("  --io_trust_warn_only\n",
-			   "                 Instead of failing when an I/O operation exceeds io_trust_seconds, just\n"
-		       "                 log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.\n");
+		printOptionUsage("--testservers ADDRESSES",
+			   " The addresses of networktestservers"
+			   " specified as ADDRESS:PORT,ADDRESS:PORT...");
+		printOptionUsage("--testonservers",
+			   " Testers are recruited on servers.");
+		printOptionUsage("--metrics_cluster CONNFILE",
+			   " The cluster file designating where this process will"
+			   " store its metric data. By default metrics will be stored"
+			   " in the same database the process is participating in.");
+		printOptionUsage("--metrics_prefix PREFIX",
+			   " The prefix where this process will store its metric data."
+			   " Must be specified if using a different database for metrics.");
+		printOptionUsage("--knob_KNOBNAME KNOBVALUE",
+			   " Changes a database knob. KNOBNAME should be lowercase.");
+		printOptionUsage("--io_trust_seconds SECONDS",
+			   " Sets the time in seconds that a read or write operation is allowed to take"
+		       " before timing out with an error. If an operation times out, all future"
+		       " operations on that file will fail with an error as well. Only has an effect"
+		       " when using AsyncFileKAIO in Linux.");
+		printOptionUsage("--io_trust_warn_only",
+			   " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
+		       " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
 	} else {
-		printOptionUsage("  --dev-help", "Display developer-specific help and exit.\n");
+		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
 
 	printf("\n"
