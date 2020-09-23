@@ -247,7 +247,6 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	VersionedMutationsMap kvOps; // Mutations at each version
 	std::map<Key, StagingKey> stagingKeys;
 	std::set<StagingKeyRange> stagingKeyRanges;
-	FlowLock applyStagingKeysBatchLock;
 
 	Future<Void> pollMetrics;
 
@@ -288,7 +287,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
+	  : counters(this, nodeID, batchIndex),
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
 	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
 	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {

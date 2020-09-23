@@ -543,6 +543,7 @@ public:
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 	// Fast Restore
+	// TODO: After 6.3, review FR knobs, remove unneeded ones and change default value
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;

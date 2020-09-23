@@ -489,8 +489,7 @@ ACTOR static Future<Void> shouldReleaseTransaction(double* targetMB, double* app
 
 // Apply mutations in batchData->stagingKeys [begin, end).
 ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::iterator begin,
-                                                std::map<Key, StagingKey>::iterator end, Database cx,
-                                                FlowLock* applyStagingKeysBatchLock, UID applierID,
+                                                std::map<Key, StagingKey>::iterator end, Database cx, UID applierID,
                                                 ApplierBatchData::Counters* cc, double* appliedBytes,
                                                 double* applyingDataBytes, double* targetMB,
                                                 AsyncTrigger* releaseTxnTrigger) {
@@ -500,9 +499,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 		return Void();
 	}
 	wait(shouldReleaseTransaction(targetMB, applyingDataBytes, releaseTxnTrigger));
-	// TODO: Remove applyStagingKeysBatchLock everywhere
-	// wait(applyStagingKeysBatchLock->take(TaskPriority::RestoreApplierWriteDB)); // Q: Do we really need the lock?
-	// state FlowLock::Releaser releaser(*applyStagingKeysBatchLock);
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
@@ -589,10 +586,9 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 	while (cur != batchData->stagingKeys.end()) {
 		txnSize += cur->second.totalSize(); // should be consistent with receivedBytes accounting method
 		if (txnSize > SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
-			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
-			                                         &batchData->counters, &batchData->appliedBytes,
-			                                         &batchData->applyingDataBytes, &batchData->targetWriteRateMB,
-			                                         &batchData->releaseTxnTrigger));
+			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, applierID, &batchData->counters,
+			                                         &batchData->appliedBytes, &batchData->applyingDataBytes,
+			                                         &batchData->targetWriteRateMB, &batchData->releaseTxnTrigger));
 			batchData->totalBytesToWrite += txnSize;
 			begin = cur;
 			txnSize = 0;
@@ -601,10 +597,9 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 		cur++;
 	}
 	if (begin != batchData->stagingKeys.end()) {
-		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID,
-		                                         &batchData->counters, &batchData->appliedBytes,
-		                                         &batchData->applyingDataBytes, &batchData->targetWriteRateMB,
-		                                         &batchData->releaseTxnTrigger));
+		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, applierID, &batchData->counters,
+		                                         &batchData->appliedBytes, &batchData->applyingDataBytes,
+		                                         &batchData->targetWriteRateMB, &batchData->releaseTxnTrigger));
 		batchData->totalBytesToWrite += txnSize;
 		txnBatches++;
 	}
