@@ -3047,7 +3047,7 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 			operationType = MutationRef::AndV2;
 	}
 
-	if ((operationType == MutationRef::LockRange || operationType == MutationRef::UnlockRange) && key != rangeLockKey) {
+	if (operationType == MutationRef::LockRange && key != rangeLockKey) {
 		throw client_invalid_operation();
 	}
 

@@ -1543,7 +1543,6 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const&
 					case MutationRef::AndV2:
 					case MutationRef::CompareAndClear:
 					case MutationRef::LockRange:
-					case MutationRef::UnlockRange:
 						tr.atomicOp(it.beginKey().assertRef(), op[i].value.get(), op[i].type, false);
 						break;
 					default:
@@ -1717,7 +1716,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		throw key_outside_legal_range();
 	}
 
-	if ((operationType == MutationRef::LockRange || operationType == MutationRef::UnlockRange) && key != rangeLockKey) {
+	if (operationType == MutationRef::LockRange && key != rangeLockKey) {
 		throw client_invalid_operation();
 	}
 

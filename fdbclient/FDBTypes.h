@@ -1101,8 +1101,13 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 enum LockMode : uint8_t {
 	LOCK_EXCLUSIVE,
 	LOCK_READ_SHARED,
+	UNLOCK_EXCLUSIVE,
+	UNLOCK_READ_SHARED,
 };
 
+// A lock or unlock request for a key range. Note the serialization is done
+// by encodeRangeLock() and decodeRangeLockValue(), because a prefix is added
+// or removed for the range.
 struct LockRequest {
 	LockRequest() = default;
 	LockRequest(KeyRangeRef range, LockMode mode) : range(range), mode(mode) {}

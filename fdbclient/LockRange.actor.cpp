@@ -92,6 +92,7 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, Lock
 }
 
 ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
+	ASSERT(mode == UNLOCK_EXCLUSIVE || mode == UNLOCK_READ_SHARED);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -103,7 +104,7 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 		}
 	}
 
-	tr->atomicOp(rangeLockKey, encodeRangeLock(LockRequest(range, mode)), MutationRef::UnlockRange);
+	tr->atomicOp(rangeLockKey, encodeRangeLock(LockRequest(range, mode)), MutationRef::LockRange);
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	}
@@ -112,6 +113,7 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 }
 
 ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode) {
+	ASSERT(mode == UNLOCK_EXCLUSIVE || mode == UNLOCK_READ_SHARED);
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -153,4 +155,62 @@ ACTOR Future<Void> unlockRange(Database cx, std::vector<KeyRangeRef> ranges, Loc
 			wait(tr.onError(e));
 		}
 	}
+}
+
+RangeLockCache::RangeLockCache(Snapshot snapshot, Version version) {
+	snapshots[version] = snapshot;
+}
+
+void RangeLockCache::add(Version version, Mutations more) {
+	auto& current = mutations[version];
+	current.append(current.arena(), more.begin(), more.size());
+	current.arena().dependsOn(more.arena());
+}
+
+void RangeLockCache::expire(Version upTo) {
+	// Make sure we have a snapshot right after "upTo" version
+	auto snapIter = snapshots.upper_bound(upTo);
+	auto mutIter = mutations.upper_bound(upTo);
+	if (snapIter != snapshots.end()) {
+		if (mutIter != mutations.end() && mutIter->first < snapIter->first) {
+			ensureSnapshot(mutIter->first);
+		}
+	} else if (mutIter != mutations.end()) {
+		ensureSnapshot(mutIter->first);
+	} else {
+		TraceEvent("RLCExpireNone");
+		return;
+	}
+
+	TraceEvent("RLCExpire").detail("Version", upTo);
+	for (auto it = snapshots.begin(); it != snapshots.end() && it->first <= upTo;) {
+		it = snapshots.erase(it);
+	}
+
+	for (auto it = mutations.begin(); it != mutations.end() && it->first <= upTo;) {
+		it = mutations.erase(it);
+	}
+}
+
+bool RangeLockCache::hasVersion(Version version) {
+	return snapshots.find(version) != snapshots.end() || mutations.find(version) != mutations.end();
+}
+
+bool RangeLockCache::check(KeyRef key, Version version) {
+	ensureSnapshot(version);
+	return true;
+}
+
+bool RangeLockCache::check(KeyRangeRef range, Version version) {
+	ensureSnapshot(version);
+	return true;
+}
+
+Value RangeLockCache::getChanges(Version from) {
+	ASSERT(false);
+	return Value();
+}
+
+void RangeLockCache::ensureSnapshot(Version version) {
+	// TODO
 }

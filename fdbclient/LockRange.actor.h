@@ -41,14 +41,15 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, Lock
 // Unlocks a range in the normal key space. If the database is already locked,
 // then a database_locked error is thrown. If the range is not locked, then
 // a range_unlocked error is thrown during commit.
-ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode = LOCK_EXCLUSIVE);
-ACTOR Future<Void> unlockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode = LOCK_EXCLUSIVE);
+ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode = UNLOCK_EXCLUSIVE);
+ACTOR Future<Void> unlockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode = UNLOCK_EXCLUSIVE);
 
 class RangeLockCache {
 public:
-	using Snapshot = std::vector<KeyRange>;
-	using Mutations = Standalone<VectorRef<MutationRef>>;
+	using Snapshot = std::vector<LockRequest>;
+	using Mutations = Standalone<VectorRef<LockRequest>>;
 
+	RangeLockCache() = default;
 	RangeLockCache(Snapshot snapshot, Version ver);
 
 	void add(Version version, Mutations mutations);
@@ -56,13 +57,20 @@ public:
 	// Expire cached snapshots or mutations up to the given version.
 	void expire(Version upTo);
 
+	// Returns if the cache has data for the given lock version.
+	bool hasVersion(Version version);
+
+	// Returns if the key/range can be accessed for the given version.
 	bool check(KeyRef key, Version version);
-	bool intersects(KeyRangeRef range, Version version);
+	bool check(KeyRangeRef range, Version version);
 
 	// Serializes all mutations from the given version and on.
 	Value getChanges(Version from);
 
 private:
+	// Make sure a snapshot for the version exists.
+	void ensureSnapshot(Version version);
+
 	// A version ordered locked ranges
 	std::map<Version, Snapshot> snapshots;
 	std::map<Version, Mutations> mutations;
