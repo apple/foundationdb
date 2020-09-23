@@ -19,6 +19,11 @@ simBackupAgents = 'BackupToFile'
     testDuration = 10.0
     expectedRate = 0
 
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    waitVersion = true
+
 [[test]]
 testTitle = 'SubmitRestore'
 clearAfterTest = false
@@ -28,7 +33,6 @@ simBackupAgents = 'BackupToFile'
     testName = 'IncrementalBackup'
     tag = 'default'
     restoreOnly = true
-    waitVersion = true
 
 
 [[test]]
