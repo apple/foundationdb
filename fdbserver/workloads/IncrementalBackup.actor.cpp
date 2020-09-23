@@ -33,14 +33,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 	FileBackupAgent backupAgent;
 	bool submitOnly;
 	bool restoreOnly;
-	bool waitVersion;
+	bool waitForBackup;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
 		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
-		waitVersion = getOption(options, LiteralStringRef("waitVersion"), false);
+		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
 	}
 
 	virtual std::string description() { return "IncrementalBackup"; }
@@ -55,7 +55,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId || !waitVersion) {
+		if (clientId || !waitForBackup) {
 			return true;
 		}
 		return _check(cx, this);

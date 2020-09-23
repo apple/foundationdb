@@ -22,7 +22,7 @@ simBackupAgents = 'BackupToFile'
     [[test.workload]]
     testName = 'IncrementalBackup'
     tag = 'default'
-    waitVersion = true
+    waitForBackup = true
 
 [[test]]
 testTitle = 'SubmitRestore'
