@@ -4,11 +4,8 @@
 Release Notes
 #############
 
-6.3.5
+6.3.6
 =====
-
-* Report missing old tlogs information when in recovery before storage servers are fully recovered. `(PR #3706) <https://github.com/apple/foundationdb/pull/3706>`_
-* Support query command in backup CLI that allows users to query restorable files by key ranges. `(PR #3703) <https://github.com/apple/foundationdb/pull/3703>`_
 
 Features
 --------
@@ -113,6 +110,8 @@ Other Changes
 * Updated boost to 1.72.  `(PR #2684) <https://github.com/apple/foundationdb/pull/2684>`_
 * Calling ``fdb_run_network`` multiple times in a single run of a client program now returns an error instead of causing undefined behavior. [6.3.1] `(PR #3229) <https://github.com/apple/foundationdb/pull/3229>`_
 * Blob backup URL parameter ``request_timeout`` changed to ``request_timeout_min``, with prior name still supported. `(PR #3533) <https://github.com/apple/foundationdb/pull/3533>`_
+* Support query command in backup CLI that allows users to query restorable files by key ranges. [6.3.6] `(PR #3703) <https://github.com/apple/foundationdb/pull/3703>`_
+* Report missing old tlogs information when in recovery before storage servers are fully recovered. [6.3.6] `(PR #3706) <https://github.com/apple/foundationdb/pull/3706>`_
 
 Fixes from previous versions
 ----------------------------
@@ -129,6 +128,7 @@ Fixes only impacting 6.3.0+
 * Refreshing TLS certificates could cause crashes. [6.3.2] `(PR #3352) <https://github.com/apple/foundationdb/pull/3352>`_
 * All storage class processes attempted to connect to the same coordinator. [6.3.2] `(PR #3361) <https://github.com/apple/foundationdb/pull/3361>`_
 * Adjusted the proxy load balancing algorithm to be based on the CPU usage of the process instead of the number of requests processed. [6.3.5] `(PR #3653) <https://github.com/apple/foundationdb/pull/3653>`_
+* Only return the error code ``batch_transaction_throttled`` for API versions greater than or equal to 630. [6.3.6] `(PR #3799) <https://github.com/apple/foundationdb/pull/3799>`_
 
 Earlier release notes
 ---------------------
