@@ -1030,7 +1030,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 	try {
 		state Future<TraceEventFields> mdActiveGensF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
 		state Future<TraceEventFields> mdF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0);
-		state Future<TraceEventFields> mDBAvailableF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoverFDBAvailable") ) ), 1.0);
+		state Future<TraceEventFields> mDBAvailableF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryAvailable") ) ), 1.0);
 		state Future<Version> rvF = timeoutError(tr.getReadVersion(), 1.0);
 
 		wait(success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
@@ -1046,10 +1046,10 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		Version rv = rvF.get();
 		const TraceEventFields& dbAvailableMsg = mDBAvailableF.get();
 		if (dbAvailableMsg.size() > 0) {
-			int64_t availabelAtVersion = dbAvailableMsg.getInt64("AvailabelAtVersion");
+			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
 			int numOfOldGensOfLogs = dbAvailableMsg.getInt("NumOfOldGensOfLogs");
-			double lastFullyRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv - availabelAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-			message["time_since_last_db_turned_available_seconds"] = lastFullyRecoveredSecondsAgo;
+			double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+			message["time_since_last_recovered"] = lastRecoveredSecondsAgo;
 			message["number_of_old_generations_of_tlogs"] = numOfOldGensOfLogs;
 		} else {
 			message["time_since_last_db_turned_available_seconds"] = -1;

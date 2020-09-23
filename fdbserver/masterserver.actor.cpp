@@ -1689,10 +1689,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
 
-	TraceEvent("MasterRecoverFDBAvailable", self->dbgid)
+	TraceEvent("MasterRecoveryAvailable", self->dbgid)
 		.detail("NumOfOldGensOfLogs", self->cstate.myDBState.oldTLogData.size())
-		.detail("AvailabelAtVersion", self->version)
-		.trackLatest("MasterRecoverFDBAvailable");
+		.detail("AvailableAtVersion", self->version)
+		.trackLatest("MasterRecoveryAvailable");
 
 	if( self->resolvers.size() > 1 )
 		self->addActor.send( resolutionBalancing(self) );
