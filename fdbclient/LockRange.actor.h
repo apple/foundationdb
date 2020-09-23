@@ -35,14 +35,15 @@
 // Locks a range in the normal key space. If the database is already locked,
 // then a database_locked error is thrown. If (part of) the range is already
 // locked, then a range_locked error is thrown during commit.
-ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range, LockMode mode = LOCK_EXCLUSIVE);
-ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode = LOCK_EXCLUSIVE);
+ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range, LockMode mode = LockMode::LOCK_EXCLUSIVE);
+ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode = LockMode::LOCK_EXCLUSIVE);
 
 // Unlocks a range in the normal key space. If the database is already locked,
 // then a database_locked error is thrown. If the range is not locked, then
 // a range_unlocked error is thrown during commit.
-ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode = UNLOCK_EXCLUSIVE);
-ACTOR Future<Void> unlockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode = UNLOCK_EXCLUSIVE);
+ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode = LockMode::UNLOCK_EXCLUSIVE);
+ACTOR Future<Void> unlockRanges(Database cx, std::vector<KeyRangeRef> ranges,
+                                LockMode mode = LockMode::UNLOCK_EXCLUSIVE);
 
 class RangeLockCache {
 public:

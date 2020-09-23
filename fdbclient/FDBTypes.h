@@ -1098,12 +1098,15 @@ inline const char* transactionPriorityToString(TransactionPriority priority, boo
 	throw internal_error();
 }
 
-enum LockMode : uint8_t {
+enum class LockMode : uint8_t {
 	LOCK_EXCLUSIVE,
 	LOCK_READ_SHARED,
 	UNLOCK_EXCLUSIVE,
 	UNLOCK_READ_SHARED,
 };
+
+// Convert the LockMode enum to a text description
+extern const char* getLockModeText(LockMode mode);
 
 // A lock or unlock request for a key range. Note the serialization is done
 // by encodeRangeLock() and decodeRangeLockValue(), because a prefix is added

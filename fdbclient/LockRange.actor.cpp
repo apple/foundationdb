@@ -27,6 +27,25 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+const char* getLockModeText(LockMode mode) {
+	switch (mode) {
+	case LockMode::LOCK_EXCLUSIVE:
+		return "LOCK_EXCLUSIVE";
+
+	case LockMode::LOCK_READ_SHARED:
+		return "LOCK_READ_SHARED";
+
+	case LockMode::UNLOCK_EXCLUSIVE:
+		return "UNLOCK_EXCLUSIVE";
+
+	case LockMode::UNLOCK_READ_SHARED:
+		return "UNLOCK_READ_SHARED";
+
+	default:
+		return "<undefined>";
+	}
+}
+
 ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -92,7 +111,7 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, Lock
 }
 
 ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
-	ASSERT(mode == UNLOCK_EXCLUSIVE || mode == UNLOCK_READ_SHARED);
+	ASSERT(mode == LockMode::UNLOCK_EXCLUSIVE || mode == LockMode::UNLOCK_READ_SHARED);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -113,7 +132,7 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 }
 
 ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode) {
-	ASSERT(mode == UNLOCK_EXCLUSIVE || mode == UNLOCK_READ_SHARED);
+	ASSERT(mode == LockMode::UNLOCK_EXCLUSIVE || mode == LockMode::UNLOCK_READ_SHARED);
 	state Transaction tr(cx);
 	loop {
 		try {

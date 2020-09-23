@@ -506,7 +506,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 		} else if (m.param2.size() && m.type == MutationRef::LockRange) {
 			LockRequest request = decodeRangeLockValue(m.param2);
 			TraceEvent("LockRange")
-			    .detail("LockMode", request.mode)
+			    .detail("LockMode", getLockModeText(request.mode))
 			    .detail("Begin", printable(request.range.begin))
 			    .detail("End", printable(request.range.end));
 		}
