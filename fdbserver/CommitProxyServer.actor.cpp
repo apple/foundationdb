@@ -118,7 +118,7 @@ struct ResolutionRequestBuilder {
 	void addTransaction(CommitTransactionRequest& trRequest, int transactionNumberInBatch) {
 		auto& trIn = trRequest.transaction;
 		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
-		outTr.assign(requests.size(), NULL);
+		outTr.assign(requests.size(), nullptr);
 		ASSERT( transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768 );
 
 		bool isTXNStateTransaction = false;
@@ -330,7 +330,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 
 		MutationRef backupMutation;
 		backupMutation.type = MutationRef::SetValue;
-		uint32_t* partBuffer = NULL;
+		uint32_t* partBuffer = nullptr;
 
 		for (int part = 0; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < val.size(); part++) {
 

@@ -58,7 +58,7 @@ void disallow_access(ArenaBlock* b) {
 }
 } // namespace
 
-Arena::Arena() : impl(NULL) {}
+Arena::Arena() : impl(nullptr) {}
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	if (reservedSize) {

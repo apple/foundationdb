@@ -1242,6 +1242,6 @@ ACTOR Future<Key> getCompletionKey(TaskCompletionKey *self, Future<Reference<Tas
 }
 
 Future<Key> TaskCompletionKey::get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
-	ASSERT(key.present() == (joinFuture.getPtr() == NULL));
+	ASSERT(key.present() == (joinFuture.getPtr() == nullptr));
 	return key.present() ? key.get() : getCompletionKey(this, joinFuture->joinedFuture(tr, taskBucket));
 }

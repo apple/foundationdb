@@ -77,7 +77,7 @@ struct AlternativeTLogQueueEntryRef {
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

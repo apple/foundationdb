@@ -55,12 +55,12 @@ public:
 
 		HANDLE h = CreateFile( open_filename.c_str(),
 			GENERIC_READ | ((flags&OPEN_READWRITE) ? GENERIC_WRITE : 0),
-			FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL,
+			FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
 			(flags&OPEN_EXCLUSIVE) ? CREATE_NEW :
 				(flags&OPEN_CREATE) ? OPEN_ALWAYS :
 				OPEN_EXISTING,
 			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING,
-			NULL );
+			nullptr );
 		if (h == INVALID_HANDLE_VALUE) {
 			bool notFound = GetLastError() == ERROR_FILE_NOT_FOUND;
 			Error e = notFound ? file_not_found() : io_error();
@@ -141,7 +141,7 @@ public:
 	}
 	Future<Void> truncate(int64_t size) override {
 		// FIXME: Possibly use SetFileInformationByHandle( file.native_handle(), FileEndOfFileInfo, ... ) instead
-		if (!SetFilePointerEx( file.native_handle(), *(LARGE_INTEGER*)&size, NULL, FILE_BEGIN ))
+		if (!SetFilePointerEx( file.native_handle(), *(LARGE_INTEGER*)&size, nullptr, FILE_BEGIN ))
 			throw io_error();
 		if (!SetEndOfFile(file.native_handle()))
 			throw io_error();
