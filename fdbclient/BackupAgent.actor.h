@@ -46,11 +46,6 @@ public:
 		return "YYYY/MM/DD.HH:MI:SS[+/-]HHMM";
 	}
 
-	// Type of program being executed
-	enum enumActionResult {
-		RESULT_SUCCESSFUL = 0, RESULT_ERRORED = 1, RESULT_DUPLICATE = 2, RESULT_UNNEEDED = 3
-	};
-
 	enum class EnumState {
 		STATE_ERRORED = 0,
 		STATE_SUBMITTED = 1,
