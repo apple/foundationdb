@@ -172,7 +172,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("DataFolder", *dataFolder)
 				.detail("ConnectionString", connFile ? connFile->getConnectionString().toString() : "")
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 				.detail("CommandLine", "fdbserver -r simulation")
 				.detail("BuggifyEnabled", isBuggifyEnabled(BuggifyType::General))
 				.detail("Simulated", true)
@@ -559,7 +559,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
 		int listenersPerProcess = 1;
 		auto listenersPerProcessStr = ini.GetValue("META", "listenersPerProcess");
-		if(listenersPerProcessStr != NULL) {
+		if(listenersPerProcessStr != nullptr) {
 			listenersPerProcess = atoi(listenersPerProcessStr);
 		}
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
@@ -586,7 +586,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 			}
 
 			auto zoneIDini = ini.GetValue(machineIdString.c_str(), "zoneId");
-			if( zoneIDini == NULL ) {
+			if( zoneIDini == nullptr ) {
 				zoneId = machineId;
 			} else {
 				zoneId = StringRef(zoneIDini);
@@ -610,11 +610,11 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 				if (parsedIp.present()) {
 					return parsedIp.get();
 				} else {
-					return IPAddress(strtoul(ipStr, NULL, 10));
+					return IPAddress(strtoul(ipStr, nullptr, 10));
 				}
 			};
 
-			if( ip == NULL ) {
+			if( ip == nullptr ) {
 				for (int i = 0; i < processes; i++) {
 					const char* val =
 					    ini.GetValue(machineIdString.c_str(), format("ipAddr%d", i * listenersPerProcess).c_str());
@@ -735,7 +735,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	bool generateFearless = simple ? false : (minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	datacenters = simple ? 1 : ( generateFearless ? ( minimumReplication > 0 || deterministicRandom()->random01() < 0.5 ? 4 : 6 ) : deterministicRandom()->randomInt( 1, 4 ) );
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
-	if (deterministicRandom()->random01() < 0.25) db.proxyCount = deterministicRandom()->randomInt(1, 7);
+	if (deterministicRandom()->random01() < 0.25) db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
 	if (deterministicRandom()->random01() < 0.25) db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
@@ -772,7 +772,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	//  set_config("memory-radixtree-beta");
 	if(simple) {
 		db.desiredTLogCount = 1;
-		db.proxyCount = 1;
+		db.commitProxyCount = 1;
 		db.grvProxyCount = 1;
 		db.resolverCount = 1;
 	}

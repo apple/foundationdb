@@ -33,6 +33,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
@@ -78,8 +79,9 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if ((key == "logs" || key == "proxies" || key == "grv_proxies" || key == "resolvers" || key == "remote_logs" ||
-		     key == "log_routers" || key == "usable_regions" || key == "repopulate_anti_quorum") &&
+		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
+		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
+		     key == "repopulate_anti_quorum") &&
 		    isInteger(value)) {
 			out[p+key] = value;
 		}
@@ -656,7 +658,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 			}
 
 			if (processClass.classType() == ProcessClass::TransactionClass ||
-			    processClass.classType() == ProcessClass::ProxyClass ||
+			    processClass.classType() == ProcessClass::CommitProxyClass ||
 			    processClass.classType() == ProcessClass::GrvProxyClass ||
 			    processClass.classType() == ProcessClass::ResolutionClass ||
 			    processClass.classType() == ProcessClass::StatelessClass ||
@@ -701,7 +703,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 			if (proc.second == ProcessClass::StatelessClass) {
 				existingStatelessCount++;
 			}
-			if(proc.second == ProcessClass::ProxyClass) {
+			if (proc.second == ProcessClass::CommitProxyClass) {
 				existingProxyCount++;
 			}
 			if (proc.second == ProcessClass::GrvProxyClass) {
@@ -734,19 +736,18 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		resolverCount = result.old_resolvers;
 	}
 
-	result.desired_proxies = std::max(std::min(12, processCount / 15), 1);
+	result.desired_commit_proxies = std::max(std::min(12, processCount / 15), 1);
 	int proxyCount;
-	if (!statusObjConfig.get("proxies", result.old_proxies)) {
-		result.old_proxies = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
-		statusObjConfig.get("auto_proxies", result.old_proxies);
-		result.auto_proxies = result.desired_proxies;
-		proxyCount = result.auto_proxies;
+	if (!statusObjConfig.get("commit_proxies", result.old_commit_proxies)) {
+		result.old_commit_proxies = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
+		statusObjConfig.get("auto_commit_proxies", result.old_commit_proxies);
+		result.auto_commit_proxies = result.desired_commit_proxies;
+		proxyCount = result.auto_commit_proxies;
 	} else {
-		result.auto_proxies = result.old_proxies;
-		proxyCount = result.old_proxies;
+		result.auto_commit_proxies = result.old_commit_proxies;
+		proxyCount = result.old_commit_proxies;
 	}
 
-	// Need to configure a good number.
 	result.desired_grv_proxies = std::max(std::min(4, processCount / 20), 1);
 	int grvProxyCount;
 	if (!statusObjConfig.get("grv_proxies", result.old_grv_proxies)) {
@@ -857,8 +858,8 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			if (conf.auto_logs != conf.old_logs)
 				tr.set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
 
-			if(conf.auto_proxies != conf.old_proxies)
-				tr.set(configKeysPrefix.toString() + "auto_proxies", format("%d", conf.auto_proxies));
+			if (conf.auto_commit_proxies != conf.old_commit_proxies)
+				tr.set(configKeysPrefix.toString() + "auto_commit_proxies", format("%d", conf.auto_commit_proxies));
 
 			if (conf.auto_grv_proxies != conf.old_grv_proxies)
 				tr.set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));

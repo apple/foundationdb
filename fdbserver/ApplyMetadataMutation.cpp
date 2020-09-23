@@ -43,8 +43,8 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 }
 
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
-// the same operations will be done on all proxies at the same time. Otherwise, the data stored in
-// txnStateStore will become corrupted.
+// the same operations will be done on all commit proxies at the same time. Otherwise, the data 
+// stored in txnStateStore will become corrupted.
 void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRef> const& mutations,
                             IKeyValueStore* txnStateStore, LogPushData* toCommit, bool& confChange,
                             Reference<ILogSystem> logSystem, Version popVersion,

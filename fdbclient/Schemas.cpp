@@ -47,7 +47,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage",
                   "transaction",
                   "resolution",
-                  "proxy",
+                  "commit_proxy",
                   "grv_proxy",
                   "master",
                   "test",
@@ -84,7 +84,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "role":{
                      "$enum":[
                         "master",
-                        "proxy",
+                        "commit_proxy",
                         "grv_proxy",
                         "log",
                         "storage",
@@ -278,15 +278,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "run_loop_busy":0.2
          }
       },
-      "old_logs":[
+      "logs":[
          {
-            "logs":[
+            "log_interfaces":[
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
                   "address":"1.2.3.4:1234"
                }
             ],
+            "epoch":1,
+            "current":false,
+            "begin_version":23,
+            "end_version":112315141,
+            "possibly_losing_data":true,
             "log_replication_factor":3,
             "log_write_anti_quorum":0,
             "log_fault_tolerance":2,
@@ -486,7 +491,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                                                           R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
-         "required_proxies":1,
+         "required_commit_proxies":1,
          "required_grv_proxies":1,
          "name":{
             "$enum":[
@@ -675,11 +680,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "address":"10.0.4.1"
             }
          ],
-         "auto_proxies":3,
+         "auto_commit_proxies":3,
          "auto_grv_proxies":1,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5,
+         "commit_proxies":5,
          "grv_proxies":1,
          "backup_worker_enabled":1
       },
@@ -879,11 +884,11 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "ssd-2",
         "memory"
     ]},
-    "auto_proxies":3,
+    "auto_commit_proxies":3,
     "auto_grv_proxies":1,
     "auto_resolvers":1,
     "auto_logs":3,
-    "proxies":5
+    "commit_proxies":5
     "grv_proxies":1
 })configSchema");
 

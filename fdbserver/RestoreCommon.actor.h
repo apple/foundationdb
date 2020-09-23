@@ -307,6 +307,12 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 					if (ongoingReplies[j].isReady()) {
 						std::get<2>(replyDurations[ongoingRepliesIndex[j]]) = now();
 						--oustandingReplies;
+					} else if (ongoingReplies[j].isError()) {
+						// When this happens,
+						// the above assertion ASSERT(ongoingReplies.size() == oustandingReplies) will fail
+						TraceEvent(SevError, "FastRestoreGetBatchRepliesReplyError")
+						    .detail("OngoingReplyIndex", j)
+						    .detail("FutureError", ongoingReplies[j].getError().what());
 					}
 				}
 			}

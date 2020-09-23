@@ -574,7 +574,7 @@ struct RolesInfo {
 			*pMetricVersion = metricVersion;
 		return roles.insert( std::make_pair(iface.address(), obj ))->second;
 	}
-	JsonBuilderObject& addRole(std::string const& role, MasterProxyInterface& iface, EventMap const& metrics) {
+	JsonBuilderObject& addRole(std::string const& role, CommitProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
@@ -646,11 +646,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     WorkerEvents mMetrics, WorkerEvents nMetrics, WorkerEvents errors, WorkerEvents traceFileOpenErrors,
     WorkerEvents programStarts, std::map<std::string, std::vector<JsonBuilderObject>> processIssues,
     vector<std::pair<StorageServerInterface, EventMap>> storageServers,
-    vector<std::pair<TLogInterface, EventMap>> tLogs,
-    vector<std::pair<MasterProxyInterface, EventMap>> proxies,
-    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
-    ServerCoordinators coordinators, Database cx, Optional<DatabaseConfiguration> configuration,
-    Optional<Key> healthyZone, std::set<std::string>* incomplete_reasons) {
+    vector<std::pair<TLogInterface, EventMap>> tLogs, vector<std::pair<CommitProxyInterface, EventMap>> commitProxies,
+    vector<std::pair<GrvProxyInterface, EventMap>> grvProxies, ServerCoordinators coordinators, Database cx,
+    Optional<DatabaseConfiguration> configuration, Optional<Key> healthyZone,
+    std::set<std::string>* incomplete_reasons) {
 
 	state JsonBuilderObject processMap;
 
@@ -736,9 +735,9 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addCoordinatorRole(coordinator);
 	}
 
-	state std::vector<std::pair<MasterProxyInterface, EventMap>>::iterator proxy;
-	for(proxy = proxies.begin(); proxy != proxies.end(); ++proxy) {
-		roles.addRole( "proxy", proxy->first, proxy->second );
+	state std::vector<std::pair<CommitProxyInterface, EventMap>>::iterator commit_proxy;
+	for (commit_proxy = commitProxies.begin(); commit_proxy != commitProxies.end(); ++commit_proxy) {
+		roles.addRole("commit_proxy", commit_proxy->first, commit_proxy->second);
 		wait(yield());
 	}
 
@@ -1064,14 +1063,14 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
 			int requiredLogs = atoi( md.getValue("RequiredTLogs").c_str() );
-			int requiredProxies = atoi( md.getValue("RequiredProxies").c_str() );
+			int requiredCommitProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
 			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
 			int requiredResolvers = atoi( md.getValue("RequiredResolvers").c_str() );
-			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredProxies));
+			//int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredCommitProxies));
 			//int requiredMachines = std::max(requiredLogs, 1);
 
 			message["required_logs"] = requiredLogs;
-			message["required_proxies"] = requiredProxies;
+			message["required_commit_proxies"] = requiredCommitProxies;
 			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
@@ -1669,9 +1668,11 @@ ACTOR static Future<vector<std::pair<TLogInterface, EventMap>>> getTLogsAndMetri
 	return results;
 }
 
-ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxiesAndMetrics(Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
-	vector<std::pair<MasterProxyInterface, EventMap>> results = wait(getServerMetrics(
-	    db->get().client.masterProxies, address_workers, std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
+ACTOR static Future<vector<std::pair<CommitProxyInterface, EventMap>>> getCommitProxiesAndMetrics(
+    Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> address_workers) {
+	vector<std::pair<CommitProxyInterface, EventMap>> results =
+	    wait(getServerMetrics(db->get().client.commitProxies, address_workers,
+	                          std::vector<std::string>{ "CommitLatencyMetrics", "CommitLatencyBands" }));
 
 	return results;
 }
@@ -1755,16 +1756,18 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 
 	// Writes and conflicts
 	try {
-		state vector<Future<TraceEventFields>> proxyStatFutures;
+		state vector<Future<TraceEventFields>> commitProxyStatFutures;
 		state vector<Future<TraceEventFields>> grvProxyStatFutures;
 		std::map<NetworkAddress, WorkerDetails> workersMap;
 		for (auto const& w : workers) {
 			workersMap[w.interf.address()] = w;
 		}
-		for (auto &p : db->get().client.masterProxies) {
+		for (auto& p : db->get().client.commitProxies) {
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
-				proxyStatFutures.push_back(timeoutError(worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))), 1.0));
+				commitProxyStatFutures.push_back(timeoutError(
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))),
+				    1.0));
 			else
 				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
 		}
@@ -1775,7 +1778,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			else
 				throw all_alternatives_failed();  // We need data from all proxies for this result to be trustworthy
 		}
-		state vector<TraceEventFields> proxyStats = wait(getAll(proxyStatFutures));
+		state vector<TraceEventFields> commitProxyStats = wait(getAll(commitProxyStatFutures));
 		state vector<TraceEventFields> grvProxyStats = wait(getAll(grvProxyStatFutures));
 
 		StatusCounter txnStartOut;
@@ -1798,14 +1801,14 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(Reference<AsyncVar<
 			txnMemoryErrors.updateValues(StatusCounter(gps.getValue("TxnRequestErrors")));
 		}
 
-		for (auto &ps : proxyStats) {
-			mutations.updateValues( StatusCounter(ps.getValue("Mutations")) );
-			mutationBytes.updateValues( StatusCounter(ps.getValue("MutationBytes")) );
-			txnConflicts.updateValues( StatusCounter(ps.getValue("TxnConflicts")) );
-			txnCommitOutSuccess.updateValues( StatusCounter(ps.getValue("TxnCommitOutSuccess")) );
-			txnKeyLocationOut.updateValues( StatusCounter(ps.getValue("KeyServerLocationOut")) );
-			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("KeyServerLocationErrors")) );
-			txnMemoryErrors.updateValues( StatusCounter(ps.getValue("TxnCommitErrors")) );
+		for (auto& cps : commitProxyStats) {
+			mutations.updateValues(StatusCounter(cps.getValue("Mutations")));
+			mutationBytes.updateValues(StatusCounter(cps.getValue("MutationBytes")));
+			txnConflicts.updateValues(StatusCounter(cps.getValue("TxnConflicts")));
+			txnCommitOutSuccess.updateValues(StatusCounter(cps.getValue("TxnCommitOutSuccess")));
+			txnKeyLocationOut.updateValues(StatusCounter(cps.getValue("KeyServerLocationOut")));
+			txnMemoryErrors.updateValues(StatusCounter(cps.getValue("KeyServerLocationErrors")));
+			txnMemoryErrors.updateValues(StatusCounter(cps.getValue("TxnCommitErrors")));
 		}
 
 		operationsObj["writes"] = mutations.getStatus();
@@ -2009,78 +2012,98 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 	return statusObj;
 }
 
-static JsonBuilderArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
-	JsonBuilderArray oldTlogsArray;
+static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<TLogSet>& tLogs,
+                                     std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
+	JsonBuilderObject statusObj;
+	JsonBuilderArray logsObj;
+	Optional<int32_t> sat_log_replication_factor, sat_log_write_anti_quorum, sat_log_fault_tolerance,
+	    log_replication_factor, log_write_anti_quorum, log_fault_tolerance, remote_log_replication_factor,
+	    remote_log_fault_tolerance;
 
-	if(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-		for(auto it : db->get().logSystemConfig.oldTLogs) {
-			JsonBuilderObject statusObj;
-			JsonBuilderArray logsObj;
-			Optional<int32_t> sat_log_replication_factor, sat_log_write_anti_quorum, sat_log_fault_tolerance, log_replication_factor, log_write_anti_quorum, log_fault_tolerance, remote_log_replication_factor, remote_log_fault_tolerance;
+	int maxFaultTolerance = 0;
 
-			int maxFaultTolerance = 0;
-
-			for(int i = 0; i < it.tLogs.size(); i++) {
-				int failedLogs = 0;
-				for(auto& log : it.tLogs[i].tLogs) {
-					JsonBuilderObject logObj;
-					bool failed = !log.present() || !address_workers.count(log.interf().address());
-					logObj["id"] = log.id().shortString();
-					logObj["healthy"] = !failed;
-					if(log.present()) {
-						logObj["address"] = log.interf().address().toString();
-					}
-					logsObj.push_back(logObj);
-					if(failed) {
-						failedLogs++;
-					}
-				}
-				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
-				if(it.tLogs[i].isLocal && it.tLogs[i].locality == tagLocalitySatellite) {
-					sat_log_replication_factor = it.tLogs[i].tLogReplicationFactor;
-					sat_log_write_anti_quorum = it.tLogs[i].tLogWriteAntiQuorum;
-					sat_log_fault_tolerance = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
-				}
-				else if(it.tLogs[i].isLocal) {
-					log_replication_factor = it.tLogs[i].tLogReplicationFactor;
-					log_write_anti_quorum = it.tLogs[i].tLogWriteAntiQuorum;
-					log_fault_tolerance = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
-				}
-				else {
-					remote_log_replication_factor = it.tLogs[i].tLogReplicationFactor;
-					remote_log_fault_tolerance = it.tLogs[i].tLogReplicationFactor - 1 - failedLogs;
-				}
+	for (int i = 0; i < tLogs.size(); i++) {
+		int failedLogs = 0;
+		for (auto& log : tLogs[i].tLogs) {
+			JsonBuilderObject logObj;
+			bool failed = !log.present() || !address_workers.count(log.interf().address());
+			logObj["id"] = log.id().shortString();
+			logObj["healthy"] = !failed;
+			if (log.present()) {
+				logObj["address"] = log.interf().address().toString();
 			}
-			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
-			statusObj["logs"] = logsObj;
-
-			if (sat_log_replication_factor.present())
-				statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
-			if (sat_log_write_anti_quorum.present())
-				statusObj["satellite_log_write_anti_quorum"] = sat_log_write_anti_quorum.get();
-			if (sat_log_fault_tolerance.present())
-				statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
-
-			if (log_replication_factor.present())
-				statusObj["log_replication_factor"] = log_replication_factor.get();
-			if (log_write_anti_quorum.present())
-				statusObj["log_write_anti_quorum"] = log_write_anti_quorum.get();
-			if (log_fault_tolerance.present())
-				statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
-
-			if (remote_log_replication_factor.present())
-				statusObj["remote_log_replication_factor"] = remote_log_replication_factor.get();
-			if (remote_log_fault_tolerance.present())
-				statusObj["remote_log_fault_tolerance"] = remote_log_fault_tolerance.get();
-
-			oldTlogsArray.push_back(statusObj);
+			logsObj.push_back(logObj);
+			if (failed) {
+				failedLogs++;
+			}
+		}
+		// The log generation's fault tolerance is the maximum tlog fault tolerance of each region.
+		maxFaultTolerance =
+		    std::max(maxFaultTolerance, tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs);
+		if (tLogs[i].isLocal && tLogs[i].locality == tagLocalitySatellite) {
+			sat_log_replication_factor = tLogs[i].tLogReplicationFactor;
+			sat_log_write_anti_quorum = tLogs[i].tLogWriteAntiQuorum;
+			sat_log_fault_tolerance = tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs;
+		} else if (tLogs[i].isLocal) {
+			log_replication_factor = tLogs[i].tLogReplicationFactor;
+			log_write_anti_quorum = tLogs[i].tLogWriteAntiQuorum;
+			log_fault_tolerance = tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs;
+		} else {
+			remote_log_replication_factor = tLogs[i].tLogReplicationFactor;
+			remote_log_fault_tolerance = tLogs[i].tLogReplicationFactor - 1 - failedLogs;
 		}
 	}
+	*logFaultTolerance = std::min(*logFaultTolerance, maxFaultTolerance);
+	statusObj["log_interfaces"] = logsObj;
+	// We may lose logs in this log generation, storage servers may never be able to catch up this log
+	// generation.
+	statusObj["possibly_losing_data"] = maxFaultTolerance < 0;
 
-	return oldTlogsArray;
+	if (sat_log_replication_factor.present())
+		statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
+	if (sat_log_write_anti_quorum.present())
+		statusObj["satellite_log_write_anti_quorum"] = sat_log_write_anti_quorum.get();
+	if (sat_log_fault_tolerance.present()) statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
+
+	if (log_replication_factor.present()) statusObj["log_replication_factor"] = log_replication_factor.get();
+	if (log_write_anti_quorum.present()) statusObj["log_write_anti_quorum"] = log_write_anti_quorum.get();
+	if (log_fault_tolerance.present()) statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
+
+	if (remote_log_replication_factor.present())
+		statusObj["remote_log_replication_factor"] = remote_log_replication_factor.get();
+	if (remote_log_fault_tolerance.present())
+		statusObj["remote_log_fault_tolerance"] = remote_log_fault_tolerance.get();
+
+	return statusObj;
 }
 
-static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<WorkerDetails>& workers, int extraTlogEligibleZones, int minReplicasRemaining, bool underMaintenance) {
+static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<ServerDBInfo>> db,
+                                    std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
+	JsonBuilderArray tlogsArray;
+	JsonBuilderObject tlogsStatus;
+	tlogsStatus = tlogFetcher(logFaultTolerance, db->get().logSystemConfig.tLogs, address_workers);
+	tlogsStatus["epoch"] = db->get().logSystemConfig.epoch;
+	tlogsStatus["current"] = true;
+	if (db->get().logSystemConfig.recoveredAt.present()) {
+		tlogsStatus["begin_version"] = db->get().logSystemConfig.recoveredAt.get();
+	}
+	tlogsArray.push_back(tlogsStatus);
+	for (auto it : db->get().logSystemConfig.oldTLogs) {
+		JsonBuilderObject oldTlogsStatus = tlogFetcher(logFaultTolerance, it.tLogs, address_workers);
+		oldTlogsStatus["epoch"] = it.epoch;
+		oldTlogsStatus["current"] = false;
+		oldTlogsStatus["begin_version"] = it.epochBegin;
+		oldTlogsStatus["end_version"] = it.epochEnd;
+		tlogsArray.push_back(oldTlogsStatus);
+	}
+	return tlogsArray;
+}
+
+static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
+                                                     ServerCoordinators coordinators,
+                                                     std::vector<WorkerDetails>& workers, int extraTlogEligibleZones,
+                                                     int minReplicasRemaining, int oldLogFaultTolerance,
+                                                     bool underMaintenance) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
@@ -2112,17 +2135,18 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 		}
 		maxCoordinatorZoneFailures += 1;
 	}
-
+	// max zone failures that we can tolerate to not lose data
 	int zoneFailuresWithoutLosingData = std::min(maxZoneFailures, maxCoordinatorZoneFailures);
 
 	if (minReplicasRemaining >= 0){
 		zoneFailuresWithoutLosingData = std::min(zoneFailuresWithoutLosingData, minReplicasRemaining - 1);
 	}
 
-	statusObj["max_zone_failures_without_losing_data"] = std::max(zoneFailuresWithoutLosingData, 0);
-
-	// without losing availablity
-	statusObj["max_zone_failures_without_losing_availability"] = std::max(std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData), 0);
+	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or availability.
+	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
+	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
+	statusObj["max_zone_failures_without_losing_availability"] =
+	    std::max(std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData), -1);
 	return statusObj;
 }
 
@@ -2440,7 +2464,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		    getProcessIssuesAsMessages(workerIssues);
 		state vector<std::pair<StorageServerInterface, EventMap>> storageServers;
 		state vector<std::pair<TLogInterface, EventMap>> tLogs;
-		state vector<std::pair<MasterProxyInterface, EventMap>> proxies;
+		state vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
@@ -2504,7 +2528,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, EventMap>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers, rkWorker));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, EventMap>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
-			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
+			state Future<ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>>> commitProxyFuture =
+			    errorOr(getCommitProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<vector<std::pair<GrvProxyInterface, EventMap>>>> grvProxyFuture = errorOr(getGrvProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
@@ -2517,14 +2542,16 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 
-			int oldLogFaultTolerance = 100;
-			if(db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && db->get().logSystemConfig.oldTLogs.size() > 0) {
-				statusObj["old_logs"] = oldTlogFetcher(&oldLogFaultTolerance, db, address_workers);
+			int logFaultTolerance = 100;
+			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
 			}
 
 			if(configuration.present()) {
 				int extraTlogEligibleZones = getExtraTLogEligibleZones(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining, loadResult.present() && loadResult.get().healthyZone.present());
+				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(
+				    configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining,
+				    logFaultTolerance, loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
 			state JsonBuilderObject configObj =
@@ -2587,13 +2614,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				messages.push_back(JsonBuilder::makeMessage("log_servers_error", "Timed out trying to retrieve log servers."));
 			}
 
-			// ...also proxies
-			ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>> _proxies = wait(proxyFuture);
-			if (_proxies.present()) {
-				proxies = _proxies.get();
-			}
-			else {
-				messages.push_back(JsonBuilder::makeMessage("proxies_error", "Timed out trying to retrieve proxies."));
+			// ...also commit proxies
+			ErrorOr<vector<std::pair<CommitProxyInterface, EventMap>>> _commitProxies = wait(commitProxyFuture);
+			if (_commitProxies.present()) {
+				commitProxies = _commitProxies.get();
+			} else {
+				messages.push_back(
+				    JsonBuilder::makeMessage("commit_proxies_error", "Timed out trying to retrieve commit proxies."));
 			}
 
 			// ...also grv proxies
@@ -2614,12 +2641,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["layers"] = layers;
 		}
 
-		JsonBuilderObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, networkMetrics,
-		                                                            latestError, traceFileOpenErrors, programStarts,
-		                                                            processIssues, storageServers, tLogs, proxies,
-		                                                            grvProxies, coordinators, cx, configuration,
-		                                                            loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),
-		                                                            &status_incomplete_reasons));
+		JsonBuilderObject processStatus = wait(processStatusFetcher(
+		    db, workers, pMetrics, mMetrics, networkMetrics, latestError, traceFileOpenErrors, programStarts,
+		    processIssues, storageServers, tLogs, commitProxies, grvProxies, coordinators, cx, configuration,
+		    loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(), &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
 

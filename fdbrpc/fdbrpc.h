@@ -115,7 +115,7 @@ public:
 
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
 	bool isSet() { return sav->isSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
@@ -144,7 +144,7 @@ public:
 	}
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() { auto ptr = sav; sav = nullptr; return ptr; }
 	explicit ReplyPromise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }

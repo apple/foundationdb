@@ -260,10 +260,10 @@ extern const KeyRangeRef logRangesRange;
 Key logRangesEncodeKey(KeyRef keyBegin, UID logUid);
 
 // Returns the start key and optionally the logRange Uid
-KeyRef logRangesDecodeKey(KeyRef key, UID* logUid = NULL);
+KeyRef logRangesDecodeKey(KeyRef key, UID* logUid = nullptr);
 
 // Returns the end key and optionally the key prefix
-Key logRangesDecodeValue(KeyRef keyValue, Key* destKeyPrefix = NULL);
+Key logRangesDecodeValue(KeyRef keyValue, Key* destKeyPrefix = nullptr);
 
 // Returns the encoded key value comprised of the end key and destination prefix
 Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath);

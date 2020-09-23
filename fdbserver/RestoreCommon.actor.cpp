@@ -312,6 +312,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 	int rLen = wait(file->read(mutateString(buf), len, offset));
 	if (rLen != len) throw restore_bad_read();
 
+	simulateBlobFailure();
+
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
 

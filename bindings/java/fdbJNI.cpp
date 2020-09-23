@@ -1089,13 +1089,13 @@ void JNI_OnUnload(JavaVM *vm, void *reserved) {
 		return;
 	} else {
 		// delete global references so the GC can collect them
-		if (range_result_summary_class != NULL) {
+		if (range_result_summary_class != JNI_NULL) {
 			env->DeleteGlobalRef(range_result_summary_class);
 		}
-		if (range_result_class != NULL) {
+		if (range_result_class != JNI_NULL) {
 			env->DeleteGlobalRef(range_result_class);
 		}
-		if (string_class != NULL) {
+		if (string_class != JNI_NULL) {
 			env->DeleteGlobalRef(string_class);
 		}
 	}

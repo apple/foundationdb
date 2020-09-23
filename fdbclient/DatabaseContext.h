@@ -29,7 +29,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
@@ -68,7 +68,7 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	}
 };
 
-using ProxyInfo = ModelInterface<MasterProxyInterface>;
+using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
 using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
@@ -165,8 +165,8 @@ public:
 	bool sampleOnCost(uint64_t cost) const;
 
 	void updateProxies();
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
+	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
 	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
@@ -219,9 +219,9 @@ public:
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger proxiesChangeTrigger;
 	Future<Void> monitorProxiesInfoChange;
-	Reference<ProxyInfo> masterProxies;
+	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
-	bool proxyProvisional;
+	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
 	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;

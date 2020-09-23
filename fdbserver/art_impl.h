@@ -91,7 +91,7 @@ struct stack_entry {
 art_leaf *art_tree::minimum(art_node *n) {
     // Handle base cases
     if (!n) {
-        return NULL;
+        return nullptr;
     }
     if (ART_IS_LEAF(n)) {
         return ART_LEAF_RAW(n);
@@ -125,7 +125,7 @@ art_leaf *art_tree::minimum(art_node *n) {
 
 art_leaf *art_tree::maximum(art_node *n) {
     // Handle base cases
-    if (!n) return NULL;
+    if (!n) return nullptr;
     if (ART_IS_LEAF(n)) return ART_LEAF_RAW(n);
 
     int idx;
@@ -168,7 +168,7 @@ void art_tree::art_bound_iterative(art_node *n, const KeyRef &k, int depth, art_
         if (ret == ART_I_BACKTRACK) break;
         if (ret == ART_I_DEPTH) {
             head = new(curr_arena++) stack_entry(n, key[depth], head);
-            //if the child is NULL, then we have to look right; i.e., we start backtracking
+            //if the child is nullptr, then we have to look right; i.e., we start backtracking
             child = find_child(n, key[depth]);
             if (!child)break;
             n = *child;
@@ -374,7 +374,7 @@ int art_tree::signed_prefix_mismatch(art_node *n, const KeyRef &k, int depth, ar
 art_leaf *art_tree::minimum_kv(art_node *n) {
     // Handle base cases
     if (!n) {
-        return NULL;
+        return nullptr;
     }
     if (ART_IS_LEAF(n)) {
         return ART_LEAF_RAW(n);
@@ -473,7 +473,7 @@ art_node **art_tree::find_child(art_node *n, unsigned char c) {
         default:
             UNSTOPPABLE_ASSERT(false);
     }
-    return NULL;
+    return nullptr;
 }
 
 void art_tree::find_next(art_node *n, unsigned char c, art_node **out) {
@@ -641,7 +641,7 @@ void art_tree::recursive_delete_binary(art_node *n, art_node **ref, const KeyRef
         if ((*child)->type >= ART_NODE4_KV && (key_len == depth + 1 + (*child)->partial_len)) {
             //Check if key matches
             art_leaf *l = ART_FAT_NODE_LEAF((*child));
-            //Return NULL if key does not match
+            //Return nullptr if key does not match
             if (leaf_matches(l, k, depth + 1)) {
                 return;
             }
@@ -675,7 +675,7 @@ int art_tree::check_prefix(const art_node *n, const KeyRef &k, int depth) {
 
 //Remove a LEAF from a node256/node256kv
 void art_tree::remove_child256(art_node256 *n, art_node **ref, unsigned char c) {
-    n->children[c] = NULL;
+    n->children[c] = nullptr;
     n->n.num_children--;
 
     // Resize to a node48 on underflow, not immediately to prevent
@@ -713,7 +713,7 @@ void art_tree::remove_fat_child256(art_node256_kv *n, art_node **ref) {
 void art_tree::remove_child48(art_node48 *n, art_node **ref, unsigned char c) {
     int pos = n->keys[c];
     n->keys[c] = 0;
-    n->children[pos - 1] = NULL;
+    n->children[pos - 1] = nullptr;
     n->n.num_children--;
 
     if (n->n.num_children == 12) {

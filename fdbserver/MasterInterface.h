@@ -38,7 +38,7 @@ struct MasterInterface {
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
-	// Get the centralized live committed version reported by proxies.
+	// Get the centralized live committed version reported by commit proxies.
 	RequestStream< struct GetRawCommittedVersionRequest > getLiveCommittedVersion;
 	// Report a proxy's committed version.
 	RequestStream< struct ReportRawCommittedVersionRequest> reportLiveCommittedVersion;

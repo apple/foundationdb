@@ -149,7 +149,7 @@ void recordAllocation( void *ptr, size_t size ) {
 #elif defined(_WIN32)
 		// We could be using fourth parameter to get a hash, but we'll do this
 		//  in a unified way between platforms
-		int nptrs = CaptureStackBackTrace( 1, 100, buffer, NULL );
+		int nptrs = CaptureStackBackTrace( 1, 100, buffer, nullptr );
 #else
 #error Instrumentation not supported on this platform
 #endif

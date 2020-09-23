@@ -74,7 +74,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		TEST(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT); //WriteDuringReadWorkload testing large keys
 
-		useExtraDB = g_simulator.extraDB != NULL;
+		useExtraDB = g_simulator.extraDB != nullptr;
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			extraDB = Database::createDatabase(extraFile, -1);

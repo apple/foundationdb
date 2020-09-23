@@ -33,7 +33,7 @@ struct ProcessClass {
 		TransactionClass,
 		ResolutionClass,
 		TesterClass,
-		ProxyClass, // Process class of CommitProxy
+		CommitProxyClass,
 		GrvProxyClass,
 		MasterClass,
 		StatelessClass,
@@ -53,7 +53,7 @@ struct ProcessClass {
 	enum ClusterRole {
 		Storage,
 		TLog,
-		Proxy,
+		CommitProxy,
 		GrvProxy,
 		Master,
 		Resolver,
@@ -77,7 +77,7 @@ public:
 		if (s=="storage") _class = StorageClass;
 		else if (s=="transaction") _class = TransactionClass;
 		else if (s=="resolution") _class = ResolutionClass;
-		else if (s=="proxy") _class = ProxyClass;
+		else if (s=="commit_proxy") _class = CommitProxyClass;
 		else if (s=="grv_proxy") _class = GrvProxyClass;
 		else if (s=="master") _class = MasterClass;
 		else if (s=="test") _class = TesterClass;
@@ -99,7 +99,7 @@ public:
 		if (classStr=="storage") _class = StorageClass;
 		else if (classStr=="transaction") _class = TransactionClass;
 		else if (classStr=="resolution") _class = ResolutionClass;
-		else if (classStr=="proxy") _class = ProxyClass;
+		else if (classStr=="commit_proxy") _class = CommitProxyClass;
 		else if (classStr=="grv_proxy") _class = GrvProxyClass;
 		else if (classStr=="master") _class = MasterClass;
 		else if (classStr=="test") _class = TesterClass;
@@ -137,7 +137,7 @@ public:
 			case StorageClass: return "storage";
 			case TransactionClass: return "transaction";
 			case ResolutionClass: return "resolution";
-			case ProxyClass: return "proxy";
+			case CommitProxyClass: return "commit_proxy";
 			case GrvProxyClass: return "grv_proxy";
 			case MasterClass: return "master";
 			case TesterClass: return "test";

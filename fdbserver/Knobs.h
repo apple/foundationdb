@@ -37,10 +37,11 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
+	                                  // often, so that versions always advance smoothly
 
 	// TLogs
-	double TLOG_TIMEOUT;  // tlog OR master proxy failure - master's reaction time
+	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
@@ -262,7 +263,7 @@ public:
 	double POLLING_FREQUENCY;
 	double HEARTBEAT_FREQUENCY;
 
-	// Master Proxy
+	// Commit CommitProxy
 	double START_TRANSACTION_BATCH_INTERVAL_MIN;
 	double START_TRANSACTION_BATCH_INTERVAL_MAX;
 	double START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
@@ -368,7 +369,7 @@ public:
 	int EXPECTED_MASTER_FITNESS;
 	int EXPECTED_TLOG_FITNESS;
 	int EXPECTED_LOG_ROUTER_FITNESS;
-	int EXPECTED_PROXY_FITNESS;
+	int EXPECTED_COMMIT_PROXY_FITNESS;
 	int EXPECTED_GRV_PROXY_FITNESS;
 	int EXPECTED_RESOLVER_FITNESS;
 	double RECRUITMENT_TIMEOUT;
@@ -495,7 +496,8 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
-	int64_t MIN_TAG_PAGES_RATE;
+	int64_t MIN_TAG_READ_PAGES_RATE;
+	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
 	int64_t READ_COST_BYTE_FACTOR;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
@@ -609,7 +611,7 @@ public:
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs();
-	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
+	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

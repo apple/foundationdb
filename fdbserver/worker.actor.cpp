@@ -114,13 +114,13 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 }
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastCommitProxyUIDs;
+	state std::vector<CommitProxyInterface> lastCommitProxies;
 	state std::vector<UID> lastGrvProxyUIDs;
 	state std::vector<GrvProxyInterface> lastGrvProxies;
 	loop {
 		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies, lastGrvProxyUIDs, lastGrvProxies);
+		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 		info->set( ni );
 		wait( db->onChange() );
 	}
@@ -570,7 +570,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 			const char *path = (const char*)req.outputFile.begin();
 			ProfilerOptions *options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
-			options->filter_in_thread_arg = NULL;
+			options->filter_in_thread_arg = nullptr;
 			ProfilerStartWithOptions(path, options);
 			break;
 		}
@@ -994,7 +994,7 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
-		DUMPTOKEN(recruited.masterProxy);
+		DUMPTOKEN(recruited.commitProxy);
 		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
@@ -1368,15 +1368,15 @@ ACTOR Future<Void> workerServer(
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
-			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
-				MasterProxyInterface recruited;
+			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
+				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
 				details["ForMaster"] = req.master.id().shortString();
-				startRole( Role::MASTER_PROXY, recruited.id(), interf.id(), details );
+				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.getConsistentReadVersion);
@@ -1385,9 +1385,10 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
 
-				//printf("Recruited as masterProxyServer\n");
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
-						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+				// printf("Recruited as commitProxyServer\n");
+				errorForwarders.add(
+				    zombie(recruited, forwardError(errors, Role::COMMIT_PROXY, recruited.id(),
+				                                   commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
 				req.reply.send(recruited);
 			}
 			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
@@ -1857,7 +1858,7 @@ const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
-const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
+const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
 const Role Role::GRV_PROXY("GrvProxyServer", "GP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");

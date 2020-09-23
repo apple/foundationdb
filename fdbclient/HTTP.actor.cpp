@@ -72,7 +72,7 @@ namespace HTTP {
 	}
 
 	PacketBuffer * writeRequestHeader(std::string const &verb, std::string const &resource, HTTP::Headers const &headers, PacketBuffer *dest) {
-		PacketWriter writer(dest, NULL, Unversioned());
+		PacketWriter writer(dest, nullptr, Unversioned());
 		writer.serializeBytes(verb);
 		writer.serializeBytes(" ", 1);
 		writer.serializeBytes(resource);
@@ -238,7 +238,7 @@ namespace HTTP {
 				{
 					// Read the line that contains the chunk length as text in hex
 					size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
-					state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), NULL, 16);
+					state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), nullptr, 16);
 
 					// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the content buffer
 					r->content.erase(pos, lineLen + 2);
@@ -301,7 +301,7 @@ namespace HTTP {
 		state TraceEvent event(SevDebug, "HTTPRequest");
 
 		state UnsentPacketQueue empty;
-		if(pContent == NULL)
+		if(pContent == nullptr)
 			pContent = &empty;
 
 		// There is no standard http request id header field, so either a global default can be set via a knob

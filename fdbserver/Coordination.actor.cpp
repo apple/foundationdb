@@ -96,7 +96,7 @@ ServerCoordinators::ServerCoordinators( Reference<ClusterConnectionFile> cf )
 // The coordination server wants to create its key value store only if it is actually used
 struct OnDemandStore {
 public:
-	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(NULL), myID(myID) {}
+	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(nullptr), myID(myID) {}
 	~OnDemandStore() { if (store) store->close(); }
 
 	IKeyValueStore* get() {
