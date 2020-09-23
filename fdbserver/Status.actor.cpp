@@ -1031,7 +1031,8 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		state Future<TraceEventFields> mdActiveGensF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
 		state Future<TraceEventFields> mdF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0);
 		state Future<TraceEventFields> mDBAvailableF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryAvailable") ) ), 1.0);
-		state Future<Version> rvF = timeoutError(tr.getReadVersion(), 1.0);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		state Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
 
 		wait(success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
 
@@ -1043,13 +1044,15 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
 
-		Version rv = rvF.get();
+		ErrorOr<Version> rv = rvF.get();
 		const TraceEventFields& dbAvailableMsg = mDBAvailableF.get();
 		if (dbAvailableMsg.size() > 0) {
 			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
 			int numOfOldGensOfLogs = dbAvailableMsg.getInt("NumOfOldGensOfLogs");
-			double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-			message["time_since_last_recovered"] = lastRecoveredSecondsAgo;
+			if (!rv.isError()) {
+				double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv.get() - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+				message["time_since_last_recovered"] = lastRecoveredSecondsAgo;
+			}
 			message["number_of_old_generations_of_tlogs"] = numOfOldGensOfLogs;
 		} else {
 			message["time_since_last_db_turned_available_seconds"] = -1;
