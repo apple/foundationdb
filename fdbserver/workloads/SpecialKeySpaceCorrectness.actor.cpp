@@ -119,7 +119,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Future<Void> f;
 		{
 			ReadYourWritesTransaction ryw{ cx->clone() };
-			if(!ryw->getDatabase()->apiVersionAtLeast(630)) {
+			if(!ryw.getDatabase()->apiVersionAtLeast(630)) {
 				//This test is not valid for API versions smaller than 630
 				return;
 			}
