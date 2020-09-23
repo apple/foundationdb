@@ -494,7 +494,7 @@ static void printOptionUsage(std::string option, std::string description) {
 	sstream >> currWord;
 
 	std::string currLine(DESCRIPTION_INDENT + ' ' + currWord);
-	int currLength = DESCRIPTION_INDENT.size();
+	int currLength = currLine.size();
 
 	while(!sstream.eof()) {
 		sstream >> currWord;
