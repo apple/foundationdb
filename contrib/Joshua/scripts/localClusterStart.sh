@@ -17,12 +17,17 @@ AUDITLOG="${AUDITLOG:-/tmp/audit-cluster.log}"
 status=0
 messagetime=0
 messagecount=0
-let index2="${RANDOM} % 256"
-let index3="${RANDOM} % 256"
-let index4="(${RANDOM} % 255) + 1"
-let FDBPORT="(${RANDOM} % 1000) + ${FDBPORTSTART}"
+
 # Define a random ip address and port on localhost
-IPADDRESS="127.${index2}.${index3}.${index4}"
+if [ -z ${IPADDRESS} ]; then
+    let index2="${RANDOM} % 256"
+    let index3="${RANDOM} % 256"
+    let index4="(${RANDOM} % 255) + 1"
+    IPADDRESS="127.${index2}.${index3}.${index4}"
+fi
+if [ -z ${FDBPORT} ]; then
+    let FDBPORT="(${RANDOM} % 1000) + ${FDBPORTSTART}"
+fi
 CLUSTERSTRING="${IPADDRESS}:${FDBPORT}"
 
 
@@ -231,12 +236,17 @@ function startFdbServer
 		log 'Failed to display user message'
 		let status="${status} + 1"
 
-	elif ! "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${CLUSTERSTRING}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
-	then
-		log "Failed to start FDB Server"
-		let status="${status} + 1"
 	else
-		FDBSERVERID="${!}"
+            "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${CLUSTERSTRING}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
+            fdbpid=$!
+            fdbrc=$?
+            if [ $fdbrc -ne 0 ]
+            then
+                log "Failed to start FDB Server"
+                let status="${status} + 1"
+            else
+                FDBSERVERID="${fdbpid}"
+            fi
 	fi
 
 	if [ -z "${FDBSERVERID}" ]; then
