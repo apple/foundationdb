@@ -95,7 +95,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	DatabaseContext* ctx, const Reference<LocationInfo> alternatives, RequestStream<Request> Interface::*channel,
 	const Request& request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
-	QueueModel* model = NULL) {
+	QueueModel* model = nullptr) {
 	if (alternatives->hasCaches) {
 		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
 	}
@@ -147,7 +147,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
-	cx = NULL;
+	cx = nullptr;
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -155,7 +155,7 @@ StorageServerInfo::~StorageServerInfo() {
 		auto it = cx->server_interf.find( interf.id() );
 		if( it != cx->server_interf.end() )
 			cx->server_interf.erase( it );
-		cx = NULL;
+		cx = nullptr;
 	}
 }
 
@@ -1317,7 +1317,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("ClusterFile", connFile->getFilename().c_str())
 				.detail("ConnectionString", connFile->getConnectionString().toString())
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 				.detail("ApiVersion", apiVersion)
 				.detailf("ImageOffset", "%p", platform::getImageOffset())
 				.trackLatest("ClientStart");
@@ -1604,7 +1604,7 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxie
 	return grvProxies;
 }
 
-// Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not NULL
+// Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not nullptr
 ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx, bool useProvisionalProxies) {
 	loop{
 		Reference<CommitProxyInfo> commitProxies = cx->getCommitProxies(useProvisionalProxies);
@@ -1614,7 +1614,7 @@ ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext*
 	}
 }
 
-// Returns a future which will not be set until the CommitProxyInfo of this DatabaseContext is not NULL
+// Returns a future which will not be set until the CommitProxyInfo of this DatabaseContext is not nullptr
 Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(bool useProvisionalProxies) {
 	return ::getCommitProxiesFuture(this, useProvisionalProxies);
 }
@@ -2522,7 +2522,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					GetKeyValuesReply _rep =
 						wait(loadBalance(cx.getPtr(), beginServer.second, &StorageServerInterface::getKeyValues, req,
 										 TaskPriority::DefaultPromiseEndpoint, false,
-										 cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
+										 cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
 				} catch(Error&) {

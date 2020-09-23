@@ -163,7 +163,7 @@ public:
 
 		if(destroyNow) {
 			api->futureDestroy(f);
-			f = NULL;
+			f = nullptr;
 		}
 
 		return destroyNow;
@@ -202,7 +202,7 @@ public:
 		auto sav = (DLThreadSingleAssignmentVar<T>*)param;
 
 		if(MultiVersionApi::api->callbackOnMainThread) {
-			onMainThreadVoid([sav](){ sav->apply(); }, NULL);
+			onMainThreadVoid([sav](){ sav->apply(); }, nullptr);
 		}
 		else {
 			sav->apply();

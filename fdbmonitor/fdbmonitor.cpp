@@ -96,7 +96,7 @@ void monitor_fd( fdb_fd_set list, int fd, int* maxfd, void* cmd ) {
 	/* ignore maxfd */
 	struct kevent ev;
 	EV_SET( &ev, fd, EVFILT_READ, EV_ADD, 0, 0, cmd );
-	kevent( list, &ev, 1, NULL, 0, NULL ); // FIXME: check?
+	kevent( list, &ev, 1, nullptr, 0, nullptr ); // FIXME: check?
 #endif
 }
 
@@ -105,15 +105,15 @@ void unmonitor_fd( fdb_fd_set list, int fd ) {
 	FD_CLR( fd, list );
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 	struct kevent ev;
-	EV_SET( &ev, fd, EVFILT_READ, EV_DELETE, 0, 0, NULL );
-	kevent( list, &ev, 1, NULL, 0, NULL ); // FIXME: check?
+	EV_SET( &ev, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr );
+	kevent( list, &ev, 1, nullptr, 0, nullptr ); // FIXME: check?
 #endif
 }
 
 double get_cur_timestamp() {
 	struct tm tm_info;
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+	gettimeofday(&tv, nullptr);
 	localtime_r(&tv.tv_sec, &tm_info);
 
 	return tv.tv_sec + 1e-6*tv.tv_usec;
@@ -182,14 +182,14 @@ void log_err(const char* func, int err, const char* format, ...) {
 }
 
 const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
-	const char* ret = NULL;
-	const char* section = NULL;
+	const char* ret = nullptr;
+	const char* section = nullptr;
 
 	va_list ap;
 	va_start(ap, key);
 
 	while (!ret && (section = va_arg(ap, const char *)))
-		ret = ini.GetValue(section, key, NULL);
+		ret = ini.GetValue(section, key, nullptr);
 
 	va_end(ap);
 
@@ -378,8 +378,8 @@ public:
 	// one pair for each of stdout and stderr
 	int pipes[2][2];
 
-	Command() : argv(NULL) { }
-	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
+	Command() : argv(nullptr) { }
+	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(nullptr), fork_retry_time(-1), quiet(false), delete_envvars(nullptr), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%" PRIu64, section.c_str(), id);
 		ssection = _ssection;
@@ -410,7 +410,7 @@ public:
 		last_start = 0;
 
 		char* endptr;
-		const char* rd = get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		const char* rd = get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rd) {
 			log_msg(SevError, "Unable to resolve restart delay for %s\n", ssection.c_str());
 			return;
@@ -423,7 +423,7 @@ public:
 			}
 		}
 
-		const char* mrd = get_value_multi(ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		const char* mrd = get_value_multi(ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!mrd) {
 			initial_restart_delay = 0;
 		}
@@ -437,7 +437,7 @@ public:
 
 		current_restart_delay = initial_restart_delay;
 
-		const char* rbo = get_value_multi(ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		const char* rbo = get_value_multi(ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if(!rbo) {
 			restart_backoff = max_restart_delay;
 		}
@@ -453,7 +453,7 @@ public:
 			}
 		}
 
-		const char* rdri = get_value_multi(ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		const char* rdri = get_value_multi(ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rdri) {
 			restart_delay_reset_interval = max_restart_delay;
 		}
@@ -465,19 +465,19 @@ public:
 			}
 		}
 
-		const char* q = get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* q = get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (q && !strcmp(q, "true"))
 			quiet = true;
 
-		const char* del_env = get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* del_env = get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", nullptr);
 		delete_envvars = del_env;
 
-		const char* kocc = get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* kocc = get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", nullptr);
 		if(kocc && strcmp(kocc, "true")) {
 			kill_on_configuration_change = false;
 		}
 
-		const char* binary = get_value_multi(ini, "command", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* binary = get_value_multi(ini, "command", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (!binary) {
 			log_msg(SevError, "Unable to resolve command for %s\n", ssection.c_str());
 			return;
@@ -495,7 +495,7 @@ public:
 				continue;
 			}
 
-			std::string opt = get_value_multi(ini, i.pItem, ssection.c_str(), section.c_str(), "general", NULL);
+			std::string opt = get_value_multi(ini, i.pItem, ssection.c_str(), section.c_str(), "general", nullptr);
 
 			std::size_t pos = 0;
 
@@ -520,7 +520,7 @@ public:
 		for (auto itr : commands) {
 			argv[i++] = strdup(itr.c_str());
 		}
-		argv[i] = NULL;
+		argv[i] = nullptr;
 	}
 	~Command() {
 		delete[] argv;
@@ -609,7 +609,7 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 		dup2( cmd->pipes[0][1], fileno(stdout) );
 		dup2( cmd->pipes[1][1], fileno(stderr) );
 
-		if(cmd->delete_envvars != NULL && std::strlen(cmd->delete_envvars) > 0) {
+		if(cmd->delete_envvars != nullptr && std::strlen(cmd->delete_envvars) > 0) {
 			std::string vars(cmd->delete_envvars);
 			size_t start = 0;
 			do {
@@ -630,7 +630,7 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 #ifdef __linux__
 		signal(SIGCHLD, SIG_DFL);
 
-		sigprocmask(SIG_SETMASK, mask, NULL);
+		sigprocmask(SIG_SETMASK, mask, nullptr);
 
 		/* death of our parent raises SIGHUP */
 		prctl(PR_SET_PDEATHSIG, SIGHUP);
@@ -722,7 +722,7 @@ bool argv_equal(const char** a1, const char** a2)
 		i++;
 	}
 
-	if (a1[i] != NULL || a2[i] != NULL)
+	if (a1[i] != nullptr || a2[i] != nullptr)
 		return false;
 	return true;
 }
@@ -734,7 +734,7 @@ void kill_process(uint64_t id, bool wait = true) {
 
 	kill(pid, SIGTERM);
 	if(wait) {
-		waitpid(pid, NULL, 0);
+		waitpid(pid, nullptr, 0);
 	}
 
 	pid_id.erase(pid);
@@ -758,8 +758,8 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 		uid_t _uid;
 		gid_t _gid;
 
-		const char* user = ini.GetValue("fdbmonitor", "user", NULL);
-		const char* group = ini.GetValue("fdbmonitor", "group", NULL);
+		const char* user = ini.GetValue("fdbmonitor", "user", nullptr);
+		const char* group = ini.GetValue("fdbmonitor", "group", nullptr);
 
 		if (user) {
 			errno = 0;
@@ -924,8 +924,8 @@ void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
 	while(true) {
 		/* If already watching, drop it and close */
 		if ( *confd_fd >= 0 ) {
-			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE, 0, NULL );
-			kevent( kq, &ev, 1, NULL, 0, NULL );
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE, 0, nullptr );
+			kevent( kq, &ev, 1, nullptr, 0, nullptr );
 			close( *confd_fd );
 		}
 
@@ -939,8 +939,8 @@ void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
 		}
 
 		if ( *confd_fd >= 0 ) {
-			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );
-			kevent( kq, &ev, 1, NULL, 0, NULL );
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, nullptr );
+			kevent( kq, &ev, 1, nullptr, 0, nullptr );
 
 			/* If our child appeared since we last tested it, start over from the beginning */
 			if ( confdir != child && (access(child.c_str(), F_OK) == 0 || errno != ENOENT) ) {
@@ -964,16 +964,16 @@ void watch_conf_file( int kq, int* conff_fd, const char* confpath ) {
 
 	/* If already watching, drop it and close */
 	if ( *conff_fd >= 0 ) {
-		EV_SET( &ev, *conff_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE | NOTE_ATTRIB, 0, NULL );
-		kevent( kq, &ev, 1, NULL, 0, NULL );
+		EV_SET( &ev, *conff_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE | NOTE_ATTRIB, 0, nullptr );
+		kevent( kq, &ev, 1, nullptr, 0, nullptr );
 		close( *conff_fd );
 	}
 
 	/* Open and watch */
 	*conff_fd = open( confpath, O_EVTONLY );
 	if ( *conff_fd >= 0 ) {
-		EV_SET( &ev, *conff_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE | NOTE_ATTRIB, 0, NULL );
-		kevent( kq, &ev, 1, NULL, 0, NULL );
+		EV_SET( &ev, *conff_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE | NOTE_ATTRIB, 0, nullptr );
+		kevent( kq, &ev, 1, nullptr, 0, nullptr );
 	}
 }
 #endif
@@ -1194,7 +1194,7 @@ int main(int argc, char** argv) {
 					lockfile = args.OptionArg();
 					break;
 				case OPT_LOGGROUP:
-					if(strchr(args.OptionArg(), '"') != NULL) {
+					if(strchr(args.OptionArg(), '"') != nullptr) {
 						log_msg(SevError, "Invalid log group '%s', cannot contain '\"'\n", args.OptionArg());
 						exit(1);
 					}
@@ -1226,9 +1226,9 @@ int main(int argc, char** argv) {
 		_confpath = joinPath(buf, _confpath);
 	}
 
-	// Guaranteed (if non-NULL) to be an absolute path with no
+	// Guaranteed (if non-nullptr) to be an absolute path with no
 	// symbolic link, /./ or /../ components
-	const char *p = realpath(_confpath.c_str(), NULL);
+	const char *p = realpath(_confpath.c_str(), nullptr);
 	if (!p) {
 		log_msg(SevError, "No configuration file at %s\n", _confpath.c_str());
 		exit(1);
@@ -1351,14 +1351,14 @@ int main(int argc, char** argv) {
 
 	struct kevent ev;
 
-	EV_SET( &ev, SIGHUP, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent( kq, &ev, 1, NULL, 0, NULL );
-	EV_SET( &ev, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent( kq, &ev, 1, NULL, 0, NULL );
-	EV_SET( &ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent( kq, &ev, 1, NULL, 0, NULL );
-	EV_SET( &ev, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
-	kevent( kq, &ev, 1, NULL, 0, NULL );
+	EV_SET( &ev, SIGHUP, EVFILT_SIGNAL, EV_ADD, 0, 0, nullptr);
+	kevent( kq, &ev, 1, nullptr, 0, nullptr );
+	EV_SET( &ev, SIGINT, EVFILT_SIGNAL, EV_ADD, 0, 0, nullptr);
+	kevent( kq, &ev, 1, nullptr, 0, nullptr );
+	EV_SET( &ev, SIGTERM, EVFILT_SIGNAL, EV_ADD, 0, 0, nullptr);
+	kevent( kq, &ev, 1, nullptr, 0, nullptr );
+	EV_SET( &ev, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, nullptr);
+	kevent( kq, &ev, 1, nullptr, 0, nullptr );
 
 	int confd_fd = -1;
 	int conff_fd = -1;
@@ -1383,7 +1383,7 @@ int main(int argc, char** argv) {
 	   pselect, but none blocks all signals while processing events */
 	sigprocmask(SIG_SETMASK, &full_mask, &normal_mask);
 #elif defined(__APPLE__) || defined(__FreeBSD__)
-	sigprocmask(0, NULL, &normal_mask);
+	sigprocmask(0, nullptr, &normal_mask);
 #endif
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -1474,10 +1474,10 @@ int main(int argc, char** argv) {
 		srfds = rfds;
 		nfds = 0;
 		if(timeout < 0) {
-			nfds = pselect(maxfd+1, &srfds, NULL, NULL, NULL, &normal_mask);
+			nfds = pselect(maxfd+1, &srfds, nullptr, nullptr, nullptr, &normal_mask);
 		}
 		else if(timeout > 0) {
-			nfds = pselect(maxfd+1, &srfds, NULL, NULL, &tv, &normal_mask);
+			nfds = pselect(maxfd+1, &srfds, nullptr, nullptr, &tv, &normal_mask);
 		}
 
 		if(nfds == 0) {
@@ -1486,10 +1486,10 @@ int main(int argc, char** argv) {
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 		int nev = 0;
 		if(timeout < 0) {
-			nev = kevent( kq, NULL, 0, &ev, 1, NULL );
+			nev = kevent( kq, nullptr, 0, &ev, 1, nullptr );
 		}
 		else if(timeout > 0) {
-			nev = kevent( kq, NULL, 0, &ev, 1, &tv );
+			nev = kevent( kq, nullptr, 0, &ev, 1, &tv );
 		}
 
 		if(nev == 0) {
@@ -1503,8 +1503,8 @@ int main(int argc, char** argv) {
 					// This could be the conf dir or conf file
 					if ( ev.ident == confd_fd ) {
 						/* Changes in the directory holding the conf file; schedule a future timeout to reset watches and reload the conf */
-						EV_SET( &timeout, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, 200, NULL );
-						kevent( kq, &timeout, 1, NULL, 0, NULL );
+						EV_SET( &timeout, 1, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, 200, nullptr );
+						kevent( kq, &timeout, 1, nullptr, 0, nullptr );
 					} else {
 						/* Direct writes to the conf file; reload! */
 						reload = true;
@@ -1559,7 +1559,7 @@ int main(int argc, char** argv) {
 
 					/* Unblock signals */
 					signal(SIGCHLD, SIG_IGN);
-					sigprocmask(SIG_SETMASK, &normal_mask, NULL);
+					sigprocmask(SIG_SETMASK, &normal_mask, nullptr);
 
 					/* If daemonized, setsid() was called earlier so we can just kill our entire new process group */
 					if(daemonize) {
@@ -1578,7 +1578,7 @@ int main(int argc, char** argv) {
 					/* Wait for all child processes (says POSIX.1-2001) */
 					/* POSIX.1-2001 specifies that if the disposition of SIGCHLD is set to SIG_IGN, then children that terminate do not become zombies and a call to wait()
 					   will block until all children have terminated, and then fail with errno set to ECHILD */
-					wait(NULL);
+					wait(nullptr);
 
 					unlink(lockfile.c_str());
 					exit(0);
@@ -1617,7 +1617,7 @@ int main(int argc, char** argv) {
 						if(search != additional_watch_wds.end() && event->len && search->second.count(event->name)) {
 							log_msg(SevInfo, "Changes detected on watched symlink `%s': (%d, %#010x)\n", event->name, event->wd, event->mask);
 
-							char *redone_confpath = realpath(_confpath.c_str(), NULL);
+							char *redone_confpath = realpath(_confpath.c_str(), nullptr);
 							if(!redone_confpath) {
 								log_msg(SevInfo, "Error calling realpath on `%s', continuing...\n", _confpath.c_str());
 								// exit(1);

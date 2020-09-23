@@ -103,7 +103,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 
 	do {
 		iter++;
@@ -113,7 +113,7 @@ void printAtCol(const char* text, int col) {
 			printf("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' ' || *start == '\n') start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 }
@@ -121,7 +121,7 @@ void printAtCol(const char* text, int col) {
 std::string lineWrap(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 	std::string out = "";
 	do {
 		iter++;
@@ -131,7 +131,7 @@ std::string lineWrap(const char* text, int col) {
 			out += format("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' '/* || *start == '\n'*/) start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 	return out;
@@ -2518,7 +2518,7 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
-	const char* helpExtra[] = {"escaping", "options", NULL};
+	const char* helpExtra[] = {"escaping", "options", nullptr};
 
 	const char** he = helpExtra;
 
@@ -3032,7 +3032,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			.detail("ClusterFile", ccf->getFilename().c_str())
 			.detail("ConnectionString", ccf->getConnectionString().toString())
 			.setMaxFieldLength(10000)
@@ -4607,7 +4607,7 @@ int main(int argc, char **argv) {
 	sigemptyset( &act.sa_mask );
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
-	sigaction(SIGINT, &act, NULL);
+	sigaction(SIGINT, &act, nullptr);
 #endif
 
 	CLIOptions opt(argc, argv);

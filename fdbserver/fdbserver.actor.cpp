@@ -212,7 +212,7 @@ bool enableFailures = true;
 //    LocalFree function.
 BOOL CreatePermissiveReadWriteDACL(SECURITY_ATTRIBUTES * pSA)
 {
-	UNSTOPPABLE_ASSERT( pSA != NULL );
+	UNSTOPPABLE_ASSERT( pSA != nullptr );
 
 	TCHAR * szSD = TEXT("D:")        // Discretionary ACL
 		TEXT("(A;OICI;GR;;;AU)")     // Allow read/write/execute to authenticated users
@@ -222,7 +222,7 @@ BOOL CreatePermissiveReadWriteDACL(SECURITY_ATTRIBUTES * pSA)
 			szSD,
 			SDDL_REVISION_1,
 			&(pSA->lpSecurityDescriptor),
-			NULL);
+			nullptr);
 }
 #endif
 
@@ -264,7 +264,7 @@ private:
 };
 
 UID getSharedMemoryMachineId() {
-	UID *machineId = NULL;
+	UID *machineId = nullptr;
 	int numTries = 0;
 
 	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
@@ -873,7 +873,7 @@ struct CLIOptions {
 	std::vector<std::string> publicAddressStrs, listenAddressStrs;
 	NetworkAddressList publicAddresses, listenAddresses;
 
-	const char* targetKey = NULL;
+	const char* targetKey = nullptr;
 	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
@@ -987,12 +987,12 @@ private:
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
 			case OPT_NOBUFSTDOUT:
-				setvbuf(stdout, NULL, _IONBF, 0);
-				setvbuf(stderr, NULL, _IONBF, 0);
+				setvbuf(stdout, nullptr, _IONBF, 0);
+				setvbuf(stderr, nullptr, _IONBF, 0);
 				break;
 			case OPT_BUFSTDOUTERR:
-				setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-				setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+				setvbuf(stdout, nullptr, _IOFBF, BUFSIZ);
+				setvbuf(stderr, nullptr, _IOFBF, BUFSIZ);
 				break;
 			case OPT_ROLE:
 				sRole = args.OptionArg();
@@ -1494,8 +1494,8 @@ int main(int argc, char* argv[]) {
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
-		setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-		setvbuf(stderr, NULL, _IOLBF, BUFSIZ);
+		setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
+		setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
 
 		// Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
@@ -1662,7 +1662,7 @@ int main(int argc, char* argv[]) {
 		    .detail("ClusterFile", opts.connectionFile ? opts.connectionFile->getFilename().c_str() : "")
 		    .detail("ConnectionString",
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
-		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
@@ -1730,10 +1730,10 @@ int main(int argc, char* argv[]) {
 				std::string absDataFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				int backupFailed = true;
-				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", NULL);
+				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
 				if (isRestoringStr) {
 					isRestoring = atoi(isRestoringStr);
-					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", NULL);
+					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", nullptr);
 					if (isRestoring && backupFailedStr) {
 						backupFailed = atoi(backupFailedStr);
 					}
@@ -1976,7 +1976,7 @@ int main(int argc, char* argv[]) {
 				std::string s;
 
 #ifdef __linux__
-				char *demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+				char *demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
 					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))

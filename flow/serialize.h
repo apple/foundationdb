@@ -348,7 +348,7 @@ public:
 	int getLength() { return size; }
 	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
-	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
+	explicit BinaryWriter( VersionOptions vo ) : data(nullptr), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
@@ -755,11 +755,11 @@ struct PacketWriter {
 	typedef PacketWriter WRITER;
 
 	PacketBuffer* buffer;
-	struct ReliablePacket *reliable;  // NULL if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
+	struct ReliablePacket *reliable;  // nullptr if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
 	int length;
 	ProtocolVersion m_protocolVersion;
 
-	// reliable is NULL if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
+	// reliable is nullptr if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
 	//   for filling in reliable->buffer, ->cont, ->begin, and ->end, but not ->prev or ->next.
 	template <class VersionOptions>
 	PacketWriter(PacketBuffer* buf, ReliablePacket* reliable, VersionOptions vo) { init(buf, reliable); vo.read(*this); }

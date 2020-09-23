@@ -103,12 +103,12 @@ struct CacheRangeInfo : ReferenceCounted<CacheRangeInfo>, NonCopyable {
 		delete adding;
 	}
 
-	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, NULL, NULL); }
-	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, NULL, data); }
-	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), NULL); }
+	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, nullptr, nullptr); }
+	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, nullptr, data); }
+	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), nullptr); }
 
-	bool isReadable() const { return readWrite!=NULL; }
-	bool isAdding() const { return adding!=NULL; }
+	bool isReadable() const { return readWrite!=nullptr; }
+	bool isAdding() const { return adding!=nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }

@@ -70,7 +70,7 @@ struct UnitTestWorkload : TestWorkload {
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
 		state std::vector<UnitTest*> tests;
 
-		for (auto test = g_unittests.tests; test != NULL; test = test->next) {
+		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
 			if (StringRef(test->name).startsWith(self->testPattern)) {
 				++self->testsAvailable;
 				tests.push_back(test);

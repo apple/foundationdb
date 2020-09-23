@@ -1338,7 +1338,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	if(begin.getKey() > maxKey || end.getKey() > maxKey)
 		return key_outside_legal_range();
 
-	//This optimization prevents NULL operations from being added to the conflict range
+	//This optimization prevents nullptr operations from being added to the conflict range
 	if( limits.isReached() ) {
 		TEST(true); // RYW range read limit 0
 		return Standalone<RangeResultRef>();

@@ -1057,8 +1057,8 @@ void sleeptest() {
 			timespec ts;
 			ts.tv_sec = times[j] / 1000000;
 			ts.tv_nsec = (times[j] % 1000000)*1000;
-			clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL);
-			//nanosleep(&ts, NULL);
+			clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+			//nanosleep(&ts, nullptr);
 		}
 		double t = timer() - b;
 		printf("Sleep test (%dus x %d): %0.1f\n", times[j], n, double(t)/n*1e6);

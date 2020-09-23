@@ -123,7 +123,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		try
 		{
 			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
-			if(self->fileHandle.getPtr() == NULL)
+			if(self->fileHandle.getPtr() == nullptr)
 				self->fileHandle = Reference<AsyncFileHandle>(new AsyncFileHandle(file, self->path, false));
 			else
 				self->fileHandle->file = file;

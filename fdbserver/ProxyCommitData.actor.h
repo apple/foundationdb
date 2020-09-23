@@ -198,7 +198,7 @@ struct ProxyCommitData {
 	                Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 	  : dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
-	    logAdapter(NULL), txnStateStore(NULL), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
+	    logAdapter(nullptr), txnStateStore(nullptr), popRemoteTxs(false), committedVersion(recoveryTransactionVersion),
 	    version(0), minKnownCommittedVersion(0), lastVersionTime(0), commitVersionRequestNumber(1),
 	    mostRecentProcessedRequestNumber(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    lastCoalesceTime(0), localCommitBatchesStarted(0), locked(false),

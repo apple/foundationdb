@@ -65,7 +65,7 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 	// EIO.
 	if ((flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) &&
 	    !FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
-		f = AsyncFileKAIO::open(filename, flags, mode, NULL);
+		f = AsyncFileKAIO::open(filename, flags, mode, nullptr);
 	else
 #endif
 	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
