@@ -280,9 +280,11 @@ public:
 
 	virtual Future<BackupFileList> dumpFileList(Version begin = 0, Version end = std::numeric_limits<Version>::max()) = 0;
 
-	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
-	// restore to given version is not possible.
-	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) = 0;
+	// Get exactly the files necessary to restore the key space filtered by the specified key ranges to targetVersion.
+	// If targetVersion is 'latestVersion', use the minimum restorable version in a snapshot. Returns non-present if
+	// restoring to the given version is not possible.
+	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
+	                                                          VectorRef<KeyRangeRef> keyRangesFilter = {}) = 0;
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(std::string url);
