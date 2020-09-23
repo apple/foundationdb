@@ -223,6 +223,7 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 
 	loop {
 		try {
+			// TODO: Consider clearrange traffic in write traffic control
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : ranges) {
@@ -613,7 +614,8 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysDone", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("StagingKeys", batchData->stagingKeys.size())
-	    .detail("TransactionBatches", txnBatches);
+	    .detail("TransactionBatches", txnBatches)
+	    .detail("TotalBytesToWrite", batchData->totalBytesToWrite);
 	return Void();
 }
 
@@ -633,10 +635,11 @@ ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Referen
 }
 
 void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreApplierData> self) {
-	TraceEvent("FastRestoreApplierUpdateRateRequest", self->id())
-	    .suppressFor(10)
+	TraceEvent ev("FastRestoreApplierUpdateRateRequest", self->id());
+	ev.suppressFor(10)
 	    .detail("BatchIndex", req.batchIndex)
-	    .detail("FinishedBatch", self->finishedBatch.get());
+	    .detail("FinishedBatch", self->finishedBatch.get())
+	    .detail("WriteMB", req.writeMB);
 	double remainingDataMB = 0;
 	if (self->finishedBatch.get() == req.batchIndex - 1) { // current applying batch
 		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
@@ -645,6 +648,11 @@ void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreAppl
 		remainingDataMB = batchData->totalBytesToWrite > 0
 		                      ? std::max(0.0, batchData->totalBytesToWrite - batchData->appliedBytes) / 1024 / 1024
 		                      : batchData->receivedBytes / 1024 / 1024;
+		ev.detail("TotalBytesToWrite", batchData->totalBytesToWrite)
+		    .detail("AppliedBytes", batchData->appliedBytes)
+		    .detail("ReceivedBytes", batchData->receivedBytes)
+		    .detail("TargetWriteRateMB", batchData->targetWriteRateMB)
+		    .detail("RemainingDataMB", remainingDataMB);
 	}
 	req.reply.send(RestoreUpdateRateReply(self->id(), remainingDataMB));
 
@@ -652,15 +660,15 @@ void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreAppl
 }
 
 ACTOR static Future<Void> traceRate(const char* context, Reference<ApplierBatchData> batchData, int batchIndex,
-                                    UID nodeID) {
-	ASSERT(batchData.isValid());
+                                    UID nodeID, NotifiedVersion* finishedVB) {
 	loop {
-		if (!batchData.isValid()) {
+		if ((finishedVB->get() != batchIndex - 1) || !batchData.isValid()) {
 			break;
 		}
 		TraceEvent(context, nodeID)
 		    .suppressFor(10)
 		    .detail("BatchIndex", batchIndex)
+		    .detail("FinishedBatchIndex", finishedVB->get())
 		    .detail("TotalDataToWriteMB", batchData->totalBytesToWrite / 1024 / 1024)
 		    .detail("AppliedBytesMB", batchData->appliedBytes / 1024 / 1024)
 		    .detail("TargetBytesMB", batchData->targetWriteRateMB)
@@ -700,8 +708,8 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 			batchData->dbApplier = Never();
 			batchData->dbApplier = writeMutationsToDB(self->id(), req.batchIndex, batchData, cx);
 			batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
-			batchData->rateTracer =
-			    traceRate("FastRestoreApplierTransactionRateControl", batchData, req.batchIndex, self->id());
+			batchData->rateTracer = traceRate("FastRestoreApplierTransactionRateControl", batchData, req.batchIndex,
+			                                  self->id(), &self->finishedBatch);
 		}
 
 		ASSERT(batchData->dbApplier.present());
@@ -714,7 +722,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
 		if (self->finishedBatch.get() == req.batchIndex - 1) {
 			batchData->rateTracer = traceRate("FastRestoreApplierTransactionRateControlDone", batchData, req.batchIndex,
-			                                  self->id()); // Track the last rate info
+			                                  self->id(), &self->finishedBatch); // Track the last rate info
 			self->finishedBatch.set(req.batchIndex);
 			// self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
 			// Free memory for the version batch

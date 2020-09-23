@@ -297,7 +297,9 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
-	~ApplierBatchData() = default;
+	~ApplierBatchData() {
+		rateTracer = Void(); // cancel actor
+	}
 
 	void addMutation(MutationRef m, LogMessageVersion ver) {
 		if (!isRangeMutation(m)) {

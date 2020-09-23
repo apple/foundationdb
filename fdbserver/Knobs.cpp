@@ -643,7 +643,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FASTRESTORE_REQBATCH_LOG,                            false ); if( randomize && BUGGIFY ) { FASTRESTORE_REQBATCH_LOG = deterministicRandom()->random01() < 0.2 ? true : false; }
 	init( FASTRESTORE_TXN_CLEAR_MAX,                             100 ); if( randomize && BUGGIFY ) { FASTRESTORE_TXN_CLEAR_MAX = deterministicRandom()->random01() * 100 + 1; }
 	init( FASTRESTORE_TXN_RETRY_MAX,                              10 ); if( randomize && BUGGIFY ) { FASTRESTORE_TXN_RETRY_MAX = deterministicRandom()->random01() * 100 + 1; }
-	init( FASTRESTORE_TXN_EXTRA_DELAY,                           0.1 ); if( randomize && BUGGIFY ) { FASTRESTORE_TXN_EXTRA_DELAY = deterministicRandom()->random01() * 1 + 0.001;}
+	init( FASTRESTORE_TXN_EXTRA_DELAY,                           0.0 ); if( randomize && BUGGIFY ) { FASTRESTORE_TXN_EXTRA_DELAY = deterministicRandom()->random01() * 1 + 0.001;}
 	init( FASTRESTORE_NOT_WRITE_DB,                            false ); // Perf test only: set it to true will cause simulation failure
 	init( FASTRESTORE_USE_RANGE_FILE,                           true ); // Perf test only: set it to false will cause simulation failure
 	init( FASTRESTORE_USE_LOG_FILE,                             true ); // Perf test only: set it to false will cause simulation failure
