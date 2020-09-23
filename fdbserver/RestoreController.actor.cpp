@@ -912,7 +912,7 @@ ACTOR static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInt
 // This is the amount of data that are in in-progress transactions.
 ACTOR static Future<Void> updateApplierWriteBW(Reference<ControllerBatchData> batchData,
                                                std::map<UID, RestoreApplierInterface> appliersInterf, int batchIndex) {
-	state std::map<UID, double> applierRemainMB;
+	state std::unordered_map<UID, double> applierRemainMB;
 	state double totalRemainMB = SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB;
 	state double standardAvgBW = SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS;
 	state int loopCount = 0;
