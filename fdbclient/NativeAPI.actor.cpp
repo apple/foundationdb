@@ -3497,7 +3497,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 			if(e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
-				wait(delay(5.0));
+				wait(delayJittered(5.0));
 			} else {
 				throw;
 			}
