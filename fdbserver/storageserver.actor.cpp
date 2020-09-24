@@ -155,6 +155,7 @@ struct StorageServerDisk {
 
 	void makeNewStorageServerDurable();
 	bool makeVersionMutationsDurable( Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft );
+	Future<int64_t> asyncMakeVersionMutationsDurable(Version startStorageVersion, Version desiredVersion, int64_t bytesLeft);
 	void makeVersionDurable( Version version );
 	Future<bool> restoreDurableState();
 
@@ -177,6 +178,8 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
+	
+	bool canPipelineCommits() const {return storage->canPipelineCommits();}
 
 private:
 	struct StorageServer* data;
@@ -3078,68 +3081,128 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
-		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
-		loop {
-			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
-			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage );
-			data->oldestVersion.set( newOldestVersion );
-			wait( finishedForgetting );
-			wait( yield(TaskPriority::UpdateStorage) );
-			if (done) break;
-		}
-
-		// Set the new durable version as part of the outstanding change set, before commit
-		if (startOldestVersion != newOldestVersion)
-			data->storage.makeVersionDurable( newOldestVersion );
-
-		debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
-		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
+		state Future<Void> durable = Void();
+		if (data->storage.canPipelineCommits()) {
+			state Future<int64_t> bytesLeftF;
+			state bool done = false;
+			loop{
+				durableInProgress.reset();
+				data->durableInProgress = durableInProgress.getFuture();
+				// Start commit all data up to version newOldestVersion that are ready to be persisted
+				durable = data->storage.commit();
+				durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
+				newOldestVersion = data->storageVersion();
 
-		if (bytesLeft > 0) {
-			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
-		}
+				// Start moving data after newOldestVersion from SS into engine's buffer to prepare for next round
+				startOldestVersion = data->storageVersion();
+				desiredVersion = data->desiredOldestVersion.get();
+				bytesLeftF = data->storage.asyncMakeVersionMutationsDurable(startOldestVersion, desiredVersion, bytesLeft);
 
-		wait( durable );
+				wait(durable && durableDelay && success(bytesLeftF));
 
-		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
+				if (bytesLeftF.get() > 0) {
+					wait(data->storage.commit());
+					newOldestVersion = data->storageVersion();
+					done = true;
+				}
+				debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
 
-		if(newOldestVersion > data->rebootAfterDurableVersion) {
-			TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
-			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
-			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
-			// Otherwise, in the race situation when storage server receives both reboot and
-			// brokenPromise of durableInProgress, the worker of the storage server will die.
-			// We will eventually end up with no worker for storage server role.
-			// The data distributor's buildTeam() will get stuck in building a team
-			durableInProgress.sendError(please_reboot());
-			throw please_reboot();
-		}
+				if(newOldestVersion > data->rebootAfterDurableVersion) {
+					TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+					// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
+					// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
+					// Otherwise, in the race situation when storage server receives both reboot and
+					// brokenPromise of durableInProgress, the worker of the storage server will die.
+					// We will eventually end up with no worker for storage server role.
+					// The data distributor's buildTeam() will get stuck in building a team
+					durableInProgress.sendError(please_reboot());
+					throw please_reboot();
+				}
 
-		durableInProgress.send(Void());
-		wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
+				durableInProgress.send(Void());
+				wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
 
-		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
-		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
-		// because otherwise the latest version of mutableData might be partially loaded.
-		wait( data->durableVersionLock.take() );
-		data->popVersion( data->durableVersion.get() + 1 );
-
-		while (!changeDurableVersion( data, newOldestVersion )) {
-			if(g_network->check_yield(TaskPriority::UpdateStorage)) {
-				data->durableVersionLock.release();
-				wait(delay(0, TaskPriority::UpdateStorage));
+				// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
+				// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
+				// because otherwise the latest version of mutableData might be partially loaded.
 				wait( data->durableVersionLock.take() );
+				data->popVersion( data->durableVersion.get() + 1 );
+
+				while (!changeDurableVersion( data, newOldestVersion )) {
+					if(g_network->check_yield(TaskPriority::UpdateStorage)) {
+						data->durableVersionLock.release();
+						wait(delay(0, TaskPriority::UpdateStorage));
+						wait( data->durableVersionLock.take() );
+					}
+				}
+
+				data->durableVersionLock.release();
+				if (done) break;
 			}
+		} else {
+			
+			// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
+			loop {
+				state bool mvmdDone = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
+				// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
+				// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
+				Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage );
+				data->oldestVersion.set( newOldestVersion );
+				wait( finishedForgetting );
+				wait( yield(TaskPriority::UpdateStorage) );
+				if (mvmdDone) break;
+			}
+
+			// Set the new durable version as part of the outstanding change set, before commit
+			if (startOldestVersion != newOldestVersion)
+				data->storage.makeVersionDurable( newOldestVersion );
+
+			debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
+			durable = data->storage.commit();
+
+			if (bytesLeft > 0) {
+				durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
+			}
+
+			wait( durable );
+
+			debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
+
+			if(newOldestVersion > data->rebootAfterDurableVersion) {
+				TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+				// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
+				// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
+				// Otherwise, in the race situation when storage server receives both reboot and
+				// brokenPromise of durableInProgress, the worker of the storage server will die.
+				// We will eventually end up with no worker for storage server role.
+				// The data distributor's buildTeam() will get stuck in building a team
+				durableInProgress.sendError(please_reboot());
+				throw please_reboot();
+			}
+
+			durableInProgress.send(Void());
+			wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
+
+			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
+			// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
+			// because otherwise the latest version of mutableData might be partially loaded.
+			wait( data->durableVersionLock.take() );
+			data->popVersion( data->durableVersion.get() + 1 );
+
+			while (!changeDurableVersion( data, newOldestVersion )) {
+				if(g_network->check_yield(TaskPriority::UpdateStorage)) {
+					data->durableVersionLock.release();
+					wait(delay(0, TaskPriority::UpdateStorage));
+					wait( data->durableVersionLock.take() );
+				}
+			}
+
+			data->durableVersionLock.release();
+
+			//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
+			wait( durableDelay );
 		}
-
-		data->durableVersionLock.release();
-
-		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
-
-		wait( durableDelay );
 	}
 }
 
@@ -3222,6 +3285,30 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations, 
 			storage->clear(KeyRangeRef(m.param1, m.param2));
 		}
 	}
+}
+
+ACTOR Future<int64_t> _asyncMakeVersionMutationsDurable(StorageServerDisk* self, StorageServer* data, Version startStorageVersion, Version desiredVersion, int64_t bytesLeft) {
+	state Version newOldestVersion = startStorageVersion;
+	// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
+	loop {
+		state bool done = self->makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
+		// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
+		// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
+		Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage );
+		data->oldestVersion.set( newOldestVersion );
+		wait( finishedForgetting );
+		wait( yield(TaskPriority::UpdateStorage) );
+		if (done) break;
+	}
+
+	// Set the new durable version as part of the outstanding change set, before commit
+	if (startStorageVersion != newOldestVersion)
+		self->makeVersionDurable( newOldestVersion );
+	return bytesLeft;
+}
+
+Future<int64_t> StorageServerDisk::asyncMakeVersionMutationsDurable(Version startStorageVersion, Version desiredVersion, int64_t bytesLeft) {
+	return _asyncMakeVersionMutationsDurable(this, data, startStorageVersion, desiredVersion, bytesLeft);
 }
 
 bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft ) {

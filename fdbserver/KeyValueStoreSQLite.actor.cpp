@@ -1453,6 +1453,7 @@ public:
 
 	virtual KeyValueStoreType getType() const override { return type; }
 	virtual StorageBytes getStorageBytes() const override;
+	virtual bool canPipelineCommits() const override { return false; }
 
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) override;

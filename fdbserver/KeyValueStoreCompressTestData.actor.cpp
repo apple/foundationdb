@@ -35,6 +35,7 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 
 	KeyValueStoreCompressTestData(IKeyValueStore* store) : store(store) {}
 
+	virtual bool canPipelineCommits() const override {return false;}
 	virtual Future<Void> getError() override { return store->getError(); }
 	virtual Future<Void> onClosed() override { return store->onClosed(); }
 	virtual void dispose() override {
