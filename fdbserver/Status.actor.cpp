@@ -1048,15 +1048,12 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 		const TraceEventFields& dbAvailableMsg = mDBAvailableF.get();
 		if (dbAvailableMsg.size() > 0) {
 			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
-			int numOfOldGensOfLogs = dbAvailableMsg.getInt("NumOfOldGensOfLogs");
 			if (!rv.isError()) {
 				double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv.get() - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 				message["time_since_last_recovered"] = lastRecoveredSecondsAgo;
 			}
-			message["number_of_old_generations_of_tlogs"] = numOfOldGensOfLogs;
 		} else {
 			message["time_since_last_db_turned_available_seconds"] = -1;
-			message["number_of_old_generations_of_tlogs"] = -1;
 		}
 
 		// Add additional metadata for certain statuses

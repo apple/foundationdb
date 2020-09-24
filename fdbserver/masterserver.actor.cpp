@@ -1690,7 +1690,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.trackLatest("MasterRecoveryState");
 
 	TraceEvent("MasterRecoveryAvailable", self->dbgid)
-		.detail("NumOfOldGensOfLogs", self->cstate.myDBState.oldTLogData.size())
 		.detail("AvailableAtVersion", self->version)
 		.trackLatest("MasterRecoveryAvailable");
 
