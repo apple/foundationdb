@@ -1,3 +1,5 @@
+set(RUN_JAVA_TESTS ON CACHE BOOL "Run Java unit tests")
+
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
   src/main/com/apple/foundationdb/async/AsyncIterator.java
@@ -252,4 +254,13 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fat-jar fdb-java)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
+
+  set(TEST_CP ${test_jar} ${target_jar})
+  if(RUN_JAVA_TESTS)
+    set(enabled ENABLED)
+  else()
+    set(enabled DISABLED)
+  endif()
+  add_java_test(NAME DirectoryTest CLASSPATH ${TEST_CP}
+    CLASS com.apple.foundationdb.test.DirectoryTest ${enabled})
 endif()
