@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -32,12 +33,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 	FileBackupAgent backupAgent;
 	bool submitOnly;
 	bool restoreOnly;
+	bool waitForBackup;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
 		tag = getOption(options, LiteralStringRef("tag"), LiteralStringRef("default"));
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
+		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
 	}
 
 	virtual std::string description() { return "IncrementalBackup"; }
@@ -51,11 +54,37 @@ struct IncrementalBackupWorkload : TestWorkload {
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	virtual Future<bool> check(Database const& cx) {
+		if (clientId || !waitForBackup) {
+			return true;
+		}
+		return _check(cx, this);
+	}
+
+	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
+		state Reference<IBackupContainer> backupContainer;
+		state UID backupUID;
+		EBackupState waitResult =
+		    wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID));
+		TraceEvent("IBackupCheckWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state Version v = wait(tr->getReadVersion());
+		loop {
+			BackupDescription desc = wait(backupContainer->describeBackup(true));
+			TraceEvent("IBackupVersionGate")
+			    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
+			    .detail("ContiguousLogEndVersion",
+			            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
+			    .detail("TargetVersion", v);
+			if (!desc.contiguousLogEnd.present()) continue;
+			if (desc.contiguousLogEnd.get() >= v) break;
+			// Avoid spamming requests with a delay
+			wait(delay(5.0));
+		}
+		return true;
+	}
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
-		// Add a commit both before the submit and restore to test that incremental backup
-		// can be performed on non-empty database
 		if (self->submitOnly) {
 			Standalone<VectorRef<KeyRangeRef>> backupRanges;
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
@@ -63,7 +92,12 @@ struct IncrementalBackupWorkload : TestWorkload {
 			try {
 				wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
 				                                    false, true));
+				// Wait for backup container to be created and avoid race condition
+				wait(delay(60.0));
+				EBackupState waitResult = wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false));
+				TraceEvent("IBackupSubmitWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
 			} catch (Error& e) {
+				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
 					throw;
 				}
@@ -75,7 +109,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state UID backupUID;
 			TraceEvent("IBackupRestoreAttempt");
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			// TODO: add testing scenario for atomics and beginVersion
 			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
 			                                       true, -1, true, normalKeys, Key(), Key(), true, true)));
 			TraceEvent("IBackupRestoreSuccess");
