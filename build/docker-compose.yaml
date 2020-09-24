@@ -2,7 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb/foundationdb-build:0.1.15
+    image: foundationdb/foundationdb-build:0.1.17
 
   build-setup: &build-setup
     <<: *common
