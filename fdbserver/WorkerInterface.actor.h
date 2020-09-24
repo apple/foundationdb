@@ -29,6 +29,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/RpcProxyInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -53,6 +54,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeStorageRequest > storage;
 	RequestStream< struct InitializeLogRouterRequest > logRouter;
 	RequestStream< struct InitializeBackupRequest > backup;
+	RequestStream< struct InitializeRpcProxyRequest > rpcProxy;
 
 	RequestStream< struct LoadedPingRequest > debugPing;
 	RequestStream< struct CoordinationPingMessage > coordinationPing;
@@ -91,7 +93,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
+		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, rpcProxy, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
 	}
 };
 
@@ -412,6 +414,16 @@ struct InitializeBackupRequest {
 	}
 };
 
+struct InitializeRpcProxyRequest {
+	constexpr static FileIdentifier file_identifier = 15762285;
+	ReplyPromise<struct RpcProxyInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
 	constexpr static FileIdentifier file_identifier = 12684574;
@@ -667,6 +679,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role RPC_PROXY;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -733,6 +746,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<Async
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> rpcProxy(RpcProxyInterface rpi, InitializeRpcProxyRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();
 void updateCpuProfiler(ProfilerRequest req);

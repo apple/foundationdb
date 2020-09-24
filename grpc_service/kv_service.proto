@@ -3,13 +3,81 @@ syntax = "proto3";
 package foundationdb;
 
 service FdbKvClient {
+	rpc CreateTransaction(CreateTransactionRequest) returns (CreateTransactionReply) {}
 	rpc GetValue(GetValueRequest) returns (GetValueReply) {}
+	rpc Mutate(MutateRequest) returns (MutateReply) {}
+	rpc Commit(CommitRequest) returns (CommitReply) {}
+}
+
+message FdbError {
+	int32 code = 1;
+	string name = 2;
+	string message = 3;
+}
+
+message UID {
+	string uid = 1;
+}
+
+message Mutation {
+	enum MutationType {
+		SET = 0;
+		CLEAR = 1;
+		ADD = 2;
+		BIT_AND = 6;
+		BIT_OR = 7;
+		BIT_XOR = 8;
+		APPEND_IF_FITS = 9;
+		MAX = 12;
+		MIN = 13;
+		SET_VERSIONSTAMPED_KEY = 14;
+		SET_VERSIONSTAMPED_VALUE = 15;
+		BYTE_MIN = 16;
+		BYTE_MAX = 17;
+		COMPARE_AND_CLEAR = 20;
+	}
+
+	MutationType mutationType = 1;
+	bytes param1 = 2;
+	bytes param2 = 3;
+}
+
+message OrderedMutationSet {
+	repeated Mutation mutations = 1;
+}
+
+message CreateTransactionRequest {
+	int64 readVersion = 1;
+}
+
+message CreateTransactionReply {
+	UID transactionId = 1;
 }
 
 message GetValueRequest {
-	bytes key = 1;
+	UID transactionId = 1;
+	bytes key = 2;
+	OrderedMutationSet mutations = 3;
 }
 
 message GetValueReply {
-	bytes value = 1;
+	bool present = 1;
+	bytes value = 2;
+}
+
+message MutateRequest {
+	UID transactionId = 1;
+	OrderedMutationSet mutations = 2;
+}
+
+message MutateReply {}
+
+message CommitRequest {
+	UID transactionId = 1;
+	OrderedMutationSet mutations = 2;
+}
+
+message CommitReply {
+	int64 committedVersion = 1;
+	bytes versionstamp = 2;
 }

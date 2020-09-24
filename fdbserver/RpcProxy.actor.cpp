@@ -27,15 +27,12 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/RecoveryState.h"
+#include "fdbserver/IRpcInterface.h"
+#include "fdbserver/GrpcService.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-
-#include "grpc_service/kv_service.grpc.pb.h"
-#include "grpc_service/kv_service.pb.h"
-
-#include <grpcpp/grpcpp.h>
 
 struct RpcProxyData {
 	UID dbgid;
@@ -45,162 +42,75 @@ struct RpcProxyData {
 
 	Database cx;
 
+	std::map<UID, Reference<ReadYourWritesTransaction>> openTransactions; // TODO: need expiration mechanism
+
 	RpcProxyData(UID dbgid, const InitializeRpcProxyRequest& req, Reference<AsyncVar<ServerDBInfo>> db) : dbgid(dbgid), cc("RpcProxy", dbgid.toString()) {
 		logger = traceCounters("RpcProxyMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "RpcProxyMetrics");
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, false, true);
 	}
 };
 
-struct RpcDatabase {
-	RpcDatabase(Database cx) : cx(cx) {}
-	Future<Optional<Value>> getValue(Key key);//, RpcCallData<foundationdb::GetValueRequest, foundationdb::GetValueReply> *callData);
-
-	Database cx;
-};
-
-ACTOR Future<Optional<Value>> getValue(RpcDatabase *self, Key key) {//, grpc::Responder responder, void *tag) {
-	loop {
-		state Transaction tr(self->cx);
-		try {
-			Optional<Value> value = wait(tr.get(key));
-			return value;
-			//callData->reply.set_value(value.present() ? value.get().toString() : "<not present>");
-			//callData->responder.Finish(reply, Status::OK, callData);
-		} catch(Error &e) {
-			wait(tr.onError(e));
-		}
-	}	
+void processCreateTransaction(RpcProxyData *rpcProxyData, RpcCreateTransactionRequest request) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(rpcProxyData->cx));
+	if(request.readVersion > 0) {
+		tr->setVersion(request.readVersion);
+	}
+	else {
+		tr->getReadVersion(); // start the read version fetch
+	}
+	UID id = deterministicRandom()->randomUniqueID();
+	rpcProxyData->openTransactions[id] = tr;
+	request.reply.send(id);
 }
 
-Future<Optional<Value>> RpcDatabase::getValue(Key key) {
-	return ::getValue(this, key);
+Reference<ReadYourWritesTransaction> getTransaction(RpcProxyData *rpcProxyData, UID transactionId) {
+	// TODO: error for missing transaction
+	return rpcProxyData->openTransactions[transactionId];
 }
 
-class FdbKvClientServiceImpl : public foundationdb::FdbKvClient::Service {
-public:
-	FdbKvClientServiceImpl(RpcDatabase *db) : db(db) {}
+ACTOR Future<Void> processGetValue(RpcProxyData *rpcProxyData, RpcGetValueRequest request) {
+	state Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
 
-private:
-	grpc::Status GetValue(grpc::ServerContext* context, const foundationdb::GetValueRequest* request, foundationdb::GetValueReply* reply) override {
-		Standalone<StringRef> key(request->key());
-		ThreadFuture<Optional<Value>> f = onMainThread([this, key]() {
-			return db->getValue(key);
-		});
-
-		Optional<Value> value = f.getBlocking();
-
-		reply->set_value(value.present() ? value.get().toString() : "<not present>");
-		return grpc::Status::OK;
+	try {
+		Optional<Value> value = wait(tr->get(request.key));
+		request.reply.send(value);
+	} 
+	catch(Error &e) {
+		request.reply.sendError(e);
 	}
 
-	RpcDatabase *db;
-};
+	return Void();
+}
 
-/*class RpcCallDataBase {
-public:
-	RpcCallData(foundationdb::FdbKvClient::AsyncService *service, ServerCompletionQueue *completionQueue, RpcDatabase *db) : service(service), completionQueue(completionQueue), db(db), status(Status::PROCESS) {}
-
-	virtual ~RpcCallData() {}
-
-	void HandleCall() {
-		if(status == Status::PROCESS) {
-			status = Status::FINISH;
-			processRequest();
-		} else if(status == Status::FINISH) {
-			finishRequest();
-		} else {
-			ASSERT(false);
+void processApplyMutations(RpcProxyData *rpcProxyData, RpcApplyMutationsRequest request) {
+	Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
+	for(auto mutation : request.mutations) {
+		if(mutation.type == MutationRef::SetValue) {
+			tr->set(mutation.param1, mutation.param2);
+		}
+		else if(mutation.type == MutationRef::ClearRange) {
+			tr->clear(KeyRangeRef(mutation.param1, mutation.param2));
+		}
+		else {
+			tr->atomicOp(mutation.param1, mutation.param2, mutation.type);
 		}
 	}
+} 
 
-protected:
-	foundationdb::FdbKvClient::AsyncService *service;
-	ServerCompletionQueue *completionQueue;
-	RpcDatabase *db;
+ACTOR Future<Void> processCommit(RpcProxyData *rpcProxyData, RpcCommitRequest request) {
+	state Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
 
-	ServerContext ctx;
-
-	enum class Status {
-		PROCESS
-		FINISH
-	};
-
-	Status status;
-
-	virtual void getRequest() = 0;
-	virtual void processRequest() = 0;
-
-	virtual void finishRequest() {
-		delete this;
+	try {
+		state Future<Standalone<StringRef>> versionstamp = tr->getVersionstamp();
+		wait(tr->commit());
+		ASSERT(versionstamp.isReady() && (!versionstamp.isError() || versionstamp.getError().code() == error_code_no_commit_version));
+		request.reply.send(std::make_pair(tr->getCommittedVersion(), versionstamp.isError() ? Standalone<StringRef>() : versionstamp.get()));
 	}
-};
-
-template<class Request, class Reply>
-class RpcCallData : public RpcCallDataBase {
-public:
-	RpcCallData(foundationdb::FdbKvClient::AsyncService *service, ServerCompletionQueue *completionQueue, RpcDatabase *db) : RpcCallDataBase(service, completionQueue, db), responder(ctx) {
-		getRequest();
+	catch(Error &e) {
+		request.reply.sendError(e);
 	}
 
-private:
-	Request request;
-	Reply reply;
-
-	SeverAsyncResponseWriter<Reply> responder;
-
-	void getRequest() {
-		service->RequestGetValue(&ctx, &request, &responder, cq, cq, this);
-	}
-
-	void processRequest() {
-		new RpcCallData<Request, Reply>(service, completionQueue, db);
-
-		Standalone<StringRef> key(request->key());
-		ThreadFuture<Optional<Value>> f = onMainThread([this, key]() {
-			return db->getValue(key, this);
-		});
-	}
-};*/
-
-void* runServer(void* dbPtr) {
-	std::string server_address("0.0.0.0:50051");
-	RpcDatabase *db = (RpcDatabase*)dbPtr;
-	//foundationdb::FdbKvClient::AsyncService service;
-	FdbKvClientServiceImpl service(db);
-
-	grpc::ServerBuilder builder;
-
-	// Listen on the given address without any authentication mechanism.
-	builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-
-	// Register "service" as the instance through which we'll communicate with clients.
-	builder.RegisterService(&service);
-	//builder.RegisterAsyncService(&service);
-
-	auto cq = builder.AddCompletionQueue();
-	auto server = builder.BuildAndStart();
-
-	fprintf(stderr, "Running service\n");
-
-	server->Wait();
-
-	/*new RpcCallData<GetValueRequest, GetValueReply>(&service, cq.get(), db);
-
-	void *tag;
-	bool ok;
-
-	while(true) {
-		cq->next(&tag, &ok);
-		static_cast<RpcCallData<GetValueRequest, GetValueReply>*>(tag)->proceed();
-	}*/
-
-	return nullptr;
-}
-
-ACTOR Future<Void> processRpcRequests() {
-	loop {
-		wait(Future<Void>(Never()));
-	}
+	return Void();
 }
 
 ACTOR Future<Void> rpcProxyCore(
@@ -212,17 +122,35 @@ ACTOR Future<Void> rpcProxyCore(
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection( addActor.getFuture() );
 	state Future<Void> dbInfoChange = Void();
-	state RpcDatabase rpcDb(rpcProxyData.cx);
 
-	/*THREAD_HANDLE rpcThread = */startThread(runServer, &rpcDb);
+	state Reference<IRpcService> rpcService(dynamic_cast<IRpcService*>(new GrpcService()));
+	state RpcInterface rpcInterface;
 
-	addActor.send(processRpcRequests());
+	addActor.send(rpcService->run(NetworkAddress(), rpcInterface));
 
-	loop choose {
-		when( wait( dbInfoChange ) ) {
-			dbInfoChange = db->onChange();
+	try {
+		loop choose {
+		when(RpcCreateTransactionRequest request = waitNext(rpcInterface.createTransaction.getFuture())) {
+				processCreateTransaction(&rpcProxyData, request);
+			}
+			when(RpcGetValueRequest request = waitNext(rpcInterface.getValue.getFuture())) {
+				addActor.send(processGetValue(&rpcProxyData, request));
+			}
+			when(RpcApplyMutationsRequest request = waitNext(rpcInterface.applyMutations.getFuture())) {
+				processApplyMutations(&rpcProxyData, request);
+			}
+			when(RpcCommitRequest request = waitNext(rpcInterface.commit.getFuture())) {
+				addActor.send(processCommit(&rpcProxyData, request));
+			}
+			when(wait( dbInfoChange ) ) {
+				dbInfoChange = db->onChange();
+			}
+			when(wait(error)) {}
 		}
-		when (wait(error)) {}
+	}
+	catch(...) {
+		rpcService->shutdown();
+		throw;
 	}
 }
 

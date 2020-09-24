@@ -45,11 +45,12 @@ struct ProcessClass {
 		RatekeeperClass,
 		StorageCacheClass,
 		BackupClass,
+		RpcProxyClass,
 		InvalidClass = -1
 	};
 
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, StorageCache, Backup, NoRole };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, StorageCache, Backup, RpcProxy, NoRole };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -76,6 +77,7 @@ public:
 		else if (s=="ratekeeper") _class = RatekeeperClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
+		else if (s=="rpc_proxy") _class = RpcProxyClass;
 		else _class = InvalidClass;
 	}
 
@@ -97,6 +99,7 @@ public:
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
+		else if (classStr=="rpc_proxy") _class = RpcProxyClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -133,6 +136,7 @@ public:
 			case RatekeeperClass: return "ratekeeper";
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
+			case RpcProxyClass: return "rpc_proxy";
 			default: return "invalid";
 		}
 	}
