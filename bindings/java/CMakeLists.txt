@@ -255,12 +255,13 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
 
-  set(TEST_CP ${test_jar} ${target_jar})
   if(RUN_JAVA_TESTS)
     set(enabled ENABLED)
   else()
     set(enabled DISABLED)
   endif()
-  add_java_test(NAME DirectoryTest CLASSPATH ${TEST_CP}
+  set(TEST_CP ${tests_jar} ${target_jar})
+  message(STATUS "TEST_CP ${TEST_CP}")
+  add_java_test(NAME DirectoryTest CLASS_PATH ${TEST_CP}
     CLASS com.apple.foundationdb.test.DirectoryTest ${enabled})
 endif()

@@ -41,6 +41,7 @@ if __name__ == '__main__':
     parser.add_argument('--build-dir', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
     parser.add_argument('cmd', metavar="COMMAND", help="Command to run", nargs='+')
     args = parser.parse_args()
+    errcode = 1
     with TempCluster(args.build_dir) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
@@ -58,4 +59,5 @@ if __name__ == '__main__':
                 cmd_args.append(str(cluster.etc))
             else:
                 cmd_args.append(cmd)
-        subprocess.run(cmd_args, stdout=sys.stdout, stderr=sys.stderr)
+        errcode = subprocess.run(cmd_args, stdout=sys.stdout, stderr=sys.stderr).returncode
+    sys.exit(errcode)
