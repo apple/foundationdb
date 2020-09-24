@@ -620,11 +620,11 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
 // Write mutations to the destination DB
 ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Reference<ApplierBatchData> batchData,
                                       Database cx) {
-	TraceEvent("FastRestoreApplerPhaseApplyTxnStart", applierID).detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreApplierPhaseApplyTxnStart", applierID).detail("BatchIndex", batchIndex);
 	wait(precomputeMutationsResult(batchData, applierID, batchIndex, cx));
 
 	wait(applyStagingKeys(batchData, applierID, batchIndex, cx));
-	TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID)
+	TraceEvent("FastRestoreApplierPhaseApplyTxnDone", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("AppliedBytes", batchData->appliedBytes)
 	    .detail("ReceivedBytes", batchData->receivedBytes);
