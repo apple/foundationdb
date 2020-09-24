@@ -20,46 +20,50 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
-#include "flow/Tracing.h"
-#include <cctype>
-#include <iterator>
 #define BOOST_DATE_TIME_NO_LIB
-#include <boost/interprocess/managed_shared_memory.hpp>
-#include <boost/algorithm/string.hpp>
 
-#include "fdbrpc/simulator.h"
-#include "flow/DeterministicRandom.h"
-#include "fdbrpc/PerfMetric.h"
-#include "flow/Platform.h"
-#include "flow/SystemMonitor.h"
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/SystemData.h"
-#include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbclient/RestoreWorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/NetworkTest.h"
-#include "fdbserver/IKeyValueStore.h"
 #include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <iterator>
+#include <sstream>
+
 #include <stdarg.h>
 #include <stdio.h>
-#include <fstream>
-#include "fdbserver/pubsub.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
 #include <time.h>
-#include "fdbserver/Status.h"
-#include "fdbrpc/Net2FileSystem.h"
-#include "fdbrpc/AsyncFileCached.actor.h"
-#include "fdbserver/CoroFlow.h"
-#include "flow/TLSConfig.actor.h"
-#include "fdbclient/versions.h"
 
+#include <boost/algorithm/string.hpp>
+#include <boost/interprocess/managed_shared_memory.hpp>
+
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RestoreWorkerInterface.actor.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/versions.h"
 #include "fdbmonitor/SimpleIni.h"
+#include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/PerfMetric.h"
+#include "fdbrpc/simulator.h"
+#include "fdbserver/ConflictSet.h"
+#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/CoroFlow.h"
+#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/NetworkTest.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/Status.h"
+#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/pubsub.h"
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/Platform.h"
+#include "flow/SimpleOpt.h"
+#include "flow/SystemMonitor.h"
+#include "flow/TLSConfig.actor.h"
+#include "flow/Tracing.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
@@ -75,8 +79,7 @@
 #include <Windows.h>
 #endif
 
-#include "flow/SimpleOpt.h"
-#include <fstream>
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // clang-format off
@@ -471,152 +474,192 @@ static void printHelpTeaser( const char *name ) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", name);
 }
 
+static void printOptionUsage(std::string option, std::string description) {
+	static const std::string OPTION_INDENT("  ");
+	static const std::string DESCRIPTION_INDENT("                ");
+	static const int WIDTH = 80;
+
+	boost::algorithm::trim(option);
+	boost::algorithm::trim(description);
+
+	std::string result = OPTION_INDENT + option + "\n";
+
+	std::stringstream sstream(description);
+	if (sstream.eof()) {
+		printf(result.c_str());
+		return;
+	}
+
+	std::string currWord;
+	sstream >> currWord;
+
+	std::string currLine(DESCRIPTION_INDENT + ' ' + currWord);
+	int currLength = currLine.size();
+
+	while(!sstream.eof()) {
+		sstream >> currWord;
+
+		if (currLength + static_cast<int>(currWord.size()) + 1 > WIDTH) {
+			result += currLine + '\n';
+			currLine = DESCRIPTION_INDENT + ' ' + currWord;
+		} else {
+			currLine += ' ' + currWord;
+		}
+		currLength = currLine.size();
+	}
+	result += currLine + '\n';
+
+	printf(result.c_str());
+}
+
 static void printUsage( const char *name, bool devhelp ) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s -p ADDRESS [OPTIONS]\n\n", name);
-	printf("  -p ADDRESS, --public_address ADDRESS\n"
-		   "                 Public address, specified as `IP_ADDRESS:PORT' or `auto:PORT'.\n");
-	printf("  -l ADDRESS, --listen_address ADDRESS\n"
-		   "                 Listen address, specified as `IP_ADDRESS:PORT' (defaults to\n");
-	printf("                 public address).\n");
-	printf("  -C CONNFILE, --cluster_file CONNFILE\n"
-		   "                 The path of a file containing the connection string for the\n"
-		   "                 FoundationDB cluster. The default is first the value of the\n"
-		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
-	printf("  --seed_cluster_file SEEDCONNFILE\n"
-		   "                 The path of a seed cluster file which will be used to connect\n"
-		   "                 if the -C cluster file does not exist. If the server connects\n"
-		   "                 successfully using the seed file, then it copies the file to\n"
-		   "                 the -C file location.\n");
-	printf("  --seed_connection_string SEEDCONNSTRING\n"
-		   "                 The path of a seed connection string which will be used to connect\n"
-		   "                 if the -C cluster file does not exist. If the server connects\n"
-		   "                 successfully using the seed string, then it copies the string to\n"
-		   "                 the -C file location.\n");
+	printOptionUsage("-p ADDRESS, --public_address ADDRESS",
+		   " Public address, specified as `IP_ADDRESS:PORT' or `auto:PORT'.");
+	printOptionUsage("-l ADDRESS, --listen_address ADDRESS",
+		   " Listen address, specified as `IP_ADDRESS:PORT' (defaults to"
+		   " public address).");
+	printOptionUsage("-C CONNFILE, --cluster_file CONNFILE",
+		   " The path of a file containing the connection string for the"
+		   " FoundationDB cluster. The default is first the value of the"
+		   " FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',"
+		   " then `" + platform::getDefaultClusterFilePath() + "'.");
+	printOptionUsage("--seed_cluster_file SEEDCONNFILE",
+		   " The path of a seed cluster file which will be used to connect"
+		   " if the -C cluster file does not exist. If the server connects"
+		   " successfully using the seed file, then it copies the file to"
+		   " the -C file location.");
+	printOptionUsage("--seed_connection_string SEEDCONNSTRING",
+		   " The path of a seed connection string which will be used to connect"
+		   " if the -C cluster file does not exist. If the server connects"
+		   " successfully using the seed string, then it copies the string to"
+		   " the -C file location.");
 #ifdef __linux__
-	printf("  --data_filesystem PATH\n"
-		   "                 Turns on validation that all data files are written to a drive\n"
-		   "                 mounted at the specified PATH. This checks that the device at PATH\n"
-		   "                 is currently mounted and that any data files get written to the\n"
-		   "                 same device.\n");
+	printOptionUsage("--data_filesystem PATH",
+		   " Turns on validation that all data files are written to a drive"
+		   " mounted at the specified PATH. This checks that the device at PATH"
+		   " is currently mounted and that any data files get written to the"
+		   " same device.");
 #endif
-	printf("  -d PATH, --datadir PATH\n"
-		   "                 Store data files in the given folder (must be unique for each\n");
-	printf("                 fdbserver instance on a given machine).\n");
-	printf("  -L PATH, --logdir PATH\n"
-		   "                 Store log files in the given folder (default is `.').\n");
-	printf("  --logsize SIZE Roll over to a new log file after the current log file\n"
-		   "                 exceeds SIZE bytes. The default value is 10MiB.\n");
-	printf("  --maxlogs SIZE, --maxlogssize SIZE\n"
-		   "                 Delete the oldest log file when the total size of all log\n"
-		   "                 files exceeds SIZE bytes. If set to 0, old log files will not\n"
-		   "                 be deleted. The default value is 100MiB.\n");
-	printf("  --loggroup LOG_GROUP\n"
-	       "                 Sets the LogGroup field with the specified value for all\n"
-	       "                 events in the trace output (defaults to `default').\n");
-	printf("  --trace_format FORMAT\n"
-	       "                 Select the format of the log files. xml (the default) and json\n"
-	       "                 are supported.\n");
-	printf("  --tracer       TRACER\n"
-		   "                 Select a tracer for transaction tracing. Currently disabled\n"
-		   "                 (the default) and log_file are supported.\n");
-	printf("  -i ID, --machine_id ID\n"
-	       "                 Machine and zone identifier key (up to 16 hex characters).\n"
-	       "                 Defaults to a random value shared by all fdbserver processes\n"
-	       "                 on this machine.\n");
-	printf("  -a ID, --datacenter_id ID\n"
-		   "                 Data center identifier key (up to 16 hex characters).\n");
-	printf("  --locality_LOCALITYKEY LOCALITYVALUE\n"
-	       "                 Define a locality key. LOCALITYKEY is case-insensitive though\n"
-	       "                 LOCALITYVALUE is not.\n");
-	printf("  -m SIZE, --memory SIZE\n"
-	       "                 Memory limit. The default value is 8GiB. When specified\n"
-	       "                 without a unit, MiB is assumed.\n");
-	printf("  -M SIZE, --storage_memory SIZE\n"
-	       "                 Maximum amount of memory used for storage. The default\n"
-	       "                 value is 1GiB. When specified without a unit, MB is\n"
-	       "                 assumed.\n");
-	printf("  --cache_memory SIZE\n"
-	       "                 The amount of memory to use for caching disk pages.\n"
-	       "                 The default value is 2GiB. When specified without a unit,\n"
-	       "                 MiB is assumed.\n");
-	printf("  -c CLASS, --class CLASS\n"
-	       "                 Machine class (valid options are storage, transaction,\n"
-	       "                 resolution, grv_proxy, proxy, master, test, unset, stateless, log, router,\n"
-	       "                 and cluster_controller).\n");
+	printOptionUsage("-d PATH, --datadir PATH",
+		   " Store data files in the given folder (must be unique for each"
+		   " fdbserver instance on a given machine).");
+	printOptionUsage("-L PATH, --logdir PATH",
+		   " Store log files in the given folder (default is `.').");
+	printOptionUsage("--logsize SIZE",
+		   "Roll over to a new log file after the current log file"
+		   " exceeds SIZE bytes. The default value is 10MiB.");
+	printOptionUsage("--maxlogs SIZE, --maxlogssize SIZE",
+		   " Delete the oldest log file when the total size of all log"
+		   " files exceeds SIZE bytes. If set to 0, old log files will not"
+		   " be deleted. The default value is 100MiB.");
+	printOptionUsage("--loggroup LOG_GROUP",
+	       " Sets the LogGroup field with the specified value for all"
+	       " events in the trace output (defaults to `default').");
+	printOptionUsage("--trace_format FORMAT",
+	       " Select the format of the log files. xml (the default) and json"
+	       " are supported.");
+	printOptionUsage("--tracer       TRACER",
+		   " Select a tracer for transaction tracing. Currently disabled"
+		   " (the default) and log_file are supported.");
+	printOptionUsage("-i ID, --machine_id ID",
+	       " Machine and zone identifier key (up to 16 hex characters)."
+	       " Defaults to a random value shared by all fdbserver processes"
+	       " on this machine.");
+	printOptionUsage("-a ID, --datacenter_id ID",
+		   " Data center identifier key (up to 16 hex characters).");
+	printOptionUsage("--locality_LOCALITYKEY LOCALITYVALUE",
+	       " Define a locality key. LOCALITYKEY is case-insensitive though"
+	       " LOCALITYVALUE is not.");
+	printOptionUsage("-m SIZE, --memory SIZE",
+	       " Memory limit. The default value is 8GiB. When specified"
+	       " without a unit, MiB is assumed.");
+	printOptionUsage("-M SIZE, --storage_memory SIZE",
+	       " Maximum amount of memory used for storage. The default"
+	       " value is 1GiB. When specified without a unit, MB is"
+	       " assumed.");
+	printOptionUsage("--cache_memory SIZE",
+	       " The amount of memory to use for caching disk pages."
+	       " The default value is 2GiB. When specified without a unit,"
+	       " MiB is assumed.");
+	printOptionUsage("-c CLASS, --class CLASS",
+	       " Machine class (valid options are storage, transaction,"
+	       " resolution, grv_proxy, commit_proxy, master, test, unset, stateless, log, router,"
+	       " and cluster_controller).");
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
-	printf("  -v, --version  Print version information and exit.\n");
-	printf("  -h, -?, --help Display this help and exit.\n");
+	printOptionUsage("-v, --version", "Print version information and exit.");
+	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if( devhelp ) {
-		printf("  -r ROLE, --role ROLE\n"
-			   "                 Server role (valid options are fdbd, test, multitest,\n");
-		printf("                 simulation, networktestclient, networktestserver, restore\n");
-		printf("                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
+		printOptionUsage("-r ROLE, --role ROLE",
+			   " Server role (valid options are fdbd, test, multitest,"
+			   " simulation, networktestclient, networktestserver, restore"
+			   " consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.");
 #ifdef _WIN32
-		printf("  -n, --newconsole\n"
-			   "                 Create a new console.\n");
-		printf("  -q, --no_dialog\n"
-			   "                 Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
+		printOptionUsage("-n, --newconsole",
+			   " Create a new console.");
+		printOptionUsage("-q, --no_dialog",
+			   " Disable error dialog on crash.");
+		printOptionUsage("--parentpid PID",
+			   " Specify a process after whose termination to exit.");
 #endif
-		printf("  -f TESTFILE, --testfile\n"
-			   "                 Testfile to run, defaults to `tests/default.txt'.\n");
-		printf("  -R, --restarting\n");
-		printf("                 Restart a previous simulation that was cleanly shut down.\n");
-		printf("  -s SEED, --seed SEED\n"
-			   "                 Random seed.\n");
-		printf("  -k KEY, --key KEY  Target key for search role.\n");
-		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
-		printf("  -b [on,off], --buggify [on,off]\n"
-			   "                 Sets Buggify system state, defaults to `off'.\n");
-		printf("  --crash        Crash on serious errors instead of continuing.\n");
-		printf("  -N NETWORKIMPL, --network NETWORKIMPL\n"
-			   "                 Select network implementation, `net2' (default),\n");
-		printf("                 `net2-threadpool'.\n");
-		printf("  --unbufferedout\n");
-		printf("                 Do not buffer stdout and stderr.\n");
-		printf("  --bufferedout\n");
-		printf("                 Buffer stdout and stderr.\n");
-		printf("  --traceclock CLOCKIMPL\n");
-		printf("                 Select clock source for trace files, `now' (default) or\n");
-		printf("                 `realtime'.\n");
-		printf("  --num_testers NUM\n");
-		printf("                 A multitester will wait for NUM testers before starting\n");
-		printf("                 (defaults to 1).\n");
+		printOptionUsage("-f TESTFILE, --testfile",
+			   " Testfile to run, defaults to `tests/default.txt'.");
+		printOptionUsage("-R, --restarting",
+			   " Restart a previous simulation that was cleanly shut down.");
+		printOptionUsage("-s SEED, --seed SEED",
+			   " Random seed.");
+		printOptionUsage("-k KEY, --key KEY", "Target key for search role.");
+		printOptionUsage("--kvfile FILE",
+			   "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
+		printOptionUsage("-b [on,off], --buggify [on,off]",
+			   " Sets Buggify system state, defaults to `off'.");
+		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
+		printOptionUsage("-N NETWORKIMPL, --network NETWORKIMPL",
+			   " Select network implementation, `net2' (default),"
+			   " `net2-threadpool'.");
+		printOptionUsage("--unbufferedout",
+			   " Do not buffer stdout and stderr.");
+		printOptionUsage("--bufferedout",
+			   " Buffer stdout and stderr.");
+		printOptionUsage("--traceclock CLOCKIMPL",
+			   " Select clock source for trace files, `now' (default) or"
+			   " `realtime'.");
+		printOptionUsage("--num_testers NUM",
+			   " A multitester will wait for NUM testers before starting"
+			   " (defaults to 1).");
 #ifdef __linux__
-		printf("  --rsssize SIZE\n"
-			   "                 Turns on automatic heap profiling when RSS memory size exceeds\n"
-			   "                 the given threshold. fdbserver needs to be compiled with\n"
-			   "                 USE_GPERFTOOLS flag in order to use this feature.\n");
+		printOptionUsage("--rsssize SIZE",
+			   " Turns on automatic heap profiling when RSS memory size exceeds"
+			   " the given threshold. fdbserver needs to be compiled with"
+			   " USE_GPERFTOOLS flag in order to use this feature.");
 #endif
-		printf("  --testservers ADDRESSES\n");
-		printf("                 The addresses of networktestservers\n");
-		printf("                 specified as ADDRESS:PORT,ADDRESS:PORT...\n");
-		printf("  --testonservers\n");
-		printf("                 Testers are recruited on servers.\n");
-		printf("  --metrics_cluster CONNFILE\n");
-		printf("                 The cluster file designating where this process will\n");
-		printf("                 store its metric data. By default metrics will be stored\n");
-		printf("                 in the same database the process is participating in.\n");
-		printf("  --metrics_prefix PREFIX\n");
-		printf("                 The prefix where this process will store its metric data.\n");
-		printf("                 Must be specified if using a different database for metrics.\n");
-		printf("  --knob_KNOBNAME KNOBVALUE\n");
-		printf("                 Changes a database knob. KNOBNAME should be lowercase.\n");
-		printf("  --io_trust_seconds SECONDS\n");
-		printf("                 Sets the time in seconds that a read or write operation is allowed to take\n"
-		       "                 before timing out with an error. If an operation times out, all future\n"
-		       "                 operations on that file will fail with an error as well. Only has an effect\n"
-		       "                 when using AsyncFileKAIO in Linux.\n");
-		printf("  --io_trust_warn_only\n");
-		printf("                 Instead of failing when an I/O operation exceeds io_trust_seconds, just\n"
-		       "                 log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.\n");
+		printOptionUsage("--testservers ADDRESSES",
+			   " The addresses of networktestservers"
+			   " specified as ADDRESS:PORT,ADDRESS:PORT...");
+		printOptionUsage("--testonservers",
+			   " Testers are recruited on servers.");
+		printOptionUsage("--metrics_cluster CONNFILE",
+			   " The cluster file designating where this process will"
+			   " store its metric data. By default metrics will be stored"
+			   " in the same database the process is participating in.");
+		printOptionUsage("--metrics_prefix PREFIX",
+			   " The prefix where this process will store its metric data."
+			   " Must be specified if using a different database for metrics.");
+		printOptionUsage("--knob_KNOBNAME KNOBVALUE",
+			   " Changes a database knob. KNOBNAME should be lowercase.");
+		printOptionUsage("--io_trust_seconds SECONDS",
+			   " Sets the time in seconds that a read or write operation is allowed to take"
+		       " before timing out with an error. If an operation times out, all future"
+		       " operations on that file will fail with an error as well. Only has an effect"
+		       " when using AsyncFileKAIO in Linux.");
+		printOptionUsage("--io_trust_warn_only",
+			   " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
+		       " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
 	} else {
-		printf("  --dev-help     Display developer-specific help and exit.\n");
+		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
 
 	printf("\n"
