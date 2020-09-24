@@ -250,9 +250,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
 					state Reference<IBackupContainer> lastBackupContainer;
 					state UID lastBackupUID;
-					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+					state EBackupState resultWait = wait(
+					    backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
 
-					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
+					    .detail("Tag", backupTag.tagName)
+					    .detail("Result", BackupAgentBase::getStateText(resultWait));
 
 					state bool restorable = false;
 					if(lastBackupContainer) {
@@ -268,31 +271,41 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					}
 
 					TraceEvent("BARW_LastBackupContainer", randomID)
-						.detail("BackupTag", printable(tag))
-						.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-						.detail("LastBackupUID", lastBackupUID).detail("WaitStatus", resultWait).detail("Restorable", restorable);
+					    .detail("BackupTag", printable(tag))
+					    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+					    .detail("LastBackupUID", lastBackupUID)
+					    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
+					    .detail("Restorable", restorable);
 
 					// Do not check the backup, if aborted
-					if (resultWait == BackupAgentBase::STATE_ABORTED) {
+					if (resultWait == EBackupState::STATE_ABORTED) {
 					}
 					// Ensure that a backup container was found
 					else if (!lastBackupContainer) {
-						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag)).detail("WaitStatus", resultWait);
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n", printable(tag).c_str(), resultWait);
+						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID)
+						    .detail("LastBackupUID", lastBackupUID)
+						    .detail("BackupTag", printable(tag))
+						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
+						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %s\n",
+						       printable(tag).c_str(), BackupAgentBase::getStateText(resultWait));
 					}
 					// Check that backup is restorable
-					else if(!restorable) {
-						TraceEvent(SevError, "BARW_NotRestorable", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag))
-							.detail("BackupFolder", lastBackupContainer->getURL()).detail("WaitStatus", resultWait);
+					else if (!restorable) {
+						TraceEvent(SevError, "BARW_NotRestorable", randomID)
+						    .detail("LastBackupUID", lastBackupUID)
+						    .detail("BackupTag", printable(tag))
+						    .detail("BackupFolder", lastBackupContainer->getURL())
+						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
 						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
 					}
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup by now
 					if (startDelay) {
-						TraceEvent("BARW_DoBackupAbortBackup2", randomID).detail("Tag", printable(tag))
-							.detail("WaitStatus", resultWait)
-							.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-							.detail("Restorable", restorable);
+						TraceEvent("BARW_DoBackupAbortBackup2", randomID)
+						    .detail("Tag", printable(tag))
+						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
+						    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+						    .detail("Restorable", restorable);
 						wait(backupAgent->abortBackup(cx, tag.toString()));
 					}
 					else {
@@ -315,7 +328,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
 
 		state std::string statusText;
 
@@ -323,8 +336,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		statusText = _statusText;
 		// Can we validate anything about status?
 
-		TraceEvent("BARW_DoBackupComplete", randomID).detail("Tag", printable(tag))
-			.detail("Status", statusText).detail("StatusValue", statusValue);
+		TraceEvent("BARW_DoBackupComplete", randomID)
+		    .detail("Tag", printable(tag))
+		    .detail("Status", statusText)
+		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
 
 		return Void();
 	}
