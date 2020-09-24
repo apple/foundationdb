@@ -270,7 +270,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				if (BUGGIFY) {
 					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", printable(tag));
 					// Wait until the backup is in a restorable state
-					state int resultWait = wait(backupAgent->waitBackup(cx, tag, false));
+					state EBackupState resultWait = wait(backupAgent->waitBackup(cx, tag, false));
 
 					TraceEvent("BARW_LastBackupFolder", randomID).detail("BackupTag", printable(tag))
 						.detail("LogUid", logUid).detail("WaitStatus", resultWait);
@@ -309,7 +309,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		UID _destUid = wait(backupAgent->getDestUid(cx, logUid));
 		self->destUid = _destUid;
 
-		state int statusValue = wait(backupAgent->waitBackup(cx, tag, true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag, true));
 		wait(backupAgent->unlockBackup(cx, tag));
 
 		state std::string statusText;

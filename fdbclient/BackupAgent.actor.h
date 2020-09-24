@@ -46,13 +46,15 @@ public:
 		return "YYYY/MM/DD.HH:MI:SS[+/-]HHMM";
 	}
 
-	// Type of program being executed
-	enum enumActionResult {
-		RESULT_SUCCESSFUL = 0, RESULT_ERRORED = 1, RESULT_DUPLICATE = 2, RESULT_UNNEEDED = 3
-	};
-
-	enum enumState {
-		STATE_ERRORED = 0, STATE_SUBMITTED = 1, STATE_RUNNING = 2, STATE_RUNNING_DIFFERENTIAL = 3, STATE_COMPLETED = 4, STATE_NEVERRAN = 5, STATE_ABORTED = 6, STATE_PARTIALLY_ABORTED = 7
+	enum class EnumState {
+		STATE_ERRORED = 0,
+		STATE_SUBMITTED = 1,
+		STATE_RUNNING = 2,
+		STATE_RUNNING_DIFFERENTIAL = 3,
+		STATE_COMPLETED = 4,
+		STATE_NEVERRAN = 5,
+		STATE_ABORTED = 6,
+		STATE_PARTIALLY_ABORTED = 7
 	};
 
 	static const Key keyFolderId;
@@ -85,70 +87,68 @@ public:
 	static const int logHeaderSize;
 
 	// Convert the status text to an enumerated value
-	static enumState getState(std::string stateText)
-	{
-		enumState enState = STATE_ERRORED;
+	static EnumState getState(std::string stateText) {
+		auto enState = EnumState::STATE_ERRORED;
 
 		if (stateText.empty()) {
-			enState = STATE_NEVERRAN;
+			enState = EnumState::STATE_NEVERRAN;
 		}
 
 		else if (!stateText.compare("has been submitted")) {
-			enState = STATE_SUBMITTED;
+			enState = EnumState::STATE_SUBMITTED;
 		}
 
 		else if (!stateText.compare("has been started")) {
-			enState = STATE_RUNNING;
+			enState = EnumState::STATE_RUNNING;
 		}
 
 		else if (!stateText.compare("is differential")) {
-			enState = STATE_RUNNING_DIFFERENTIAL;
+			enState = EnumState::STATE_RUNNING_DIFFERENTIAL;
 		}
 
 		else if (!stateText.compare("has been completed")) {
-			enState = STATE_COMPLETED;
+			enState = EnumState::STATE_COMPLETED;
 		}
 
 		else if (!stateText.compare("has been aborted")) {
-			enState = STATE_ABORTED;
+			enState = EnumState::STATE_ABORTED;
 		}
 
 		else if (!stateText.compare("has been partially aborted")) {
-			enState = STATE_PARTIALLY_ABORTED;
+			enState = EnumState::STATE_PARTIALLY_ABORTED;
 		}
 
 		return enState;
 	}
 
 	// Convert the status enum to a text description
-	static const char* getStateText(enumState enState)
-	{
+	static const char* getStateText(EnumState enState) {
 		const char* stateText;
 
 		switch (enState)
 		{
-		case STATE_ERRORED:
+		case EnumState::STATE_ERRORED:
 			stateText = "has errored";
 			break;
-		case STATE_NEVERRAN:
+		case EnumState::STATE_NEVERRAN:
 			stateText = "has never been started";
 			break;
-		case STATE_SUBMITTED:
+		case EnumState::STATE_SUBMITTED:
 			stateText = "has been submitted";
 			break;
-		case STATE_RUNNING:
+		case EnumState::STATE_RUNNING:
 			stateText = "has been started";
 			break;
-		case STATE_RUNNING_DIFFERENTIAL:
+		case EnumState::STATE_RUNNING_DIFFERENTIAL:
 			stateText = "is differential";
 			break;
-		case STATE_COMPLETED:
+		case EnumState::STATE_COMPLETED:
 			stateText = "has been completed";
 			break;
-		case STATE_ABORTED:
+		case EnumState::STATE_ABORTED:
 			stateText = "has been aborted";
 			break;
-		case STATE_PARTIALLY_ABORTED:
+		case EnumState::STATE_PARTIALLY_ABORTED:
 			stateText = "has been partially aborted";
 			break;
 		default:
@@ -160,34 +160,33 @@ public:
 	}
 
 	// Convert the status enum to a name
-	static const char* getStateName(enumState enState)
-	{
+	static const char* getStateName(EnumState enState) {
 		const char* s;
 
 		switch (enState)
 		{
-		case STATE_ERRORED:
+		case EnumState::STATE_ERRORED:
 			s = "Errored";
 			break;
-		case STATE_NEVERRAN:
+		case EnumState::STATE_NEVERRAN:
 			s = "NeverRan";
 			break;
-		case STATE_SUBMITTED:
+		case EnumState::STATE_SUBMITTED:
 			s = "Submitted";
 			break;
-		case STATE_RUNNING:
+		case EnumState::STATE_RUNNING:
 			s = "Running";
 			break;
-		case STATE_RUNNING_DIFFERENTIAL:
+		case EnumState::STATE_RUNNING_DIFFERENTIAL:
 			s = "RunningDifferentially";
 			break;
-		case STATE_COMPLETED:
+		case EnumState::STATE_COMPLETED:
 			s = "Completed";
 			break;
-		case STATE_ABORTED:
+		case EnumState::STATE_ABORTED:
 			s = "Aborted";
 			break;
-		case STATE_PARTIALLY_ABORTED:
+		case EnumState::STATE_PARTIALLY_ABORTED:
 			s = "Aborting";
 			break;
 		default:
@@ -199,16 +198,15 @@ public:
 	}
 
 	// Determine if the specified state is runnable
-	static bool isRunnable(enumState enState)
-	{
+	static bool isRunnable(EnumState enState) {
 		bool isRunnable = false;
 
 		switch (enState)
 		{
-		case STATE_SUBMITTED:
-		case STATE_RUNNING:
-		case STATE_RUNNING_DIFFERENTIAL:
-		case STATE_PARTIALLY_ABORTED:
+		case EnumState::STATE_SUBMITTED:
+		case EnumState::STATE_RUNNING:
+		case EnumState::STATE_RUNNING_DIFFERENTIAL:
+		case EnumState::STATE_PARTIALLY_ABORTED:
 			isRunnable = true;
 			break;
 		default:
@@ -359,7 +357,8 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr);
+	Future<EnumState> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true,
+	                             Reference<IBackupContainer>* pContainer = nullptr, UID* pUID = nullptr);
 
 	static const Key keyLastRestorable;
 
@@ -432,8 +431,8 @@ public:
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
-	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
-	Future<int> getStateValue(Database cx, UID logUid) {
+	Future<EnumState> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid, bool snapshot = false);
+	Future<EnumState> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
 	}
 
@@ -452,8 +451,8 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
-	Future<int> waitSubmitted(Database cx, Key tagName);
+	Future<EnumState> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
+	Future<EnumState> waitSubmitted(Database cx, Key tagName);
 	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
 	static const Key keyAddPrefix;
@@ -522,9 +521,15 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
                                   NotifiedVersion* committedVersion, Reference<KeyRangeMap<Version>> keyVersion);
 ACTOR Future<Void> cleanupBackup(Database cx, bool deleteData);
 
-typedef BackupAgentBase::enumState EBackupState;
-template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
-template<> inline EBackupState Codec<EBackupState>::unpack(Tuple const &val) { return (EBackupState)val.getInt(0); }
+using EBackupState = BackupAgentBase::EnumState;
+template <>
+inline Tuple Codec<EBackupState>::pack(EBackupState const& val) {
+	return Tuple().append(static_cast<int>(val));
+}
+template <>
+inline EBackupState Codec<EBackupState>::unpack(Tuple const& val) {
+	return static_cast<EBackupState>(val.getInt(0));
+}
 
 // Key backed tags are a single-key slice of the TagUidMap, defined below.
 // The Value type of the key is a UidAndAbortedFlagT which is a pair of {UID, aborted_flag}
