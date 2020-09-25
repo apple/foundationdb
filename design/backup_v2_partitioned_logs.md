@@ -155,7 +155,7 @@ The requirement of the new backup system raises several design challenges:
 
 **Transaction Logs (TLogs)**: The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the commit proxy in version order, and only respond to the commit proxy once the data has been written and fsync'ed to an append only mutation log on disk. Storage servers retrieve mutations from TLogs. Once the storage servers have persisted mutations, storage servers then pop the mutations from the TLogs.
 
-**CommitProxy**: The commit proxies are responsible for committing transactions, and tracking the storage servers responsible for each range of keys. In the old backup system, Proxies are responsible to group mutations into backup mutations and write them to the database.
+**CommitProxy**: The commit proxies are responsible for committing transactions, and tracking the storage servers responsible for each range of keys. In the old backup system, commit proxies are responsible to group mutations into backup mutations and write them to the database.
 
 **GrvProxy**: The GRV proxies are responsible for providing read versions.
 ## System overview
@@ -229,7 +229,7 @@ The operator’s backup request can indicate if an old backup or a new backup is
 2. All backup workers monitor the key `\xff\x02/backupStarted`, see the change, and start logging mutations.
 3. After all backup workers have started, the `fdbbackup` tool initiates the backup of all or specified key ranges by issuing a transaction `Ts`.
 
-Compared to the old backup system, the above step 1 and 2 are new and is only triggered if client requests for a new type of backup. The purpose is to allow backup workers to function as no-op if there are no ongoing backups. However, the backup workers should still continuously pop their corresponding tags, otherwise mutations will be kept in the TLog. In order to know the version to pop, backup workers can obtain the read version from any proxy. Because the read version must be a committed version, so popping to this version is safe.
+Compared to the old backup system, the above step 1 and 2 are new and is only triggered if client requests for a new type of backup. The purpose is to allow backup workers to function as no-op if there are no ongoing backups. However, the backup workers should still continuously pop their corresponding tags, otherwise mutations will be kept in the TLog. In order to know the version to pop, backup workers can obtain the read version from any GRV proxy. Because the read version must be a committed version, so popping to this version is safe.
 
 **Backup Submission Protocol**
 Protocol for `submitBackup()` to ensure that all backup workers of the current epoch have started logging mutations:

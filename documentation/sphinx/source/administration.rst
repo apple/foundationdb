@@ -259,7 +259,8 @@ Use the ``status`` command of ``fdbcli`` to determine if the cluster is up and r
       Redundancy mode        - triple
       Storage engine         - ssd-2
       Coordinators           - 5
-      Desired Proxies        - 5
+      Desired GRV Proxies    - 1
+      Desired Commit Proxies - 4
       Desired Logs           - 8
 
     Cluster:
@@ -299,7 +300,8 @@ The summary fields are interpreted as follows:
 Redundancy mode         The currently configured redundancy mode (see the section :ref:`configuration-choosing-redundancy-mode`)
 Storage engine          The currently configured storage engine (see the section :ref:`configuration-configuring-storage-subsystem`)
 Coordinators            The number of FoundationDB coordination servers
-Desired Proxies         Number of proxies desired. If replication mode is 3 then default number of proxies is 3
+Desired GRV Proxies     Number of GRV proxies desired. If replication mode is 3 then default number of GRV proxies is 1
+Desired Commit Proxies  Number of commit proxies desired. If replication mode is 3 then default number of commit proxies is 3
 Desired Logs            Number of logs desired. If replication mode is 3 then default number of logs is 3
 FoundationDB processes  Number of FoundationDB processes participating in the cluster
 Machines                Number of physical machines running at least one FoundationDB process that is participating in the cluster
@@ -565,7 +567,7 @@ When configured, the ``status json`` output will include additional fields to re
     filtered: 1
   }
 
-The ``grv_latency_bands`` and ``commit_latency_bands`` objects will only be logged for ``proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
+The ``grv_latency_bands`` objects will only be logged for ``grv_proxy`` roles, ``commit_latency_bands`` objects will only be logged for ``commit_proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
 
 For example, ``0.1: 1`` in ``read_latency_bands`` indicates that there has been 1 read request with a latency in the range ``[0.01, 0.1)``. For the smallest specified threshold, the lower bound is 0 (e.g. ``[0, 0.01)`` in the example above). Requests that took longer than any defined latency band will be reported in the ``inf`` (infinity) band. Requests that were filtered by the configuration (e.g. using ``max_read_bytes``) are reported in the ``filtered`` category.
 

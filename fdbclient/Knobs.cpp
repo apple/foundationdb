@@ -175,6 +175,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( DEFAULT_AUTO_GRV_PROXIES,                  1 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
+	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
+	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
 
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
