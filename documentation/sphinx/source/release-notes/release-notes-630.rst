@@ -4,7 +4,7 @@
 Release Notes
 #############
 
-6.3.6
+6.3.7
 =====
 
 Features
@@ -112,6 +112,7 @@ Other Changes
 * Blob backup URL parameter ``request_timeout`` changed to ``request_timeout_min``, with prior name still supported. `(PR #3533) <https://github.com/apple/foundationdb/pull/3533>`_
 * Support query command in backup CLI that allows users to query restorable files by key ranges. [6.3.6] `(PR #3703) <https://github.com/apple/foundationdb/pull/3703>`_
 * Report missing old tlogs information when in recovery before storage servers are fully recovered. [6.3.6] `(PR #3706) <https://github.com/apple/foundationdb/pull/3706>`_
+* Updated OpenSSL to version 1.1.1h. [6.3.7] `(PR #3809) <https://github.com/apple/foundationdb/pull/3809>`_
 
 Fixes from previous versions
 ----------------------------
