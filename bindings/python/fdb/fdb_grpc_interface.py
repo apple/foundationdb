@@ -80,6 +80,13 @@ class GrpcFuture(FutureInterface):
         self._future = future
         self._extract = extract
 
+    def _handle_error(self, e):
+        fdb_error = get_fdb_error(e)
+        if fdb_error is not None:
+            raise fdb_error
+        else:
+            raise e
+
     def destroy(self):
         pass
 
@@ -99,24 +106,29 @@ class GrpcFuture(FutureInterface):
         try:
             self._future.result()
         except grpc.RpcError as e:
-            fdb_error = get_fdb_error(e)
-            if fdb_error is not None:
-                raise fdb_error
-            else:
-                raise e
+            self._handle_error(e)
 
     def get_int64(self):
-        return self._extract(self._future.result())
+        try:
+            return self._extract(self._future.result())
+        except grpc.RpcError as e:
+            self._handle_error(e)
 
     def get_key(self):
-        return self._extract(self._future.result())
+        try:
+            return self._extract(self._future.result())
+        except grpc.RpcError as e:
+            self._handle_error(e)
 
     def get_value(self):
-        (present, value) = self._extract(self._future.result())
-        if present:
-            return value
-        else:
-            return None
+        try:
+            (present, value) = self._extract(self._future.result())
+            if present:
+                return value
+            else:
+                return None
+        except grpc.RpcError as e:
+            self._handle_error(e)
 
     def get_keyvalue_array(self):
         raise NotImplementedError()

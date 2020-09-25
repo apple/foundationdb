@@ -42,13 +42,22 @@ struct RpcProxyData {
 
 	Database cx;
 
-	std::map<UID, Reference<ReadYourWritesTransaction>> openTransactions; // TODO: need expiration mechanism
+	std::unordered_map<UID, Reference<ReadYourWritesTransaction>> staleTransactions;
+	std::unordered_map<UID, Reference<ReadYourWritesTransaction>> recentTransactions;
 
 	RpcProxyData(UID dbgid, const InitializeRpcProxyRequest& req, Reference<AsyncVar<ServerDBInfo>> db) : dbgid(dbgid), cc("RpcProxy", dbgid.toString()) {
 		logger = traceCounters("RpcProxyMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "RpcProxyMetrics");
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, false, true);
 	}
 };
+
+ACTOR Future<Void> expireTransactions(RpcProxyData *rpcProxyData) {
+	loop {
+		wait(delay(SERVER_KNOBS->RPC_PROXY_TRANSACTION_EXPIRATION_INTERVAL));
+		rpcProxyData->staleTransactions = std::move(rpcProxyData->recentTransactions);
+		rpcProxyData->recentTransactions.clear();
+	}
+}
 
 void processCreateTransaction(RpcProxyData *rpcProxyData, RpcCreateTransactionRequest request) {
 	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(rpcProxyData->cx));
@@ -59,19 +68,31 @@ void processCreateTransaction(RpcProxyData *rpcProxyData, RpcCreateTransactionRe
 		tr->getReadVersion(); // start the read version fetch
 	}
 	UID id = deterministicRandom()->randomUniqueID();
-	rpcProxyData->openTransactions[id] = tr;
+	rpcProxyData->recentTransactions[id] = tr;
 	request.reply.send(id);
 }
 
 Reference<ReadYourWritesTransaction> getTransaction(RpcProxyData *rpcProxyData, UID transactionId) {
-	// TODO: error for missing transaction
-	return rpcProxyData->openTransactions[transactionId];
+	auto itr = rpcProxyData->recentTransactions.find(transactionId);
+	if(itr != rpcProxyData->recentTransactions.end()) {
+		return itr->second;
+	}
+
+	itr = rpcProxyData->staleTransactions.find(transactionId);
+	if(itr != rpcProxyData->staleTransactions.end()) {
+		TEST(true); // Using transaction from stale set
+		auto tr = itr->second;
+		auto node = rpcProxyData->staleTransactions.extract(itr);
+		rpcProxyData->recentTransactions.insert(std::move(node));
+		return tr;
+	}
+
+	throw transaction_cancelled(); // TODO: different error?
 }
 
 ACTOR Future<Void> processGetValue(RpcProxyData *rpcProxyData, RpcGetValueRequest request) {
-	state Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
-
 	try {
+		Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
 		Optional<Value> value = wait(tr->get(request.key, request.snapshot));
 		request.reply.send(value);
 	} 
@@ -83,26 +104,32 @@ ACTOR Future<Void> processGetValue(RpcProxyData *rpcProxyData, RpcGetValueReques
 }
 
 void processApplyMutations(RpcProxyData *rpcProxyData, RpcApplyMutationsRequest const& request) {
-	Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
-	for(auto mutation : request.mutations) {
-		if(mutation.type == MutationRef::SetValue) {
-			tr->set(mutation.param1, mutation.param2);
+	try {
+		Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
+		for(auto mutation : request.mutations) {
+			if(mutation.type == MutationRef::SetValue) {
+				tr->set(mutation.param1, mutation.param2);
+			}
+			else if(mutation.type == MutationRef::ClearRange) {
+				tr->clear(KeyRangeRef(mutation.param1, mutation.param2));
+			}
+			else {
+				tr->atomicOp(mutation.param1, mutation.param2, mutation.type);
+			}
 		}
-		else if(mutation.type == MutationRef::ClearRange) {
-			tr->clear(KeyRangeRef(mutation.param1, mutation.param2));
-		}
-		else {
-			tr->atomicOp(mutation.param1, mutation.param2, mutation.type);
-		}
+	}
+	catch(Error &e) {
+		// TODO
 	}
 } 
 
 ACTOR Future<Void> processCommit(RpcProxyData *rpcProxyData, RpcCommitRequest request) {
-	state Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
-
 	try {
+		state Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
 		state Future<Standalone<StringRef>> versionstamp = tr->getVersionstamp();
+
 		wait(tr->commit());
+
 		ASSERT(versionstamp.isReady() && (!versionstamp.isError() || versionstamp.getError().code() == error_code_no_commit_version));
 		request.reply.send(std::make_pair(tr->getCommittedVersion(), versionstamp.isError() ? Standalone<StringRef>() : versionstamp.get()));
 	}
@@ -114,8 +141,8 @@ ACTOR Future<Void> processCommit(RpcProxyData *rpcProxyData, RpcCommitRequest re
 }
 
 void processTransactionDestroy(RpcProxyData *rpcProxyData, RpcTransactionDestroyRequest const& request) {
-	fprintf(stderr, "Destroying transaction %s\n", request.transactionId.toString().c_str());
-	rpcProxyData->openTransactions.erase(request.transactionId);
+	rpcProxyData->recentTransactions.erase(request.transactionId);
+	rpcProxyData->recentTransactions.erase(request.transactionId);
 } 
 
 ACTOR Future<Void> rpcProxyCore(
@@ -132,10 +159,11 @@ ACTOR Future<Void> rpcProxyCore(
 	state RpcInterface rpcInterface;
 
 	addActor.send(rpcService->run(NetworkAddress(), rpcInterface));
+	addActor.send(expireTransactions(&rpcProxyData));
 
 	try {
 		loop choose {
-		when(RpcCreateTransactionRequest request = waitNext(rpcInterface.createTransaction.getFuture())) {
+			when(RpcCreateTransactionRequest request = waitNext(rpcInterface.createTransaction.getFuture())) {
 				processCreateTransaction(&rpcProxyData, request);
 			}
 			when(RpcGetValueRequest request = waitNext(rpcInterface.getValue.getFuture())) {
