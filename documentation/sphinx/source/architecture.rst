@@ -55,7 +55,7 @@ cluster. The life time is no longer tied with Master.
 |image1|
 
 GRV Proxies
-~~~~~~~
+~~~~~~~~~~~
 
 The GRV proxies are responsible for providing read versions, communicating
 with ratekeeper to control the rate providing read versions. To provide a 
@@ -65,7 +65,7 @@ transaction logs have not been stopped. Ratekeeper will artificially slow
 down the rate at which the GRV proxy provides read versions.
 
 Commit Proxies
-~~~~~~~
+~~~~~~~~~~~~~~
 
 The proxies are responsible for committing transactions, report committed
 versions to master and tracking the storage servers responsible for each 

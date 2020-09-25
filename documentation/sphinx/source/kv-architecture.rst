@@ -18,7 +18,7 @@ Master
 The master is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV proxies, commit proxies, resolvers, and transaction logs. The three roles are treated as a unit, and if any of them fail, we will recruit a replacement for all three roles. The master keeps commit proxies' committed version, provides read version for GRV proxies, provides the commit versions for batches of the mutations to the commit proxies, runs data distribution algorithm, and runs ratekeeper.
 
 GRV Proxies and Commit Proxies
-=======
+==============================
 
 The GRV proxies are responsible for providing read versions. The commit proxies are responsible for committing transactions, and tracking the storage servers responsible for each range of keys. To provide a read version, a GRV proxy will ask master the largest committed version at this point in time, while simultaneously checking that the transaction logs have not been stopped. Ratekeeper will artificially slow down the rate at which the GRV proxy provides read versions.
 
