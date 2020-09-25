@@ -55,7 +55,7 @@ struct StagingKey {
 	LogMessageVersion version; // largest version of set or clear for the key
 	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
 
-	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
+	explicit StagingKey(Key key) : key(key), version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
@@ -115,7 +115,7 @@ struct StagingKey {
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
 	void precomputeResult(const char* context, UID applierID, int batchIndex) {
-		TraceEvent(SevDebug, "FastRestoreApplierPrecomputeResult", applierID)
+		TraceEvent(SevFRMutationInfo, "FastRestoreApplierPrecomputeResult", applierID)
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Context", context)
 		    .detail("Version", version.toString())
@@ -148,7 +148,7 @@ struct StagingKey {
 		}
 		for (; lb != pendingMutations.end(); lb++) {
 			MutationRef mutation = lb->second;
-			if (type == MutationRef::CompareAndClear) { // Special atomicOp
+			if (mutation.type == MutationRef::CompareAndClear) { // Special atomicOp
 				Arena arena;
 				Optional<StringRef> inputVal;
 				if (hasBaseValue()) {
@@ -167,14 +167,14 @@ struct StagingKey {
 				val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
 			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
-				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+				type = MutationRef::SetValue;
 				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			} else {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
@@ -253,8 +253,8 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	long receiveMutationReqs;
 
 	// Stats
-	double receivedBytes;
-	double appliedBytes;
+	long receivedBytes;
+	long appliedBytes;
 
 	// Status counters
 	struct Counters {
@@ -281,7 +281,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
 	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
-	    vbState(ApplierVersionBatchState::NOT_INIT) {
+	    vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
 		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
@@ -291,7 +291,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 
 	void addMutation(MutationRef m, LogMessageVersion ver) {
 		if (!isRangeMutation(m)) {
-			auto item = stagingKeys.emplace(m.param1, StagingKey());
+			auto item = stagingKeys.emplace(m.param1, StagingKey(m.param1));
 			item.first->second.add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));

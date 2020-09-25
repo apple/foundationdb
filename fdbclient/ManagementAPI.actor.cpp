@@ -33,6 +33,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
@@ -78,7 +79,10 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "usable_regions" || key == "repopulate_anti_quorum") && isInteger(value) ) {
+		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
+		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
+		     key == "repopulate_anti_quorum") &&
+		    isInteger(value)) {
 			out[p+key] = value;
 		}
 
@@ -653,7 +657,12 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 				oldMachinesWithTransaction.insert(machineId);
 			}
 
-			if(processClass.classType() == ProcessClass::TransactionClass || processClass.classType() == ProcessClass::ProxyClass || processClass.classType() == ProcessClass::ResolutionClass || processClass.classType() == ProcessClass::StatelessClass || processClass.classType() == ProcessClass::LogClass) {
+			if (processClass.classType() == ProcessClass::TransactionClass ||
+			    processClass.classType() == ProcessClass::CommitProxyClass ||
+			    processClass.classType() == ProcessClass::GrvProxyClass ||
+			    processClass.classType() == ProcessClass::ResolutionClass ||
+			    processClass.classType() == ProcessClass::StatelessClass ||
+			    processClass.classType() == ProcessClass::LogClass) {
 				oldTransactionProcesses++;
 			}
 
@@ -682,6 +691,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	std::set<std::string> machinesWithStorage;
 	int totalTransactionProcesses = 0;
 	int existingProxyCount = 0;
+	int existingGrvProxyCount = 0;
 	int existingResolverCount = 0;
 	int existingStatelessCount = 0;
 	for( auto& it : machine_processes ) {
@@ -690,11 +700,14 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 				totalTransactionProcesses++;
 				machinesWithTransaction.insert(it.first);
 			}
-			if(proc.second == ProcessClass::StatelessClass) {
+			if (proc.second == ProcessClass::StatelessClass) {
 				existingStatelessCount++;
 			}
-			if(proc.second == ProcessClass::ProxyClass) {
+			if (proc.second == ProcessClass::CommitProxyClass) {
 				existingProxyCount++;
+			}
+			if (proc.second == ProcessClass::GrvProxyClass) {
+				existingGrvProxyCount++;
 			}
 			if(proc.second == ProcessClass::ResolutionClass) {
 				existingResolverCount++;
@@ -723,16 +736,28 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		resolverCount = result.old_resolvers;
 	}
 
-	result.desired_proxies = std::min( 12, processCount / 15 );
+	result.desired_commit_proxies = std::max(std::min(12, processCount / 15), 1);
 	int proxyCount;
-	if (!statusObjConfig.get("proxies", result.old_proxies)) {
-		result.old_proxies = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
-		statusObjConfig.get("auto_proxies", result.old_proxies);
-		result.auto_proxies = result.desired_proxies;
-		proxyCount = result.auto_proxies;
+	if (!statusObjConfig.get("commit_proxies", result.old_commit_proxies)) {
+		result.old_commit_proxies = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
+		statusObjConfig.get("auto_commit_proxies", result.old_commit_proxies);
+		result.auto_commit_proxies = result.desired_commit_proxies;
+		proxyCount = result.auto_commit_proxies;
 	} else {
-		result.auto_proxies = result.old_proxies;
-		proxyCount = result.old_proxies;
+		result.auto_commit_proxies = result.old_commit_proxies;
+		proxyCount = result.old_commit_proxies;
+	}
+
+	result.desired_grv_proxies = std::max(std::min(4, processCount / 20), 1);
+	int grvProxyCount;
+	if (!statusObjConfig.get("grv_proxies", result.old_grv_proxies)) {
+		result.old_grv_proxies = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
+		statusObjConfig.get("auto_grv_proxies", result.old_grv_proxies);
+		result.auto_grv_proxies = result.desired_grv_proxies;
+		grvProxyCount = result.auto_grv_proxies;
+	} else {
+		result.auto_grv_proxies = result.old_grv_proxies;
+		grvProxyCount = result.old_grv_proxies;
 	}
 
 	result.desired_logs = std::min( 12, processCount / 20 );
@@ -752,6 +777,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	logCount = std::max(logCount, log_replication);
 
 	totalTransactionProcesses += std::min(existingProxyCount, proxyCount);
+	totalTransactionProcesses += std::min(existingGrvProxyCount, grvProxyCount);
 	totalTransactionProcesses += std::min(existingResolverCount, resolverCount);
 	totalTransactionProcesses += existingStatelessCount;
 
@@ -767,7 +793,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		}
 	}
 
-	int desiredTotalTransactionProcesses = logCount + resolverCount + proxyCount;
+	int desiredTotalTransactionProcesses = logCount + resolverCount + proxyCount + grvProxyCount;
 
 	//add machines with all transaction class until we have enough processes and enough machines
 	for( auto& it : count_processes ) {
@@ -829,11 +855,14 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			if(conf.address_class.size())
 				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
-			if(conf.auto_logs != conf.old_logs)
+			if (conf.auto_logs != conf.old_logs)
 				tr.set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
 
-			if(conf.auto_proxies != conf.old_proxies)
-				tr.set(configKeysPrefix.toString() + "auto_proxies", format("%d", conf.auto_proxies));
+			if (conf.auto_commit_proxies != conf.old_commit_proxies)
+				tr.set(configKeysPrefix.toString() + "auto_commit_proxies", format("%d", conf.auto_commit_proxies));
+
+			if (conf.auto_grv_proxies != conf.old_grv_proxies)
+				tr.set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));
 
 			if(conf.auto_resolvers != conf.old_resolvers)
 				tr.set(configKeysPrefix.toString() + "auto_resolvers", format("%d", conf.auto_resolvers));

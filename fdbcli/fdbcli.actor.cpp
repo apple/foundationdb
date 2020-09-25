@@ -20,6 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -102,7 +103,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 
 	do {
 		iter++;
@@ -112,7 +113,7 @@ void printAtCol(const char* text, int col) {
 			printf("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' ' || *start == '\n') start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 }
@@ -120,7 +121,7 @@ void printAtCol(const char* text, int col) {
 std::string lineWrap(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 	std::string out = "";
 	do {
 		iter++;
@@ -130,7 +131,7 @@ std::string lineWrap(const char* text, int col) {
 			out += format("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' '/* || *start == '\n'*/) start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 	return out;
@@ -469,9 +470,24 @@ void initHelp() {
 		"clear a range of keys from the database",
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
-		"change the database configuration",
-		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	    "configure [new] "
+	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|commit_proxies=<"
+	    "COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "change the database configuration",
+	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
+	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
+	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
+	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
+	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
+	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
+	    "datasets.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. Must "
+	    "be at least 1, or set to -1 which restores the number of commit proxies to the default "
+	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
+	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
+	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
+	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the "
+	    "FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
 		"fileconfigure [new] <FILENAME>",
 		"change the database configuration from a file",
@@ -857,7 +873,13 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
+								description +=
+								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
+								           "%d GRV proxies and %d resolvers.",
+								           recoveryState["required_logs"].get_int(),
+								           recoveryState["required_commit_proxies"].get_int(),
+								           recoveryState["required_grv_proxies"].get_int(),
+								           recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
 									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
@@ -881,9 +903,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						}
 					}
 				}
+			} catch (std::runtime_error&) {
 			}
-			catch (std::runtime_error& ){ }
-
 
 			// Check if cluster controllable is reachable
 			try {
@@ -1008,8 +1029,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)", excludedServersArr.size());
 				}
 
-				if (statusObjConfig.get("proxies", intVal))
-					outputString += format("\n  Desired Proxies        - %d", intVal);
+				if (statusObjConfig.get("commit_proxies", intVal))
+					outputString += format("\n  Desired Commit Proxies - %d", intVal);
+
+				if (statusObjConfig.get("grv_proxies", intVal))
+					outputString += format("\n  Desired GRV Proxies    - %d", intVal);
 
 				if (statusObjConfig.get("resolvers", intVal))
 					outputString += format("\n  Desired Resolvers      - %d", intVal);
@@ -1212,13 +1236,53 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 						int minLoss = std::min(availLoss, dataLoss);
 						const char *faultDomain = machinesAreZones ? "machine" : "zone";
-						if (minLoss == 1)
-							outputString += format("1 %s", faultDomain);
-						else
-							outputString += format("%d %ss", minLoss, faultDomain);
+						outputString += format("%d %ss", minLoss, faultDomain);
 
 						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
+						}
+
+						if (dataLoss == -1) {
+							ASSERT_WE_THINK(availLoss == -1);
+							outputString += format(
+							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
+							    "following tlog interfaces, otherwise storage servers may never be able to catch "
+							    "up.\n");
+							StatusObjectReader logs;
+							if (statusObjCluster.has("logs")) {
+								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
+									bool possiblyLosingData;
+									if (logEpoch.get("possibly_losing_data", possiblyLosingData) &&
+									    !possiblyLosingData) {
+										continue;
+									}
+									// Current epoch doesn't have an end version.
+									int64_t epoch, beginVersion, endVersion = invalidVersion;
+									bool current;
+									logEpoch.get("epoch", epoch);
+									logEpoch.get("begin_version", beginVersion);
+									logEpoch.get("end_version", endVersion);
+									logEpoch.get("current", current);
+									std::string missing_log_interfaces;
+									if (logEpoch.has("log_interfaces")) {
+										for (StatusObjectReader logInterface : logEpoch.last().get_array()) {
+											bool healthy;
+											std::string address, id;
+											if (logInterface.get("healthy", healthy) && !healthy) {
+												logInterface.get("id", id);
+												logInterface.get("address", address);
+												missing_log_interfaces += format("%s,%s ", id.c_str(), address.c_str());
+											}
+										}
+									}
+									outputString += format(
+									    "  %s log epoch: %ld begin: %ld end: %s, missing "
+									    "log interfaces(id,address): %s\n",
+									    current ? "Current" : "Old", epoch, beginVersion,
+									    endVersion == invalidVersion ? "(unknown)" : format("%ld", endVersion).c_str(),
+									    missing_log_interfaces.c_str());
+								}
+							}
 						}
 					}
 				}
@@ -1768,16 +1832,17 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
-				conf.get().old_logs == conf.get().auto_logs &&
-				conf.get().old_proxies == conf.get().auto_proxies &&
-				conf.get().old_resolvers == conf.get().auto_resolvers &&
-				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
-				conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
+			                 conf.get().old_logs == conf.get().auto_logs &&
+			                 conf.get().old_commit_proxies == conf.get().auto_commit_proxies &&
+			                 conf.get().old_grv_proxies == conf.get().auto_grv_proxies &&
+			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
+			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
+			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
-			bool noDesiredChanges = noChanges &&
-				conf.get().old_logs == conf.get().desired_logs &&
-				conf.get().old_proxies == conf.get().desired_proxies &&
-				conf.get().old_resolvers == conf.get().desired_resolvers;
+			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
+			                        conf.get().old_commit_proxies == conf.get().desired_commit_proxies &&
+			                        conf.get().old_grv_proxies == conf.get().desired_grv_proxies &&
+			                        conf.get().old_resolvers == conf.get().desired_resolvers;
 
 			std::string outputString;
 
@@ -1794,8 +1859,16 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += format("| replication                 | %16s | %16s |\n", conf.get().old_replication.c_str(), conf.get().auto_replication.c_str());
 			outputString += format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
 			outputString += conf.get().auto_logs != conf.get().desired_logs ? format(" (manually set; would be %d)\n", conf.get().desired_logs) : "\n";
-			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies, conf.get().auto_proxies);
-			outputString += conf.get().auto_proxies != conf.get().desired_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_proxies) : "\n";
+			outputString += format("| commit_proxies              | %16d | %16d |", conf.get().old_commit_proxies,
+			                       conf.get().auto_commit_proxies);
+			outputString += conf.get().auto_commit_proxies != conf.get().desired_commit_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_commit_proxies)
+			                    : "\n";
+			outputString += format("| grv_proxies                 | %16d | %16d |", conf.get().old_grv_proxies,
+			                       conf.get().auto_grv_proxies);
+			outputString += conf.get().auto_grv_proxies != conf.get().desired_grv_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_grv_proxies)
+			                    : "\n";
 			outputString += format("| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
 			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers) : "\n";
 			outputString += format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction, conf.get().auto_processes_with_transaction);
@@ -2445,7 +2518,7 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
-	const char* helpExtra[] = {"escaping", "options", NULL};
+	const char* helpExtra[] = {"escaping", "options", nullptr};
 
 	const char** he = helpExtra;
 
@@ -2504,7 +2577,24 @@ void onOffGenerator(const char* text, const char *line, std::vector<std::string>
 }
 
 void configureGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", nullptr};
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 
@@ -2540,6 +2630,16 @@ void throttleGenerator(const char* text, const char *line, std::vector<std::stri
 	else if(tokens.size() == 2 && (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable"))) {
 		const char* opts[] = { "auto", nullptr };
 		arrayGenerator(text, line, opts, lc);
+	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			const char* opts[] = { "throttled", "recommended", "all", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
+		else if(tokens.size() == 3) {
+			const char* opts[] = {"LIMITS", nullptr};
+			arrayGenerator(text, line, opts, lc);
+		}
 	}
 }
 
@@ -2660,6 +2760,14 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 	}
 	else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
 		return { "auto" };
+	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			return { "[throttled|recommended|all]", "[LIMITS]" };
+		}
+		else if(tokens.size() == 3 && (tokencmp(tokens[2], "throttled") || tokencmp(tokens[2], "recommended") || tokencmp(tokens[2], "all"))){
+			return {"[LIMITS]"};
+		}
 	}
 	else if(tokens.size() == 2 && inArgument) {
 		return { "[ARGS]" };
@@ -2924,7 +3032,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			.detail("ClusterFile", ccf->getFilename().c_str())
 			.detail("ConnectionString", ccf->getConnectionString().toString())
 			.setMaxFieldLength(10000)
@@ -4077,8 +4185,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 					else if(tokencmp(tokens[1], "list")) {
-						if(tokens.size() > 3) {
-							printf("Usage: throttle list [LIMIT]\n");
+						if(tokens.size() > 4) {
+							printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
 							printf("\n");
 							printf("Lists tags that are currently throttled.\n");
 							printf("The default LIMIT is 100 tags.\n");
@@ -4086,36 +4194,72 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 
-						state int throttleListLimit = 100;
+						state bool reportThrottled = true;
+						state bool reportRecommended = false;
 						if(tokens.size() >= 3) {
-							char *end;
-							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
-							if ((tokens.size() > 3 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
-								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[2]).c_str());
+							if(tokencmp(tokens[2], "recommended")) {
+								reportThrottled = false; reportRecommended = true;
+							}
+							else if(tokencmp(tokens[2], "all")){
+								reportThrottled = true; reportRecommended = true;
+							}
+							else if(!tokencmp(tokens[2], "throttled")){
+								printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
 								is_error = true;
 								continue;
 							}
 						}
 
-						std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
+						state int throttleListLimit = 100;
+						if(tokens.size() >= 4) {
+							char *end;
+							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
+							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
+								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
+								is_error = true;
+								continue;
+							}
+						}
+
+						state std::vector<TagThrottleInfo> tags;
+						if(reportThrottled && reportRecommended) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
+						}
+						else if(reportThrottled) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
+						}
+						else if(reportRecommended) {
+							wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
+						}
 
 						bool anyLogged = false;
 						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
 							if(itr->expirationTime > now()) {
 								if(!anyLogged) {
 									printf("Throttled tags:\n\n");
-									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
-									printf(" --------------+----------------+-----------+--------+------------------\n");
+									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag\n");
+									printf(" --------------+----------------+-----------+--------+------------+------\n");
 									
 									anyLogged = true;
 								}
 
-								printf("  %12d | %13ds | %9s | %6s | %s\n", 
-									(int)(itr->tpsRate), 
-									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
-									transactionPriorityToString(itr->priority, false), 
-									itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual", 
-									itr->tag.toString().c_str());
+								std::string reasonStr = "unset";
+								if(itr->reason == TagThrottledReason::MANUAL){
+									reasonStr = "manual";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_WRITE) {
+									reasonStr = "busy write";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_READ) {
+									reasonStr = "busy read";
+								}
+
+								printf("  %12d | %13ds | %9s | %6s | %10s |%s\n", (int)(itr->tpsRate),
+								       std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
+								       transactionPriorityToString(itr->priority, false),
+								       itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
+								       reasonStr.c_str(),
+								       itr->tag.toString().c_str());
 							}
 						}
 
@@ -4124,7 +4268,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Usage: throttle list [LIMIT]\n");
 						}
 						if(!anyLogged) {
-							printf("There are no throttled tags\n");
+							printf("There are no %s tags\n", reportThrottled ? "throttled" : "recommended");
 						}
 					}
 					else if(tokencmp(tokens[1], "on")) {	
@@ -4463,7 +4607,7 @@ int main(int argc, char **argv) {
 	sigemptyset( &act.sa_mask );
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
-	sigaction(SIGINT, &act, NULL);
+	sigaction(SIGINT, &act, nullptr);
 #endif
 
 	CLIOptions opt(argc, argv);

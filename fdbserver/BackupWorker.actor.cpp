@@ -21,7 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -431,9 +431,9 @@ struct BackupData {
 			GetReadVersionRequest request(span.context, 1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
-				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
-				                                                  &MasterProxyInterface::getConsistentReadVersion,
+				when(wait(self->cx->onProxiesChanged())) {}
+				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(false),
+				                                                  &GrvProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
 					return reply.version;
 				}

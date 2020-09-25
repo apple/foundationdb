@@ -99,16 +99,17 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
-				Standalone<VectorRef<KeyRangeRef>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangesSize", keyRanges.size())
 				//     .detail("ReadKey", self->readKey.printable().c_str())
 				//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
 				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
 				// Loose check.
-				for (auto kr : keyRanges) {
-					if (kr.contains(self->readKey)) {
+				for (const auto& kr : keyRanges) {
+					if (kr.keys.contains(self->readKey)) {
 						self->passed = true;
+						return Void();
 					}
 				}
 				// The key ranges deemed read hot does not contain the readKey, which is impossible here.

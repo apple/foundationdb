@@ -54,7 +54,8 @@ FILE* debugme; /* descriptor used for debug messages */
 		int err = wait_future(_f);                                                                                     \
 		if (err) {                                                                                                     \
 			int err2;                                                                                                  \
-			if ((err != 1020 /* not_committed */) && (err != 1021 /* commit_unknown_result */)) {                      \
+			if ((err != 1020 /* not_committed */) && (err != 1021 /* commit_unknown_result */) &&                      \
+			    (err != 1213 /* tag_throttled */)) {                                                                   \
 				fprintf(stderr, "ERROR: Error %s (%d) occured at %s\n", #_func, err, fdb_get_error(err));              \
 			} else {                                                                                                   \
 				fprintf(annoyme, "ERROR: Error %s (%d) occured at %s\n", #_func, err, fdb_get_error(err));             \
@@ -698,7 +699,7 @@ retryTxn:
 }
 
 int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps, volatile double* throttle_factor,
-                 int thread_iters, volatile int* signal, mako_stats_t* stats, int dotrace, lat_block_t* block[],
+                 int thread_iters, volatile int* signal, mako_stats_t* stats, int dotrace, int dotagging, lat_block_t* block[],
                  int* elem_size, bool* is_memory_allocated) {
 	int xacts = 0;
 	int64_t total_xacts = 0;
@@ -710,11 +711,18 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	int current_tps;
 	char* traceid;
 	int tracetimer = 0;
+	char* tagstr;
 
 	if (thread_tps < 0) return 0;
 
 	if (dotrace) {
 		traceid = (char*)malloc(32);
+	}
+
+	if(dotagging) {
+		tagstr = (char*)calloc(16, 1);
+		memcpy(tagstr, KEYPREFIX, KEYPREFIXLEN);
+		memcpy(tagstr + KEYPREFIXLEN, args->txntagging_prefix, TAGPREFIXLENGTH_MAX);
 	}
 
 	current_tps = (int)((double)thread_tps * *throttle_factor);
@@ -774,6 +782,7 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 					}
 				}
 
+
 			} else {
 				if (thread_tps > 0) {
 					/* 1 second not passed, throttle */
@@ -782,6 +791,17 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 				}
 			}
 		} /* throttle or txntrace */
+
+		/* enable transaction tagging */
+		if (dotagging > 0) {
+			sprintf(tagstr + KEYPREFIXLEN + TAGPREFIXLENGTH_MAX, "%03d", urand(0, args->txntagging - 1));
+			fdb_error_t err = fdb_transaction_set_option(transaction, FDB_TR_OPTION_AUTO_THROTTLE_TAG,
+			                                             (uint8_t*)tagstr, 16);
+			if (err) {
+				fprintf(stderr, "ERROR: FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: %s\n",
+				        fdb_get_error(err));
+			}
+		}
 
 		rc = run_one_transaction(transaction, args, stats, keystr, keystr2, valstr, block, elem_size,
 		                         is_memory_allocated);
@@ -807,6 +827,9 @@ int run_workload(FDBTransaction* transaction, mako_args_t* args, int thread_tps,
 	free(valstr);
 	if (dotrace) {
 		free(traceid);
+	}
+	if(dotagging) {
+		free(tagstr);
 	}
 
 	return rc;
@@ -876,6 +899,7 @@ void* worker_thread(void* thread_args) {
 	int op;
 	int i, size;
 	int dotrace = (worker_id == 0 && thread_id == 0 && args->txntrace) ? args->txntrace : 0;
+	int dotagging = args->txntagging;
 	volatile int* signal = &((thread_args_t*)thread_args)->process->shm->signal;
 	volatile double* throttle_factor = &((thread_args_t*)thread_args)->process->shm->throttle_factor;
 	volatile int* readycount = &((thread_args_t*)thread_args)->process->shm->readycount;
@@ -940,8 +964,8 @@ void* worker_thread(void* thread_args) {
 
 	/* run the workload */
 	else if (args->mode == MODE_RUN) {
-		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, block,
-		                  elem_size, is_memory_allocated);
+		rc = run_workload(transaction, args, thread_tps, throttle_factor, thread_iters,
+				  signal, stats, dotrace, dotagging, block, elem_size, is_memory_allocated);
 		if (rc < 0) {
 			fprintf(stderr, "ERROR: run_workload failed\n");
 		}
@@ -1209,6 +1233,8 @@ int init_args(mako_args_t* args) {
 	args->tracepath[0] = '\0';
 	args->traceformat = 0; /* default to client's default (XML) */
 	args->txntrace = 0;
+	args->txntagging = 0;
+	memset(args->txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
 	for (i = 0; i < MAX_OP; i++) {
 		args->txnspec.ops[i][OP_COUNT] = 0;
 	}
@@ -1366,6 +1392,8 @@ void usage() {
 	printf("%-24s %s\n", "    --tracepath=PATH", "Set trace file path");
 	printf("%-24s %s\n", "    --trace_format <xml|json>", "Set trace format (Default: json)");
 	printf("%-24s %s\n", "    --txntrace=sec", "Specify transaction tracing interval (Default: 0)");
+	printf("%-24s %s\n", "    --txntagging", "Specify the number of different transaction tag (Default: 0, max = 1000)");
+	printf("%-24s %s\n", "    --txntagging_prefix", "Specify the prefix of transaction tag - mako${txntagging_prefix} (Default: '')");
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 }
@@ -1407,6 +1435,8 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "commitget", no_argument, NULL, ARG_COMMITGET },
 			                                    { "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
 			                                    { "trace", no_argument, NULL, ARG_TRACE },
+			                                    { "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			                                    { "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX},
 			                                    { "version", no_argument, NULL, ARG_VERSION },
 			                                    { NULL, 0, NULL, 0 }
 		};
@@ -1522,8 +1552,25 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 		case ARG_TXNTRACE:
 			args->txntrace = atoi(optarg);
 			break;
+
+		case ARG_TXNTAGGING:
+			args->txntagging = atoi(optarg);
+			if(args->txntagging > 1000) {
+				args->txntagging = 1000;
+			}
+			break;
+		case ARG_TXNTAGGINGPREFIX: {
+			if(strlen(optarg) > TAGPREFIXLENGTH_MAX) {
+				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
+				exit(0);
+			}
+			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
+			break;
+		}
+
 		}
 	}
+
 	if ((args->tpsmin == -1) || (args->tpsmin > args->tpsmax)) {
 		args->tpsmin = args->tpsmax;
 	}
@@ -1579,6 +1626,10 @@ int validate_args(mako_args_t* args) {
 		if ((args->seconds == 0) && (args->iteration == 0)) {
 			fprintf(stderr, "ERROR: Must specify either seconds or iteration\n");
 			return -1;
+		}
+		if(args->txntagging < 0) {
+            fprintf(stderr, "ERROR: --txntagging must be a non-negative integer\n");
+            return -1;
 		}
 	}
 	return 0;

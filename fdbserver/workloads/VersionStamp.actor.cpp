@@ -290,7 +290,7 @@ struct VersionStampWorkload : TestWorkload {
 		state double lastTime = now();
 		state Database extraDB;
 
-		if (g_simulator.extraDB != NULL) {
+		if (g_simulator.extraDB != nullptr) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
@@ -347,7 +347,7 @@ struct VersionStampWorkload : TestWorkload {
 				}
 				catch (Error &e) {
 					err = e;
-					if (err.code() == error_code_database_locked) {
+					if (err.code() == error_code_database_locked && g_simulator.extraDB != nullptr) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);

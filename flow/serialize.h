@@ -31,6 +31,7 @@
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
 #include <algorithm>
+#include <deque>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
 // memcpy over a defined serialize() method on a POD struct.  As not all of our structs are packed,
@@ -172,6 +173,26 @@ inline void save( Archive& ar, const std::vector<T>& value ) {
 }
 template <class Archive, class T>
 inline void load( Archive& ar, std::vector<T>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	value.reserve(s);
+	for (int i = 0; i < s; i++) {
+		value.push_back(T());
+		ar >> value[i];
+	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void save(Archive& ar, const std::deque<T>& value) {
+	ar << (int)value.size();
+	for (auto it = value.begin(); it != value.end(); ++it) ar << *it;
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void load(Archive& ar, std::deque<T>& value) {
 	int s;
 	ar >> s;
 	value.clear();
@@ -327,7 +348,7 @@ public:
 	int getLength() { return size; }
 	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
-	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
+	explicit BinaryWriter( VersionOptions vo ) : data(nullptr), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
@@ -734,11 +755,11 @@ struct PacketWriter {
 	typedef PacketWriter WRITER;
 
 	PacketBuffer* buffer;
-	struct ReliablePacket *reliable;  // NULL if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
+	struct ReliablePacket *reliable;  // nullptr if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
 	int length;
 	ProtocolVersion m_protocolVersion;
 
-	// reliable is NULL if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
+	// reliable is nullptr if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
 	//   for filling in reliable->buffer, ->cont, ->begin, and ->end, but not ->prev or ->next.
 	template <class VersionOptions>
 	PacketWriter(PacketBuffer* buf, ReliablePacket* reliable, VersionOptions vo) { init(buf, reliable); vo.read(*this); }

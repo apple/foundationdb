@@ -2,6 +2,12 @@
 Release Notes
 #############
 
+6.2.25
+======
+
+* Mitigate an issue where a non-lockaware transaction that changes certain ``\xff`` "metadata" keys, committed concurrently with locking the database, can cause corruption. If a non-lockaware transaction manually sets its read version to a version where the database is locked, and changes metadata keys, this can still cause corruption. `(PR #3674) <https://github.com/apple/foundationdb/pull/3674>`_
+* Reset network connections between the proxies and satellite tlogs if the latencies are larger than 500ms. `(PR #3686) <https://github.com/apple/foundationdb/pull/3686>`_
+
 6.2.24
 ======
 

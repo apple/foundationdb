@@ -43,8 +43,8 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 }
 
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
-// the same operations will be done on all proxies at the same time. Otherwise, the data stored in
-// txnStateStore will become corrupted.
+// the same operations will be done on all commit proxies at the same time. Otherwise, the data 
+// stored in txnStateStore will become corrupted.
 void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRef> const& mutations,
                             IKeyValueStore* txnStateStore, LogPushData* toCommit, bool& confChange,
                             Reference<ILogSystem> logSystem, Version popVersion,
@@ -296,7 +296,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 			}
 			else if (m.param1 == minRequiredCommitVersionKey) {
 				Version requested = BinaryReader::fromStringRef<Version>(m.param2, Unversioned());
-				TraceEvent("MinRequiredCommitVersion", dbgid).detail("Min", requested).detail("Current", popVersion).detail("HasConf", !!confChange);
+				TraceEvent("MinRequiredCommitVersion", dbgid).detail("Min", requested).detail("Current", popVersion);
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				confChange = true;
 				TEST(true);  // Recovering at a higher version.

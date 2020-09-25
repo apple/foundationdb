@@ -21,6 +21,7 @@ set(FDBCLIENT_SRCS
   FDBOptions.h
   FDBTypes.h
   FileBackupAgent.actor.cpp
+  GrvProxyInterface.h
   HTTP.actor.cpp
   IClientApi.h
   JsonBuilder.cpp
@@ -32,7 +33,7 @@ set(FDBCLIENT_SRCS
   Knobs.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
-  MasterProxyInterface.h
+  CommitProxyInterface.h
   MetricLogger.actor.cpp
   MetricLogger.h
   MonitorLeader.actor.cpp
@@ -67,7 +68,7 @@ set(FDBCLIENT_SRCS
   TagThrottle.h
   TaskBucket.actor.cpp
   TaskBucket.h
-  ThreadSafeTransaction.actor.cpp
+  ThreadSafeTransaction.cpp
   ThreadSafeTransaction.h
   Tuple.cpp
   Tuple.h

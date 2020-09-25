@@ -478,31 +478,21 @@ public:
 	virtual void addref() { ReferenceCounted<SimpleFile>::addref(); }
 	virtual void delref() { ReferenceCounted<SimpleFile>::delref(); }
 
-	virtual int64_t debugFD() { return (int64_t)h; }
+	int64_t debugFD() const override { return (int64_t)h; }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
-		return read_impl( this, data, length, offset );
-	}
+	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl( this, StringRef((const uint8_t*)data, length), offset );
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl( this, size );
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
-	virtual Future<Void> sync() {
-		return sync_impl( this );
-	}
+	Future<Void> sync() override { return sync_impl(this); }
 
-	virtual Future<int64_t> size() {
-		return size_impl( this );
-	}
+	Future<int64_t> size() const override { return size_impl(this); }
 
-	virtual std::string getFilename() {
-		return actualFilename;
-	}
+	std::string getFilename() const override { return actualFilename; }
 
 	~SimpleFile() {
 		_close( h );
@@ -667,7 +657,7 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> size_impl( SimpleFile* self ) {
+	ACTOR static Future<int64_t> size_impl(SimpleFile const* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
@@ -1072,7 +1062,7 @@ public:
 				}
 			}
 		}
-		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
+		return canKillProcesses(processesLeft, processesDead, KillInstantly, nullptr);
 	}
 
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const
@@ -1632,7 +1622,7 @@ public:
 	}
 
 	Sim2() : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
-		// Not letting currentProcess be NULL eliminates some annoying special cases
+		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback( Net2FileSystem::stop );
@@ -1823,12 +1813,12 @@ Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64
 
 int sf_open( const char* filename, int flags, int convFlags, int mode ) {
 	HANDLE wh = CreateFile( filename, GENERIC_READ | ((flags&IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
-		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL,
+		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
 		(flags&IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW :
 			(flags&IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS :
 			OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
-		NULL );
+		nullptr );
 	int h = -1;
 	if (wh != INVALID_HANDLE_VALUE) h = _open_osfhandle( (intptr_t)wh, convFlags );
 	else errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EFAULT;

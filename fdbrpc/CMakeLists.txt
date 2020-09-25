@@ -31,20 +31,7 @@ set(FDBRPC_SRCS
 
 set(FDBRPC_THIRD_PARTY_SRCS
   libcoroutine/Common.c
-  libcoroutine/Coro.c
-  zlib/adler32.c
-  zlib/crc32.c
-  zlib/deflate.c
-  zlib/gzclose.c
-  zlib/gzlib.c
-  zlib/gzread.c
-  zlib/gzwrite.c
-  zlib/infback.c
-  zlib/inffast.c
-  zlib/inflate.c
-  zlib/inftrees.c
-  zlib/trees.c
-  zlib/zutil.c)
+  libcoroutine/Coro.c)
 
 if(APPLE)
   list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/asm.S)

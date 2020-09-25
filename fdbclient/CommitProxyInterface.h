@@ -1,6 +1,6 @@
 
 /*
- * MasterProxyInterface.h
+ * CommitProxyInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_MASTERPROXYINTERFACE_H
-#define FDBCLIENT_MASTERPROXYINTERFACE_H
+#ifndef FDBCLIENT_COMMITPROXYINTERFACE_H
+#define FDBCLIENT_COMMITPROXYINTERFACE_H
 #pragma once
 
 #include <utility>
@@ -34,8 +34,9 @@
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "GrvProxyInterface.h"
 
-struct MasterProxyInterface {
+struct CommitProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
@@ -50,7 +51,6 @@ struct MasterProxyInterface {
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
 
-	RequestStream< struct GetRawCommittedVersionRequest > getRawCommittedVersion;
 	RequestStream< struct TxnStateRequest >  txnState;
 	RequestStream< struct GetHealthMetricsRequest > getHealthMetrics;
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
@@ -59,8 +59,8 @@ struct MasterProxyInterface {
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
-	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
-	bool operator != (MasterProxyInterface const& r) const { return id() != r.id(); }
+	bool operator==(CommitProxyInterface const& r) const { return id() == r.id(); }
+	bool operator!=(CommitProxyInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 
 	template <class Archive>
@@ -71,12 +71,11 @@ struct MasterProxyInterface {
 			getKeyServersLocations = RequestStream< struct GetKeyServerLocationsRequest >( commit.getEndpoint().getAdjustedEndpoint(2) );
 			getStorageServerRejoinInfo = RequestStream< struct GetStorageServerRejoinInfoRequest >( commit.getEndpoint().getAdjustedEndpoint(3) );
 			waitFailure = RequestStream<ReplyPromise<Void>>( commit.getEndpoint().getAdjustedEndpoint(4) );
-			getRawCommittedVersion = RequestStream< struct GetRawCommittedVersionRequest >( commit.getEndpoint().getAdjustedEndpoint(5) );
-			txnState = RequestStream< struct TxnStateRequest >( commit.getEndpoint().getAdjustedEndpoint(6) );
-			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
-			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
-			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
-			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(10) );
+			txnState = RequestStream< struct TxnStateRequest >( commit.getEndpoint().getAdjustedEndpoint(5) );
+			getHealthMetrics = RequestStream< struct GetHealthMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(6) );
+			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
+			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
+			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
 		}
 	}
 
@@ -87,7 +86,6 @@ struct MasterProxyInterface {
 		streams.push_back(getKeyServersLocations.getReceiver(TaskPriority::ReadSocket)); //priority lowered to TaskPriority::DefaultEndpoint on the proxy
 		streams.push_back(getStorageServerRejoinInfo.getReceiver(TaskPriority::ProxyStorageRejoin));
 		streams.push_back(waitFailure.getReceiver());
-		streams.push_back(getRawCommittedVersion.getReceiver(TaskPriority::ProxyGetRawCommittedVersion));
 		streams.push_back(txnState.getReceiver());
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(proxySnapReq.getReceiver());
@@ -102,14 +100,20 @@ struct MasterProxyInterface {
 struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
-	vector< MasterProxyInterface > proxies;
-	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
+	vector<GrvProxyInterface> grvProxies;
+	vector<CommitProxyInterface> commitProxies;
+	Optional<CommitProxyInterface>
+	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
 	double transactionTagSampleRate;
+	double transactionTagSampleCost;
 
-	ClientDBInfo() : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1), transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) {}
+	ClientDBInfo()
+	  : clientTxnInfoSampleRate(std::numeric_limits<double>::infinity()), clientTxnInfoSizeLimit(-1),
+	    transactionTagSampleRate(CLIENT_KNOBS->READ_TAG_SAMPLE_RATE),
+	    transactionTagSampleCost(CLIENT_KNOBS->COMMIT_SAMPLE_COST) {}
 
 	bool operator == (ClientDBInfo const& r) const { return id == r.id; }
 	bool operator != (ClientDBInfo const& r) const { return id != r.id; }
@@ -119,7 +123,8 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, proxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward, transactionTagSampleRate);
+		serializer(ar, grvProxies, commitProxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward,
+		           transactionTagSampleRate, transactionTagSampleCost);
 	}
 };
 
@@ -158,7 +163,7 @@ struct CommitTransactionRequest : TimedRequest {
 	ReplyPromise<CommitID> reply;
 	uint32_t flags;
 	Optional<UID> debugID;
-	Optional<TransactionCommitCostEstimation> commitCostEstimation;
+	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
 
 	CommitTransactionRequest() : flags(0) {}
@@ -187,6 +192,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
+	int64_t midShardSize = 0;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -194,7 +200,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, BasicLoadBalancedReply::recentRequests, version, locked, metadataVersion, tagThrottleInfo);
+		serializer(ar, BasicLoadBalancedReply::processBusyTime, version, locked, metadataVersion, tagThrottleInfo, midShardSize);
 	}
 };
 
@@ -299,11 +305,27 @@ struct GetKeyServerLocationsRequest {
 	}
 };
 
+struct GetRawCommittedVersionReply {
+	constexpr static FileIdentifier file_identifier = 1314732;
+	Optional<UID> debugID;
+	Version version;
+	bool locked;
+	Optional<Value> metadataVersion;
+	Version minKnownCommittedVersion;
+
+	GetRawCommittedVersionReply(): debugID(Optional<UID>()), version(invalidVersion), locked(false), metadataVersion(Optional<Value>()), minKnownCommittedVersion(invalidVersion) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		serializer(ar, debugID, version, locked, metadataVersion, minKnownCommittedVersion);
+	}
+};
+
 struct GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
 	SpanID spanContext;
 	Optional<UID> debugID;
-	ReplyPromise<GetReadVersionReply> reply;
+	ReplyPromise<GetRawCommittedVersionReply> reply;
 
 	explicit GetRawCommittedVersionRequest(SpanID spanContext, Optional<UID> const& debugID = Optional<UID>()) : spanContext(spanContext), debugID(debugID) {}
 	explicit GetRawCommittedVersionRequest() : spanContext(), debugID() {}

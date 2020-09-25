@@ -512,10 +512,10 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				beginKey = keyServers.end()[-1].key;
 				break;
 			} catch (Error& e) {
-				wait( tr.onError(e) );
+				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
 
+				wait(tr.onError(e));
 				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId);
 			}
 		}
 
@@ -884,8 +884,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() &&
-					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));					
+					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
+					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -1458,9 +1458,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (!shouldPrint) return;
 		// Record all team collections IDs
 		for (int i = 0; i < teamCollections.size(); ++i) {
-			TraceEvent("TraceAllInfo", distributorId)
-			    .detail("TeamCollectionIndex", i)
-			    .detail("Primary", teamCollections[i]->primary);
+			if (teamCollections[i] != nullptr) {
+				TraceEvent("TraceAllInfo", distributorId)
+				    .detail("TeamCollectionIndex", i)
+				    .detail("Primary", teamCollections[i]->primary);
+			}
 		}
 
 		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
@@ -2075,7 +2077,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				for (auto& server : serverTeam) {
 					score += server_info[server]->teams.size();
 				}
-				TraceEvent("BuildServerTeams")
+				TraceEvent(SevDebug, "BuildServerTeams")
 				    .detail("Score", score)
 				    .detail("BestScore", bestScore)
 				    .detail("TeamSize", serverTeam.size())
@@ -2779,7 +2781,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 		// To avoid removing machine teams too fast, which is unlikely happen though
 		wait( delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution) );
 
-		wait(waitUntilHealthy(self));
+		wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 		// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team tracker)
 		// and remove bad team (cancel the team tracker).
 		wait(self->badTeamRemover);
@@ -4484,12 +4486,12 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	loop {
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
-		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies));
+		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
 
 		choose {
 			when (wait(db->onChange())) {}
-			when (GetHealthMetricsReply reply = wait(proxies->size() ?
-					basicLoadBalance(proxies, &MasterProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
+			when (GetHealthMetricsReply reply = wait(grvProxies->size() ?
+					basicLoadBalance(grvProxies, &GrvProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
 					: Never())) {
 				if (reply.healthMetrics.batchLimited) {
 					*lastLimited = now();
@@ -4975,6 +4977,37 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 	}
 }
 
+static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
+	std::nth_element(metricVec.begin(), metricVec.begin() + metricVec.size() / 2, metricVec.end(),
+	                 [](const DDMetricsRef& d1, const DDMetricsRef& d2) { return d1.shardBytes < d2.shardBytes; });
+	return metricVec[metricVec.size() / 2].shardBytes;
+}
+
+ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
+                                PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
+	    errorOr(brokenPromiseToNever(getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
+
+	if (result.isError()) {
+		req.reply.sendError(result.getError());
+	} else {
+		GetDataDistributorMetricsReply rep;
+		if (!req.midOnly) {
+			rep.storageMetricsList = result.get();
+		} else {
+			auto& metricVec = result.get();
+			if (metricVec.empty())
+				rep.midShardSize = 0;
+			else {
+				rep.midShardSize = getMedianShardSize(metricVec.contents());
+			}
+		}
+		req.reply.send(rep);
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
@@ -5000,16 +5033,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
 				break;
 			}
-			when ( state GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture()) ) {
-				ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
-				    getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
-				if ( result.isError() ) {
-					req.reply.sendError(result.getError());
-				} else {
-					GetDataDistributorMetricsReply rep;
-					rep.storageMetricsList = result.get();
-					req.reply.send(rep);
-				}
+			when(GetDataDistributorMetricsRequest req = waitNext(di.dataDistributorMetrics.getFuture())) {
+				actors.add(ddGetMetrics(req, getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				actors.add(ddSnapCreate(snapReq, db));
@@ -5147,7 +5172,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
-	if (collection == NULL) {
+	if (collection == nullptr) {
 		fprintf(stderr, "collection is null\n");
 		return Void();
 	}

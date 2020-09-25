@@ -37,12 +37,22 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
+struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
+	double lastReset;
+	Future<Void> resetCheck;
+	int slowReplies;
+	int fastReplies;
+
+	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+};
+
 // The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
+	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
@@ -807,7 +817,7 @@ struct LengthPrefixedStringRef {
 	int expectedSize() const { ASSERT(length); return *length; }
 	uint32_t* getLengthPtr() const { return length; }
 
-	LengthPrefixedStringRef() : length(NULL) {}
+	LengthPrefixedStringRef() : length(nullptr) {}
 	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
 };
 

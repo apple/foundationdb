@@ -596,7 +596,7 @@ fdb_error_t fdb_transaction_set_option_impl( FDBTransaction* tr,
 void fdb_transaction_set_option_v13( FDBTransaction* tr,
 									 FDBTransactionOption option )
 {
-	fdb_transaction_set_option_impl( tr, option, NULL, 0 );
+	fdb_transaction_set_option_impl( tr, option, nullptr, 0 );
 }
 
 extern "C" DLLEXPORT

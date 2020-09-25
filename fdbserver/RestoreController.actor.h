@@ -74,9 +74,11 @@ struct ControllerBatchData : public ReferenceCounted<ControllerBatchData> {
 	// sent.
 	//   KeyRef is the inclusive lower bound of the key range the applier (UID) is responsible for
 	std::map<Key, UID> rangeToApplier;
+	Optional<Future<Void>> applyToDB;
+
 	IndexedSet<Key, int64_t> samples; // sample of range and log files
 	double samplesSize; // sum of the metric of all samples
-	Optional<Future<Void>> applyToDB;
+	std::set<UID> sampleMsgs; // deduplicate sample messages
 
 	ControllerBatchData() = default;
 	~ControllerBatchData() = default;
@@ -147,12 +149,16 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 
 	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time controller receives heart beat
 
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the RestoreController is created
+	PromiseStream<Future<Void>> addActor;
+
 	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 
-	RestoreControllerData() {
+	RestoreControllerData(UID interfId) {
 		role = RestoreRole::Controller;
-		nodeID = UID();
+		nodeID = interfId;
 		runningVersionBatches.set(0);
 	}
 
@@ -215,6 +221,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		}
 
 		TraceEvent("FastRestoreVersionBatchesSummary")
+		    .detail("VersionBatches", versionBatches.size())
 		    .detail("LogFiles", logFiles)
 		    .detail("RangeFiles", rangeFiles)
 		    .detail("LogBytes", logSize)
@@ -308,6 +315,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 						}
 					}
 				} else {
+					// TODO: Check why this may happen?!
 					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 					    .detail("RangeIndex", rangeIdx)
 					    .detail("RangeFiles", rangeFiles.size())

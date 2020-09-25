@@ -264,7 +264,7 @@ struct ApiWorkload : TestWorkload {
 	bool useExtraDB;
 	Database extraDB;
 
-	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1) : TestWorkload(wcx), success(true), transactionFactory(NULL), maxClients(maxClients) {
+	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1) : TestWorkload(wcx), success(true), transactionFactory(nullptr), maxClients(maxClients) {
 		clientPrefixInt = getOption(options, LiteralStringRef("clientId"), clientId);
 		clientPrefix = format("%010d", clientPrefixInt);
 
@@ -278,7 +278,7 @@ struct ApiWorkload : TestWorkload {
 		minValueLength = getOption(options, LiteralStringRef("minValueLength"), 1);
 		maxValueLength = getOption(options, LiteralStringRef("maxValueLength"), 10000);
 
-		useExtraDB = g_simulator.extraDB != NULL;
+		useExtraDB = g_simulator.extraDB != nullptr;
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			extraDB = Database::createDatabase(extraFile, -1);

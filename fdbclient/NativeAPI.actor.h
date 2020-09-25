@@ -30,7 +30,7 @@
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
@@ -266,7 +266,7 @@ public:
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future< StorageMetrics > getStorageMetrics( KeyRange const& keys, int shardLimit );
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
-	Future<Standalone<VectorRef<KeyRangeRef>>> getReadHotRanges(KeyRange const& keys);
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
@@ -357,5 +357,8 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
+inline uint64_t getWriteOperationCost(uint64_t bytes) {
+	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
+}
 #include "flow/unactorcompiler.h"
 #endif

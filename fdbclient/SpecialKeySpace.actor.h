@@ -67,15 +67,29 @@ private:
 
 class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {
 public:
-	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) = 0;
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) = 0;
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) = 0;
+	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
+	}
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+		ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
+	}
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+	}
 	virtual Future<Optional<std::string>> commit(
 	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
 	// Given the special key to write, return the real key that needs to be modified
-	virtual Key decode(const KeyRef& key) const = 0;
+	virtual Key decode(const KeyRef& key) const {
+		// Default implementation should never be used
+		ASSERT(false);
+		return key;
+	}
 	// Given the read key, return the corresponding special key
-	virtual Key encode(const KeyRef& key) const = 0;
+	virtual Key encode(const KeyRef& key) const {
+		// Default implementation should never be used
+		ASSERT(false);
+		return key;
+	};
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
@@ -125,6 +139,7 @@ class SpecialKeySpace {
 public:
 	enum class MODULE {
 		CLUSTERFILEPATH,
+		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
 		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
 		MANAGEMENT, // Management-API
@@ -201,6 +216,14 @@ private:
 	void modulesBoundaryInit();
 };
 
+// Used for SpecialKeySpaceCorrectnessWorkload
+class SKSCTestImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit SKSCTestImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 // to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
 // The returned key value pairs are interpretted as :
@@ -238,8 +261,6 @@ public:
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
-	Key decode(const KeyRef& key) const override;
-	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -248,8 +269,6 @@ public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 	Key decode(const KeyRef& key) const override;
 	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -260,8 +279,6 @@ public:
 	explicit FailedServersRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 	Key decode(const KeyRef& key) const override;
 	Key encode(const KeyRef& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -270,6 +287,21 @@ public:
 class ExclusionInProgressRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit ExclusionInProgressRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class ProcessClassRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ProcessClassRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit ProcessClassSourceRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 

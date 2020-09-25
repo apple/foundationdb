@@ -77,7 +77,7 @@ struct AlternativeTLogQueueEntryRef {
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -447,7 +447,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool stopped, initialized;
 	DBRecoveryCount recoveryCount;
 
-	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion;  // The last version number in the portion of the log (written|durable) to persistentData
+	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to persistentData
 	NotifiedVersion version, queueCommittedVersion;
 	Version queueCommittingVersion;
 	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
@@ -2575,6 +2575,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.lock );
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
+		DUMPTOKEN( recruited.waitFailure );
+		DUMPTOKEN( recruited.recoveryFinished );
+		DUMPTOKEN( recruited.disablePopRequest );
+		DUMPTOKEN( recruited.enablePopRequest );
+		DUMPTOKEN( recruited.snapRequest );
 
 		ProtocolVersion protocolVersion = BinaryReader::fromStringRef<ProtocolVersion>( fProtocolVersions.get()[idx].value, Unversioned() );
 		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>( fTLogSpillTypes.get()[idx].value, AssumeVersion(protocolVersion) );
@@ -2783,6 +2788,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	DUMPTOKEN( recruited.lock );
 	DUMPTOKEN( recruited.getQueuingMetrics );
 	DUMPTOKEN( recruited.confirmRunning );
+	DUMPTOKEN( recruited.waitFailure );
+	DUMPTOKEN( recruited.recoveryFinished );
+	DUMPTOKEN( recruited.disablePopRequest );
+	DUMPTOKEN( recruited.enablePopRequest );
+	DUMPTOKEN( recruited.snapRequest );
 
 	stopAllTLogs(self, recruited.id());
 

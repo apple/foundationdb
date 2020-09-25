@@ -302,7 +302,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				config += generateRegions();
 
 				if (deterministicRandom()->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
-				if (deterministicRandom()->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
+				if (deterministicRandom()->random01() < 0.5) config += " commit_proxies=" + format("%d", randomRoleNumber());
+				if (deterministicRandom()->random01() < 0.5)
+					config += " grv_proxies=" + format("%d", randomRoleNumber());
 				if (deterministicRandom()->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
 				wait(success( IssueConfigurationChange( cx, config, false ) ));

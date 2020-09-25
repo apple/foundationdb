@@ -23,6 +23,7 @@ set(FDBSERVER_SRCS
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
+  GrvProxyServer.actor.cpp
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h
@@ -45,7 +46,7 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
-  MasterProxyServer.actor.cpp
+  CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
   MutationTracking.cpp
@@ -151,12 +152,14 @@ set(FDBSERVER_SRCS
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
   workloads/KVStoreTest.actor.cpp
   workloads/KillRegion.actor.cpp
   workloads/LockDatabase.actor.cpp
+  workloads/LockDatabaseFrequently.actor.cpp
   workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp

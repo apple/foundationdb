@@ -81,7 +81,17 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 	if (g_network->isSimulated()) {
 		// memUsage and cpuUsage are not relevant in the simulator,
 		// and relying on the actual values could break seed determinism
-		self->cpuUsage = 100.0;
+		if (deterministicRandom()->random01() < 0.2) { // not fully utilized cpu
+			self->cpuUsage = deterministicRandom()->random01() * SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT;
+		} else if (deterministicRandom()->random01() < 0.6) { // achieved target cpu but cpu is not busy
+			self->cpuUsage = SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT +
+			                 deterministicRandom()->random01() * (SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT -
+			                                                      SERVER_KNOBS->FASTRESTORE_SCHED_TARGET_CPU_PERCENT);
+		} else { // reach desired max cpu usage; use max cpu as 200 to simulate incorrect cpu profiling
+			self->cpuUsage =
+			    SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT +
+			    deterministicRandom()->random01() * (200 - SERVER_KNOBS->FASTRESTORE_SCHED_MAX_CPU_PERCENT);
+		}
 		self->memory = 100.0;
 		self->residentMemory = 100.0;
 		return;
@@ -109,7 +119,12 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 		if (g_network->isSimulated() && BUGGIFY) {
 			// Intentionally randomly block actors for low memory reason.
 			// memory will be larger than threshold when deterministicRandom()->random01() > 1/2
-			memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 2 * deterministicRandom()->random01();
+			if (deterministicRandom()->random01() < 0.4) { // enough memory
+				memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * deterministicRandom()->random01();
+			} else { // used too much memory, needs throttling
+				memory = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT +
+				         deterministicRandom()->random01() * SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT;
+			}
 		}
 		if (memory < memoryThresholdBytes || self->finishedBatch.get() + 1 == actorBatchIndex) {
 			if (memory >= memoryThresholdBytes) {
@@ -163,10 +178,15 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 	loop {
 		int batchIndex = self->finishedBatch.get();
 		int maxBatchIndex = self->versionBatchId.get();
+		int maxPrintBatchIndex = batchIndex + SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM;
 
 		TraceEvent ev("FastRestoreVersionBatchProgressState", self->nodeID);
 		ev.detail("Role", role).detail("Node", self->nodeID).detail("FinishedBatch", batchIndex).detail("InitializedBatch", maxBatchIndex);
 		while (batchIndex <= maxBatchIndex) {
+			if (batchIndex > maxPrintBatchIndex) {
+				ev.detail("SkipVersionBatches", maxBatchIndex - batchIndex + 1);
+				break;
+			}
 			std::stringstream typeName;
 			typeName << "VersionBatch" << batchIndex;
 			ev.detail(typeName.str(), self->getVersionBatchState(batchIndex));

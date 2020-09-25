@@ -378,7 +378,7 @@ public:
 		if(!logTraceEventMetrics)
 			return;
 
-		EventMetricHandle<TraceEventNameID> *m = NULL;
+		EventMetricHandle<TraceEventNameID> *m = nullptr;
 		switch(severity)
 		{
 			case SevError:       m = &SevErrorNames;      break;
@@ -389,7 +389,7 @@ public:
 			default:
 			break;
 		}
-		if(m != NULL)
+		if(m != nullptr)
 		{
 			(*m)->name = StringRef((uint8_t*)name, strlen(name));
 			(*m)->id = id.toString();
@@ -679,7 +679,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	} else {
 		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
 	}
-	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(nullptr)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
