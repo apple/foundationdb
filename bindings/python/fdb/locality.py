@@ -71,4 +71,4 @@ def get_boundary_keys(db_or_tr, begin, end):
 @_impl.transactional
 def get_addresses_for_key(tr, key):
     keyBytes = _impl.keyToBytes(key)
-    return _impl.FutureStringArray(tr.tr_interface.get_addresses_for_key(keyBytes))
+    return _impl.FutureStringArray(tr._tr_interface.get_addresses_for_key(keyBytes))
