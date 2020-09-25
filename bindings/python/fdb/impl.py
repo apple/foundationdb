@@ -396,30 +396,30 @@ class FDBRange(object):
 
 class TransactionRead:
     def __init__(self, tr_interface, db, snapshot):
-        self.tr_interface = tr_interface
+        self._tr_interface = tr_interface
         self.db = db
         self._snapshot = snapshot
 
     def __del__(self):
-        self.tr_interface.destroy()
+        self._tr_interface.destroy()
 
     def get_read_version(self):
         """Get the read version of the transaction."""
-        return FutureInt64(self.tr_interface.get_read_version())
+        return FutureInt64(self._tr_interface.get_read_version())
 
     def get(self, key):
         key = keyToBytes(key)
-        return Value(self.tr_interface.get(key, self._snapshot))
+        return Value(self._tr_interface.get(key, self._snapshot))
 
     def get_key(self, key_selector):
         key = keyToBytes(key_selector.key)
-        return Key(self.tr_interface.get_key(KeySelector(key, key_selector.or_equal, key_selector.offset), self._snapshot))
+        return Key(self._tr_interface.get_key(KeySelector(key, key_selector.or_equal, key_selector.offset), self._snapshot))
 
     def _get_range(self, begin, end, limit, streaming_mode, iteration, reverse):
         beginKey = keyToBytes(begin.key)
         endKey = keyToBytes(end.key)
 
-        return FutureKeyValueArray(self.tr_interface.get_range(
+        return FutureKeyValueArray(self._tr_interface.get_range(
             KeySelector(beginKey, begin.or_equal, begin.offset), KeySelector(endKey, end.or_equal, end.offset),
             limit, 0, streaming_mode, iteration, self._snapshot, reverse))
 
@@ -451,7 +451,7 @@ class TransactionRead:
             begin_key = b''
         if end_key is None:
             end_key = b'\xff'
-        return FutureInt64(self.tr_interface.get_estimated_range_size_bytes(begin, end))
+        return FutureInt64(self._tr_interface.get_estimated_range_size_bytes(begin, end))
 
 class Transaction(TransactionRead):
     """A modifiable snapshot of a Database.
@@ -468,22 +468,22 @@ class Transaction(TransactionRead):
 
     def set_read_version(self, version):
         """Set the read version of the transaction."""
-        self.tr_interface.set_read_version(version)
+        self._tr_interface.set_read_version(version)
 
     def _set_option(self, option, param, length):
-        self.tr_interface.set_option(option, param, length)
+        self._tr_interface.set_option(option, param, length)
 
     def _atomic_operation(self, opcode, key, param):
         paramBytes = valueToBytes(param)
         paramLength = len(paramBytes)
         keyBytes = keyToBytes(key)
         keyLength = len(keyBytes)
-        self.tr_interface.atomic_op(keyBytes, paramBytes, opcode)
+        self._tr_interface.atomic_op(keyBytes, paramBytes, opcode)
 
     def set(self, key, value):
         key = keyToBytes(key)
         value = valueToBytes(value)
-        self.tr_interface.set(key, value)
+        self._tr_interface.set(key, value)
 
     def clear(self, key):
         if isinstance(key, KeySelector):
@@ -491,7 +491,7 @@ class Transaction(TransactionRead):
 
         key = keyToBytes(key)
 
-        self.tr_interface.clear(key)
+        self._tr_interface.clear(key)
 
     def clear_range(self, begin, end):
         if begin is None:
@@ -506,7 +506,7 @@ class Transaction(TransactionRead):
         begin = keyToBytes(begin)
         end = keyToBytes(end)
 
-        self.tr_interface.clear_range(begin, end)
+        self._tr_interface.clear_range(begin, end)
 
     def clear_range_startswith(self, prefix):
         prefix = keyToBytes(prefix)
@@ -514,12 +514,12 @@ class Transaction(TransactionRead):
 
     def watch(self, key):
         key = keyToBytes(key)
-        return FutureVoid(self.tr_interface.watch(key))
+        return FutureVoid(self._tr_interface.watch(key))
 
     def add_read_conflict_range(self, begin, end):
         begin = keyToBytes(begin)
         end = keyToBytes(end)
-        self.tr_interface.add_conflict_range(begin, end, ConflictRangeType.read)
+        self._tr_interface.add_conflict_range(begin, end, ConflictRangeType.read)
 
     def add_read_conflict_key(self, key):
         key = keyToBytes(key)
@@ -528,24 +528,24 @@ class Transaction(TransactionRead):
     def add_write_conflict_range(self, begin, end):
         begin = keyToBytes(begin)
         end = keyToBytes(end)
-        self.tr_interface.add_conflict_range(begin, end, ConflictRangeType.write)
+        self._tr_interface.add_conflict_range(begin, end, ConflictRangeType.write)
 
     def add_write_conflict_key(self, key):
         key = keyToBytes(key)
         self.add_write_conflict_range(key, key + b'\x00')
 
     def commit(self):
-        return FutureVoid(self.tr_interface.commit())
+        return FutureVoid(self._tr_interface.commit())
 
     def get_committed_version(self):
-        return self.tr_interface.get_committed_version()
+        return self._tr_interface.get_committed_version()
 
     def get_approximate_size(self):
         """Get the approximate commit size of the transaction."""
-        return FutureInt64(self.tr_interface.get_approximate_size())
+        return FutureInt64(self._tr_interface.get_approximate_size())
 
     def get_versionstamp(self):
-        return Key(self.tr_interface.get_versionstamp())
+        return Key(self._tr_interface.get_versionstamp())
 
     def on_error(self, error):
         if isinstance(error, FDBError):
@@ -554,13 +554,13 @@ class Transaction(TransactionRead):
             code = error
         else:
             raise error
-        return FutureVoid(self.tr_interface.on_error(code))
+        return FutureVoid(self._tr_interface.on_error(code))
 
     def reset(self):
-        self.tr_interface.reset()
+        self._tr_interface.reset()
 
     def cancel(self):
-        self.tr_interface.cancel()
+        self._tr_interface.cancel()
 
     def __setitem__(self, key, value):
         self.set(key, value)
@@ -577,22 +577,22 @@ class Future:
     _state = None  # < Hack for trollius
 
     def __init__(self, future_interface):
-        self.future_interface = future_interface
+        self._future_interface = future_interface
 
     def __del__(self):
-        self.future_interface.destroy()
+        self._future_interface.destroy()
 
     def cancel(self):
-        self.future_interface.cancel()
+        self._future_interface.cancel()
 
     def _release_memory(self):
-        self.future_interface.release_memory()
+        self._future_interface.release_memory()
 
     def wait(self):
         raise NotImplementedError
 
     def is_ready(self):
-        return self.future_interface.is_ready()
+        return self._future_interface.is_ready()
 
     def block_until_ready(self):
         # Checking readiness is faster than using the callback, so it saves us time if we are already
@@ -618,7 +618,7 @@ class Future:
                 raise
 
     def on_ready(self, callback):
-        self.future_interface.set_callback(callback)
+        self._future_interface.set_callback(callback)
 
     @staticmethod
     def wait_for_any(*futures):
@@ -668,19 +668,19 @@ class Future:
 class FutureVoid(Future):
     def wait(self):
         self.block_until_ready()
-        self.future_interface.get_error()
+        self._future_interface.get_error()
 
 
 class FutureInt64(Future):
     def wait(self):
         self.block_until_ready()
-        return self.future_interface.get_int64()
+        return self._future_interface.get_int64()
 
 
 class FutureKeyValueArray(Future):
     def wait(self):
         self.block_until_ready()
-        return self.future_interface.get_keyvalue_array()
+        return self._future_interface.get_keyvalue_array()
 
         # Logically, we should self._release_memory() after extracting the
         # KVs but before returning, but then we would have to store
@@ -691,7 +691,7 @@ class FutureKeyValueArray(Future):
 class FutureStringArray(Future):
     def wait(self):
         self.block_until_ready()
-        return self.future_interface.get_string_array()
+        return self._future_interface.get_string_array()
 
 
 class replaceable_property(object):
@@ -822,7 +822,7 @@ for i in dir(bytes):
 
 class Value(FutureString):
     def _getter(self):
-        self.value = self.future_interface.get_value()
+        self.value = self._future_interface.get_value()
 
     def present(self):
         return self.value is not None
@@ -830,7 +830,7 @@ class Value(FutureString):
 
 class Key(FutureString):
     def _getter(self):
-        self.value = self.future_interface.get_key()
+        self.value = self._future_interface.get_key()
 
 
 class FormerFuture:
@@ -857,11 +857,11 @@ class FormerFuture:
 
 class Database:
     def __init__(self, db_interface):
-        self.db_interface = db_interface
+        self._db_interface = db_interface
         self.options = _DatabaseOptions(self)
 
     def __del__(self):
-        self.db_interface.destroy()
+        self._db_interface.destroy()
 
     def get(self, key):
         return Database.__database_getitem(self, key)
@@ -908,10 +908,10 @@ class Database:
         return Database.__database_clear_and_watch(self, key)
 
     def create_transaction(self):
-        return Transaction(self.db_interface.create_transaction(), self)
+        return Transaction(self._db_interface.create_transaction(), self)
 
     def _set_option(self, option, param, length):
-        self.db_interface.set_option(option, param, length)
+        self._db_interface.set_option(option, param, length)
 
     def _atomic_operation(self, opcode, key, param):
         Database.__database_atomic_operation(self, opcode, key, param)

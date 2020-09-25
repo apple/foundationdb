@@ -239,7 +239,7 @@ protected:
 			applyMutations(rpcInterface, transactionId, request.mutations());
 		}
 
-		RpcGetValueRequest req(transactionId, KeyRef(request.key()));
+		RpcGetValueRequest req(transactionId, KeyRef(request.key()), request.snapshot());
 		rpcInterface->getValue.send(req);
 		return req.reply.getFuture();
 	}

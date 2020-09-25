@@ -57,7 +57,8 @@ message CreateTransactionReply {
 message GetValueRequest {
 	UID transactionId = 1;
 	bytes key = 2;
-	OrderedMutationSet mutations = 3;
+	bool snapshot = 3;
+	OrderedMutationSet mutations = 4;
 }
 
 message GetValueReply {

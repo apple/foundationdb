@@ -58,9 +58,6 @@ class FutureInterface:
     def cancel(self):
         raise NotImplementedError()
 
-    def block_until_ready(self):
-        raise NotImplementedError()
-
     def is_ready(self):
         raise NotImplementedError()
 
@@ -145,6 +142,9 @@ class TransactionInterface:
         raise NotImplementedError()
 
     def commit(self):
+        raise NotImplementedError()
+
+    def get_committed_version(self):
         raise NotImplementedError()
 
     def get_approximate_size(self):

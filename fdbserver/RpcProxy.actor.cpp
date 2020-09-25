@@ -72,7 +72,7 @@ ACTOR Future<Void> processGetValue(RpcProxyData *rpcProxyData, RpcGetValueReques
 	state Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
 
 	try {
-		Optional<Value> value = wait(tr->get(request.key));
+		Optional<Value> value = wait(tr->get(request.key, request.snapshot));
 		request.reply.send(value);
 	} 
 	catch(Error &e) {

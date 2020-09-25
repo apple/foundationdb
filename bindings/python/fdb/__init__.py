@@ -24,6 +24,7 @@
 https://apple.github.io/foundationdb/api-python.html"""
 
 from enum import Enum
+from fdb.fdb_grpc_interface import FdbGrpcClient
 from fdb.fdb_native_interface import FdbNativeClient
 
 
@@ -87,7 +88,7 @@ def api_version(ver):
     if client_mode == 'native':
         fdb_client_interface = FdbNativeClient()
     elif client_mode == 'grpc':
-        raise NotImplementedError()
+        fdb_client_interface = FdbGrpcClient(globals()['_client_mode.grpc_connection_string'])
     else:
         raise RuntimeError('Unexpected client mode %s' % globals()['_client_mode'])
 

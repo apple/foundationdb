@@ -35,10 +35,11 @@ struct RpcCreateTransactionRequest {
 };
 
 struct RpcGetValueRequest {
-	RpcGetValueRequest(UID transactionId, Key key) : transactionId(transactionId), key(key) {}
+	RpcGetValueRequest(UID transactionId, Key key, bool snapshot) : transactionId(transactionId), key(key), snapshot(snapshot) {}
 
 	UID transactionId;
 	Key key;
+	bool snapshot;
 	Promise<Optional<Value>> reply;
 };
 
