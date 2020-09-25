@@ -3894,26 +3894,18 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 	}
 }
 
-<<<<<<< HEAD
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx, uint32_t transactionCount, TransactionPriority priority, uint32_t flags, TransactionTagMap<uint32_t> tags, Optional<UID> debugID ) {
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, DatabaseContext* cx, uint32_t transactionCount,
+                                                           TransactionPriority priority, uint32_t flags,
+                                                           TransactionTagMap<uint32_t> tags, Optional<UID> debugID) {
+	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
+
 	++cx->transactionReadVersionBatches;
 	if( debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
 	loop {
 		try {
-			state GetReadVersionRequest req( transactionCount, priority, flags, tags, debugID );
-=======
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, DatabaseContext* cx, uint32_t transactionCount,
-                                                           TransactionPriority priority, uint32_t flags,
-                                                           TransactionTagMap<uint32_t> tags, Optional<UID> debugID) {
-	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
-	try {
-		++cx->transactionReadVersionBatches;
-		if( debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
-		loop {
 			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
->>>>>>> master
+
 			choose {
 				when ( wait( cx->onProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
@@ -3952,6 +3944,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
 			}
 		}
 	}
+
 }
 
 ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<DatabaseContext::VersionRequest> versionStream, TransactionPriority priority, uint32_t flags ) {

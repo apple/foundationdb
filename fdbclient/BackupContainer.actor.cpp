@@ -1391,19 +1391,6 @@ public:
 		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 	}
 
-<<<<<<< HEAD
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
-	                                                                    Version targetVersion,
-	                                                                    VectorRef<KeyRangeRef> keyRangesFilter) {
-		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
-		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
-		state int i = snapshots.size() - 1;
-		for (; i >= 0; i--) {
-			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
-			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
-				continue;
-			}
-=======
 	static Optional<RestorableFileSet> getRestoreSetFromLogs(std::vector<LogFile> logs, Version targetVersion,
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->endVersion;
@@ -1417,27 +1404,23 @@ public:
 	}
 
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
-	                                                                    Version targetVersion, bool logsOnly,
-	                                                                    Version beginVersion) {
-		if (logsOnly) {
-			state RestorableFileSet restorableSet;
-			state std::vector<LogFile> logFiles;
-			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
-			wait(store(logFiles, bc->listLogFiles(begin, targetVersion, false)));
-			// List logs in version order so log continuity can be analyzed
-			std::sort(logFiles.begin(), logFiles.end());
-			if (!logFiles.empty()) {
-				return getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+	                                                                    Version targetVersion,
+	                                                                    VectorRef<KeyRangeRef> keyRangesFilter, bool logsOnly = false,
+	                                                                    Version beginVersion = invalidVersion) {
+		// Does not support use keyRangesFilter for logsOnly yet
+		if (logsOnly && !keyRangesFilter.empty()) {
+			TraceEvent(SevError, "BackupContainerRestoreSetUnsupportedAPI").detail("KeyRangesFilter", keyRangesFilter.size());
+			return Optional<RestorableFileSet>();
+		}
+
+		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
+		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		state int i = snapshots.size() - 1;
+		for (; i >= 0; i--) {
+			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
+			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
+				continue;
 			}
-		}
-		// Find the most recent keyrange snapshot to end at or before targetVersion
-		state Optional<KeyspaceSnapshotFile> snapshot;
-		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
-		for(auto const &s : snapshots) {
-			if(s.endVersion <= targetVersion)
-				snapshot = s;
-		}
->>>>>>> master
 
 			state RestorableFileSet restorable;
 			state Version minKeyRangeVersion = MAX_VERSION;
@@ -1530,35 +1513,18 @@ public:
 
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
-			// If there are logs and the first one starts at or before the snapshot begin version then proceed
-<<<<<<< HEAD
+			// If there are logs and the first one starts at or before the keyrange's snapshot begin version, then
+			// it is valid restore set and proceed
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
-				Version end = logs.begin()->endVersion;
-				computeRestoreEndVersion(logs, &restorable.logs, &end, restorable.targetVersion);
-				if (end >= restorable.targetVersion) {
-					restorable.continuousBeginVersion = logs.begin()->beginVersion;
-					restorable.continuousEndVersion = end;
-					return Optional<RestorableFileSet>(restorable);
-				}
-=======
-			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
 				return getRestoreSetFromLogs(logs, targetVersion, restorable);
->>>>>>> master
 			}
 		}
 		return Optional<RestorableFileSet>();
 	}
 
-<<<<<<< HEAD
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
-	                                                  VectorRef<KeyRangeRef> keyRangesFilter) final {
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, VectorRef<KeyRangeRef> keyRangesFilter,
+	                                                  bool logsOnly, Version beginVersion) final {
 		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter);
-=======
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, bool logsOnly,
-	                                                  Version beginVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, logsOnly,
-		                          beginVersion);
->>>>>>> master
 	}
 
 private:
