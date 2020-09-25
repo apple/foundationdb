@@ -888,7 +888,7 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
     "auto_grv_proxies":1,
     "auto_resolvers":1,
     "auto_logs":3,
-    "commit_proxies":5
+    "commit_proxies":5,
     "grv_proxies":1
 })configSchema");
 
