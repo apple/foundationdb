@@ -1050,10 +1050,10 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
 			if (!rv.isError()) {
 				double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv.get() - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-				message["time_since_last_recovered"] = lastRecoveredSecondsAgo;
+				message["seconds_since_last_recovered"] = lastRecoveredSecondsAgo;
 			}
 		} else {
-			message["time_since_last_db_turned_available_seconds"] = -1;
+			message["seconds_since_last_recovered"] = -1;
 		}
 
 		// Add additional metadata for certain statuses
