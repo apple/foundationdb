@@ -47,34 +47,57 @@ ACTOR Future<Void> unlockRanges(Database cx, std::vector<KeyRangeRef> ranges,
 
 class RangeLockCache {
 public:
-	using Snapshot = std::vector<LockRequest>;
-	using Mutations = Standalone<VectorRef<LockRequest>>;
+	using Snapshot = Standalone<VectorRef<LockRequest>>;
+	using SnapshotIterator = std::map<Version, Snapshot>::iterator;
+	using Requests = Standalone<VectorRef<LockRequest>>;
+
+	enum Reason {
+		OK,
+		DENIED_EXCLUSIVE_LOCK,
+		DENIED_READ_LOCK, // Write access is denied because of read lock held
+		DENIED_OLD_VERSION // Request is denied because old lock version is used
+	};
 
 	RangeLockCache() = default;
 	RangeLockCache(Snapshot snapshot, Version ver);
 
-	void add(Version version, Mutations mutations);
+	// Adds lock requests for the given lock version.
+	void add(Version version, Requests requests);
 
-	// Expire cached snapshots or mutations up to the given version.
+	// Expire cached snapshots or requests up to the given version.
 	void expire(Version upTo);
 
 	// Returns if the cache has data for the given lock version.
 	bool hasVersion(Version version);
 
-	// Returns if the key/range can be accessed for the given version.
-	bool check(KeyRef key, Version version);
-	bool check(KeyRangeRef range, Version version);
+	// Returns if the key/range can be written/read for the given version.
+	Reason check(KeyRef key, Version version, bool write = true);
+	Reason check(KeyRangeRef range, Version version, bool write = true);
 
-	// Serializes all mutations from the given version and on.
+	// Serializes all requests from the given version and on.
 	Value getChanges(Version from);
 
+	// Returns snapshots & lock requests in string.
+	std::string toString();
+
 private:
+	std::string toString(Version version, Snapshot snapshot);
+
 	// Make sure a snapshot for the version exists.
 	void ensureSnapshot(Version version);
 
+	// From a base snapshot, builds the next snapshot and returns the iterator to it.
+	SnapshotIterator buildSnapshot(SnapshotIterator it);
+
+	// PRE-CONDITION: a and b do not overlap.
+	static bool rangeLess(const KeyRangeRef& a, const KeyRangeRef& b) { return a.begin < b.begin; }
+
+	// PRE-CONDITION: a and b do not overlap.
+	static bool lockLess(const LockRequest& a, const LockRequest& b) { return rangeLess(a.range, b.range); }
+
 	// A version ordered locked ranges
 	std::map<Version, Snapshot> snapshots;
-	std::map<Version, Mutations> mutations;
+	std::map<Version, Requests> requests;
 };
 
 #include "flow/unactorcompiler.h"

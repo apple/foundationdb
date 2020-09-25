@@ -1114,6 +1114,7 @@ extern const char* getLockModeText(LockMode mode);
 struct LockRequest {
 	LockRequest() = default;
 	LockRequest(KeyRangeRef range, LockMode mode) : range(range), mode(mode) {}
+	LockRequest(Arena a, const LockRequest& r) : range(r.range), mode(r.mode){};
 
 	KeyRangeRef range;
 	LockMode mode;
