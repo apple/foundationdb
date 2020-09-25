@@ -135,7 +135,7 @@ ERROR( no_commit_version, 2021, "Transaction is read-only and therefore does not
 ERROR( environment_variable_network_option_failed, 2022, "Environment variable network option could not be set" )
 ERROR( transaction_read_only, 2023, "Attempted to commit a transaction specified as read-only" )
 ERROR( invalid_cache_eviction_policy, 2024, "Invalid cache eviction policy, only random and lru are supported" )
-ERROR( blocked_from_network_thread, 2025, "Detected a deadlock in a callback called from the network thread" )
+ERROR( blocked_from_network_thread, 2026, "Detected a deadlock in a callback called from the network thread" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
