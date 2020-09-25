@@ -1,4 +1,0 @@
-testTitle=TaskBucketCorrectness
-    testName=TaskBucketCorrectness
-    chained=false
-    subtaskCount=20

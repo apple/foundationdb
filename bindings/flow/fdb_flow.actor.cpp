@@ -36,7 +36,7 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(630);
+	API *fdb = FDB::API::selectAPIVersion(700);
 	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr = db->createTransaction();
 
@@ -79,7 +79,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(630);
+	API *fdb = FDB::API::selectAPIVersion(700);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
@@ -157,16 +157,16 @@ namespace FDB {
 		void cancel() override;
 		void reset() override;
 
-		TransactionImpl() : tr(NULL) {}
-		TransactionImpl(TransactionImpl&& r) BOOST_NOEXCEPT {
-			tr = r.tr;
-			r.tr = NULL;
-		}
-		TransactionImpl& operator=(TransactionImpl&& r) BOOST_NOEXCEPT {
-			tr = r.tr;
-			r.tr = NULL;
+		TransactionImpl() : tr(nullptr) {}
+	    TransactionImpl(TransactionImpl&& r) noexcept {
+		    tr = r.tr;
+		    r.tr = nullptr;
+	    }
+	    TransactionImpl& operator=(TransactionImpl&& r) noexcept {
+		    tr = r.tr;
+		    r.tr = nullptr;
 			return *this;
-		}
+	    }
 
 	private:
 		FDBTransaction* tr;
@@ -207,10 +207,10 @@ namespace FDB {
 		if ( value.present() )
 			throw_on_error( fdb_network_set_option( option, value.get().begin(), value.get().size() ) );
 		else
-			throw_on_error( fdb_network_set_option( option, NULL, 0 ) );
+			throw_on_error( fdb_network_set_option( option, nullptr, 0 ) );
 	}
 
-	API* API::instance = NULL;
+	API* API::instance = nullptr;
 	API::API(int version) : version(version) {}
 
 	API* API::selectAPIVersion(int apiVersion) {
@@ -234,11 +234,11 @@ namespace FDB {
 	}
 
 	bool API::isAPIVersionSelected() {
-		return API::instance != NULL;
+		return API::instance != nullptr;
 	}
 
 	API* API::getInstance() {
-		if(API::instance == NULL) {
+		if(API::instance == nullptr) {
 			throw api_version_unset();
 		}
 		else {
@@ -280,7 +280,7 @@ namespace FDB {
 		if (value.present())
 			throw_on_error(fdb_database_set_option(db, option, value.get().begin(), value.get().size()));
 		else
-			throw_on_error(fdb_database_set_option(db, option, NULL, 0));
+			throw_on_error(fdb_database_set_option(db, option, nullptr, 0));
 	}
 
 	TransactionImpl::TransactionImpl(FDBDatabase* db) {
@@ -417,7 +417,7 @@ namespace FDB {
 		if ( value.present() ) {
 			throw_on_error( fdb_transaction_set_option( tr, option, value.get().begin(), value.get().size() ) );
 		} else {
-			throw_on_error( fdb_transaction_set_option( tr, option, NULL, 0 ) );
+			throw_on_error( fdb_transaction_set_option( tr, option, nullptr, 0 ) );
 		}
 	}
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/Platform.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -1390,6 +1391,7 @@ public:
 		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 	}
 
+<<<<<<< HEAD
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
 	                                                                    Version targetVersion,
 	                                                                    VectorRef<KeyRangeRef> keyRangesFilter) {
@@ -1401,6 +1403,41 @@ public:
 			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
 				continue;
 			}
+=======
+	static Optional<RestorableFileSet> getRestoreSetFromLogs(std::vector<LogFile> logs, Version targetVersion,
+	                                                         RestorableFileSet restorable) {
+		Version end = logs.begin()->endVersion;
+		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
+		if (end >= targetVersion) {
+			restorable.continuousBeginVersion = logs.begin()->beginVersion;
+			restorable.continuousEndVersion = end;
+			return Optional<RestorableFileSet>(restorable);
+		}
+		return Optional<RestorableFileSet>();
+	}
+
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
+	                                                                    Version targetVersion, bool logsOnly,
+	                                                                    Version beginVersion) {
+		if (logsOnly) {
+			state RestorableFileSet restorableSet;
+			state std::vector<LogFile> logFiles;
+			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
+			wait(store(logFiles, bc->listLogFiles(begin, targetVersion, false)));
+			// List logs in version order so log continuity can be analyzed
+			std::sort(logFiles.begin(), logFiles.end());
+			if (!logFiles.empty()) {
+				return getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+			}
+		}
+		// Find the most recent keyrange snapshot to end at or before targetVersion
+		state Optional<KeyspaceSnapshotFile> snapshot;
+		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		for(auto const &s : snapshots) {
+			if(s.endVersion <= targetVersion)
+				snapshot = s;
+		}
+>>>>>>> master
 
 			state RestorableFileSet restorable;
 			state Version minKeyRangeVersion = MAX_VERSION;
@@ -1494,6 +1531,7 @@ public:
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
 			// If there are logs and the first one starts at or before the snapshot begin version then proceed
+<<<<<<< HEAD
 			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
 				Version end = logs.begin()->endVersion;
 				computeRestoreEndVersion(logs, &restorable.logs, &end, restorable.targetVersion);
@@ -1502,14 +1540,25 @@ public:
 					restorable.continuousEndVersion = end;
 					return Optional<RestorableFileSet>(restorable);
 				}
+=======
+			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
+				return getRestoreSetFromLogs(logs, targetVersion, restorable);
+>>>>>>> master
 			}
 		}
 		return Optional<RestorableFileSet>();
 	}
 
+<<<<<<< HEAD
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter) final {
 		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter);
+=======
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, bool logsOnly,
+	                                                  Version beginVersion) final {
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, logsOnly,
+		                          beginVersion);
+>>>>>>> master
 	}
 
 private:
@@ -1613,9 +1662,13 @@ public:
 		// Remove trailing slashes on path
 		path.erase(path.find_last_not_of("\\/") + 1);
 
-		if(!g_network->isSimulated() && path != abspath(path)) {
-			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path);
-			throw io_error();
+		std::string absolutePath = abspath(path);
+		
+		if(!g_network->isSimulated() && path != absolutePath) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path).detail("AbsolutePath", absolutePath);
+			// throw io_error();
+			IBackupContainer::lastOpenError = format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
+			throw backup_invalid_url();
 		}
 
 		// Finalized path written to will be will be <path>/backup-<uid>
@@ -1761,11 +1814,11 @@ public:
 		return Void();
 	}
 
-	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const&)>) final {
-		FilesAndSizesT results;
+	ACTOR static Future<FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
+		state std::vector<std::string> files;
+		wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files));
 
-		std::vector<std::string> files;
-		platform::findFilesRecursively(joinPath(m_path, path), files);
+		FilesAndSizesT results;
 
 		// Remove .lnk files from results, they are a side effect of a backup that was *read* during simulation.  See openFile() above for more info on why they are created.
 		if(g_network->isSimulated())
@@ -1781,7 +1834,11 @@ public:
 		return results;
 	}
 
-	Future<Void> deleteContainer(int* pNumDeleted) final {
+	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)>) final {
+		return listFiles_impl(path, m_path);
+	}
+
+	Future<Void> deleteContainer(int *pNumDeleted) final {
 		// In order to avoid deleting some random directory due to user error, first describe the backup
 		// and make sure it has something in it.
 		return map(describeBackup(false, invalidVersion), [=](BackupDescription const &desc) {

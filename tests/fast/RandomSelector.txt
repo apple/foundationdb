@@ -1,2 +1,0 @@
-testTitle=RYOW_test
-    testName=RandomSelector

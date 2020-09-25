@@ -33,27 +33,72 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-class SpecialKeyRangeBaseImpl {
+class SpecialKeyRangeReadImpl {
 public:
 	// Each derived class only needs to implement this simple version of getRange
 	virtual Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
-	explicit SpecialKeyRangeBaseImpl(KeyRangeRef kr) : range(kr) {}
+	explicit SpecialKeyRangeReadImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
 	// true if the getRange call can emit more than one rpc calls,
 	// we cache the results to keep consistency in the same getrange lifetime
 	// TODO : give this function a more descriptive name
 	virtual bool isAsync() const { return false; }
 
-	virtual ~SpecialKeyRangeBaseImpl() {}
+	virtual ~SpecialKeyRangeReadImpl() {}
 
 protected:
 	KeyRange range; // underlying key range for this function
 };
 
-class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeBaseImpl {
+class ManagementAPIError {
 public:
-	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeBaseImpl(kr) {}
+	static std::string toJsonString(bool retriable, const std::string& command, const std::string& msg) {
+		json_spirit::mObject errorObj;
+		errorObj["retriable"] = retriable;
+		errorObj["command"] = command;
+		errorObj["message"] = msg;
+		return json_spirit::write_string(json_spirit::mValue(errorObj), json_spirit::Output_options::raw_utf8);
+	}
+
+private:
+	ManagementAPIError(){};
+};
+
+class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {
+public:
+	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
+	}
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+		ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
+	}
+	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+	}
+	virtual Future<Optional<std::string>> commit(
+	    ReadYourWritesTransaction* ryw) = 0; // all delayed async operations of writes in special-key-space
+	// Given the special key to write, return the real key that needs to be modified
+	virtual Key decode(const KeyRef& key) const {
+		// Default implementation should never be used
+		ASSERT(false);
+		return key;
+	}
+	// Given the read key, return the corresponding special key
+	virtual Key encode(const KeyRef& key) const {
+		// Default implementation should never be used
+		ASSERT(false);
+		return key;
+	};
+
+	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+	virtual ~SpecialKeyRangeRWImpl() {}
+};
+
+class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const = 0;
 
@@ -65,7 +110,7 @@ public:
 
 	bool isAsync() const override { return true; }
 
-	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeBaseImpl* skrAyncImpl,
+	ACTOR static Future<Standalone<RangeResultRef>> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
 	                                                                   ReadYourWritesTransaction* ryw, KeyRangeRef kr,
 	                                                                   Optional<Standalone<RangeResultRef>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
@@ -94,7 +139,10 @@ class SpecialKeySpace {
 public:
 	enum class MODULE {
 		CLUSTERFILEPATH,
+		CONFIGURATION, // Configuration of the cluster
 		CONNECTIONSTRING,
+		ERRORMSG, // A single key space contains a json string which describes the last error in special-key-space
+		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
 		TRANSACTION, // transaction related info, conflicting keys, read/write conflict range
@@ -103,67 +151,77 @@ public:
 		WORKERINTERFACE,
 	};
 
+	enum class IMPLTYPE {
+		READONLY, // The underlying special key range can only be called with get and getRange
+		READWRITE // The underlying special key range can be called with get, getRange, set, clear
+	};
+
+	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
+
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeySelector begin, KeySelector end,
 	                                            GetRangeLimits limits, bool reverse = false);
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true)
-	  : range(KeyRangeRef(spaceStartKey, spaceEndKey)), impls(nullptr, spaceEndKey),
-	    modules(testOnly ? SpecialKeySpace::MODULE::TESTONLY : SpecialKeySpace::MODULE::UNKNOWN, spaceEndKey) {
-		// Default begin of KeyRangeMap is Key(), insert the range to update start key if needed
-		impls.insert(range, nullptr);
-		if (!testOnly) modulesBoundaryInit(); // testOnly is used in the correctness workload
-	}
-	// Initialize module boundaries, used to handle cross_module_read
-	void modulesBoundaryInit() {
-		for (const auto& pair : moduleToBoundary) {
-			ASSERT(range.contains(pair.second));
-			// Make sure the module is not overlapping with any registered modules
-			// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
-			ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
-			       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
-			modules.insert(pair.second, pair.first);
-			impls.insert(pair.second, nullptr); // Note: Due to underlying implementation, the insertion here is
-			                                    // important to make cross_module_read being handled correctly
-		}
-	}
-	void registerKeyRange(SpecialKeySpace::MODULE module, const KeyRangeRef& kr, SpecialKeyRangeBaseImpl* impl) {
-		// module boundary check
-		if (module == SpecialKeySpace::MODULE::TESTONLY)
-			ASSERT(normalKeys.contains(kr));
-		else
-			ASSERT(moduleToBoundary.at(module).contains(kr));
-		// make sure the registered range is not overlapping with existing ones
-		// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
-		for (auto iter = impls.rangeContaining(kr.begin); true; ++iter) {
-			ASSERT(iter->value() == nullptr);
-			if (iter == impls.rangeContaining(kr.end))
-				break; // relax the condition that the end can be another range's start, if needed
-		}
-		impls.insert(kr, impl);
-	}
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
 
-	KeyRangeMap<SpecialKeyRangeBaseImpl*>& getImpls() { return impls; }
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range);
+
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key);
+
+	Future<Void> commit(ReadYourWritesTransaction* ryw);
+
+	void registerKeyRange(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type, const KeyRangeRef& kr,
+	                      SpecialKeyRangeReadImpl* impl);
+
+	Key decode(const KeyRef& key);
+	KeyRange decode(const KeyRangeRef& kr);
+
+	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
+	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
+	static KeyRangeRef getModuleRange(SpecialKeySpace::MODULE module) { return moduleToBoundary.at(module); }
+	static KeyRangeRef getManamentApiCommandRange(const std::string& command) {
+		return managementApiCommandToRange.at(command);
+	}
+	static KeyRef getManagementApiCommandPrefix(const std::string& command) {
+		return managementApiCommandToRange.at(command).begin;
+	}
+	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
+	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks,
-	                                                                 ReadYourWritesTransaction* ryw, KeySelector begin,
-	                                                                 KeySelector end, GetRangeLimits limits,
-	                                                                 bool reverse);
+	ACTOR static Future<Standalone<RangeResultRef>> checkRYWValid(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw,
+	                                                              KeySelector begin, KeySelector end,
+	                                                              GetRangeLimits limits, bool reverse);
 	ACTOR static Future<Standalone<RangeResultRef>> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                                         ReadYourWritesTransaction* ryw,
 	                                                                         KeySelector begin, KeySelector end,
 	                                                                         GetRangeLimits limits, bool reverse);
-	KeyRange range;
-	KeyRangeMap<SpecialKeyRangeBaseImpl*> impls;
+
+	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
+	KeyRangeMap<SpecialKeyRangeRWImpl*> writeImpls;
+	KeyRange range; // key space range, (\xff\xff, \xff\xff\xff) in prod and (, \xff) in test
 
 	static std::unordered_map<SpecialKeySpace::MODULE, KeyRange> moduleToBoundary;
+	static std::unordered_map<std::string, KeyRange>
+	    managementApiCommandToRange; // management command to its special keys' range
+	static std::set<std::string> options; // "<command>/<option>"
+
+	// Initialize module boundaries, used to handle cross_module_read
+	void modulesBoundaryInit();
+};
+
+// Used for SpecialKeySpaceCorrectnessWorkload
+class SKSCTestImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit SKSCTestImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
@@ -172,19 +230,19 @@ private:
 // prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 // prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 // Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
-class ConflictingKeysImpl : public SpecialKeyRangeBaseImpl {
+class ConflictingKeysImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class ReadConflictRangeImpl : public SpecialKeyRangeBaseImpl {
+class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ReadConflictRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
-class WriteConflictRangeImpl : public SpecialKeyRangeBaseImpl {
+class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit WriteConflictRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
@@ -193,6 +251,57 @@ public:
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit DDStatsRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class ManagementCommandsOptionsImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ManagementCommandsOptionsImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class FailedServersRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit FailedServersRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Key decode(const KeyRef& key) const override;
+	Key encode(const KeyRef& key) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class ExclusionInProgressRangeImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit ExclusionInProgressRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+};
+
+class ProcessClassRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ProcessClassRangeImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+};
+
+class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit ProcessClassSourceRangeImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 

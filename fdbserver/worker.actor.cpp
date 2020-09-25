@@ -21,6 +21,8 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbrpc/Locality.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -112,11 +114,13 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 }
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastCommitProxyUIDs;
+	state std::vector<CommitProxyInterface> lastCommitProxies;
+	state std::vector<UID> lastGrvProxyUIDs;
+	state std::vector<GrvProxyInterface> lastGrvProxies;
 	loop {
 		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 		info->set( ni );
 		wait( db->onChange() );
 	}
@@ -485,7 +489,7 @@ ACTOR Future<Void> registrationClient(
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
@@ -523,41 +527,10 @@ ACTOR Future<Void> registrationClient(
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
-
-				if(!reply.storageCache.present()) {
-					cacheProcessFuture.cancel();
-					scInterf->set(Optional<std::pair<uint16_t,StorageServerInterface>>());
-				} else if (!scInterf->get().present() || scInterf->get().get().first != reply.storageCache.get()) {
-					StorageServerInterface recruited;
-					recruited.locality = locality;
-					recruited.initEndpoints();
-
-					std::map<std::string, std::string> details;
-					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
-
-					//DUMPTOKEN(recruited.getVersion);
-					DUMPTOKEN(recruited.getValue);
-					DUMPTOKEN(recruited.getKey);
-					DUMPTOKEN(recruited.getKeyValues);
-					DUMPTOKEN(recruited.getShardState);
-					DUMPTOKEN(recruited.waitMetrics);
-					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getReadHotRanges);
-					DUMPTOKEN(recruited.getStorageMetrics);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.getKeyValueStoreType);
-					DUMPTOKEN(recruited.watchValue);
-
-					cacheProcessFuture = storageCache( recruited, reply.storageCache.get(), dbInfo );
-					cacheErrorsFuture = forwardError(errors, Role::STORAGE_CACHE, recruited.id(), setWhenDoneOrError(cacheProcessFuture, scInterf, Optional<std::pair<uint16_t,StorageServerInterface>>()));
-					scInterf->set(std::make_pair(reply.storageCache.get(), recruited));
-				}
 			}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
-			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
 			when ( wait( FlowTransport::transport().onIncompatibleChanged() ) ) {}
 			when ( wait( issues->onChange() ) ) {}
@@ -597,7 +570,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 			const char *path = (const char*)req.outputFile.begin();
 			ProfilerOptions *options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
-			options->filter_in_thread_arg = NULL;
+			options->filter_in_thread_arg = nullptr;
 			ProfilerStartWithOptions(path, options);
 			break;
 		}
@@ -741,6 +714,41 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile> (nullptr) );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
+	}
+}
+
+ACTOR Future<Void> storageCacheRollbackRebooter( Future<Void> prevStorageCache, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db) {
+	loop {
+		ErrorOr<Void> e = wait( errorOr( prevStorageCache) );
+		if (!e.isError()) {
+			TraceEvent("StorageCacheRequestedReboot1", id);
+			return Void();
+		}
+		else if (e.getError().code() != error_code_please_reboot && e.getError().code() != error_code_worker_removed) {
+			TraceEvent("StorageCacheRequestedReboot2", id).detail("Code",e.getError().code());
+			throw e.getError();
+		}
+
+		TraceEvent("StorageCacheRequestedReboot", id);
+
+		StorageServerInterface recruited;
+		recruited.uniqueID = deterministicRandom()->randomUniqueID();// id;
+		recruited.locality = locality;
+		recruited.initEndpoints();
+
+		DUMPTOKEN(recruited.getValue);
+		DUMPTOKEN(recruited.getKey);
+		DUMPTOKEN(recruited.getKeyValues);
+		DUMPTOKEN(recruited.getShardState);
+		DUMPTOKEN(recruited.waitMetrics);
+		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getStorageMetrics);
+		DUMPTOKEN(recruited.waitFailure);
+		DUMPTOKEN(recruited.getQueuingMetrics);
+		DUMPTOKEN(recruited.getKeyValueStoreType);
+		DUMPTOKEN(recruited.watchValue);
+
+		prevStorageCache = storageCacheServer(recruited, 0, db);
 	}
 }
 
@@ -986,7 +994,8 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
-		DUMPTOKEN(recruited.masterProxy);
+		DUMPTOKEN(recruited.commitProxy);
+		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
@@ -1081,10 +1090,40 @@ ACTOR Future<Void> workerServer(
 			}
 		}
 
+		bool hasCache = false;
+		//  start cache role if we have the right process class
+		if (initialClass.classType() == ProcessClass::StorageCacheClass) {
+			hasCache = true;
+			StorageServerInterface recruited;
+			recruited.locality = locality;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			startRole(Role::STORAGE_CACHE, recruited.id(), interf.id(), details);
+
+			// DUMPTOKEN(recruited.getVersion);
+			DUMPTOKEN(recruited.getValue);
+			DUMPTOKEN(recruited.getKey);
+			DUMPTOKEN(recruited.getKeyValues);
+			DUMPTOKEN(recruited.getShardState);
+			DUMPTOKEN(recruited.waitMetrics);
+			DUMPTOKEN(recruited.splitMetrics);
+			DUMPTOKEN(recruited.getStorageMetrics);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.getQueuingMetrics);
+			DUMPTOKEN(recruited.getKeyValueStoreType);
+			DUMPTOKEN(recruited.watchValue);
+
+			auto f = storageCacheServer(recruited, 0, dbInfo);
+			f = storageCacheRollbackRebooter( f, recruited.id(), recruited.locality, dbInfo);
+			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
+		}
+
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
+		details["CachePresent"] = hasCache ? "true" : "false";
 		startRole( Role::WORKER, interf.id(), interf.id(), details );
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
@@ -1180,6 +1219,9 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.tlogRejoin );
 				DUMPTOKEN( recruited.changeCoordinators );
 				DUMPTOKEN( recruited.getCommitVersion );
+				DUMPTOKEN( recruited.getLiveCommittedVersion);
+				DUMPTOKEN( recruited.reportLiveCommittedVersion);
+				DUMPTOKEN( recruited.notifyBackupWorkerDone);
 
 				//printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer( recruited, dbInfo, ccInterface, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
@@ -1216,6 +1258,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
+					DUMPTOKEN(recruited.reportCommitCostEstimation);
 
 					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
 					errorForwarders.add(
@@ -1325,27 +1368,46 @@ ACTOR Future<Void> workerServer(
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
-			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
-				MasterProxyInterface recruited;
+			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
+				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
 				details["ForMaster"] = req.master.id().shortString();
-				startRole( Role::MASTER_PROXY, recruited.id(), interf.id(), details );
+				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.getConsistentReadVersion);
 				DUMPTOKEN(recruited.getKeyServersLocations);
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getRawCommittedVersion);
 				DUMPTOKEN(recruited.txnState);
 
-				//printf("Recruited as masterProxyServer\n");
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
-						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+				// printf("Recruited as commitProxyServer\n");
+				errorForwarders.add(
+				    zombie(recruited, forwardError(errors, Role::COMMIT_PROXY, recruited.id(),
+				                                   commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
+				req.reply.send(recruited);
+			}
+			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
+				GrvProxyInterface recruited;
+				recruited.processId = locality.processId();
+				recruited.provisional = false;
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				details["ForMaster"] = req.master.id().shortString();
+				startRole( Role::GRV_PROXY, recruited.id(), interf.id(), details );
+
+				DUMPTOKEN(recruited.getConsistentReadVersion);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.getHealthMetrics);
+
+				//printf("Recruited as grvProxyServer\n");
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::GRV_PROXY, recruited.id(),
+						grvProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
@@ -1796,7 +1858,8 @@ const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
-const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
+const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
+const Role Role::GRV_PROXY("GrvProxyServer", "GP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");

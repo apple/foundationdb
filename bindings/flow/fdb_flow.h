@@ -23,7 +23,7 @@
 
 #include <flow/flow.h>
 
-#define FDB_API_VERSION 630
+#define FDB_API_VERSION 700
 #include <bindings/c/foundationdb/fdb_c.h>
 #undef DLLEXPORT
 
@@ -31,7 +31,7 @@
 
 namespace FDB {
 	struct CFuture : NonCopyable, ReferenceCounted<CFuture>, FastAllocated<CFuture> {
-		CFuture() : f(NULL) {}
+		CFuture() : f(nullptr) {}
 		explicit CFuture(FDBFuture* f) : f(f) {}
 		~CFuture() {
 			if (f) {

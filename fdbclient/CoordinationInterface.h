@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
@@ -103,8 +103,12 @@ struct LeaderInfo {
 	LeaderInfo() : forward(false) {}
 	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
 
-	bool operator < (LeaderInfo const& r) const { return changeID < r.changeID; }
-	bool operator == (LeaderInfo const& r) const { return changeID == r.changeID; }
+	bool operator<(LeaderInfo const& r) const { return changeID < r.changeID; }
+	bool operator>(LeaderInfo const& r) const { return r < *this; }
+	bool operator<=(LeaderInfo const& r) const { return !(*this > r); }
+	bool operator>=(LeaderInfo const& r) const { return !(*this < r); }
+	bool operator==(LeaderInfo const& r) const { return changeID == r.changeID; }
+	bool operator!=(LeaderInfo const& r) const { return !(*this == r); }
 
 	// The first 7 bits of ChangeID represent cluster controller process class fitness, the lower the better
 	void updateChangeID(ClusterControllerPriorityInfo info) {

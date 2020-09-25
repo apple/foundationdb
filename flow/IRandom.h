@@ -80,6 +80,9 @@ public:
 	bool operator == ( const UID& r ) const { return part[0]==r.part[0] && part[1]==r.part[1]; }
 	bool operator != ( const UID& r ) const { return part[0]!=r.part[0] || part[1]!=r.part[1]; }
 	bool operator < ( const UID& r ) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
+	bool operator>(const UID& r) const { return r < *this; }
+	bool operator<=(const UID& r) const { return !(*this > r); }
+	bool operator>=(const UID& r) const { return !(*this < r); }
 
 	uint64_t hash() const { return first(); }
 	uint64_t first() const { return part[0]; }

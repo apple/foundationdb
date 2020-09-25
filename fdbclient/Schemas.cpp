@@ -47,7 +47,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage",
                   "transaction",
                   "resolution",
-                  "proxy",
+                  "commit_proxy",
+                  "grv_proxy",
                   "master",
                   "test",
                   "storage_cache"
@@ -83,7 +84,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "role":{
                      "$enum":[
                         "master",
-                        "proxy",
+                        "commit_proxy",
+                        "grv_proxy",
                         "log",
                         "storage",
                         "resolver",
@@ -184,6 +186,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "$map": 1
                   },
                   "busiest_read_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz": 0.0
+                     }
+                  },
+                  "busiest_write_tag":{
                      "tag": "",
                      "fractional_cost": 0.0,
                      "estimated_cost":{
@@ -346,11 +355,14 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
          "throttled_tags":{
-            "auto":{
-               "count":0
+            "auto" : {
+                "busy_read" : 0,
+                "busy_write" : 0,
+                "count" : 0,
+                "recommended_only": 0
             },
-            "manual":{
-               "count":0
+            "manual" : {
+                "count" : 0
             }
          },
          "limiting_queue_bytes_storage_server":0,
@@ -479,7 +491,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                                                           R"statusSchema(
       "recovery_state":{
          "required_resolvers":1,
-         "required_proxies":1,
+         "required_commit_proxies":1,
+         "required_grv_proxies":1,
          "name":{
             "$enum":[
                "reading_coordinated_state",
@@ -667,10 +680,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "address":"10.0.4.1"
             }
          ],
-         "auto_proxies":3,
+         "auto_commit_proxies":3,
+         "auto_grv_proxies":1,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5,
+         "commit_proxies":5,
+         "grv_proxies":1,
          "backup_worker_enabled":1
       },
       "data":{
@@ -869,10 +884,12 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "ssd-2",
         "memory"
     ]},
-    "auto_proxies":3,
+    "auto_commit_proxies":3,
+    "auto_grv_proxies":1,
     "auto_resolvers":1,
     "auto_logs":3,
-    "proxies":5
+    "commit_proxies":5
+    "grv_proxies":1
 })configSchema");
 
 const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
@@ -925,5 +942,13 @@ const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
   "worst_storage_durability_lag": 5050809,
   "worst_storage_queue": 2030,
   "worst_log_queue": 156
+}
+)""");
+
+const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
+{
+   "retriable": false,
+   "command": "exclude",
+   "message": "The reason of the error"
 }
 )""");

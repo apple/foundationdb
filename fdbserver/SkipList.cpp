@@ -318,14 +318,14 @@ public:
 		Node* alreadyChecked;
 		StringRef value;
 
-		Finger() : level(MaxLevels), x(NULL), alreadyChecked(NULL) {}
+		Finger() : level(MaxLevels), x(nullptr), alreadyChecked(nullptr) {}
 
-		Finger(Node* header, const StringRef& ptr) : value(ptr), level(MaxLevels), alreadyChecked(NULL), x(header) {}
+		Finger(Node* header, const StringRef& ptr) : value(ptr), level(MaxLevels), alreadyChecked(nullptr), x(header) {}
 
 		void init(const StringRef& value, Node* header) {
 			this->value = value;
 			x = header;
-			alreadyChecked = NULL;
+			alreadyChecked = nullptr;
 			level = MaxLevels;
 		}
 
@@ -366,7 +366,7 @@ public:
 			if (n && n->length() == value.size() && !memcmp(n->value(), value.begin(), value.size()))
 				return n;
 			else
-				return NULL;
+				return nullptr;
 		}
 
 		StringRef getValue() const {
@@ -388,16 +388,16 @@ public:
 	explicit SkipList(Version version = 0) {
 		header = Node::create(StringRef(), MaxLevels - 1);
 		for (int l = 0; l < MaxLevels; l++) {
-			header->setNext(l, NULL);
+			header->setNext(l, nullptr);
 			header->setMaxVersion(l, version);
 		}
 	}
 	~SkipList() { destroy(); }
-	SkipList(SkipList&& other) BOOST_NOEXCEPT : header(other.header) { other.header = NULL; }
-	void operator=(SkipList&& other) BOOST_NOEXCEPT {
+	SkipList(SkipList&& other) noexcept : header(other.header) { other.header = nullptr; }
+	void operator=(SkipList&& other) noexcept {
 		destroy();
 		header = other.header;
-		other.header = NULL;
+		other.header = nullptr;
 	}
 	void swap(SkipList& other) { std::swap(header, other.header); }
 
@@ -406,7 +406,7 @@ public:
 			const Finger& startF = fingers[r * 2];
 			const Finger& endF = fingers[r * 2 + 1];
 
-			if (endF.found() == NULL) insert(endF, endF.finger[0]->getMaxVersion(0));
+			if (endF.found() == nullptr) insert(endF, endF.finger[0]->getMaxVersion(0));
 
 			remove(startF, endF);
 			insert(startF, version);
@@ -470,7 +470,7 @@ public:
 			for (int i = ends.size() - 1; i >= 0; i--) {
 				ends[i].finger[l]->setNext(l, input[i + 1].header->getNext(l));
 				if (l && (!i || ends[i].finger[l] != input[i].header)) ends[i].finger[l]->calcVersionForLevel(l);
-				input[i + 1].header->setNext(l, NULL);
+				input[i + 1].header->setNext(l, nullptr);
 			}
 		}
 		swap(input[0]);
@@ -499,7 +499,7 @@ public:
 		for (int i = 1; i < count; i++) {
 			results[i].level = startLevel;
 			results[i].x = x;
-			results[i].alreadyChecked = NULL;
+			results[i].alreadyChecked = nullptr;
 			results[i].value = values[i];
 			for (int j = startLevel; j < MaxLevels; j++) results[i].finger[j] = results[0].finger[j];
 		}
@@ -697,7 +697,7 @@ private:
 		right.header->setMaxVersion(0, f.finger[0]->getMaxVersion(0));
 		for (int l = 0; l < MaxLevels; l++) {
 			right.header->setNext(l, f.finger[l]->getNext(l));
-			f.finger[l]->setNext(l, NULL);
+			f.finger[l]->setNext(l, nullptr);
 		}
 	}
 
@@ -705,7 +705,7 @@ private:
 		Node* node = header;
 		for (int l = MaxLevels - 1; l >= 0; l--) {
 			Node* next;
-			while ((next = node->getNext(l)) != NULL) node = next;
+			while ((next = node->getNext(l)) != nullptr) node = next;
 			end.finger[l] = node;
 		}
 		end.level = 0;

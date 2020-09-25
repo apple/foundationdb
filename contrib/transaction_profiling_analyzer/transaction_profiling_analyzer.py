@@ -39,7 +39,9 @@ from json import JSONEncoder
 import logging
 import struct
 from bisect import bisect_left
+from bisect import bisect_right
 import time
+import datetime
 
 PROTOCOL_VERSION_5_2 = 0x0FDB00A552000001
 PROTOCOL_VERSION_6_0 = 0x0FDB00A570010001
@@ -95,6 +97,9 @@ class ByteBuffer(object):
 
     def get_double(self):
         return struct.unpack("<d", self.get_bytes(8))[0]
+
+    def get_bool(self):
+        return struct.unpack("<?", self.get_bytes(1))[0]
 
     def get_bytes_with_length(self):
         length = self.get_int()
@@ -221,6 +226,8 @@ class CommitInfo(BaseInfo):
             self.mutations = mutations
 
         self.read_snapshot_version = bb.get_long()
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.report_conflicting_keys = bb.get_bool()
 
 
 class ErrorGetInfo(BaseInfo):
@@ -253,7 +260,8 @@ class ErrorCommitInfo(BaseInfo):
             self.mutations = mutations
 
         self.read_snapshot_version = bb.get_long()
-
+        if protocol_version >= PROTOCOL_VERSION_6_3:
+            self.report_conflicting_keys = bb.get_bool()
 
 class UnsupportedProtocolVersionError(Exception):
     def __init__(self, protocol_version):
@@ -414,7 +422,7 @@ class TransactionInfoLoader(object):
         else:
             end_key = self.client_latency_end_key_selector
 
-        valid_transaction_infos = 0
+        transaction_infos = 0
         invalid_transaction_infos = 0
 
         def build_client_transaction_info(v):
@@ -446,11 +454,12 @@ class TransactionInfoLoader(object):
                             info = build_client_transaction_info(v)
                             if info.has_types():
                                 buffer.append(info)
-                            valid_transaction_infos += 1
                         except UnsupportedProtocolVersionError as e:
                             invalid_transaction_infos += 1
                         except ValueError:
                             invalid_transaction_infos += 1
+
+                        transaction_infos += 1
                     else:
                         if chunk_num == 1:
                             # first chunk
@@ -476,14 +485,15 @@ class TransactionInfoLoader(object):
                                     info = build_client_transaction_info(b''.join([chunk.value for chunk in c_list]))
                                     if info.has_types():
                                         buffer.append(info)
-                                    valid_transaction_infos += 1
                                 except UnsupportedProtocolVersionError as e:
                                     invalid_transaction_infos += 1
                                 except ValueError:
                                     invalid_transaction_infos += 1
+
+                                transaction_infos += 1
                             self._check_and_adjust_chunk_cache_size()
-                    if (valid_transaction_infos + invalid_transaction_infos) % 1000 == 0:
-                        print("Processed valid: %d, invalid: %d" % (valid_transaction_infos, invalid_transaction_infos))
+                    if transaction_infos % 1000 == 0:
+                        print("Processed %d transactions, %d invalid" % (transaction_infos, invalid_transaction_infos))
                 if found == 0:
                     more = False
             except fdb.FDBError as e:
@@ -495,13 +505,15 @@ class TransactionInfoLoader(object):
             for item in buffer:
                 yield item
 
+        print("Processed %d transactions, %d invalid\n" % (transaction_infos, invalid_transaction_infos))
+
 
 def has_sortedcontainers():
     try:
         import sortedcontainers
         return True
     except ImportError:
-        logger.warn("Can't find sortedcontainers so disabling RangeCounter")
+        logger.warn("Can't find sortedcontainers so disabling ReadCounter")
         return False
 
 
@@ -513,155 +525,200 @@ def has_dateparser():
         logger.warn("Can't find dateparser so disabling human date parsing")
         return False
 
-
-class RangeCounter(object):
-    def __init__(self, k):
-        self.k = k
+class ReadCounter(object):
+    def __init__(self):
         from sortedcontainers import SortedDict
-        self.ranges = SortedDict()
+        self.reads = SortedDict()
+        self.reads[b''] = [0, 0]
+
+        self.read_counts = {}
+        self.hit_count=0
 
     def process(self, transaction_info):
+        for get in transaction_info.gets:
+            self._insert_read(get.key, None)
         for get_range in transaction_info.get_ranges:
-            self._insert_range(get_range.key_range.start_key, get_range.key_range.end_key)
+            self._insert_read(get_range.key_range.start_key, get_range.key_range.end_key)
 
-    def _insert_range(self, start_key, end_key):
-        keys = self.ranges.keys()
-        if len(keys) == 0:
-            self.ranges[start_key] = end_key, 1
-            return
+    def _insert_read(self, start_key, end_key):
+        self.read_counts.setdefault((start_key, end_key), 0)
+        self.read_counts[(start_key, end_key)] += 1
 
-        start_pos = bisect_left(keys, start_key)
-        end_pos = bisect_left(keys, end_key)
-        #print("start_pos=%d, end_pos=%d" % (start_pos, end_pos))
+        self.reads.setdefault(start_key, [0, 0])[0] += 1
+        if end_key is not None:
+            self.reads.setdefault(end_key, [0, 0])[1] += 1
+        else:
+            self.reads.setdefault(start_key+b'\x00', [0, 0])[1] += 1
 
-        possible_intersection_keys = keys[max(0, start_pos - 1):min(len(keys), end_pos+1)]
+    def get_total_reads(self):
+        return sum([v for v in self.read_counts.values()])
 
-        start_range_left = start_key
+    def matches_filter(addresses, required_addresses):
+        for addr in required_addresses:
+            if addr not in addresses:
+                return False
+        return True
 
-        for key in possible_intersection_keys:
-            cur_end_key, cur_count = self.ranges[key]
-            #logger.debug("key=%s, cur_end_key=%s, cur_count=%d, start_range_left=%s" % (key, cur_end_key, cur_count, start_range_left))
-            if start_range_left < key:
-                if end_key <= key:
-                    self.ranges[start_range_left] = end_key, 1
-                    return
-                self.ranges[start_range_left] = key, 1
-                start_range_left = key
-            assert start_range_left >= key
-            if start_range_left >= cur_end_key:
-                continue
+    def get_top_k_reads(self, num, filter_addresses, shard_finder=None):
+        count_pairs = sorted([(v, k) for (k, v) in self.read_counts.items()], reverse=True, key=lambda item: item[0])
+        if not filter_addresses:
+            count_pairs = count_pairs[0:num]
 
-            # [key, start_range_left) = cur_count
-            # if key == start_range_left this will get overwritten below
-            self.ranges[key] = start_range_left, cur_count
+        if shard_finder:
+            results = []
+            for (count, (start, end)) in count_pairs:
+                results.append((start, end, count, shard_finder.get_addresses_for_key(start)))
 
-            if end_key <= cur_end_key:
-                # [start_range_left, end_key) = cur_count+1
-                # [end_key, cur_end_key) = cur_count
-                self.ranges[start_range_left] = end_key, cur_count + 1
-                if end_key != cur_end_key:
-                    self.ranges[end_key] = cur_end_key, cur_count
-                start_range_left = end_key
-                break
-            else:
-                # [start_range_left, cur_end_key) = cur_count+1
-                self.ranges[start_range_left] = cur_end_key, cur_count+1
-                start_range_left = cur_end_key
-            assert start_range_left <= end_key
+            shard_finder.wait_for_shard_addresses(results, 0, 3)
 
-        # there may be some range left
-        if start_range_left < end_key:
-            self.ranges[start_range_left] = end_key, 1
+            if filter_addresses:
+                filter_addresses = set(filter_addresses)
+                results = [r for r in results if filter_addresses.issubset(set(r[3]))][0:num]
+        else:
+            results = [(start, end, count) for (count, (start, end)) in count_pairs[0:num]]
 
-    def get_count_for_key(self, key):
-        if key in self.ranges:
-            return self.ranges[key][1]
+        return results
 
-        keys = self.ranges.keys()
-        index = bisect_left(keys, key)
-        if index == 0:
-            return 0
-
-        index_key = keys[index-1]
-        if index_key <= key < self.ranges[index_key][0]:
-            return self.ranges[index_key][1]
-        return 0
-
-    def get_range_boundaries(self, shard_finder=None):
-        total = sum([count for _, (_, count) in self.ranges.items()])
-        range_size = total // self.k
+    def get_range_boundaries(self, num_buckets, shard_finder=None):
+        total = sum([start_count for (start_count, end_count) in self.reads.values()])
+        range_size = total // num_buckets
         output_range_counts = []
 
-        def add_boundary(start, end, count):
+        if total == 0:
+            return output_range_counts
+
+        def add_boundary(start, end, started_count, total_count):
             if shard_finder:
                 shard_count = shard_finder.get_shard_count(start, end)
                 if shard_count == 1:
                     addresses = shard_finder.get_addresses_for_key(start)
                 else:
                     addresses = None
-                output_range_counts.append((start, end, count, shard_count, addresses))
+                output_range_counts.append((start, end, started_count, total_count, shard_count, addresses))
             else:
-                output_range_counts.append((start, end, count, None, None))
+                output_range_counts.append((start, end, started_count, total_count, None, None))
 
         this_range_start_key = None
+        last_end = None
+        open_count = 0
+        opened_this_range = 0
         count_this_range = 0
-        for (start_key, (end_key, count)) in self.ranges.items():
-            if not this_range_start_key:
-                this_range_start_key = start_key
-            count_this_range += count
-            if count_this_range >= range_size:
-                add_boundary(this_range_start_key, end_key, count_this_range)
-                count_this_range = 0
-                this_range_start_key = None
-        if count_this_range > 0:
-            add_boundary(this_range_start_key, end_key, count_this_range)
 
+        for (start_key, (start_count, end_count)) in self.reads.items():
+            open_count -= end_count
+
+            if opened_this_range >= range_size:
+                add_boundary(this_range_start_key, start_key, opened_this_range, count_this_range)
+                count_this_range = open_count
+                opened_this_range = 0
+                this_range_start_key = None
+
+            count_this_range += start_count
+            opened_this_range += start_count
+            open_count += start_count
+
+            if count_this_range > 0 and this_range_start_key is None:
+                this_range_start_key = start_key
+
+            if end_count > 0:
+                last_end = start_key
+
+        if last_end is None:
+            last_end = b'\xff'
+        if count_this_range > 0:
+            add_boundary(this_range_start_key, last_end, opened_this_range, count_this_range)
+
+        shard_finder.wait_for_shard_addresses(output_range_counts, 0, 5)
         return output_range_counts
 
 
 class ShardFinder(object):
-    def __init__(self, db):
+    def __init__(self, db, exclude_ports):
         self.db = db
+        self.exclude_ports = exclude_ports
+
+        self.tr = db.create_transaction()
+        self.refresh_tr()
+
+        self.outstanding = []
+        self.boundary_keys = list(fdb.locality.get_boundary_keys(db, b'', b'\xff\xff'))
+        self.shard_cache = {}
+
+    def _get_boundary_keys(self, begin, end):
+        start_pos = max(0, bisect_right(self.boundary_keys, begin)-1)
+        end_pos = max(0, bisect_right(self.boundary_keys, end)-1)
+
+        return self.boundary_keys[start_pos:end_pos]
+
+    def refresh_tr(self):
+        self.tr.options.set_read_lock_aware()
+        if not self.exclude_ports:
+            self.tr.options.set_include_port_in_address()
 
     @staticmethod
-    @fdb.transactional
-    def _get_boundary_keys(tr, begin, end):
-        tr.options.set_read_lock_aware()
-        return fdb.locality.get_boundary_keys(tr, begin, end)
-
-    @staticmethod
-    @fdb.transactional
     def _get_addresses_for_key(tr, key):
-        tr.options.set_read_lock_aware()
         return fdb.locality.get_addresses_for_key(tr, key)
 
     def get_shard_count(self, start_key, end_key):
-        return len(list(self._get_boundary_keys(self.db, start_key, end_key))) + 1
+        return len(self._get_boundary_keys(start_key, end_key)) + 1
 
     def get_addresses_for_key(self, key):
-        return [a.decode('ascii') for a in self._get_addresses_for_key(self.db, key).wait()]
+        shard = self.boundary_keys[max(0, bisect_right(self.boundary_keys, key)-1)]
+        do_load = False
+        if not shard in self.shard_cache:
+            do_load = True
+        elif self.shard_cache[shard].is_ready():
+            try:
+                self.shard_cache[shard].wait()
+            except fdb.FDBError as e:
+                self.tr.on_error(e).wait()
+                self.refresh_tr()
+                do_load = True
 
+        if do_load:
+            if len(self.outstanding) > 1000:
+                for f in self.outstanding:
+                    try:
+                        f.wait()
+                    except fdb.FDBError as e:
+                        pass
 
-class TopKeysCounter(object):
+                self.outstanding = []
+                self.tr.reset()
+                self.refresh_tr()
+
+            self.outstanding.append(self._get_addresses_for_key(self.tr, shard))
+            self.shard_cache[shard] = self.outstanding[-1]
+
+        return self.shard_cache[shard]
+
+    def wait_for_shard_addresses(self, ranges, key_idx, addr_idx):
+        for index in range(len(ranges)):
+            item = ranges[index]
+            if item[addr_idx] is not None:
+                while True:
+                    try:
+                        ranges[index] = item[0:addr_idx] + ([a.decode('ascii') for a in item[addr_idx].wait()],) + item[addr_idx+1:]
+                        break
+                    except fdb.FDBError as e:
+                        ranges[index] = item[0:addr_idx] + (self.get_addresses_for_key(item[key_idx]),) + item[addr_idx+1:]
+
+class WriteCounter(object):
     mutation_types_to_consider = frozenset([MutationType.SET_VALUE, MutationType.ADD_VALUE])
 
-    def __init__(self, k):
-        self.k = k
-        self.reads = defaultdict(lambda: 0)
+    def __init__(self):
         self.writes = defaultdict(lambda: 0)
 
     def process(self, transaction_info):
-        for get in transaction_info.gets:
-            self.reads[get.key] += 1
         if transaction_info.commit:
             for mutation in transaction_info.commit.mutations:
                 if mutation.code in self.mutation_types_to_consider:
                     self.writes[mutation.param_one] += 1
 
-    def _get_range_boundaries(self, counts, shard_finder=None):
-        total = sum([v for (k, v) in counts.items()])
-        range_size = total // self.k
-        key_counts_sorted = sorted(counts.items())
+    def get_range_boundaries(self, num_buckets, shard_finder=None):
+        total = sum([v for (k, v) in self.writes.items()])
+        range_size = total // num_buckets
+        key_counts_sorted = sorted(self.writes.items())
         output_range_counts = []
 
         def add_boundary(start, end, count):
@@ -671,9 +728,9 @@ class TopKeysCounter(object):
                     addresses = shard_finder.get_addresses_for_key(start)
                 else:
                     addresses = None
-                output_range_counts.append((start, end, count, shard_count, addresses))
+                output_range_counts.append((start, end, count, None, shard_count, addresses))
             else:
-                output_range_counts.append((start, end, count, None, None))
+                output_range_counts.append((start, end, count, None, None, None))
 
         start_key = None
         count_this_range = 0
@@ -688,24 +745,31 @@ class TopKeysCounter(object):
         if count_this_range > 0:
             add_boundary(start_key, k, count_this_range)
 
+        shard_finder.wait_for_shard_addresses(output_range_counts, 0, 5)
         return output_range_counts
 
-    def _get_top_k(self, counts):
-        count_key_pairs = sorted([(v, k) for (k, v) in counts.items()], reverse=True)
-        return count_key_pairs[0:self.k]
+    def get_total_writes(self):
+        return sum([v for v in self.writes.values()])
 
-    def get_top_k_reads(self):
-        return self._get_top_k(self.reads)
+    def get_top_k_writes(self, num, filter_addresses, shard_finder=None):
+        count_pairs = sorted([(v, k) for (k, v) in self.writes.items()], reverse=True)
+        if not filter_addresses:
+            count_pairs = count_pairs[0:num]
 
-    def get_top_k_writes(self):
-        return self._get_top_k(self.writes)
+        if shard_finder:
+            results = []
+            for (count, key) in count_pairs:
+                results.append((key, None, count, shard_finder.get_addresses_for_key(key)))
 
-    def get_k_read_range_boundaries(self, shard_finder=None):
-        return self._get_range_boundaries(self.reads, shard_finder)
+            shard_finder.wait_for_shard_addresses(results, 0, 3)
 
-    def get_k_write_range_boundaries(self, shard_finder=None):
-        return self._get_range_boundaries(self.writes, shard_finder)
+            if filter_addresses:
+                filter_addresses = set(filter_addresses)
+                results = [r for r in results if filter_addresses.issubset(set(r[3]))][0:num]
+        else:
+            results = [(key, end, count) for (count, key) in count_pairs[0:num]]
 
+        return results
 
 def connect(cluster_file=None):
     db = fdb.open(cluster_file=cluster_file)
@@ -722,6 +786,8 @@ def main():
                         help="Include get type. If no filter args are given all will be returned.")
     parser.add_argument("--filter-get-range", action="store_true",
                         help="Include get_range type. If no filter args are given all will be returned.")
+    parser.add_argument("--filter-reads", action="store_true",
+                        help="Include get and get_range type. If no filter args are given all will be returned.")
     parser.add_argument("--filter-commit", action="store_true",
                         help="Include commit type. If no filter args are given all will be returned.")
     parser.add_argument("--filter-error-get", action="store_true",
@@ -737,21 +803,34 @@ def main():
     end_time_group = parser.add_mutually_exclusive_group()
     end_time_group.add_argument("--max-timestamp", type=int, help="Don't return events newer than this epoch time")
     end_time_group.add_argument("-e", "--end-time", type=str, help="Don't return events older than this parsed time")
-    parser.add_argument("--top-keys", type=int, help="If specified will output this many top keys for reads or writes", default=0)
+    parser.add_argument("--num-buckets", type=int, help="The number of buckets to partition the key-space into for operation counts", default=100)
+    parser.add_argument("--top-requests", type=int, help="If specified will output this many top keys for reads or writes", default=0)
+    parser.add_argument("--exclude-ports", action="store_true", help="Print addresses without the port number. Only works in versions older than 6.3, and is required in versions older than 6.2.")
+    parser.add_argument("--single-shard-ranges-only", action="store_true", help="Only print range boundaries that exist in a single shard")
+    parser.add_argument("-a", "--filter-address", action="append", help="Only print range boundaries that include the given address. This option can used multiple times to include more than one address in the filter, in which case all addresses must match.")
+
     args = parser.parse_args()
 
     type_filter = set()
     if args.filter_get_version: type_filter.add("get_version")
-    if args.filter_get: type_filter.add("get")
-    if args.filter_get_range: type_filter.add("get_range")
+    if args.filter_get or args.filter_reads: type_filter.add("get")
+    if args.filter_get_range or args.filter_reads: type_filter.add("get_range")
     if args.filter_commit: type_filter.add("commit")
     if args.filter_error_get: type_filter.add("error_get")
     if args.filter_error_get_range: type_filter.add("error_get_range")
     if args.filter_error_commit: type_filter.add("error_commit")
-    top_keys = args.top_keys
-    key_counter = TopKeysCounter(top_keys) if top_keys else None
-    range_counter = RangeCounter(top_keys) if (has_sortedcontainers() and top_keys) else None
-    full_output = args.full_output or (top_keys is not None)
+
+    if (not type_filter or "commit" in type_filter):
+        write_counter = WriteCounter() if args.num_buckets else None
+    else:
+        write_counter = None
+
+    if (not type_filter or "get" in type_filter or "get_range" in type_filter):
+        read_counter = ReadCounter() if (has_sortedcontainers() and args.num_buckets) else None
+    else:
+        read_counter = None
+
+    full_output = args.full_output or (args.num_buckets is not None)
 
     if args.min_timestamp:
         min_timestamp = args.min_timestamp
@@ -784,48 +863,128 @@ def main():
     db = connect(cluster_file=args.cluster_file)
     loader = TransactionInfoLoader(db, full_output=full_output, type_filter=type_filter,
                                    min_timestamp=min_timestamp, max_timestamp=max_timestamp)
+
     for info in loader.fetch_transaction_info():
         if info.has_types():
-            if not key_counter and not range_counter:
+            if not write_counter and not read_counter:
                 print(info.to_json())
             else:
-                if key_counter:
-                    key_counter.process(info)
-                if range_counter:
-                    range_counter.process(info)
+                if write_counter:
+                    write_counter.process(info)
+                if read_counter:
+                    read_counter.process(info)
 
-    if key_counter:
-        def print_top(top):
-            for (count, key) in top:
-                print("%s %d" % (key, count))
-
-        def print_range_boundaries(range_boundaries):
-            for (start, end, count, shard_count, addresses) in range_boundaries:
-                if not shard_count:
-                    print("[%s, %s] %d" % (start, end, count))
+    def print_top(top, total, context):
+        if top:
+            running_count = 0
+            for (idx, (start, end, count, addresses)) in enumerate(top):
+                running_count += count
+                if end is not None:
+                    op_str = 'Range %r - %r' % (start, end)
                 else:
-                    addresses_string = "addresses=%s" % ','.join(addresses) if addresses else ''
-                    print("[%s, %s] %d shards=%d %s" % (start, end, count, shard_count, addresses_string))
+                    op_str = 'Key %r' % start
 
-        shard_finder = ShardFinder(db)
-        top_reads = key_counter.get_top_k_reads()
-        if top_reads:
-            print("Top %d reads:" % min(top_keys, len(top_reads)))
-            print_top(top_reads)
-            print("Approx equal sized gets range boundaries:")
-            print_range_boundaries(key_counter.get_k_read_range_boundaries(shard_finder=shard_finder))
-        top_writes = key_counter.get_top_k_writes()
-        if top_writes:
-            print("Top %d writes:" % min(top_keys, len(top_writes)))
-            print_top(top_writes)
-            print("Approx equal sized commits range boundaries:")
-            print_range_boundaries(key_counter.get_k_write_range_boundaries(shard_finder=shard_finder))
-    if range_counter:
-        range_boundaries = range_counter.get_range_boundaries(shard_finder=shard_finder)
+                print(" %d. %s\n    %d sampled %s (%.2f%%, %.2f%% cumulative)" % (idx+1, op_str, count, context, 100*count/total, 100*running_count/total))
+                print("    shard addresses: %s\n" % ", ".join(addresses))
+
+        else:
+            print(" No %s found" % context)
+
+    def print_range_boundaries(range_boundaries, context):
+        omit_start = None
+        for (idx, (start, end, start_count, total_count, shard_count, addresses)) in enumerate(range_boundaries):
+            omit = args.single_shard_ranges_only and shard_count is not None and shard_count > 1
+            if args.filter_address:
+                if not addresses:
+                    omit = True
+                else:
+                    for addr in args.filter_address:
+                        if addr not in addresses:
+                            omit = True
+                            break
+
+            if not omit:
+                if omit_start is not None:
+                    if omit_start == idx-1:
+                        print(" %d. Omitted\n" % (idx))
+                    else:
+                        print(" %d - %d. Omitted\n" % (omit_start+1, idx))
+                    omit_start = None
+
+                if total_count is None:
+                    count_str = '%d sampled %s' % (start_count, context)
+                else:
+                    count_str = '%d sampled %s (%d intersecting)' % (start_count, context, total_count)
+                if not shard_count:
+                    print(" %d. [%s, %s]\n     %d sampled %s\n" % (idx+1, start, end, count, context))
+                else:
+                    addresses_string = "; addresses=%s" % ', '.join(addresses) if addresses else ''
+                    print(" %d. [%s, %s]\n     %s spanning %d shard(s)%s\n" % (idx+1, start, end, count_str, shard_count, addresses_string))
+            elif omit_start is None:
+                omit_start = idx
+
+        if omit_start is not None:
+            if omit_start == len(range_boundaries)-1:
+                print(" %d. Omitted\n" % len(range_boundaries))
+            else:
+                print(" %d - %d. Omitted\n" % (omit_start+1, len(range_boundaries)))
+
+    shard_finder = ShardFinder(db, args.exclude_ports)
+
+    print("NOTE: shard locations are current and may not reflect where an operation was performed in the past\n")
+
+    if write_counter:
+        if args.top_requests:
+            top_writes = write_counter.get_top_k_writes(args.top_requests, args.filter_address, shard_finder=shard_finder)
+
+        range_boundaries = write_counter.get_range_boundaries(args.num_buckets, shard_finder=shard_finder)
+        num_writes = write_counter.get_total_writes()
+
+        if args.top_requests or range_boundaries:
+            print("WRITES")
+            print("------\n")
+            print("Processed %d total writes\n" % num_writes)
+
+        if args.top_requests:
+            suffix = ""
+            if args.filter_address:
+                suffix = " (%s)" % ", ".join(args.filter_address)
+            print("Top %d writes%s:\n" % (args.top_requests, suffix))
+
+            print_top(top_writes, write_counter.get_total_writes(), "writes")
+            print("")
+
         if range_boundaries:
-            print("Approx equal sized get_ranges boundaries:")
-            print_range_boundaries(range_boundaries)
+            print("Key-space boundaries with approximately equal mutation counts:\n")
+            print_range_boundaries(range_boundaries, "writes")
 
+        if args.top_requests or range_boundaries:
+            print("")
+
+    if read_counter:
+        if args.top_requests:
+            top_reads = read_counter.get_top_k_reads(args.top_requests, args.filter_address, shard_finder=shard_finder)
+
+        range_boundaries = read_counter.get_range_boundaries(args.num_buckets, shard_finder=shard_finder)
+        num_reads = read_counter.get_total_reads()
+
+        if args.top_requests or range_boundaries:
+            print("READS")
+            print("-----\n")
+            print("Processed %d total reads\n" % num_reads)
+
+        if args.top_requests:
+            suffix = ""
+            if args.filter_address:
+                suffix = " (%s)" % ", ".join(args.filter_address)
+            print("Top %d reads%s:\n" % (args.top_requests, suffix))
+
+            print_top(top_reads, num_reads, "reads")
+            print("")
+
+        if range_boundaries:
+            print("Key-space boundaries with approximately equal read counts:\n")
+            print_range_boundaries(range_boundaries, "reads")
 
 if __name__ == "__main__":
     main()

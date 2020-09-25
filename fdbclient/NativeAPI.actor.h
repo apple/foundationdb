@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 	#define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 	#include "fdbclient/NativeAPI.actor.g.h"
@@ -28,7 +30,7 @@
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
@@ -77,8 +79,8 @@ public:
 	Database() {}  // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator= ( Database const& rhs ) { db = rhs.db; }
 	Database( Database const& rhs ) : db(rhs.db) {}
-	Database(Database&& r) BOOST_NOEXCEPT : db(std::move(r.db)) {}
-	void operator= (Database&& r) BOOST_NOEXCEPT { db = std::move(r.db); }
+	Database(Database&& r) noexcept : db(std::move(r.db)) {}
+	void operator=(Database&& r) noexcept { db = std::move(r.db); }
 
 	// For internal use by the native client:
 	explicit Database(Reference<DatabaseContext> cx) : db(cx) {}
@@ -131,6 +133,7 @@ struct TransactionOptions {
 	bool firstInBatch : 1;
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
+	bool expensiveClearCostEstimation : 1;
 
 	TransactionPriority priority;
 
@@ -152,13 +155,15 @@ class ReadYourWritesTransaction; // workaround cyclic dependency
 struct TransactionInfo {
 	Optional<UID> debugID;
 	TaskPriority taskID;
+	SpanID spanID;
 	bool useProvisionalProxies;
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
-	explicit TransactionInfo( TaskPriority taskID ) : taskID(taskID), useProvisionalProxies(false) {}
+	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
+	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
 };
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
@@ -283,8 +288,10 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction() : info( TaskPriority::DefaultEndpoint ) {}
-	void operator=(Transaction&& r) BOOST_NOEXCEPT;
+	Transaction()
+	  : info(TaskPriority::DefaultEndpoint, deterministicRandom()->randomUniqueID()),
+	    span(info.spanID, "Transaction"_loc) {}
+	void operator=(Transaction&& r) noexcept;
 
 	void reset();
 	void fullReset();
@@ -309,6 +316,7 @@ public:
 	}
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 	TransactionOptions options;
+	Span span;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
 
@@ -334,7 +342,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit);
 
@@ -349,5 +357,8 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
 
+inline uint64_t getWriteOperationCost(uint64_t bytes) {
+	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
+}
 #include "flow/unactorcompiler.h"
 #endif

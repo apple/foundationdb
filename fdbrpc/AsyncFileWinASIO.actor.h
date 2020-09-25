@@ -55,12 +55,12 @@ public:
 
 		HANDLE h = CreateFile( open_filename.c_str(),
 			GENERIC_READ | ((flags&OPEN_READWRITE) ? GENERIC_WRITE : 0),
-			FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL,
+			FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
 			(flags&OPEN_EXCLUSIVE) ? CREATE_NEW :
 				(flags&OPEN_CREATE) ? OPEN_ALWAYS :
 				OPEN_EXISTING,
 			FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING,
-			NULL );
+			nullptr );
 		if (h == INVALID_HANDLE_VALUE) {
 			bool notFound = GetLastError() == ERROR_FILE_NOT_FOUND;
 			Error e = notFound ? file_not_found() : io_error();
@@ -87,7 +87,7 @@ public:
 	virtual void addref() { ReferenceCounted<AsyncFileWinASIO>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileWinASIO>::delref(); }
 
-	virtual int64_t debugFD() { return (int64_t)file.native_handle(); }
+	int64_t debugFD() const override { return (int64_t)(const_cast<decltype(file)&>(file).native_handle()); }
 
 	static void onReadReady( Promise<int> onReady, const boost::system::error_code& error, size_t bytesRead ) {
 		if (error) {
@@ -116,7 +116,7 @@ public:
 		}
 	}
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		// the size call is set inline
 		auto end = this->size().get();
 		//TraceEvent("WinAsyncRead").detail("Offset", offset).detail("Length", length).detail("FileSize", end).detail("FileName", filename);
@@ -128,7 +128,7 @@ public:
 
 		return result.getFuture();
 	}
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		/*
 		FIXME
 		if ( length + offset >= fileValidData ) {
@@ -139,15 +139,15 @@ public:
 		boost::asio::async_write_at( file, offset, boost::asio::const_buffers_1( data, length ), boost::bind( &onWriteReady, result, length, boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred ) );
 		return result.getFuture();
 	}
-	virtual Future<Void> truncate( int64_t size ) {
+	Future<Void> truncate(int64_t size) override {
 		// FIXME: Possibly use SetFileInformationByHandle( file.native_handle(), FileEndOfFileInfo, ... ) instead
-		if (!SetFilePointerEx( file.native_handle(), *(LARGE_INTEGER*)&size, NULL, FILE_BEGIN ))
+		if (!SetFilePointerEx( file.native_handle(), *(LARGE_INTEGER*)&size, nullptr, FILE_BEGIN ))
 			throw io_error();
 		if (!SetEndOfFile(file.native_handle()))
 			throw io_error();
 		return Void();
 	}
-	virtual Future<Void> sync() {
+	Future<Void> sync() override {
 		// FIXME: Do FlushFileBuffers in a worker thread (using g_network->createThreadPool)?
 		if (!FlushFileBuffers( file.native_handle() )) throw io_error();
 
@@ -159,14 +159,12 @@ public:
 
 		return Void();
 	}
-	virtual Future<int64_t> size() {
+	Future<int64_t> size() const override {
 		LARGE_INTEGER s;
-		if (!GetFileSizeEx(file.native_handle(), &s)) throw io_error();
+		if (!GetFileSizeEx(const_cast<decltype(file)&>(file).native_handle(), &s)) throw io_error();
 		return *(int64_t*)&s;
 	}
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
 	~AsyncFileWinASIO() { }
 

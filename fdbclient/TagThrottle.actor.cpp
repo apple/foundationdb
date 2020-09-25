@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/TagThrottle.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -104,12 +104,37 @@ TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
 
 TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	TagThrottleValue throttleValue;
-	BinaryReader reader(value, IncludeVersion());
+	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
 }
 
 namespace ThrottleApi {
+	ACTOR Future<bool> getValidAutoEnabled(Transaction* tr, Database db) {
+		state bool result;
+		loop {
+			Optional<Value> value = wait(tr->get(tagThrottleAutoEnabledKey));
+			if(!value.present()) {
+				tr->reset();
+				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				continue;
+			}
+			else if(value.get() == LiteralStringRef("1")) {
+				result = true;
+			}
+			else if(value.get() == LiteralStringRef("0")) {
+				result = false;
+			}
+			else {
+				TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue", db->dbId).detail("Value", value.get());
+				tr->reset();
+				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				continue;
+			}
+			return result;
+		};
+	}
+
 	void signalThrottleChange(Transaction &tr) {
 		tr.atomicOp(tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
 	}
@@ -146,12 +171,16 @@ namespace ThrottleApi {
 		return Void();
 	}
 
-	ACTOR Future<std::vector<TagThrottleInfo>> getThrottledTags(Database db, int limit) {
+	ACTOR Future<std::vector<TagThrottleInfo>> getThrottledTags(Database db, int limit, bool containsRecommend) {
 		state Transaction tr(db);
-
+		state bool reportAuto = containsRecommend;
 		loop {
 			try {
-				Standalone<RangeResultRef> throttles = wait(tr.getRange(tagThrottleKeys, limit));
+				if (!containsRecommend) {
+					wait(store(reportAuto, getValidAutoEnabled(&tr, db)));
+				}
+				Standalone<RangeResultRef> throttles = wait(tr.getRange(
+					reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit));
 				std::vector<TagThrottleInfo> results;
 				for(auto throttle : throttles) {
 					results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key), TagThrottleValue::fromValue(throttle.value)));
@@ -164,14 +193,42 @@ namespace ThrottleApi {
 		}
 	}
 
-	ACTOR Future<Void> throttleTags(Database db, TagSet tags, double tpsRate, double initialDuration, TagThrottleType throttleType, TransactionPriority priority, Optional<double> expirationTime) {
+	ACTOR Future<std::vector<TagThrottleInfo>> getRecommendedTags(Database db, int limit) {
+		state Transaction tr(db);
+		loop {
+			try {
+				bool enableAuto = wait(getValidAutoEnabled(&tr, db));
+				if(enableAuto) {
+					return std::vector<TagThrottleInfo>();
+				}
+
+				Standalone<RangeResultRef> throttles = wait(tr.getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit));
+				std::vector<TagThrottleInfo> results;
+				for(auto throttle : throttles) {
+					results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key), TagThrottleValue::fromValue(throttle.value)));
+				}
+				return results;
+			}
+			catch(Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR Future<Void> throttleTags(Database db, TagSet tags, double tpsRate, double initialDuration,
+                                    TagThrottleType throttleType, TransactionPriority priority, Optional<double> expirationTime,
+                                    Optional<TagThrottledReason> reason) {
 		state Transaction tr(db);
 		state Key key = TagThrottleKey(tags, throttleType, priority).toKey();
 
 		ASSERT(initialDuration > 0);
 
-		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration);
-		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
+		if(throttleType == TagThrottleType::MANUAL) {
+			reason = TagThrottledReason::MANUAL;
+		}
+		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration,
+	                              reason.present() ? reason.get() : TagThrottledReason::UNSET);
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 		wr << throttle;
 		state Value value = wr.toValue();
 
@@ -290,6 +347,7 @@ namespace ThrottleApi {
 
 					removed = true;
 					tr.clear(tag.key);
+					unthrottledTags ++;
 				}
 
 				if(manualUnthrottledTags > 0) {

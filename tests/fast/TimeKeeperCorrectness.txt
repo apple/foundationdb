@@ -1,3 +1,0 @@
-testTitle=TimeKeeperCorrectness
-    testName=TimeKeeperCorrectness
-    testDuration=40.0

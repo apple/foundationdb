@@ -113,7 +113,7 @@ struct KVWorkload : TestWorkload {
 struct IWorkloadFactory {
 	static TestWorkload* create( std::string const& name, WorkloadContext const& wcx ) {
 		auto it = factories().find(name);
-		if (it == factories().end()) return NULL;  // or throw?
+		if (it == factories().end()) return nullptr;  // or throw?
 		return it->second->create(wcx);
 	}
 	static std::map<std::string, IWorkloadFactory*>& factories() {

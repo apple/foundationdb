@@ -27,9 +27,11 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/MutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/IDiskQueue.h"
@@ -75,7 +77,7 @@ struct AlternativeTLogQueueEntryRef {
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -372,8 +374,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 		TagData( Tag tag, Version popped, IDiskQueue::location poppedLocation, bool nothingPersistent, bool poppedRecently, bool unpoppedRecovered ) : tag(tag), nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), popped(popped), persistentPopped(0), versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered) {}
 
-		TagData(TagData&& r) BOOST_NOEXCEPT : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent), poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped), versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag), unpoppedRecovered(r.unpoppedRecovered) {}
-		void operator= (TagData&& r) BOOST_NOEXCEPT {
+		TagData(TagData&& r) noexcept
+		  : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent),
+		    poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped),
+		    versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation), tag(r.tag),
+		    unpoppedRecovered(r.unpoppedRecovered) {}
+		void operator=(TagData&& r) noexcept {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
 			poppedRecently = r.poppedRecently;
@@ -441,7 +447,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool stopped, initialized;
 	DBRecoveryCount recoveryCount;
 
-	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion;  // The last version number in the portion of the log (written|durable) to persistentData
+	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to persistentData
 	NotifiedVersion version, queueCommittedVersion;
 	Version queueCommittingVersion;
 	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
@@ -1260,6 +1266,7 @@ void commitMessages( TLogData* self, Reference<LogData> logData, Version version
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
 
+		DEBUG_TAGS_AND_MESSAGE("TLogCommitMessages", version, msg.getRawMessage()).detail("UID", self->dbgid).detail("LogId", logData->logId);
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
 			if(logData->locality == tagLocalitySatellite) {
@@ -1374,7 +1381,12 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			messages << VERSION_HEADER << currentVersion;
 		}
 
+		// We need the 4 byte length prefix to be a TagsAndMessage format, but that prefix is added as part of StringRef serialization.
+		int offset = messages.getLength();
 		messages << it->second.toStringRef();
+		void* data = messages.getData();
+		DEBUG_TAGS_AND_MESSAGE("TLogPeek", currentVersion, StringRef((uint8_t*)data+offset, messages.getLength()-offset))
+			.detail("LogId", self->logId).detail("PeekTag", req.tag);
 	}
 }
 
@@ -1636,6 +1648,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 				    wait(parseMessagesForTag(entry.messages, req.tag, logData->logRouterTags));
 				for (const StringRef& msg : rawMessages) {
 					messages.serializeBytes(msg);
+					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg).detail("UID", self->dbgid).detail("LogId", logData->logId).detail("PeekTag", req.tag);
 				}
 
 				lastRefMessageVersion = entry.version;
@@ -1669,7 +1682,10 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	reply.end = endVersion;
 	reply.onlySpilled = onlySpilled;
 
-	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("EndVer", reply.end).detail("MsgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
+	//TraceEvent("TlogPeek", self->dbgid).detail("LogId", logData->logId).detail("Tag", req.tag.toString()).
+	//	detail("BeginVer", req.begin).detail("EndVer", reply.end).
+	//	detail("MsgBytes", reply.messages.expectedSize()).
+	//	detail("ForAddress", req.reply.getEndpoint().getPrimaryAddress());
 
 	if(req.sequence.present()) {
 		auto& trackerData = logData->peekTracker[peekId];

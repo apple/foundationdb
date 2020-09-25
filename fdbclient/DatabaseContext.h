@@ -20,11 +20,16 @@
 
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
+#include "flow/FastAlloc.h"
+#include "flow/FastRef.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "flow/genericactors.actor.h"
+#include <vector>
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
@@ -44,8 +49,27 @@ private:
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
 };
 
-typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
-typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
+	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
+	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
+		: Locations(v)
+	{}
+	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
+		: Locations(v)
+		, hasCaches(hasCaches)
+	{}
+	LocationInfo(const LocationInfo&) = delete;
+	LocationInfo(LocationInfo&&) = delete;
+	LocationInfo& operator=(const LocationInfo&) = delete;
+	LocationInfo& operator=(LocationInfo&&) = delete;
+	bool hasCaches = false;
+	Reference<Locations> locations() {
+		return Reference<Locations>::addRef(this);
+	}
+};
+
+using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -131,17 +155,20 @@ public:
 
 	Database clone() const { return Database(new DatabaseContext( connectionFile, clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, internal, apiVersion, switchable )); }
 
-	std::pair<KeyRange,Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
+	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation( const KeyRef&, bool isBackward = false );
 	bool getCachedLocations( const KeyRangeRef&, vector<std::pair<KeyRange,Reference<LocationInfo>>>&, int limit, bool reverse );
 	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	bool sampleReadTags();
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
-	Future<Void> onMasterProxiesChanged();
+	void updateProxies();
+	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
+	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
@@ -190,21 +217,24 @@ public:
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
-	AsyncTrigger masterProxiesChangeTrigger;
-	Future<Void> monitorMasterProxiesInfoChange;
-	Reference<ProxyInfo> masterProxies;
-	bool provisional;
-	UID masterProxiesLastChange;
+	AsyncTrigger proxiesChangeTrigger;
+	Future<Void> monitorProxiesInfoChange;
+	Reference<CommitProxyInfo> commitProxies;
+	Reference<GrvProxyInfo> grvProxies;
+	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
+	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
 
 	struct VersionRequest {
+		SpanID spanContext;
 		Promise<GetReadVersionReply> reply;
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+		VersionRequest(SpanID spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
 	// Transaction start request batching
@@ -232,7 +262,7 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
-	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
+	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 
 	std::map< UID, StorageServerInfo* > server_interf;
 
@@ -280,6 +310,7 @@ public:
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
+	Counter transactionsExpensiveClearCostEstCount;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -312,12 +343,16 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothMidShardSize;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
-	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
+	Future<Void> cacheListMonitor;
+	AsyncTrigger updateCache;
+	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
-	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);
+	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
+	                                   std::unique_ptr<SpecialKeyRangeReadImpl> &&impl);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 

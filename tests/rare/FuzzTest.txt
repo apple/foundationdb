@@ -1,2 +1,0 @@
-testTitle=FuzzTest
-testName=ActorFuzz

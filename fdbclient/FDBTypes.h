@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "flow/Arena.h"
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
@@ -35,6 +36,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
+typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1,
@@ -77,6 +79,10 @@ struct Tag {
 		serializer(ar, locality, id);
 	}
 };
+
+template <>
+struct flow_ref<Tag> : std::integral_constant<bool, false> {};
+
 #pragma pack(pop)
 
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
@@ -105,6 +111,13 @@ struct struct_like_traits<Tag> : std::true_type {
 			static_assert(i == 1);
 			m.locality = t;
 		}
+	}
+};
+
+template<>
+struct Traceable<Tag> : std::true_type {
+	static std::string toString(const Tag& value) {
+		return value.toString();
 	}
 };
 
@@ -222,10 +235,24 @@ std::string describe( std::vector<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
 
+template<typename T>
+struct Traceable<std::vector<T>> : std::true_type {
+	static std::string toString(const std::vector<T>& value) {
+		return describe(value);
+	}
+};
+
 template <class T>
 std::string describe( std::set<T> const& items, int max_items = -1 ) {
 	return describeList(items, max_items);
 }
+
+template<typename T>
+struct Traceable<std::set<T>> : std::true_type {
+	static std::string toString(const std::set<T>& value) {
+		return describe(value);
+	}
+};
 
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
@@ -253,6 +280,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef( const KeyRef& begin, const KeyRef& end ) : begin(begin), end(end) {
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		}
 	}
@@ -631,9 +659,10 @@ struct GetRangeLimits {
 	bool hasRowLimit();
 
 	bool hasSatisfiedMinRows();
-	bool isValid() { return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED)
-							&& (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED)
-							&& minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED); }
+	bool isValid() const {
+		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
+		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
+	}
 };
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
@@ -729,11 +758,11 @@ struct TLogVersion {
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
-		V5 = 5, // 7.0
+		V5 = 5, // 6.3
 		MIN_SUPPORTED = V2,
 		MAX_SUPPORTED = V5,
-		MIN_RECRUITABLE = V3,
-		DEFAULT = V4,
+		MIN_RECRUITABLE = V4,
+		DEFAULT = V5,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -838,6 +867,9 @@ struct LogMessageVersion {
 		if (r.version<version) return false;
 		return sub < r.sub;
 	}
+	bool operator>(LogMessageVersion const& r) const { return r < *this; }
+	bool operator<=(LogMessageVersion const& r) const { return !(*this > r); }
+	bool operator>=(LogMessageVersion const& r) const { return !(*this < r); }
 
 	bool operator==(LogMessageVersion const& r) const { return version == r.version && sub == r.sub; }
 
@@ -924,6 +956,7 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
+	bool operator!=(ClusterControllerPriorityInfo const& r) const { return !(*this == r); }
 	ClusterControllerPriorityInfo()
 	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}

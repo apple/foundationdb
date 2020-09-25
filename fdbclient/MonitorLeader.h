@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 
 #define CLUSTER_FILE_ENV_VAR_NAME "FDB_CLUSTER_FILE"
 
@@ -67,7 +67,9 @@ Future<Void> monitorLeaderForProxies( Value const& key, vector<NetworkAddress> c
 
 Future<Void> monitorProxies( Reference<AsyncVar<Reference<ClusterConnectionFile>>> const& connFile, Reference<AsyncVar<ClientDBInfo>> const& clientInfo, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> const& supportedVersions, Key const& traceLogGroup );
 
-void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies );
+void shrinkProxyList(ClientDBInfo& ni, std::vector<UID>& lastCommitProxyUIDs,
+                     std::vector<CommitProxyInterface>& lastCommitProxies, std::vector<UID>& lastGrvProxyUIDs,
+                     std::vector<GrvProxyInterface>& lastGrvProxies);
 
 #ifndef __INTEL_COMPILER
 #pragma region Implementation

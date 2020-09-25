@@ -87,19 +87,27 @@ struct TargetedKillWorkload : TestWorkload {
 		NetworkAddress machine;
 		if( self->machineToKill == "master" ) {
 			machine = self->dbInfo->get().master.address();
-		}
-		else if( self->machineToKill == "masterproxy" ) {
-			auto proxies = cx->getMasterProxies(false);
-			int o = deterministicRandom()->randomInt(0, proxies->size());
-			for( int i = 0; i < proxies->size(); i++) {
-				MasterProxyInterface mpi = proxies->getInterface(o);
+		} else if (self->machineToKill == "commitproxy") {
+			auto commitProxies = cx->getCommitProxies(false);
+			int o = deterministicRandom()->randomInt(0, commitProxies->size());
+			for( int i = 0; i < commitProxies->size(); i++) {
+				CommitProxyInterface mpi = commitProxies->getInterface(o);
 				machine = mpi.address();
 				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
 					break;
-				o = ++o%proxies->size();
+				o = ++o%commitProxies->size();
 			}
-		}
-		else if( self->machineToKill == "tlog" ) {
+		} else if (self->machineToKill == "grvproxy") {
+			auto grvProxies = cx->getGrvProxies(false);
+			int o = deterministicRandom()->randomInt(0, grvProxies->size());
+			for( int i = 0; i < grvProxies->size(); i++) {
+				GrvProxyInterface gpi = grvProxies->getInterface(o);
+				machine = gpi.address();
+				if(machine != self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress())
+					break;
+				o = ++o%grvProxies->size();
+			}
+		} else if (self->machineToKill == "tlog") {
 			auto tlogs = self->dbInfo->get().logSystemConfig.allPresentLogs();
 			int o = deterministicRandom()->randomInt(0, tlogs.size());
 			for( int i = 0; i < tlogs.size(); i++) {
@@ -109,8 +117,8 @@ struct TargetedKillWorkload : TestWorkload {
 					break;
 				o = ++o%tlogs.size();
 			}
-		}
-		else if( self->machineToKill == "storage" || self->machineToKill == "ss"  || self->machineToKill == "storageserver" ) {
+		} else if (self->machineToKill == "storage" || self->machineToKill == "ss" ||
+		           self->machineToKill == "storageserver") {
 			int o = deterministicRandom()->randomInt(0,storageServers.size());
 			for( int i = 0; i < storageServers.size(); i++) {
 				StorageServerInterface ssi = storageServers[o];
@@ -119,8 +127,7 @@ struct TargetedKillWorkload : TestWorkload {
 					break;
 				o = ++o%storageServers.size();
 			}
-		}
-		else if( self->machineToKill == "clustercontroller" || self->machineToKill == "cc" ) {
+		} else if (self->machineToKill == "clustercontroller" || self->machineToKill == "cc") {
 			machine = self->dbInfo->get().clusterInterface.getWorkers.getEndpoint().getPrimaryAddress();
 		}
 

@@ -195,7 +195,7 @@ description is not currently required but encouraged.
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"
-            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'."
+            description="Committing this transaction will bypass the normal load balancing across commit proxies and go directly to the specifically nominated 'first commit proxy'."
             hidden="true" />
     <Option name="check_writes_enable" code="50"
             hidden="true" />
@@ -264,10 +264,16 @@ description is not currently required but encouraged.
             description="The transaction can retrieve keys that are conflicting with other transactions." />
     <Option name="special_key_space_relaxed" code="713"
             description="By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space). Use this option to allow reading from zero or more modules. Users who set this option should be prepared for new modules, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error." />
+    <Option name="special_key_space_enable_writes" code="714"
+            description="By default, users are not allowed to write to special keys. Enable this option will implicitly enable all options required to achieve the configuration change." />        
     <Option name="tag" code="800" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction." />
     <Option name="auto_throttle_tag" code="801" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual or automatic targeted throttling. At most 5 tags can be set on a transaction." />
+    <Option name="span_parent" code="900" paramType="Bytes" paramDescription="A byte string of length 16 used to associate the span of this transaction with a parent"
+            description="Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes"/>
+    <Option name="expensive_clear_cost_estimation_enable" code="1000"
+                description="Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this." />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

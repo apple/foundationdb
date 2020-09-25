@@ -1,4 +1,0 @@
-testTitle=Downgrade
-  testName=Downgrade
-  oldKey=oldKey
-  newKey=newKey

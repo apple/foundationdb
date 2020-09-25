@@ -28,8 +28,8 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "..\flow\SimpleOpt.h"
-#include "..\fdbmonitor\SimpleIni.h"
+#include "flow/SimpleOpt.h"
+#include "fdbmonitor/SimpleIni.h"
 #include "fdbclient/versions.h"
 
 // For PathFileExists
@@ -113,34 +113,34 @@ public:
 				: CServiceBase(SERVICE_NAME, fCanStop, fCanShutdown, fCanPauseContinue), serviceStopping( false )
 	{
 		// Create a manual-reset event to signal the end of the service.
-		stoppedEvent = CreateEvent(NULL, true, false, NULL);
-		if (stoppedEvent == NULL)
+		stoppedEvent = CreateEvent(nullptr, true, false, nullptr);
+		if (stoppedEvent == nullptr)
 		{
 			throw GetLastError();
 		}
 		// Create a manual-reset event to signal the end of the service.
-		stoppingEvent = CreateEvent(NULL, true, false, NULL);
-		if (stoppingEvent == NULL)
+		stoppingEvent = CreateEvent(nullptr, true, false, nullptr);
+		if (stoppingEvent == nullptr)
 		{
 			throw GetLastError();
 		}
 
 		// Initialize child job member
-		childJob = NULL;
+		childJob = nullptr;
 	}
 
 	virtual ~FDBService(void) {
 		if (stoppedEvent) {
 			CloseHandle(stoppedEvent);
-			stoppedEvent = NULL;
+			stoppedEvent = nullptr;
 		}
 		if (stoppingEvent) {
 			CloseHandle(stoppingEvent);
-			stoppingEvent = NULL;
+			stoppingEvent = nullptr;
 		}
 		if(childJob) {
 			CloseHandle(childJob);
-			childJob = NULL;
+			childJob = nullptr;
 		}
 		logFile.close();
 	};
@@ -182,7 +182,7 @@ protected:
 	std::string	GetDefaultConfigFilePath()
 	{
 		TCHAR programData[MAX_PATH];
-		if (SHGetFolderPath(NULL, CSIDL_COMMON_APPDATA, NULL, 0, programData) != S_OK)
+		if (SHGetFolderPath(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, programData) != S_OK)
 		{
 			errorExit("resolving CSIDL_COMMON_APPDATA");
 		}
@@ -269,7 +269,7 @@ protected:
 		// Implementation
 		void startTimer() {
 			isProcess = false;
-			process_or_timer = CreateWaitableTimer(NULL, TRUE, NULL);
+			process_or_timer = CreateWaitableTimer(nullptr, TRUE, nullptr);
 			if( !process_or_timer )
 				svc->errorExit( format( "Error in startTimer(): CreateWaitableTimer (%d)", GetLastError() ).c_str() );
 
@@ -292,12 +292,12 @@ protected:
 			// Start the child process.
 			if (!CreateProcess(command.binary.c_str(),   // Command's binary
 				(char *)command.args.c_str(),             // Command's args
-				NULL,           // Process handle not inheritable
-				NULL,           // Thread handle not inheritable
+				nullptr,           // Process handle not inheritable
+				nullptr,           // Thread handle not inheritable
 				FALSE,          // Set handle inheritance to FALSE
 				CREATE_NEW_PROCESS_GROUP,              // No flags for creation
-				NULL,           // Use parent's environment block
-				NULL,           // Use parent's starting directory 
+				nullptr,        // Use parent's environment block
+				nullptr,        // Use parent's starting directory
 				&si,            // Pointer to STARTUPINFO structure
 				&pi )           // Pointer to PROCESS_INFORMATION structure
 			) {
@@ -326,7 +326,7 @@ protected:
 		// negative numbers are relative times, times are in 100s of ns -- see SetWaitableTimer MSDN docs
 		liDueTime.QuadPart = (LONGLONG)(delaySeconds * -10000000LL);
 
-		if (!SetWaitableTimer(h, &liDueTime, 0, NULL, NULL, 0))
+		if (!SetWaitableTimer(h, &liDueTime, 0, nullptr, nullptr, 0))
 			errorExit( format( "Error in startTimer(): SetWaitableTimer (%d)", GetLastError() ).c_str() );
 	}
 
@@ -371,11 +371,11 @@ protected:
 			escaped.replace( pos, 1, "/" );
 
 		HANDLE hMutex = CreateMutex( 
-			NULL,                        // default security descriptor
+			nullptr,                        // default security descriptor
 			TRUE,                        // attempt to create with ownership
 			format( "Global\\" SERVICE_NAME ".%s", escaped.c_str() ).c_str() );  // object name
 
-		if (hMutex == NULL)
+		if (hMutex == nullptr)
 			errorExit( format( "Could not create/aquire global mutex (%s)", escaped.c_str() ).c_str() );
 		else
 			// In this case ownership on creation flag is ignored. (see MSDN docs)
@@ -429,7 +429,7 @@ protected:
 
 			// FALSE here as "manualReset" means that the timer will go to the unsignaled state once
 			//  signalled from a "wait" call.
-			HANDLE fileErrorReloadHandle = CreateWaitableTimer(NULL, FALSE, NULL);
+			HANDLE fileErrorReloadHandle = CreateWaitableTimer(nullptr, FALSE, nullptr);
 			if( fileErrorReloadHandle == INVALID_HANDLE_VALUE ) {
 				errorExit( format( "Error creating waitable timer (%d)", GetLastError() ).c_str() );
 			}
@@ -664,12 +664,12 @@ private:
 	}
 
 	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
-		const char* ret = NULL;
-		const char* section = NULL;
+		const char* ret = nullptr;
+		const char* section = nullptr;
 		va_list ap;
 		va_start(ap, name);
 		while( !ret && (section = va_arg(ap, const char *) ) ) {
-			ret = ini.GetValue( section, name, NULL );
+			ret = ini.GetValue( section, name, nullptr );
 		}
 		va_end(ap);
 		return ret;
@@ -692,7 +692,7 @@ private:
 				return !CSimpleIniA::Entry::KeyOrder()(lhs, rhs);
 			} );
 
-		const char* rd = getValueMulti(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
+		const char* rd = getValueMulti(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if(!rd) {
 			LogEvent( EVENTLOG_ERROR_TYPE, format( "Unable to resolve restart delay for %s\n", ssection.c_str() ) );
 			return result;
@@ -705,11 +705,11 @@ private:
 			return result;
 		}
 
-		const char* q = getValueMulti(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* q = getValueMulti(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if( q && !strcmp(q, "true") )
 			result.quiet = true;
 
-		const char* binary = getValueMulti(ini, "command", ssection.c_str(), section.c_str(), "general", NULL);
+		const char* binary = getValueMulti(ini, "command", ssection.c_str(), section.c_str(), "general", nullptr);
 		if( !binary ) {
 			LogEvent( EVENTLOG_ERROR_TYPE, format( "Unable to resolve command for %s.%d\n", section.c_str(), id ) );
 			return result;
@@ -727,7 +727,7 @@ private:
 				continue;
 			}
 
-			std::string opt = getValueMulti( ini, i.pItem, ssection.c_str(), section.c_str(), "general", NULL );
+			std::string opt = getValueMulti( ini, i.pItem, ssection.c_str(), section.c_str(), "general", nullptr );
 
 			std::size_t pos = 0;
 			while( (pos = opt.find("$ID", pos)) != opt.npos )
@@ -814,7 +814,7 @@ private:
 	}
 };
 
-static FDBService*	staticService = NULL;
+static FDBService*	staticService = nullptr;
 
 bool consoleHandler(int signal)
 {
@@ -852,7 +852,7 @@ int main(DWORD argc, LPCSTR *argv) {
 	for (DWORD loop = 1; loop < argc; loop++)
 	{
 		// Ignore undefined or non-options
-		if ((argv[loop] == NULL) ||
+		if ((argv[loop] == nullptr) ||
 			(argv[loop][0] == '\0'))
 		{
 
@@ -894,7 +894,7 @@ int main(DWORD argc, LPCSTR *argv) {
 			if( !GetEnvironmentVariable( "ALLUSERSPROFILE", programData, 2048 ) ) {
 				throw GetLastError();
 			}
-			if( !CreateDirectory( format( "%s\\foundationdb", programData ).c_str(), NULL ) ) {
+			if( !CreateDirectory( format( "%s\\foundationdb", programData ).c_str(), nullptr ) ) {
 				if( GetLastError() != ERROR_ALREADY_EXISTS )
 					throw GetLastError();
 			}

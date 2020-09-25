@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(nullptr), allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -58,7 +58,6 @@ public:
 		bool failed;
 		bool excluded;
 		bool cleared;
-		int64_t cpuTicks;
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
 
@@ -73,7 +72,7 @@ public:
 		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
 		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
-		    failed(false), excluded(false), cpuTicks(0), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+		    failed(false), excluded(false), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
 		    fault_injection_r(0), machine(0), cleared(false) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
@@ -91,17 +90,22 @@ public:
 			return ss.str();
 		}
 
-		// Returns true if the class represents an acceptable worker
+		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
 			switch (startingClass._class) {
 				case ProcessClass::UnsetClass: return true;
 				case ProcessClass::StorageClass: return true;
 				case ProcessClass::TransactionClass: return true;
 				case ProcessClass::ResolutionClass: return false;
-				case ProcessClass::ProxyClass: return false;
-				case ProcessClass::MasterClass: return false;
-				case ProcessClass::TesterClass: return false;
-				case ProcessClass::StatelessClass: return false;
+			    case ProcessClass::CommitProxyClass:
+				    return false;
+			    case ProcessClass::GrvProxyClass:
+				    return false;
+			    case ProcessClass::MasterClass:
+				    return false;
+			    case ProcessClass::TesterClass:
+				    return false;
+			    case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
 				case ProcessClass::ClusterControllerClass: return false;
@@ -119,7 +123,7 @@ public:
 			return listener->second;
 		}
 
-		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
+		inline flowGlobalType global(int id) const { return (globals.size() > id) ? globals[id] : nullptr; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
@@ -148,6 +152,8 @@ public:
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
+	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
+	// onProcess: wait for the process to be scheduled by the runloop; a task will be created for the process.
 	virtual Future<Void> onProcess( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 	virtual Future<Void> onMachine( ISimulator::ProcessInfo *process, TaskPriority taskID = TaskPriority::Zero ) = 0;
 
@@ -158,9 +164,9 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
-	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> machineId, KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
+	virtual bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
@@ -318,7 +324,7 @@ public:
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 
-	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
+	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
 
 	virtual void disableFor(const std::string& desc, double time) {
