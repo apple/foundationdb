@@ -1,4 +1,5 @@
 set(RUN_JAVA_TESTS ON CACHE BOOL "Run Java unit tests")
+set(RUN_JUNIT_TESTS OFF CACHE BOOL "Compile and run junit tests")
 
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
@@ -181,10 +182,6 @@ add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${MANIFEST_FILE})
 add_dependencies(fdb-java fdb_java_options fdb_java)
 
-add_jar(fdb-junit ${JAVA_JUNIT_TESTS}
-  INCLUDE_JARS fdb-java ${JUNIT_JAR})
-add_dependencies(fdb-junit fdb-java junit)
-
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
     "Path of a directory structure with libraries to include in fat jar (a lib directory)")
@@ -268,4 +265,20 @@ if(NOT OPEN_FOR_IDE)
   message(STATUS "TEST_CP ${TEST_CP}")
   add_java_test(NAME DirectoryTest CLASS_PATH ${TEST_CP}
     CLASS com.apple.foundationdb.test.DirectoryTest ${enabled})
+
+  if(RUN_JUNIT_TESTS)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=junit/junit/4.13/junit-4.13.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar
+      EXPECTED_HASH SHA256=4b8532f63bdc0e0661507f947eb324a954d1dbac631ad19c8aa9a00feed1d863)
+    file(DOWNLOAD "https://repo1.maven.org/maven2/org/hamcrest/hamcrest-all/1.3/hamcrest-all-1.3.jar"
+      ${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar
+      EXPECTED_HASH SHA256=4877670629ab96f34f5f90ab283125fcd9acb7e683e66319a68be6eb2cca60de)
+    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar)
+    get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
+    add_test(NAME junit
+      COMMAND ${Java_JAVA_EXECUTABLE}
+              -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
+              -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+              org.junit.runner.JUnitCore)
+  endif()
 endif()
