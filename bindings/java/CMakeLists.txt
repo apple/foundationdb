@@ -104,6 +104,10 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
 
+set(JAVA_JUNIT_TESTS
+  src/junit/com/apple/foundationdb/tuple/AllTests.java
+  src/junit/com/apple/foundationdb/tuple/ArrayUtilTests.java)
+
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
 
@@ -118,6 +122,8 @@ set(GENERATED_JAVA_FILES
 
 vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DIR}
   OUTPUT ${GENERATED_JAVA_FILES})
+
+configure_file(pom.xml.cmake ${CMAKE_CURRENT_BINARY_DIR}/pom.xml)
 
 set(SYSTEM_NAME "linux")
 if (APPLE)
@@ -175,11 +181,9 @@ add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${MANIFEST_FILE})
 add_dependencies(fdb-java fdb_java_options fdb_java)
 
-# TODO[mpilman]: The java RPM will require some more effort (mostly on debian). However,
-# most people will use the fat-jar, so it is not clear how high this priority is.
-
-#install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT java)
-#install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT java)
+add_jar(fdb-junit ${JAVA_JUNIT_TESTS}
+  INCLUDE_JARS fdb-java ${JUNIT_JAR})
+add_dependencies(fdb-junit fdb-java junit)
 
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
