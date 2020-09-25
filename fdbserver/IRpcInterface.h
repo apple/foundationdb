@@ -57,12 +57,19 @@ struct RpcCommitRequest {
 	Promise<std::pair<Version, Standalone<StringRef>>> reply;
 };
 
+struct RpcTransactionDestroyRequest {
+	RpcTransactionDestroyRequest(UID transactionId) : transactionId(transactionId) {}
+
+	UID transactionId;
+};
+
 class RpcInterface {
 public:
 	PromiseStream<RpcCreateTransactionRequest> createTransaction;
 	PromiseStream<RpcGetValueRequest> getValue;
 	PromiseStream<RpcApplyMutationsRequest> applyMutations;
 	PromiseStream<RpcCommitRequest> commit;
+	PromiseStream<RpcTransactionDestroyRequest> transactionDestroy;
 };
 
 class IRpcService {

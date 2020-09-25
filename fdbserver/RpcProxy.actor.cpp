@@ -82,7 +82,7 @@ ACTOR Future<Void> processGetValue(RpcProxyData *rpcProxyData, RpcGetValueReques
 	return Void();
 }
 
-void processApplyMutations(RpcProxyData *rpcProxyData, RpcApplyMutationsRequest request) {
+void processApplyMutations(RpcProxyData *rpcProxyData, RpcApplyMutationsRequest const& request) {
 	Reference<ReadYourWritesTransaction> tr = getTransaction(rpcProxyData, request.transactionId);
 	for(auto mutation : request.mutations) {
 		if(mutation.type == MutationRef::SetValue) {
@@ -113,6 +113,11 @@ ACTOR Future<Void> processCommit(RpcProxyData *rpcProxyData, RpcCommitRequest re
 	return Void();
 }
 
+void processTransactionDestroy(RpcProxyData *rpcProxyData, RpcTransactionDestroyRequest const& request) {
+	fprintf(stderr, "Destroying transaction %s\n", request.transactionId.toString().c_str());
+	rpcProxyData->openTransactions.erase(request.transactionId);
+} 
+
 ACTOR Future<Void> rpcProxyCore(
 	RpcProxyInterface interf,
 	InitializeRpcProxyRequest req,
@@ -141,6 +146,9 @@ ACTOR Future<Void> rpcProxyCore(
 			}
 			when(RpcCommitRequest request = waitNext(rpcInterface.commit.getFuture())) {
 				addActor.send(processCommit(&rpcProxyData, request));
+			}
+			when(RpcTransactionDestroyRequest request = waitNext(rpcInterface.transactionDestroy.getFuture())) {
+				processTransactionDestroy(&rpcProxyData, request);
 			}
 			when(wait( dbInfoChange ) ) {
 				dbInfoChange = db->onChange();

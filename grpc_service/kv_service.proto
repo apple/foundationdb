@@ -4,9 +4,10 @@ package foundationdb;
 
 service FdbKvClient {
 	rpc CreateTransaction(CreateTransactionRequest) returns (CreateTransactionReply) {}
-	rpc GetValue(GetValueRequest) returns (GetValueReply) {}
-	rpc Mutate(MutateRequest) returns (MutateReply) {}
-	rpc Commit(CommitRequest) returns (CommitReply) {}
+	rpc TransactionGetValue(GetValueRequest) returns (GetValueReply) {}
+	rpc TransactionMutate(MutateRequest) returns (MutateReply) {}
+	rpc TransactionCommit(CommitRequest) returns (CommitReply) {}
+	rpc TransactionDestroy(TransactionDestroyRequest) returns (TransactionDestroyReply) {}
 }
 
 message FdbError {
@@ -82,3 +83,9 @@ message CommitReply {
 	int64 committedVersion = 1;
 	bytes versionstamp = 2;
 }
+
+message TransactionDestroyRequest {
+	UID transactionId = 1;
+}
+
+message TransactionDestroyReply {}

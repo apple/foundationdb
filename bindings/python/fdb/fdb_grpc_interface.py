@@ -151,7 +151,9 @@ class GrpcTransaction(TransactionInterface):
         return mutations
 
     def destroy(self):
-        pass
+        # TODO: this sends the destroy request but doesn't make sure it works.
+        # Is that ok? We can just rely on transaction expiration cleanup if it fails.
+        _grpc_service.TransactionDestroy.future(kv_service_pb2.TransactionDestroyRequest(transactionId=self._tr()))
 
     def cancel(self):
         raise NotImplementedError()
@@ -163,7 +165,7 @@ class GrpcTransaction(TransactionInterface):
         raise NotImplementedError()
 
     def get(self, key, snapshot):
-        response_future = _grpc_service.GetValue.future(
+        response_future = _grpc_service.TransactionGetValue.future(
                             kv_service_pb2.GetValueRequest(
                                 transactionId=self._tr(), 
                                 key=key, 
@@ -213,7 +215,7 @@ class GrpcTransaction(TransactionInterface):
         self._versionstamp = f.result().versionstamp
 
     def commit(self):
-        response_future = _grpc_service.Commit.future(
+        response_future = _grpc_service.TransactionCommit.future(
                             kv_service_pb2.CommitRequest(
                                 transactionId=self._tr(),
                                 mutations=self._pending_mutations_set()))

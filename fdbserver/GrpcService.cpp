@@ -58,11 +58,12 @@ public:
 
 	static std::vector<Reference<CallDataBase>> initialCallData;
 
+	virtual const char* name() = 0;
+
 protected:
 	virtual void process() = 0;
 	virtual void finishRequest() = 0;
 	virtual void enqueue() = 0;
-	virtual const char* name() = 0;
 
 	RpcInterface* rpcInterface;
 	foundationdb::FdbKvClient::AsyncService* asyncGrpcService;
@@ -109,13 +110,13 @@ class CallData : public CallDataBase {
 public:
 	CallData() : responder(&ctx), callState(PROCESS) {}
 
+	virtual const char *name() {
+		return "CallData";
+	}
+
 protected:
 	virtual void enqueue() {
 		(asyncGrpcService->*getRequestFunc())(&ctx, &request, &responder, cq, cq, this);
-	}
-
-	virtual const char *name() {
-		return "CallData";
 	}
 
 	virtual void process() {
@@ -205,6 +206,7 @@ protected:
 		return grpc::Status::OK;
 	}
 
+public:
 	virtual const char* name() {
 		return "CreateTransaction";
 	}
@@ -229,7 +231,7 @@ class GetValueCallData : public CallData<foundationdb::GetValueRequest,
                                          Optional<Value>> {
 protected:
 	virtual GrpcRequestFunc<foundationdb::GetValueRequest, foundationdb::GetValueReply> getRequestFunc() {
-		return &foundationdb::FdbKvClient::AsyncService::RequestGetValue;
+		return &foundationdb::FdbKvClient::AsyncService::RequestTransactionGetValue;
 	}
 
 	virtual Future<Optional<Value>> makeRpcRequest() {
@@ -252,6 +254,7 @@ protected:
 		return grpc::Status::OK;
 	}
 
+public:
 	virtual const char* name() {
 		return "GetValue";
 	}
@@ -264,7 +267,7 @@ class MutateCallData : public CallData<foundationdb::MutateRequest,
                                        Void> {
 protected:
 	virtual GrpcRequestFunc<foundationdb::MutateRequest, foundationdb::MutateReply> getRequestFunc() {
-		return &foundationdb::FdbKvClient::AsyncService::RequestMutate;
+		return &foundationdb::FdbKvClient::AsyncService::RequestTransactionMutate;
 	}
 
 	virtual Future<Void> makeRpcRequest() {
@@ -277,6 +280,7 @@ protected:
 		return grpc::Status::OK;
 	}
 
+public:
 	virtual const char* name() {
 		return "Mutate";
 	}
@@ -289,7 +293,7 @@ class CommitCallData : public CallData<foundationdb::CommitRequest,
                                        std::pair<Version, Standalone<StringRef>>> {
 protected:
 	virtual GrpcRequestFunc<foundationdb::CommitRequest, foundationdb::CommitReply> getRequestFunc() {
-		return &foundationdb::FdbKvClient::AsyncService::RequestCommit;
+		return &foundationdb::FdbKvClient::AsyncService::RequestTransactionCommit;
 	}
 
 	virtual Future<std::pair<Version, Standalone<StringRef>>> makeRpcRequest() {
@@ -310,11 +314,40 @@ protected:
 		return grpc::Status::OK;
 	}
 
+public:
 	virtual const char* name() {
 		return "Commit";
 	}
 };
 REGISTER_RPC_CALL(CommitCallData);
+
+class TransactionDestroyCallData : public CallData<foundationdb::TransactionDestroyRequest, 
+                                          foundationdb::TransactionDestroyReply, 
+                                          TransactionDestroyCallData,
+                                          Void> {
+protected:
+	virtual GrpcRequestFunc<foundationdb::TransactionDestroyRequest, foundationdb::TransactionDestroyReply> getRequestFunc() {
+		return &foundationdb::FdbKvClient::AsyncService::RequestTransactionDestroy;
+	}
+
+	virtual Future<Void> makeRpcRequest() {
+		UID transactionId = UID::fromString(request.transactionid().uid());
+
+		RpcTransactionDestroyRequest req(transactionId);
+		rpcInterface->transactionDestroy.send(req);
+		return Future<Void>(Void());
+	}
+
+	virtual grpc::Status getResult() {
+		return grpc::Status::OK;
+	}
+
+public:
+	virtual const char* name() {
+		return "TransactionDestroy";
+	}
+};
+REGISTER_RPC_CALL(TransactionDestroyCallData);
 
 //
 // RPC Service
@@ -381,9 +414,9 @@ void GrpcService::handleRequests() {
 		while(!isShutdown) {
 			ASSERT(cq->Next(&tag, &ok));
 			Reference<CallDataBase> callData(static_cast<CallDataBase*>(tag));
-
-			ASSERT(ok);
-			CallDataBase::proceed(callData);
+			if(ok) {
+				CallDataBase::proceed(callData);
+			}
 		}
 		doShutdown(Optional<Error>());
 	}
