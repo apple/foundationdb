@@ -56,6 +56,7 @@ cluster. The life time is no longer tied with Master.
 
 GRV Proxies
 ~~~~~~~
+
 The GRV proxies are responsible for providing read versions, communicating
 with ratekeeper to control the rate providing read versions. To provide a 
 read version, a GRV proxy will ask all master to see the largest committed
