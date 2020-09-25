@@ -415,5 +415,8 @@ function(add_java_test)
   endforeach()
   add_fdbclient_test(
     NAME ${T_NAME}
-    COMMAND ${Java_JAVA_EXECUTABLE} -cp "${cp}" ${T_CLASS} "@CLUSTER_FILE@")
+    COMMAND ${Java_JAVA_EXECUTABLE}
+            -cp "${cp}"
+            -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+            ${T_CLASS} "@CLUSTER_FILE@")
 endfunction()
