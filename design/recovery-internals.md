@@ -13,7 +13,7 @@ This data structure contains transient information which is broadcast to all wor
 Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propagate the new `ServerDBInfo` to all workers in the cluster.
 
 ## When will recovery happen?
-Failure of certain roles in FDB can cause recovery. Those roles are cluster controller, master, GRV proxy, commit proxy, transaction logs (tLog), resolvers, and log router.
+Failure of certain roles in FDB can cause recovery. Those roles are cluster controller, master, GRV proxy, commit proxy, transaction logs (tLog), resolvers, log router, and backup workers.
 
 Network partition or failures can make CC unable to reach some roles, treating those roles as dead and causing recovery. If CC cannot connect to a majority of coordinators, it will be treated as dead by coordinators and recovery will happen.
 
