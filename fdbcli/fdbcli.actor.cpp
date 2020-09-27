@@ -1807,7 +1807,7 @@ ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) 
 }
 
 ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, LineNoise* linenoise, Future<Void> warn ) {
-	state ConfigurationResult::Type result;
+	state ConfigurationResult result;
 	state int startToken = 1;
 	state bool force = false;
 	if (tokens.size() < 2)
@@ -1888,7 +1888,8 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 		}
 
-		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+startToken,tokens.end()), conf, force) ) );
+		ConfigurationResult r = wait(makeInterruptable(
+		    changeConfig(db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force)));
 		result = r;
 	}
 
@@ -2014,7 +2015,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 			return true;
 		}
 	}
-	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString, force) ) );
+	ConfigurationResult result = wait(makeInterruptable(changeConfig(db, configString, force)));
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret;
@@ -2145,7 +2146,7 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 	}
 	if(setName.size()) change = nameQuorumChange( setName.toString(), change );
 
-	CoordinatorsResult::Type r = wait( makeInterruptable( changeQuorum( db, change ) ) );
+	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change)));
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
