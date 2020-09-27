@@ -3473,10 +3473,10 @@ namespace fileBackup {
 		    Optional<RestorableFileSet> restorable =
 		        wait(bc->getRestoreSet(restoreVersion, VectorRef<KeyRangeRef>(), incremental, beginVersion));
 		    if (!incremental) {
-				beginVersion = restorable.get().snapshot.beginVersion;
-			}
+			    beginVersion = restorable.get().snapshot.beginVersion;
+		    }
 
-			if(!restorable.present())
+		    if(!restorable.present())
 				throw restore_missing_data();
 
 			// First version for which log data should be applied
