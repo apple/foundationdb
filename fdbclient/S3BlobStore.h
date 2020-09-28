@@ -46,6 +46,11 @@ public:
 
 	static Stats s_stats;
 
+	struct Credentials {
+		std::string key;
+		std::string secret;
+	};
+
 	struct BlobKnobs {
 		BlobKnobs();
 		int secure_connection, connect_tries, connect_timeout, max_connection_life, request_tries, request_timeout_min,
@@ -90,23 +95,20 @@ public:
 		}
 	};
 
-	S3BlobStoreEndpoint(std::string const& host,
-	                    std::string service,
-	                    std::string const& key,
-	                    std::string const& secret,
-	                    BlobKnobs const& knobs = BlobKnobs(),
-	                    HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
-	    extraHeaders(extraHeaders), requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
-	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
-	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
-	    requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
-	    requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
-	    sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
-	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
-	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
+	S3BlobStoreEndpoint(std::string const &host, std::string service, Optional<Credentials> const& creds, BlobKnobs const &knobs = BlobKnobs(), HTTP::Headers extraHeaders = HTTP::Headers())
+	  : host(host), service(service), credentials(creds), lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
+		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
+		requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
+		requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
+		requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
+		requestRateDelete(new SpeedLimit(knobs.delete_requests_per_second, 1)),
+		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
+		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
+		concurrentRequests(knobs.concurrent_requests),
+		concurrentUploads(knobs.concurrent_uploads),
+		concurrentLists(knobs.concurrent_lists) {
 
-		if (host.empty())
+		if(host.empty())
 			throw connection_string_invalid();
 	}
 
@@ -114,8 +116,7 @@ public:
 		const char* resource = "";
 		if (withResource)
 			resource = "<name>";
-		return format("blobstore://<api_key>:<secret>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
-		              resource);
+		return format("blobstore://[<api_key>:<secret>]@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]", resource);
 	}
 
 	typedef std::map<std::string, std::string> ParametersT;
@@ -142,8 +143,7 @@ public:
 
 	std::string host;
 	std::string service;
-	std::string key;
-	std::string secret;
+	Optional<Credentials> credentials;
 	bool lookupSecret;
 	BlobKnobs knobs;
 	HTTP::Headers extraHeaders;
@@ -163,10 +163,10 @@ public:
 	Future<Void> updateSecret();
 
 	// Calculates the authentication string from the secret key
-	std::string hmac_sha1(std::string const& msg);
+	std::string hmac_sha1(Credentials const &creds, std::string const &msg);
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
-	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
+	void setAuthHeaders(Credentials const &creds, std::string const &verb, std::string const &resource, HTTP::Headers &headers);
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
 	static PacketBuffer* writeRequestHeader(std::string const& request,
