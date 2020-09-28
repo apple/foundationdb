@@ -303,6 +303,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 			} else if (m.param1 == writeRecoveryKey) {
 				TraceEvent("WriteRecoveryKeySet", dbgid);
 				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
 			}
 		}
 		else if (m.param2.size() && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {

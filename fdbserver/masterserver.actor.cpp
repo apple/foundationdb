@@ -1574,6 +1574,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		TraceEvent("MasterRecoverySnap")
 		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A");
 		if (snapRecoveryFlag.present()) {
+			TEST(true); // Recovering from snapshot, writing to snapShotEndVersionKey
 			BinaryWriter bw(Unversioned());
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
