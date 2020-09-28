@@ -853,6 +853,7 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 	else {
 		taskSpace = getAvailableSpace(task->getPriority()).get(key);
 	}
+
 	for (auto & param : task->params)
 		tr->set(taskSpace.pack(param.key), param.value);
 

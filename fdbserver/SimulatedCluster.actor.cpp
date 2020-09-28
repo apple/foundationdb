@@ -57,6 +57,7 @@ T simulate( const T& in ) {
 
 ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 	state std::vector<Future<Void>> agentFutures;
+
 	while (g_simulator.backupAgents == ISimulator::WaitForType) {
 		wait(delay(1.0));
 	}

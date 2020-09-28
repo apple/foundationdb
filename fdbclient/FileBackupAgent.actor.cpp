@@ -3415,6 +3415,7 @@ namespace fileBackup {
 			state Version restoreVersion;
 			state Version beginVersion;
 			state Reference<IBackupContainer> bc;
+
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3438,6 +3439,7 @@ namespace fileBackup {
 					restore.fileCount().clear(tr);
 					Reference<IBackupContainer> _bc = wait(restore.sourceContainer().getOrThrow(tr));
 					bc = _bc;
+
 					wait(tr->commit());
 					break;
 				} catch(Error &e) {
@@ -3573,6 +3575,7 @@ namespace fileBackup {
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
 			state Reference<Task> task(new Task(StartFullRestoreTaskFunc::name, StartFullRestoreTaskFunc::version, doneKey));
 
@@ -3983,7 +3986,9 @@ public:
 		}
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix);
+
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
+
 		if (lockDB)
 			wait(lockDatabase(tr, uid));
 		else
