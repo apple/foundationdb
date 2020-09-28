@@ -150,7 +150,11 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		StringRef prefix = t.eat("://");
 		if(prefix != LiteralStringRef("blobstore"))
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
-		StringRef cred = t.eat("@");
+
+		Optional<StringRef> cred;
+		if (url.find("@") != std::string::npos) {
+			cred = t.eat("@");
+		}
 		uint8_t foundSeparator = 0;
 		StringRef hostPort = t.eatAny("/?", &foundSeparator);
 		StringRef resource;
@@ -218,11 +222,15 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		if(resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
 
-		StringRef c(cred);
-		StringRef key = c.eat(":");
-		StringRef secret = c.eat();
+		Optional<BlobStoreEndpoint::Credentials> creds;
+		if (cred.present()) {
+			StringRef c(cred.get());
+			StringRef key = c.eat(":");
+			StringRef secret = c.eat();
+			creds = BlobStoreEndpoint::Credentials{key.toString(), secret.toString()};
+		}
 
-		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders));
+		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), creds, knobs, extraHeaders));
 
 	} catch(std::string &err) {
 		if(error != nullptr)
@@ -239,12 +247,17 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string 
 		hostPort.append(service);
 	}
 
-	// If secret isn't being looked up from credentials files then it was passed explicitly in th URL so show it here.
-	std::string s;
-	if(!lookupSecret)
-		s = std::string(":") + secret;
+	// If secret isn't being looked up from credentials files then it was passed explicitly in the URL so show it here.
+	std::string credsString;
+	if (credentials.present()) {
+		credsString = credentials.get().key;
+		if (!lookupSecret) {
+			credsString +=":" + credentials.get().secret;
+		}
+		credsString += "@";
+	}
 
-	std::string r = format("blobstore://%s%s@%s/%s", key.c_str(), s.c_str(), hostPort.c_str(), resource.c_str());
+	std::string r = format("blobstore://%s%s/%s", credsString.c_str(), hostPort.c_str(), resource.c_str());
 
 	// Get params that are deviations from knob defaults
 	std::string knobParams = knobs.getURLParameters();
@@ -450,13 +463,18 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 	if(pFiles == nullptr)
 		return Void();
 
+	if (!b->credentials.present()) {
+		return Void();
+	}
+
 	state std::vector<Future<Optional<json_spirit::mObject>>> reads;
 	for(auto &f : *pFiles)
 		reads.push_back(tryReadJSONFile(f));
 
 	wait(waitForAll(reads));
 
-	std::string key = b->key + "@" + b->host;
+	std::string accessKey = b->credentials.get().key;
+	std::string credentialsFileKey = accessKey + "@" + b->host;
 
 	int invalid = 0;
 
@@ -470,12 +488,12 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 		JSONDoc doc(f.get().get());
 		if(doc.has("accounts") && doc.last().type() == json_spirit::obj_type) {
 			JSONDoc accounts(doc.last().get_obj());
-			if(accounts.has(key, false) && accounts.last().type() == json_spirit::obj_type) {
+			if(accounts.has(credentialsFileKey, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
 				std::string secret;
 				// Once we find a matching account, use it.
 				if(account.tryGet("secret", secret)) {
-					b->secret = secret;
+					b->credentials = BlobStoreEndpoint::Credentials{accessKey, secret};
 					return Void();
 				}
 			}
@@ -598,7 +616,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
 			// when a new connection is established and setAuthHeaders() would need the updated secret.
-			bstore->setAuthHeaders(verb, resource, headers);
+			if (bstore->credentials.present()) {
+				bstore->setAuthHeaders(bstore->credentials.get(), verb, resource, headers);
+			}
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), requestTimeout));
@@ -948,8 +968,8 @@ Future<std::vector<std::string>> BlobStoreEndpoint::listBuckets() {
 	return listBuckets_impl(Reference<BlobStoreEndpoint>::addRef(this));
 }
 
-std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
-	std::string key = secret;
+std::string BlobStoreEndpoint::hmac_sha1(Credentials const &creds, std::string const &msg) {
+	std::string key = creds.secret;
 
 	// First pad the key to 64 bytes.
 	key.append(64 - key.size(), '\0');
@@ -968,7 +988,7 @@ std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
 	return SHA1::from_string(kopad);
 }
 
-void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string const &resource, HTTP::Headers& headers) {
+void BlobStoreEndpoint::setAuthHeaders(Credentials const &creds, std::string const &verb, std::string const &resource, HTTP::Headers& headers) {
 	std::string &date = headers["Date"];
 
 	char dateBuf[20];
@@ -1009,11 +1029,11 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 			msg.resize(msg.size() - (resource.size() - q));
 	}
 
-	std::string sig = base64::encoder::from_string(hmac_sha1(msg));
+	std::string sig = base64::encoder::from_string(hmac_sha1(creds, msg));
 	// base64 encoded blocks end in \n so remove it.
 	sig.resize(sig.size() - 1);
 	std::string auth = "AWS ";
-	auth.append(key);
+	auth.append(creds.key);
 	auth.append(":");
 	auth.append(sig);
 	headers["Authorization"] = auth;
