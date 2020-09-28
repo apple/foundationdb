@@ -20,6 +20,7 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
@@ -267,6 +268,9 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
+	}
+	virtual ProtocolVersion protocolVersion() {
+		return baseNetwork->protocolVersion();
 	}
 };
 

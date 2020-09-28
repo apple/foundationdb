@@ -50,7 +50,7 @@ TraceEvent debugKeyRangeEnabled( const char* context, Version version, KeyRangeR
 }
 
 TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, StringRef commitBlob ) {
-	BinaryReader rdr(commitBlob, AssumeVersion(currentProtocolVersion));
+	BinaryReader rdr(commitBlob, AssumeVersion(g_network->protocolVersion()));
 	while (!rdr.empty()) {
 		if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
 			int32_t dummy;

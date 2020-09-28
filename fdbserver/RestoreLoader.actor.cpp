@@ -393,7 +393,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			// only one clear mutation is generated (i.e., always inserted).
 			ASSERT(inserted);
 
-			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
+			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 			MutationRef mutation;
 			rd >> mutation;
 

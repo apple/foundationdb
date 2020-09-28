@@ -20,6 +20,7 @@
 
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include <array>
@@ -436,6 +437,11 @@ class INetwork;
 extern INetwork* g_network;
 extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
 
+// Make current protocol a member
+// find all usess of current protocol version
+// add member function that returns version
+
+// in simulation, they share same instance of INetwork. In simulated, its possible to return the calling processes protocol version.
 class INetwork {
 public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running on.
@@ -526,6 +532,8 @@ public:
 
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise, returns false.
 	virtual bool checkRunnable() = 0;
+
+	virtual ProtocolVersion protocolVersion() = 0;
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

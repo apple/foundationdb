@@ -172,6 +172,7 @@ set(FDBSERVER_SRCS
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp
+  workloads/ProtocolVersion.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
   workloads/RandomClogging.actor.cpp

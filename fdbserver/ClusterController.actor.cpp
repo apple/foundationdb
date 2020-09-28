@@ -2879,7 +2879,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 		dbInfoChange = self->db.serverInfo->onChange();
 		updateDBInfo = self->updateDBInfo.onTrigger();
 
-		req.serializedDbInfo = BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(currentProtocolVersion));
+		req.serializedDbInfo = BinaryWriter::toValue(self->db.serverInfo->get(), AssumeVersion(g_network->protocolVersion()));
 
 		TraceEvent("DBInfoStartBroadcast", self->id);
 		choose {

@@ -59,7 +59,7 @@ struct VersionedMessage {
 			}
 		}
 
-		ArenaReader reader(arena, message, AssumeVersion(currentProtocolVersion));
+		ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
 
 		// Return false for LogProtocolMessage.
 		if (LogProtocolMessage::isNextIn(reader)) return false;
@@ -755,7 +755,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 				const auto& subrange = range.range();
 				intersectionRange = mutationRange & subrange;
 				MutationRef subm(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
-				BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+				BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
 				wr << subm;
 				mutations.push_back(wr.toValue());
 				for (int index : range.value()) {

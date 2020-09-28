@@ -26,6 +26,7 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
@@ -877,7 +878,16 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	currentClientIndex = newIndex;
 }
 
+// TODO: adding connections here and attempt connections
 void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
+	// do check if compatible - call StatusClient::statusFetcher(Database)?
+		// why doesn't Database inherit from IDatabase
+		// could use clusterFilePath to directly ask for coordinators protocols - statusFetcher requires a Database object to be passed in
+	// clientCoordinatorsStatusFetcher(Reference<ClusterConnectionFile> f, bool *quorum_reachable, int *coordinatorsFaultTolerance) can't be accessed
+	// statusObj["coordinators"] -> array of coordStatus JSON. coordStatus[protocol]
+
+	// should we be adding the client first and then use runOnExternalClient to check if the protocol is compatible?
+	// or can we check if a client is compatible here and only get the coordinator protocol versions once?
 	clients.push_back(client);
 	connectionAttempts.push_back(Reference<Connector>(new Connector(Reference<DatabaseState>::addRef(this), client, clusterFilePath)));
 }
