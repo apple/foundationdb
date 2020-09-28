@@ -763,8 +763,6 @@ TransportData::~TransportData() {
 }
 
 static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersion version) {
-	// std::cout << "REQUIREMENT: " << (policy.requirement == RequirePeer::Exactly ? "EXACTLY" : "AT LEAST") << " POLICY: " << policy.version.version() << " VERSION: " << version.versionWithFlags() << std::endl;
-
 	switch (policy.requirement) {
 	case RequirePeer::Exactly:
 		return version.version() == policy.version.version();
