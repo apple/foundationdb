@@ -277,6 +277,6 @@ if(NOT OPEN_FOR_IDE)
       COMMAND ${Java_JAVA_EXECUTABLE}
               -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
               -Djava.library.path=${CMAKE_BINARY_DIR}/lib
-              org.junit.runner.JUnitCore)
+              org.junit.runner.JUnitCore "com.apple.foundationdb.tuple.AllTests")
   endif()
 endif()

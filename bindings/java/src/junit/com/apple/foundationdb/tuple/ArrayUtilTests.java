@@ -34,6 +34,7 @@ import java.util.Random;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.Ignore;
 
 /**
  * @author Ben
@@ -252,61 +253,61 @@ public class ArrayUtilTests {
 		}
 	}
 
-//	/**
-//	 * Test method for {@link ByteArrayUtil#bisectLeft(java.math.BigInteger[], java.math.BigInteger)}.
-//	 */
-//	@Test
-//	public void testBisectLeft() {
-//		fail("Not yet implemented");
-//	}
-//
-//	/**
-//	 * Test method for {@link ByteArrayUtil#compareUnsigned(byte[], byte[])}.
-//	 */
-//	@Test
-//	public void testCompare() {
-//		fail("Not yet implemented");
-//	}
-//
-//	/**
-//	 * Test method for {@link ByteArrayUtil#findNext(byte[], byte, int)}.
-//	 */
-//	@Test
-//	public void testFindNext() {
-//		fail("Not yet implemented");
-//	}
-//
-//	/**
-//	 * Test method for {@link ByteArrayUtil#findTerminator(byte[], byte, byte, int)}.
-//	 */
-//	@Test
-//	public void testFindTerminator() {
-//		fail("Not yet implemented");
-//	}
-//
-//	/**
-//	 * Test method for {@link ByteArrayUtil#copyOfRange(byte[], int, int)}.
-//	 */
-//	@Test
-//	public void testCopyOfRange() {
-//		fail("Not yet implemented");
-//	}
-//
-//	/**
-//	 * Test method for {@link ByteArrayUtil#strinc(byte[])}.
-//	 */
-//	@Test
-//	public void testStrinc() {
-//		fail("Not yet implemented");
-//	}
-//
-//	/**
-//	 * Test method for {@link ByteArrayUtil#printable(byte[])}.
-//	 */
-//	@Test
-//	public void testPrintable() {
-//		fail("Not yet implemented");
-//	}
+	/**
+	 * Test method for {@link ByteArrayUtil#bisectLeft(java.math.BigInteger[], java.math.BigInteger)}.
+	 */
+	@Test @Ignore
+	public void testBisectLeft() {
+		fail("Not yet implemented");
+	}
+
+	/**
+	 * Test method for {@link ByteArrayUtil#compareUnsigned(byte[], byte[])}.
+	 */
+	@Test @Ignore
+	public void testCompare() {
+		fail("Not yet implemented");
+	}
+
+	/**
+	 * Test method for {@link ByteArrayUtil#findNext(byte[], byte, int)}.
+	 */
+	@Test @Ignore
+	public void testFindNext() {
+		fail("Not yet implemented");
+	}
+
+	/**
+	 * Test method for {@link ByteArrayUtil#findTerminator(byte[], byte, byte, int)}.
+	 */
+	@Test @Ignore
+	public void testFindTerminator() {
+		fail("Not yet implemented");
+	}
+
+	/**
+	 * Test method for {@link ByteArrayUtil#copyOfRange(byte[], int, int)}.
+	 */
+	@Test @Ignore
+	public void testCopyOfRange() {
+		fail("Not yet implemented");
+	}
+
+	/**
+	 * Test method for {@link ByteArrayUtil#strinc(byte[])}.
+	 */
+	@Test @Ignore
+	public void testStrinc() {
+		fail("Not yet implemented");
+	}
+
+	/**
+	 * Test method for {@link ByteArrayUtil#printable(byte[])}.
+	 */
+	@Test @Ignore
+	public void testPrintable() {
+		fail("Not yet implemented");
+	}
 
 	private static final int SAMPLE_COUNT = 1000000;
 	private static final int SAMPLE_MAX_SIZE = 2048;
