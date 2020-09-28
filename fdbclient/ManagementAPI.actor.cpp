@@ -19,8 +19,10 @@
  */
 
 #include <cinttypes>
+#include <string>
 #include <vector>
 
+#include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -78,6 +80,32 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	if( pos != std::string::npos ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
+
+		if (key == "proxies" && isInteger(value)) {
+			printf("\nWarning: Proxy role is being split into GRV Proxy and Commit Proxy, now prefer configuring "
+			       "\"grv_proxies\" and \"commit_proxies\" separately.\n");
+			int proxiesCount = atoi(value.c_str());
+			if (proxiesCount < 2) {
+				printf("Error: At least 2 proxies (1 GRV proxy and Commit proxy) are required.\n");
+				return out;
+			}
+
+			int grvProxyCount =
+			    std::max(1, std::min(CLIENT_KNOBS->DEFAULT_MAX_GRV_PROXIES,
+			                         proxiesCount / (CLIENT_KNOBS->DEFAULT_COMMIT_GRV_PROXIES_RATIO + 1)));
+			int commitProxyCount = proxiesCount - grvProxyCount;
+			ASSERT_WE_THINK(grvProxyCount >= 1 && commitProxyCount >= 1);
+
+			out[p + "grv_proxies"] = std::to_string(grvProxyCount);
+			out[p + "commit_proxies"] = std::to_string(commitProxyCount);
+			printf("%d proxies are automatically converted into %d GRV proxies and %d Commit proxies.\n", proxiesCount,
+			       grvProxyCount, commitProxyCount);
+
+			TraceEvent("DatabaseConfigurationProxiesSpecified")
+			    .detail("SpecifiedProxies", grvProxyCount)
+			    .detail("ConvertedGrvProxies", grvProxyCount)
+			    .detail("ConvertedCommitProxies", commitProxyCount);
+		}
 
 		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
 		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||

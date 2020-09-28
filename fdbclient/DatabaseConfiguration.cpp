@@ -321,7 +321,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["commit_proxies"] = commitProxyCount;
 	}
 	if (grvProxyCount != -1 || isOverridden("grv_proxies")) {
-		result["grv_proxies"] = commitProxyCount;
+		result["grv_proxies"] = grvProxyCount;
 	}
 	if (resolverCount != -1 || isOverridden("resolvers")) {
 		result["resolvers"] = resolverCount;
