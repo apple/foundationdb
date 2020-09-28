@@ -1,13 +1,3 @@
-[[test]]
-testTitle = 'PresetValue'
-clearAfterTest = false
-
-    [[test.workload]]
-    testName = 'SimpleAtomicAdd'
-    initialize = true
-    initialValue = 0
-    iterations = 0
-
 [[test]] 
 testTitle = 'SubmitBackup'
 simBackupAgents = 'BackupToFile'
