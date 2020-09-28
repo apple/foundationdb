@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from local_cluster import LocalCluster
-from argparse import ArgumentParser
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from random import choice
 from pathlib import Path
 import shutil
@@ -37,9 +37,23 @@ class TempCluster:
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser()
+    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
+                            description="""
+    This script automatically configures a temporary local cluster on the machine
+    and then calls a command while this cluster is running. As soon as the command
+    returns, the configured cluster is killed and all generated data is deleted.
+    This is useful for testing: if a test needs access to a fresh fdb cluster, one
+    can simply pass the test command to this script.
+
+    The command to run after the cluster started. Before the command is execute,
+    the following arguments will be preprocessed:
+    - All occurrences of @CLUSTER_FILE@ will be replaced with the path to the generated cluster file.
+    - All occurrences of @DATA_DIR@ will be replaced with the path to the data directory.
+    - All occurrences of @LOG_DIR@ will be replaced with the path to the log directory.
+    - All occurrences of @ETC_DIR@ will be replaced with the path to the configuration directory.
+    """)
     parser.add_argument('--build-dir', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
-    parser.add_argument('cmd', metavar="COMMAND", help="Command to run", nargs='+')
+    parser.add_argument('cmd', metavar="COMMAND", nargs="+", help="The command to run")
     args = parser.parse_args()
     errcode = 1
     with TempCluster(args.build_dir) as cluster:
