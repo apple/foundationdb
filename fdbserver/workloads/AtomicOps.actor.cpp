@@ -101,7 +101,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// case 10:
 		// 	TEST(true); // Testing atomic CompareAndClear Not supported yet
 		// 	opType = MutationRef::CompareAndClear
-		// 	break;
+		//  break;
 		default:
 			ASSERT(false);
 		}

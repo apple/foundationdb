@@ -177,7 +177,8 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		versionBatches.clear();
 		batch.clear();
 		batchStatus.clear();
-		finishedBatch = NotifiedVersion();
+		finishedBatch = NotifiedVersion(0);
+		versionBatchId = NotifiedVersion(0);
 		ASSERT(runningVersionBatches.get() == 0);
 	}
 
