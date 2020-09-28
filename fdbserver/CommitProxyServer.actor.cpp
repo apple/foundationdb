@@ -260,7 +260,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData *commitData, PromiseStream<std:
 	}
 }
 
-void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<StringRef>>& binPathVec) {
+void createAllowedBinPathVec(const std::string& binPath, vector<Standalone<StringRef>>& binPathVec) {
 	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
 	StringRef input(binPath);
 	while (input != StringRef()) {
@@ -280,7 +280,7 @@ void createWhitelistBinPathVec(const std::string& binPath, vector<Standalone<Str
 	return;
 }
 
-bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
+bool isAllowlisted(const vector<Standalone<StringRef>>& binPathVec, StringRef binPath) {
 	TraceEvent("BinPath").detail("Value", binPath);
 	for (const auto& item : binPathVec) {
 		TraceEvent("Element").detail("Value", item);
@@ -1493,10 +1493,10 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 	    .detail("SnapPayload", snapReq.snapPayload)
 	    .detail("SnapUID", snapReq.snapUID);
 	try {
-		// whitelist check
+		// Allow list check
 		ExecCmdValueString execArg(snapReq.snapPayload);
 		StringRef binPath = execArg.getBinaryPath();
-		if (!isWhitelisted(commitData->whitelistedBinPathVec, binPath)) {
+		if (!isAllowlisted(commitData->allowedBinPathVec, binPath)) {
 			TraceEvent("SnapCommitProxy_WhiteListCheckFailed")
 			    .detail("SnapPayload", snapReq.snapPayload)
 			    .detail("SnapUID", snapReq.snapUID);
@@ -1627,7 +1627,7 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID, Reference<AsyncVar<ServerDBI
 ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy, MasterInterface master,
                                          Reference<AsyncVar<ServerDBInfo>> db, LogEpoch epoch,
                                          Version recoveryTransactionVersion, bool firstProxy,
-                                         std::string whitelistBinPaths) {
+                                         std::string allowedBinPaths) {
 	state ProxyCommitData commitData(proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 
 	state Future<Sequence> sequenceFuture = (Sequence)0;
@@ -1667,7 +1667,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy, MasterInter
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
-	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
+	createAllowedBinPathVec(allowedBinPaths, commitData.allowedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
 
@@ -1825,11 +1825,10 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 }
 
 ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy, InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths) {
+                                     Reference<AsyncVar<ServerDBInfo>> db, std::string allowedBinPaths) {
 	try {
-		state Future<Void> core =
-		    commitProxyServerCore(proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion,
-		                          req.firstProxy, whitelistBinPaths);
+		state Future<Void> core = commitProxyServerCore(
+		    proxy, req.master, db, req.recoveryCount, req.recoveryTransactionVersion, req.firstProxy, allowedBinPaths);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	}
 	catch (Error& e) {
