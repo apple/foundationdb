@@ -124,8 +124,6 @@ set(GENERATED_JAVA_FILES
 vexillographer_compile(TARGET fdb_java_options LANG java OUT ${GENERATED_JAVA_DIR}
   OUTPUT ${GENERATED_JAVA_FILES})
 
-configure_file(pom.xml.cmake ${CMAKE_CURRENT_BINARY_DIR}/pom.xml)
-
 set(SYSTEM_NAME "linux")
 if (APPLE)
   set(SYSTEM_NAME "osx")
