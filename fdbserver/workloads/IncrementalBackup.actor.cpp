@@ -97,7 +97,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
 				                                    false, true));
 				// Wait for backup container to be created and avoid race condition
-				wait(delay(60.0));
+				wait(delay(90.0));
 				EBackupState waitResult = wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false));
 				TraceEvent("IBackupSubmitWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
 			} catch (Error& e) {
