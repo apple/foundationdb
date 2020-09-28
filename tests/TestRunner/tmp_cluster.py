@@ -45,7 +45,7 @@ if __name__ == '__main__':
     This is useful for testing: if a test needs access to a fresh fdb cluster, one
     can simply pass the test command to this script.
 
-    The command to run after the cluster started. Before the command is execute,
+    The command to run after the cluster started. Before the command is executed,
     the following arguments will be preprocessed:
     - All occurrences of @CLUSTER_FILE@ will be replaced with the path to the generated cluster file.
     - All occurrences of @DATA_DIR@ will be replaced with the path to the data directory.
