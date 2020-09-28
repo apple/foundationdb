@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
 
 #include <unordered_map>
@@ -697,7 +698,7 @@ void Peer::prependConnectPacket() {
 	}
 
 	pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
-	pkt.protocolVersion = currentProtocolVersion;
+	pkt.protocolVersion = g_network->protocolVersion();
 	pkt.protocolVersion.addObjectSerializerFlag();
 	pkt.connectionId = transport->transportId;
 
@@ -762,6 +763,8 @@ TransportData::~TransportData() {
 }
 
 static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersion version) {
+	// std::cout << "REQUIREMENT: " << (policy.requirement == RequirePeer::Exactly ? "EXACTLY" : "AT LEAST") << " POLICY: " << policy.version.version() << " VERSION: " << version.versionWithFlags() << std::endl;
+
 	switch (policy.requirement) {
 	case RequirePeer::Exactly:
 		return version.version() == policy.version.version();
@@ -781,6 +784,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
+			std::cout << "INCOMPATIBLE" << std::endl;
 			// TODO(anoyes): Report incompatibility somehow
 			return;
 		}
@@ -995,11 +999,14 @@ ACTOR static Future<Void> connectionReader(
 						ConnectPacket pkt;
 						serializer(pktReader, pkt);
 
+						std::cout << "INCOMING PKT VERSION: " << pkt.protocolVersion.version() << std::endl;
+
 						uint64_t connectionId = pkt.connectionId;
 						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
 						    // !pkt.protocolVersion.hasStableInterfaces()) {
-							!pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
-							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
+							!pkt.protocolVersion.isCompatible(g_network->protocolVersion())) {
+							//	!pkt.protocolVersion.isCompatible(ProtocolVersion(ProtocolVersion::minValidProtocolVersion))) { // TODO DELETE THIS
+							incompatibleProtocolVersionNewer = pkt.protocolVersion > g_network->protocolVersion();
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 							                          : conn->getPeerAddress();
@@ -1009,7 +1016,7 @@ ACTOR static Future<Void> connectionReader(
 								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
 									    .detail("Reason", "IncompatibleProtocolVersion")
-									    .detail("LocalVersion", currentProtocolVersion.version())
+									    .detail("LocalVersion", g_network->protocolVersion().version())
 									    .detail("RejectedVersion", pkt.protocolVersion.version())
 									    .detail("Peer", pkt.canonicalRemotePort ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 									                                            : conn->getPeerAddress())
@@ -1022,7 +1029,6 @@ ACTOR static Future<Void> connectionReader(
 							} else if(connectionId > 1) {
 								transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
-
 							compatible = false;
 							if(!protocolVersion.hasMultiVersionClient()) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
@@ -1311,7 +1317,7 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
-	ObjectWriter wr(AssumeVersion(currentProtocolVersion));
+	ObjectWriter wr(AssumeVersion(g_network->protocolVersion()));
 	what.serializeObjectWriter(wr);
 	copy = wr.toStringRef();
 #if VALGRIND
@@ -1319,7 +1325,7 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 #endif
 
 	ASSERT(copy.size() > 0);
-	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
+	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(g_network->protocolVersion())), false);
 }
 
 static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISerializeSource const& what,
@@ -1341,7 +1347,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	int prevBytesWritten = pb->bytes_written;
 	PacketBuffer* checksumPb = pb;
 
-	PacketWriter wr(pb,rp,AssumeVersion(currentProtocolVersion));  // SOMEDAY: Can we downgrade to talk to older peers?
+	PacketWriter wr(pb,rp,AssumeVersion(g_network->protocolVersion()));  // SOMEDAY: Can we downgrade to talk to older peers?
 
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;

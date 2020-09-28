@@ -22,6 +22,7 @@
 
 #include "fdbrpc/simulator.h"
 #include "flow/IThreadPool.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
@@ -994,7 +995,7 @@ public:
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder) {
+	                                const char* coordinationFolder, ProtocolVersion protocol) {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())
@@ -1037,6 +1038,7 @@ public:
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
+		processProtocolVersion[m] = protocol; // do we want protocol to be part of protocol info?
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
@@ -1703,6 +1705,13 @@ public:
 		return delay( 0, taskID, process->machine->machineProcess );
 	}
 
+	virtual ProtocolVersion protocolVersion() override {
+		// use getCurrentProcess to get current process and then in mapping find the correct protocol version
+		// ASSERT(processProtocolVersion.find(getCurrentProcess()) != processProtocolVersion.end());
+		while(processProtocolVersion.find(getCurrentProcess()) == processProtocolVersion.end()) {}
+		return processProtocolVersion.at(getCurrentProcess());
+	}
+
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	//time should only be modified from the main thread.
 	double time;
@@ -1726,6 +1735,8 @@ public:
 
 	//Map from machine IP -> machine disk space info
 	std::map<IPAddress, SimDiskSpace> diskSpaceMap;
+
+	std::map<ProcessInfo*, ProtocolVersion> processProtocolVersion;
 
 	//Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;

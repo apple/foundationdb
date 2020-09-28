@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cstdint>
 #include <fstream>
 #include <ostream>
 #include "fdbrpc/simulator.h"
@@ -33,6 +34,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/versions.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max
@@ -47,9 +49,9 @@ bool destructed = false;
 
 template <class T>
 T simulate( const T& in ) {
-	BinaryWriter writer(AssumeVersion(currentProtocolVersion));
+	BinaryWriter writer(AssumeVersion(g_network->protocolVersion()));
 	writer << in;
-	BinaryReader reader( writer.getData(), writer.getLength(), AssumeVersion(currentProtocolVersion) );
+	BinaryReader reader( writer.getData(), writer.getLength(), AssumeVersion(g_network->protocolVersion()) );
 	T out;
 	reader >> out;
 	return out;
@@ -154,7 +156,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 		state ISimulator::ProcessInfo* process =
 		    g_simulator.newProcess("Server", ip, port, sslEnabled, listenPerProcess, localities, processClass, dataFolder->c_str(),
-		                           coordFolder->c_str());
+		                           coordFolder->c_str(), currentProtocolVersion);
 		wait(g_simulator.onProcess(process,
 		                           TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
@@ -1399,7 +1401,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
 	                                        Optional<Standalone<StringRef>>()),
-	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", ""),
+	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "", currentProtocolVersion), // this won't work
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(true, 1);

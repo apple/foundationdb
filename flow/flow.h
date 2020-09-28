@@ -256,7 +256,7 @@ public:
 	//This should only be called from the ObjectSerializer load function
 	Standalone<StringRef> getCache() const {
 		if(cacheType != SerializeType::Object) {
-			cache = ObjectWriter::toValue(ErrorOr<EnsureTable<T>>(data), AssumeVersion(currentProtocolVersion));
+			cache = ObjectWriter::toValue(ErrorOr<EnsureTable<T>>(data), AssumeVersion(g_network->protocolVersion()));
 			cacheType = SerializeType::Object;
 		}
 		return cache;
@@ -283,7 +283,7 @@ public:
 				serializer(ar, data);
 			} else {
 				if (cacheType != SerializeType::Binary) {
-					cache = BinaryWriter::toValue(data, AssumeVersion(currentProtocolVersion));
+					cache = BinaryWriter::toValue(data, AssumeVersion(g_network->protocolVersion()));
 					cacheType = SerializeType::Binary;
 				}
 				ar.serializeBytes(const_cast<uint8_t*>(cache.begin()), cache.size());
@@ -327,7 +327,7 @@ struct serialize_raw<ErrorOr<EnsureTable<CachedSerialization<V>>>> : std::true_t
 	static uint8_t* save_raw(Context& context, const ErrorOr<EnsureTable<CachedSerialization<V>>>& obj) {
 		auto cache = obj.present() ? obj.get().asUnderlyingType().getCache()
 		                           : ObjectWriter::toValue(ErrorOr<EnsureTable<V>>(obj.getError()),
-		                                                   AssumeVersion(currentProtocolVersion));
+		                                                   AssumeVersion(g_network->protocolVersion()));
 		uint8_t* out = context.allocate(cache.size());
 		memcpy(out, cache.begin(), cache.size());
 		return out;

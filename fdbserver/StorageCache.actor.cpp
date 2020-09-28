@@ -1752,7 +1752,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 				//TODO cache servers should write the LogProtocolMessage when they are created
 				//cloneCursor1->setProtocolVersion(data->logProtocol);
-				cloneCursor1->setProtocolVersion(currentProtocolVersion);
+				cloneCursor1->setProtocolVersion(g_network->protocolVersion());
 
 				for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
 					ArenaReader& cloneReader = *cloneCursor1->reader();
@@ -1816,7 +1816,7 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 
 			//FIXME: ensure this can only read data from the current version
 			//cloneCursor2->setProtocolVersion(data->logProtocol);
-			cloneCursor2->setProtocolVersion(currentProtocolVersion);
+			cloneCursor2->setProtocolVersion(g_network->protocolVersion());
 			ver = invalidVersion;
 
 			// Now process the mutations

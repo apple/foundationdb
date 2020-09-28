@@ -294,7 +294,9 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 
 		state vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
+		std::cout << "TRYING TO GET coord protocols" << std::endl;
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			std::cout << "CLIENT SENDING TO ENDPOINT: " << coord.clientLeaderServers[i].getLeader.getEndpoint().addresses.toString() << std::endl;
 			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
 				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
 			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
@@ -327,7 +329,6 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		statusObj["coordinators"] = coordsStatus;
 		
 		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
-
 		return statusObj;
 	}
 	catch (Error &e){
