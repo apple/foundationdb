@@ -1706,9 +1706,7 @@ public:
 	}
 
 	virtual ProtocolVersion protocolVersion() override {
-		// use getCurrentProcess to get current process and then in mapping find the correct protocol version
-		// ASSERT(processProtocolVersion.find(getCurrentProcess()) != processProtocolVersion.end());
-		while(processProtocolVersion.find(getCurrentProcess()) == processProtocolVersion.end()) {}
+		ASSERT(processProtocolVersion.find(getCurrentProcess()) != processProtocolVersion.end());
 		return processProtocolVersion.at(getCurrentProcess());
 	}
 
