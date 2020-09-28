@@ -204,6 +204,8 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
+	// std::cout << "OPEN DATAASE" << std::endl;
+
 	++(*clientCount);
 	hasConnectedClients->set(true);
 	

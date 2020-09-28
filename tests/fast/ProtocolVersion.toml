@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'ProtocolVersionTest'
+
+    [[test.workload]]
+    testName = 'ProtocolVersion'
+    clusterFilePath= '/home/rchen/Documents/FDB/build/fdb.cluster'

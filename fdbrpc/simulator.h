@@ -20,6 +20,7 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "flow/flow.h"
@@ -158,7 +159,7 @@ public:
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder) = 0;
+	                                const char* coordinationFolder, ProtocolVersion protocol) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
@@ -171,6 +172,8 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
+
+	virtual ProtocolVersion protocolVersion() = 0;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;

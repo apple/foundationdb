@@ -172,7 +172,7 @@ struct StatusWorkload : TestWorkload {
 				state double issued = now();
 				StatusObject result = wait(StatusClient::statusFetcher(cx));
 				++self->replies;
-				BinaryWriter br(AssumeVersion(currentProtocolVersion));
+				BinaryWriter br(AssumeVersion(g_network->protocolVersion()));
 				save(br, result);
 				self->totalSize += br.getLength();
 				TraceEvent("StatusWorkloadReply").detail("ReplySize", br.getLength()).detail("Latency", now() - issued);//.detail("Reply", json_spirit::write_string(json_spirit::mValue(result)));

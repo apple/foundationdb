@@ -46,6 +46,7 @@
 #include "flow/Profiler.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
+#include "flow/network.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -1136,7 +1137,7 @@ ACTOR Future<Void> workerServer(
 
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
-				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
+				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
 
 				if(localInfo.infoGeneration < dbInfo->get().infoGeneration && localInfo.clusterInterface == dbInfo->get().clusterInterface) {
@@ -1794,7 +1795,7 @@ ACTOR Future<Void> serveProtocolInfo() {
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
 	loop {
 		ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
-		req.reply.send(ProtocolInfoReply{ currentProtocolVersion });
+		req.reply.send(ProtocolInfoReply{ g_network->protocolVersion() });
 	}
 }
 

@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
 
 static std::set<int> const& normalAttritionErrors() {
 	static std::set<int> s;

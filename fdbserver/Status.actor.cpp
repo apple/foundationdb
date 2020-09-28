@@ -2445,7 +2445,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
-		statusObj["protocol_version"] = format("%" PRIx64, currentProtocolVersion.version());
+		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
 
 		state Optional<DatabaseConfiguration> configuration;

@@ -162,6 +162,9 @@ public:
 
 	virtual flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
+
+	virtual ProtocolVersion protocolVersion() override { return currentProtocolVersion; /* is this correct? */ }
+
 	std::vector<flowGlobalType>		globals;
 
 	virtual const TLSConfig& getTLSConfig() const override { return tlsConfig; }
@@ -1806,7 +1809,7 @@ void net2_test() {
 			SendBuffer* pb = unsent.getWriteBuffer();
 			ReliablePacket* rp = new ReliablePacket;  // 0
 
-			PacketWriter wr(pb,rp,AssumeVersion(currentProtocolVersion));
+			PacketWriter wr(pb,rp,AssumeVersion(g_network->protocolVersion()));
 			//BinaryWriter wr;
 			SplitBuffer packetLen;
 			uint32_t len = 0;
