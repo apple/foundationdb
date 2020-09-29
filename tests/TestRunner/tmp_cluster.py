@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 
+import shutil
+import subprocess
+import sys
+import socket
 from local_cluster import LocalCluster
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from random import choice
 from pathlib import Path
-import shutil
-import subprocess
-import sys
 
 class TempCluster:
     def __init__(self, build_dir: str):
-        self.build_dir = Path(build_dir)
+        self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         tmp_dir = self.build_dir.joinpath(
@@ -52,7 +53,7 @@ if __name__ == '__main__':
     - All occurrences of @LOG_DIR@ will be replaced with the path to the log directory.
     - All occurrences of @ETC_DIR@ will be replaced with the path to the configuration directory.
     """)
-    parser.add_argument('--build-dir', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
+    parser.add_argument('--build-dir', '-b', metavar='BUILD_DIRECTORY', help='FDB build directory', required=True)
     parser.add_argument('cmd', metavar="COMMAND", nargs="+", help="The command to run")
     args = parser.parse_args()
     errcode = 1

@@ -4,6 +4,14 @@ import random
 import string
 import subprocess
 import sys
+import socket
+
+
+def get_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('0.0.0.0', 0))
+        return s.getsockname()[1]
+
 
 class LocalCluster:
     configuration_template = """
@@ -66,9 +74,11 @@ logdir = {logdir}
         self.etc.mkdir(exist_ok=True)
         self.log.mkdir(exist_ok=True)
         self.data.mkdir(exist_ok=True)
-        self.port = random.randrange(4000, 4500) if port is None else port
+        self.port = get_free_port() if port is None else port
         self.ip_address = '127.0.0.1' if ip_address is None else ip_address
         self.running = False
+        self.process = None
+        self.fdbmonitor_logfile = None
         if create_config:
             with open(self.etc.joinpath('fdb.cluster'), 'x') as f:
                 random_string = lambda len : ''.join(random.choice(LocalCluster.valid_letters_for_secret) for i in range(len))
