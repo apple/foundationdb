@@ -327,8 +327,11 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 					}
 
 					// Log the modification
-					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", m.param1)
-						.detail("LogRangeBegin", logRangeBegin).detail("LogRangeEnd", logRangeEnd);
+					TraceEvent("LogRangeAdd", dbgid)
+					    .detail("LogRanges", vecBackupKeys->size())
+					    .detail("MutationKey", m.param1)
+					    .detail("LogRangeBegin", logRangeBegin)
+					    .detail("LogRangeEnd", logRangeEnd);
 				}
 			}
 			else if (m.param1.startsWith(globalKeysPrefix)) {
@@ -406,7 +409,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
 						Tag tag = decodeServerTagValue(kv.value);
-						TraceEvent("ServerTagRemove")
+						TraceEvent("ServerTagRemove", dbgid)
 						    .detail("PopVersion", popVersion)
 						    .detail("Tag", tag.toString())
 						    .detail("Server", decodeServerTagKey(kv.key));
@@ -437,8 +440,11 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagHistoryKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
 						Tag tag = decodeServerTagValue(kv.value);
-						TraceEvent("ServerTagHistoryRemove").detail("PopVersion", popVersion).detail("Tag", tag.toString()).detail("Version", decodeServerTagHistoryKey(kv.key));
-						logSystem->pop( popVersion, tag );
+						TraceEvent("ServerTagHistoryRemove", dbgid)
+						    .detail("PopVersion", popVersion)
+						    .detail("Tag", tag.toString())
+						    .detail("Version", decodeServerTagHistoryKey(kv.key));
+						logSystem->pop(popVersion, tag);
 						(*tag_popped)[tag] = popVersion;
 					}
 				}
@@ -493,7 +499,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 			if (range.intersects(logRangesRange)) {
 				KeyRangeRef commonLogRange(range & logRangesRange);
 
-				TraceEvent("LogRangeClear")
+				TraceEvent("LogRangeClear", dbgid)
 				    .detail("RangeBegin", range.begin)
 				    .detail("RangeEnd", range.end)
 				    .detail("IntersectBegin", commonLogRange.begin)
@@ -507,7 +513,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 			LockRequest request;
 			BinaryReader reader(m.param2, IncludeVersion());
 			reader >> request;
-			TraceEvent("LockRange")
+			TraceEvent("LockRange", dbgid)
 			    .detail("Mode", getLockModeText(request.mode))
 			    .detail("Range", printable(request.range));
 			if (locks != nullptr) {
