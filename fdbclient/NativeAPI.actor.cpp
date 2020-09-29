@@ -1233,6 +1233,13 @@ Future<Void> DatabaseContext::onConnected() {
 	return connected;
 }
 
+void DatabaseContext::updateMetadataVersionCache(Version version, Optional<Value> value) {
+	if (version > metadataVersionCache[mvCacheInsertLocation].first) {
+		mvCacheInsertLocation = (mvCacheInsertLocation + 1) % metadataVersionCache.size();
+		metadataVersionCache[mvCacheInsertLocation] = std::make_pair(version, value);
+	}
+}
+
 ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
 	TEST(true); // Switch connection file
 	TraceEvent("SwitchConnectionFile")
@@ -3515,10 +3522,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
-					if(v > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
-						cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1)%cx->metadataVersionCache.size();
-						cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(v, ci.metadataVersion);
-					}
+					cx->updateMetadataVersionCache(v, ci.metadataVersion);
 
 					Standalone<StringRef> ret = makeString(10);
 					placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
@@ -4091,10 +4095,7 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 		}
 	}
 
-	if(rep.version > cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
-		cx->mvCacheInsertLocation = (cx->mvCacheInsertLocation + 1) % cx->metadataVersionCache.size();
-		cx->metadataVersionCache[cx->mvCacheInsertLocation] = std::make_pair(rep.version, rep.metadataVersion);
-	}
+	cx->updateMetadataVersionCache(rep.version, rep.metadataVersion);
 
 	metadataVersion.send(rep.metadataVersion);
 	rangeLockVersion.send(rep.rangeLockVersion);

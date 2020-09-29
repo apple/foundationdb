@@ -215,6 +215,8 @@ public:
 
 	void expireThrottles();
 
+	void updateMetadataVersionCache(Version version, Optional<Value> value);
+
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger proxiesChangeTrigger;
