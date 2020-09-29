@@ -59,7 +59,9 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLoc
 		}
 	}
 
-	tr->atomicOp(rangeLockKey, encodeRangeLock(LockRequest(range, mode)), MutationRef::LockRange);
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLockRangeValue()));
+	wr << LockRequest(range, mode);
+	tr->atomicOp(rangeLockKey, wr.toValue(), MutationRef::LockRange);
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	}
@@ -124,7 +126,9 @@ ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBL
 		}
 	}
 
-	tr->atomicOp(rangeLockKey, encodeRangeLock(LockRequest(range, mode)), MutationRef::LockRange);
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLockRangeValue()));
+	wr << LockRequest(range, mode);
+	tr->atomicOp(rangeLockKey, wr.toValue(), MutationRef::LockRange);
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	}
@@ -181,10 +185,15 @@ RangeLockCache::RangeLockCache(Snapshot snapshot, Version version) {
 	snapshots[version] = snapshot;
 }
 
-void RangeLockCache::add(Version version, Requests more) {
+void RangeLockCache::add(Version version, const Requests& more) {
 	auto& current = requests[version];
 	current.append(current.arena(), more.begin(), more.size());
 	current.arena().dependsOn(more.arena());
+}
+
+void RangeLockCache::add(Version version, const LockRequest& request) {
+	auto& current = requests[version];
+	current.push_back_deep(current.arena(), request);
 }
 
 // PRE-CONDITION: there are lock versions larger than "upTo".

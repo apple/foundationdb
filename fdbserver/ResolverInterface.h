@@ -62,10 +62,14 @@ struct ResolverInterface {
 
 struct StateTransactionRef {
 	constexpr static FileIdentifier file_identifier = 6150271;
-	StateTransactionRef() {}
-	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations) : committed(committed), mutations(mutations) {}
-	StateTransactionRef(Arena &p, const StateTransactionRef &toCopy) : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
+	StateTransactionRef() = default;
+	StateTransactionRef(const bool committed, Version version, VectorRef<MutationRef> const& mutations)
+	  : committed(committed), version(version), mutations(mutations) {}
+	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)
+	  : committed(toCopy.committed), version(toCopy.version), mutations(p, toCopy.mutations) {}
+
 	bool committed;
+	Version version; // Commit version for the mutations
 	VectorRef<MutationRef> mutations;
 	size_t expectedSize() const {
 		return mutations.expectedSize();
@@ -73,7 +77,7 @@ struct StateTransactionRef {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, mutations);
+		serializer(ar, committed, version, mutations);
 	}
 };
 

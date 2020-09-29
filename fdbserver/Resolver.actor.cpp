@@ -137,13 +137,16 @@ struct Resolver : ReferenceCounted<Resolver> {
 			stateBytes += req.transactions[t].mutations.expectedSize();
 			stateTransactions.push_back_deep(
 			    stateTransactions.arena(),
-			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
+			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted, req.version,
 			                        req.transactions[t].mutations));
 		}
 
 		resolvedStateTransactions += req.txnStateTransactions.size();
 		resolvedStateMutations += stateMutations;
 		resolvedStateBytes += stateBytes;
+		if (stateBytes > 0) {
+			recentStateTransactionSizes.emplace_back(req.version, stateBytes);
+		}
 		return stateBytes;
 	}
 };
@@ -260,9 +263,6 @@ ACTOR Future<Void> resolveBatch(
 		// Save request's state transactions into self->recentStateTransactions
 		// so that other proxies can get them later.
 		int64_t stateBytes = self->saveStateTransactions(req, reply);
-		if (stateBytes > 0) {
-			self->recentStateTransactionSizes.emplace_back(req.version, stateBytes);
-		}
 
 		ASSERT(req.version >= firstUnseenVersion);
 		ASSERT(firstUnseenVersion >= self->debugMinRecentStateVersion);

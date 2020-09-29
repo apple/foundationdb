@@ -111,15 +111,15 @@ void removeBackupKeys(KeyRangeMap<std::set<Key>>* vecBackupKeys, KeyRangeRef com
 // It is incredibly important that any modifications to txnStateStore are done in such a way that
 // the same operations will be done on all commit proxies at the same time. Otherwise, the data 
 // stored in txnStateStore will become corrupted.
-void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRef> const& mutations,
-                            IKeyValueStore* txnStateStore, LogPushData* toCommit, bool& confChange,
-                            Reference<ILogSystem> logSystem, Version popVersion,
-                            KeyRangeMap<std::set<Key>>* vecBackupKeys, KeyRangeMap<ServerCacheInfo>* keyInfo,
-                            KeyRangeMap<bool>* cacheInfo, std::map<Key, ApplyMutationsData>* uid_applyMutationsData,
+void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVersion,
+                            VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore,
+                            LogPushData* toCommit, bool& confChange, Reference<ILogSystem> logSystem,
+                            Version popVersion, KeyRangeMap<std::set<Key>>* vecBackupKeys,
+                            KeyRangeMap<ServerCacheInfo>* keyInfo, KeyRangeMap<bool>* cacheInfo,
+                            std::map<Key, ApplyMutationsData>* uid_applyMutationsData,
                             RequestStream<CommitTransactionRequest> commit, Database cx, NotifiedVersion* commitVersion,
                             std::map<UID, Reference<StorageInfo>>* storageCache, std::map<Tag, Version>* tag_popped,
-                            bool initialCommit) {
-	//std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
+                            bool initialCommit, RangeLockCache* locks) {
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
@@ -503,12 +503,16 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 
 				if(!initialCommit) txnStateStore->clear(commonLogRange);
 			}
-		} else if (m.param2.size() && m.type == MutationRef::LockRange) {
-			LockRequest request = decodeRangeLockValue(m.param2);
+		} else if (m.param2.size() && m.type == MutationRef::LockRange && m.param1 == rangeLockKey) {
+			LockRequest request;
+			BinaryReader reader(m.param2, IncludeVersion());
+			reader >> request;
 			TraceEvent("LockRange")
-			    .detail("LockMode", getLockModeText(request.mode))
-			    .detail("Begin", printable(request.range.begin))
-			    .detail("End", printable(request.range.end));
+			    .detail("Mode", getLockModeText(request.mode))
+			    .detail("Range", printable(request.range));
+			if (locks != nullptr) {
+				locks->add(mutationVersion, request);
+			}
 		}
 	}
 
@@ -578,19 +582,19 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, VectorRef<MutationRe
 }
 
 void applyMetadataMutations(ProxyCommitData& proxyCommitData, Arena& arena, Reference<ILogSystem> logSystem,
-                            const VectorRef<MutationRef>& mutations, LogPushData* toCommit, bool& confChange,
-                            Version popVersion, bool initialCommit) {
+                            Version commitVersion, const VectorRef<MutationRef>& mutations, LogPushData* toCommit,
+                            bool& confChange, Version popVersion, bool initialCommit) {
 
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	if (proxyCommitData.firstProxy) {
 		uid_applyMutationsData = &proxyCommitData.uid_applyMutationsData;
 	}
 
-	applyMetadataMutations(proxyCommitData.dbgid, arena, mutations, proxyCommitData.txnStateStore, toCommit, confChange,
-	                       logSystem, popVersion, &proxyCommitData.vecBackupKeys, &proxyCommitData.keyInfo,
-	                       &proxyCommitData.cacheInfo, uid_applyMutationsData, proxyCommitData.commit,
-	                       proxyCommitData.cx, &proxyCommitData.committedVersion, &proxyCommitData.storageCache,
-	                       &proxyCommitData.tag_popped, initialCommit);
+	applyMetadataMutations(
+	    proxyCommitData.dbgid, arena, commitVersion, mutations, proxyCommitData.txnStateStore, toCommit, confChange,
+	    logSystem, popVersion, &proxyCommitData.vecBackupKeys, &proxyCommitData.keyInfo, &proxyCommitData.cacheInfo,
+	    uid_applyMutationsData, proxyCommitData.commit, proxyCommitData.cx, &proxyCommitData.committedVersion,
+	    &proxyCommitData.storageCache, &proxyCommitData.tag_popped, initialCommit, &proxyCommitData.locks);
 }
 
 void applyMetadataMutations(const UID& dbgid, Arena& arena, const VectorRef<MutationRef>& mutations,
@@ -598,9 +602,10 @@ void applyMetadataMutations(const UID& dbgid, Arena& arena, const VectorRef<Muta
 
 	bool confChange; // Dummy variable, not used.
 
-	applyMetadataMutations(dbgid, arena, mutations, txnStateStore, /* toCommit= */ nullptr, confChange,
-	                       Reference<ILogSystem>(), /* popVersion= */ 0, /* vecBackupKeys= */ nullptr,
+	applyMetadataMutations(dbgid, arena, /*commitVersion=*/0, mutations, txnStateStore, /* toCommit= */ nullptr,
+	                       confChange, Reference<ILogSystem>(), /* popVersion= */ 0, /* vecBackupKeys= */ nullptr,
 	                       /* keyInfo= */ nullptr, /* cacheInfo= */ nullptr, /* uid_applyMutationsData= */ nullptr,
 	                       RequestStream<CommitTransactionRequest>(), Database(), /* commitVersion= */ nullptr,
-	                       /* storageCache= */ nullptr, /* tag_popped= */ nullptr, /* initialCommit= */ false);
+	                       /* storageCache= */ nullptr, /* tag_popped= */ nullptr, /* initialCommit= */ false,
+	                       /*locks=*/nullptr);
 }

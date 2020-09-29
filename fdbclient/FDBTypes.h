@@ -1108,16 +1108,22 @@ enum class LockMode : uint8_t {
 // Convert the LockMode enum to a text description
 extern const char* getLockModeText(LockMode mode);
 
-// A lock or unlock request for a key range. Note the serialization is done
-// by encodeRangeLock() and decodeRangeLockValue(), because a prefix is added
-// or removed for the range.
+// A lock or unlock request for a key range.
 struct LockRequest {
+	constexpr static FileIdentifier file_identifier = 1583382;
 	LockRequest() = default;
 	LockRequest(KeyRangeRef range, LockMode mode) : range(range), mode(mode) {}
 	LockRequest(Arena a, const LockRequest& r) : range(r.range), mode(r.mode){};
 
 	KeyRangeRef range;
-	LockMode mode;
+	LockMode mode; // LockMode
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		uint8_t m = static_cast<uint8_t>(mode);
+		serializer(ar, range, m);
+		mode = static_cast<LockMode>(m);
+	}
 };
 
 #endif

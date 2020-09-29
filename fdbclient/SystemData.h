@@ -365,9 +365,6 @@ extern const KeyRef rangeLockVersionKey;
 extern const KeyRef rangeLockVersionKeyEnd;
 extern const KeyRef rangeLockVersionRequiredValue;
 
-extern Value encodeRangeLock(const LockRequest& request);
-extern LockRequest decodeRangeLockValue(const ValueRef& v);
-
 // Key range reserved for storing changes to monitor conf files
 extern const KeyRangeRef monitorConfKeys;
 

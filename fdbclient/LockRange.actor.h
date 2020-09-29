@@ -62,7 +62,8 @@ public:
 	RangeLockCache(Snapshot snapshot, Version ver);
 
 	// Adds lock requests for the given lock version.
-	void add(Version version, Requests requests);
+	void add(Version version, const Requests& requests);
+	void add(Version version, const LockRequest& request);
 
 	// Expire cached snapshots or requests up to the given version.
 	void expire(Version upTo);

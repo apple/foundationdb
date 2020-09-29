@@ -42,8 +42,8 @@ inline bool isMetadataMutation(MutationRef const& m) {
 Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInfo>>* storageCache, IKeyValueStore* txnStateStore);
 
 void applyMetadataMutations(ProxyCommitData& proxyCommitData, Arena& arena, Reference<ILogSystem> logSystem,
-                            const VectorRef<MutationRef>& mutations, LogPushData* pToCommit, bool& confChange,
-                            Version popVersion, bool initialCommit);
+                            Version commitVersion, const VectorRef<MutationRef>& mutations, LogPushData* pToCommit,
+                            bool& confChange, Version popVersion, bool initialCommit);
 void applyMetadataMutations(const UID& dbgid, Arena& arena, const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
 

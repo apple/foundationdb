@@ -26,6 +26,7 @@
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/LockRange.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -143,6 +144,8 @@ struct ProxyCommitData {
 
 	std::vector<double> commitComputePerOperation;
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
+
+	RangeLockCache locks;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

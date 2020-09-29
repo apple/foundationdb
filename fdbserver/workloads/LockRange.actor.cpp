@@ -33,12 +33,13 @@ struct LockRangeWorkload : TestWorkload {
 	bool ok = true;
 
 	LockRangeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		lockAfter = getOption(options, LiteralStringRef("lockAfter"), 0.0);
-		unlockAfter = getOption(options, LiteralStringRef("unlockAfter"), 10.0);
+		lockAfter = getOption(options, "lockAfter"_sr, 0.0);
+		unlockAfter = getOption(options, "unlockAfter"_sr, 10.0);
 		ASSERT(unlockAfter > lockAfter);
-		keyPrefix = getOption(options, LiteralStringRef("prefix"), LiteralStringRef("LR_"));
+		keyPrefix = getOption(options, "prefix"_sr, "LR_"_sr);
 		Key keyEnd = endOfRange(keyPrefix);
 		range = KeyRangeRef(keyPrefix, keyEnd);
+		std::cout << "LockRange workload range = " << printable(range) << "\n";
 	}
 
 	virtual std::string description() { return "LockRange"; }

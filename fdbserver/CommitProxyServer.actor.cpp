@@ -657,11 +657,14 @@ void applyMetadataEffect(CommitBatchContext* self) {
 
 		for (int transactionIndex = 0; transactionIndex < self->resolution[0].stateMutations[versionIndex].size() && !self->forceRecovery; transactionIndex++) {
 			bool committed = true;
-			for (int resolver = 0; resolver < self->resolution.size(); resolver++)
+			for (int resolver = 0; resolver < self->resolution.size() && committed; resolver++) {
 				committed = committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
+			}
 			if (committed) {
+				const StateTransactionRef& stateTxn =
+				    self->resolution[0].stateMutations[versionIndex][transactionIndex];
 				applyMetadataMutations(*self->pProxyCommitData, self->arena, self->pProxyCommitData->logSystem,
-				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
+				                       stateTxn.version, stateTxn.mutations,
 				                       /* pToCommit= */ nullptr, self->forceRecovery,
 				                       /* popVersion= */ 0, /* initialCommit */ false);
 			}
@@ -743,7 +746,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
-			applyMetadataMutations(*pProxyCommitData, self->arena, pProxyCommitData->logSystem,
+			applyMetadataMutations(*pProxyCommitData, self->arena, pProxyCommitData->logSystem, self->commitVersion,
 			                       trs[t].transaction.mutations, &self->toCommit, self->forceRecovery,
 			                       self->commitVersion + 1, /* initialCommit= */ false);
 		}
@@ -1794,7 +1797,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy, MasterInter
 
 						Arena arena;
 						bool confChanges;
-						applyMetadataMutations(commitData, arena, Reference<ILogSystem>(), mutations,
+						applyMetadataMutations(commitData, arena, Reference<ILogSystem>(), /*commitVersion=*/0,
+						                       mutations,
 						                       /* pToCommit= */ nullptr, confChanges,
 						                       /* popVersion= */ 0, /* initialCommit= */ true);
 					}
