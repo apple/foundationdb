@@ -1,0 +1,39 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                      http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.foundationdb</groupId>
+  <artifactId>NAME</artifactId>
+  <version>VERSION</version>
+  <packaging>jar</packaging>
+
+  <name>foundationdb-java</name>
+  <description>Java bindings for the FoundationDB database. These bindings require the FoundationDB client, which is under a different license. The client can be obtained from https://www.foundationdb.org/download/.</description>
+  <inceptionYear>2010</inceptionYear>
+  <url>https://www.foundationdb.org</url>
+
+  <organization>
+    <name>FoundationDB</name>
+    <url>https://www.foundationdb.org</url>
+  </organization>
+
+  <developers>
+    <developer>
+        <name>FoundationDB</name>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>http://0.0.0.0</url>
+  </scm>
+
+  <licenses>
+    <license>
+      <name>The Apache v2 License</name>
+      <url>http://www.apache.org/licenses/</url>
+    </license>
+  </licenses>
+
+</project>
