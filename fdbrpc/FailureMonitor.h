@@ -87,10 +87,10 @@ struct FailureStatus {
 class IFailureMonitor {
 public:
 	// Returns the currently known status for the endpoint
-	virtual FailureStatus getState(Endpoint const& endpoint) = 0;
+	virtual FailureStatus getState(Endpoint const& endpoint) const = 0;
 
 	// Returns the currently known status for the address
-	virtual FailureStatus getState(NetworkAddress const& address) = 0;
+	virtual FailureStatus getState(NetworkAddress const& address) const = 0;
 
 	// Only use this function when the endpoint is known to be failed
 	virtual void endpointNotFound(Endpoint const&) = 0;
@@ -102,10 +102,10 @@ public:
 	virtual Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) = 0;
 
 	// Returns true if the endpoint is failed but the address of the endpoint is not failed.
-	virtual bool onlyEndpointFailed(Endpoint const& endpoint) = 0;
+	virtual bool onlyEndpointFailed(Endpoint const& endpoint) const = 0;
 
 	// Returns true if the endpoint will never become available.
-	virtual bool permanentlyFailed(Endpoint const& endpoint) = 0;
+	virtual bool permanentlyFailed(Endpoint const& endpoint) const = 0;
 
 	// Called by FlowTransport when a connection closes and a prior request or reply might be lost
 	virtual void notifyDisconnect(NetworkAddress const&) = 0;
@@ -140,14 +140,14 @@ public:
 	SimpleFailureMonitor();
 	void setStatus(NetworkAddress const& address, FailureStatus const& status);
 	void endpointNotFound(Endpoint const&);
-	virtual void notifyDisconnect(NetworkAddress const&);
+	void notifyDisconnect(NetworkAddress const&) override;
 
-	virtual Future<Void> onStateChanged(Endpoint const& endpoint);
-	virtual FailureStatus getState(Endpoint const& endpoint);
-	virtual FailureStatus getState(NetworkAddress const& address);
-	virtual Future<Void> onDisconnectOrFailure(Endpoint const& endpoint);
-	virtual bool onlyEndpointFailed(Endpoint const& endpoint);
-	virtual bool permanentlyFailed(Endpoint const& endpoint);
+	Future<Void> onStateChanged(Endpoint const& endpoint) override;
+	FailureStatus getState(Endpoint const& endpoint) const override;
+	FailureStatus getState(NetworkAddress const& address) const override;
+	Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) override;
+	bool onlyEndpointFailed(Endpoint const& endpoint) const override;
+	bool permanentlyFailed(Endpoint const& endpoint) const override;
 
 	void reset();
 

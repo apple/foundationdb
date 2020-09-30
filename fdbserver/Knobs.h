@@ -547,6 +547,7 @@ public:
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 	// Fast Restore
+	// TODO: After 6.3, review FR knobs, remove unneeded ones and change default value
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;
@@ -594,6 +595,8 @@ public:
 	int FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH; // number of future VB sendLoadingParam requests to process at once
 	int FASTRESTORE_NUM_TRACE_EVENTS;
 	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
+	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
+	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.

@@ -3470,12 +3470,13 @@ namespace fileBackup {
 			if (beginVersion == invalidVersion) {
 				beginVersion = 0;
 			}
-			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, incremental, beginVersion));
-			if (!incremental) {
-				beginVersion = restorable.get().snapshot.beginVersion;
-			}
+		    Optional<RestorableFileSet> restorable =
+		        wait(bc->getRestoreSet(restoreVersion, VectorRef<KeyRangeRef>(), incremental, beginVersion));
+		    if (!incremental) {
+			    beginVersion = restorable.get().snapshot.beginVersion;
+		    }
 
-			if(!restorable.present())
+		    if(!restorable.present())
 				throw restore_missing_data();
 
 			// First version for which log data should be applied
@@ -4519,7 +4520,7 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, VectorRef<KeyRangeRef>(), incrementalBackupOnly, beginVersion));
 
 		if(!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
