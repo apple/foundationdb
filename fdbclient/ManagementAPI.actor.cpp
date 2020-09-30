@@ -83,7 +83,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 		if (key == "proxies" && isInteger(value)) {
 			printf("\nWarning: Proxy role is being split into GRV Proxy and Commit Proxy, now prefer configuring "
-			       "\"grv_proxies\" and \"commit_proxies\" separately.\n");
+			       "\"grv_proxies\" and \"commit_proxies\" separately. Generally we should follow that Commit proxies"
+			       "/GRV proxies >= 3 && 1 <= GRV proxies <= 4\n");
 			int proxiesCount = atoi(value.c_str());
 			if (proxiesCount < 2) {
 				printf("Error: At least 2 proxies (1 GRV proxy and Commit proxy) are required.\n");
