@@ -7,7 +7,7 @@ SCRIPTID="${$}"
 SAVEONERROR="${SAVEONERROR:-1}"
 PYTHONDIR="${BINDIR}/tests/python"
 testScript="${BINDIR}/tests/bindingtester/run_binding_tester.sh"
-VERSION="1.8"
+VERSION="1.9"
 
 source ${SCRIPTDIR}/localClusterStart.sh
 
@@ -28,7 +28,7 @@ then
 	echo "Log dir:        ${LOGDIR}"
 	echo "Python path:    ${PYTHONDIR}"
 	echo "Lib dir:        ${LIBDIR}"
-	echo "Cluster String: ${CLUSTERSTRING}"
+	echo "Cluster String: ${FDBCLUSTERTEXT}"
 	echo "Script Id:      ${SCRIPTID}"
 	echo "Version:        ${VERSION}"
 fi
