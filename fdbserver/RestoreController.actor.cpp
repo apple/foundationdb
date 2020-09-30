@@ -115,7 +115,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		// recruitRestoreRoles must come after controllerWorker has finished collectWorkerInterface
 		wait(recruitRestoreRoles(controllerWorker, self));
 
-		self->addActor.send(updateHeartbeatTime(self));
+		// self->addActor.send(updateHeartbeatTime(self));
 		self->addActor.send(checkRolesLiveness(self));
 		self->addActor.send(updateProcessMetrics(self));
 		self->addActor.send(traceProcessMetrics(self, "RestoreController"));

@@ -658,7 +658,7 @@ void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreAppl
 }
 
 ACTOR static Future<Void> traceRate(const char* context, Reference<ApplierBatchData> batchData, int batchIndex,
-                                    UID nodeID, NotifiedVersion* finishedVB) {
+                                    UID nodeID, NotifiedVersion* finishedVB, bool once = false) {
 	loop {
 		if ((finishedVB->get() != batchIndex - 1) || !batchData.isValid()) {
 			break;
@@ -672,6 +672,9 @@ ACTOR static Future<Void> traceRate(const char* context, Reference<ApplierBatchD
 		    .detail("TargetBytesMB", batchData->targetWriteRateMB)
 		    .detail("InflightBytesMB", batchData->applyingDataBytes)
 		    .detail("ReceivedBytes", batchData->receivedBytes);
+		if (once) {
+			break;
+		}
 		wait(delay(5.0));
 	}
 
@@ -719,8 +722,9 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 		// Multiple actors can wait on req.batchIndex-1;
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
 		if (self->finishedBatch.get() == req.batchIndex - 1) {
-			batchData->rateTracer = traceRate("FastRestoreApplierTransactionRateControlDone", batchData, req.batchIndex,
-			                                  self->id(), &self->finishedBatch); // Track the last rate info
+			batchData->rateTracer =
+			    traceRate("FastRestoreApplierTransactionRateControlDone", batchData, req.batchIndex, self->id(),
+			              &self->finishedBatch, true /*print once*/); // Track the last rate info
 			self->finishedBatch.set(req.batchIndex);
 			// self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
 			// Free memory for the version batch
