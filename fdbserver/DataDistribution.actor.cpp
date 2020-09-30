@@ -4297,6 +4297,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			zeroHealthyTeams.push_back(Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ));
 			int storageTeamSize = configuration.storageTeamSize;
 
+			// Stored outside of data distribution tracker to avoid slow tasks
+			// when tracker is cancelled
+			state KeyRangeMap<ShardTrackedData> shards;
+
 			vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
@@ -4310,7 +4314,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back(
+			    reportErrorsExcept(dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure,
+			                                               getShardMetrics, getAverageShardBytes.getFuture(),
+			                                               readyToStart, anyZeroHealthyTeams, self->ddId, &shards),
+			                       "DDTracker", self->ddId, &normalDDQueueErrors()));
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
@@ -4331,8 +4339,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 		}
 		catch( Error &e ) {
 			state Error err = e;
-			if( e.code() != error_code_movekeys_conflict )
-				throw err;
+			wait(shards.clearAsync());
+			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
 			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
 			if( ddEnabled )
