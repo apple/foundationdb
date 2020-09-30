@@ -11,9 +11,12 @@ testTitle = 'Clogged'
     [[test.workload]]
     testName = 'LockRange'
     lockAfter = 15.0
-    unlockAfter = 45.0
-    prefix = 'LR_'
+
+    # Unlock must happen after Cycle has finished
+    unlockAfter = 100.0
+
     # prefix must match Cycle test's keyPrefix
+    prefix = 'LR_'
 
     [[test.workload]]
     testName = 'RandomClogging'

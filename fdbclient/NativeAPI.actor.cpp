@@ -881,9 +881,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    metadataVersionCache(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE),
+    rangeLockVersionCache(CLIENT_KNOBS->RANGE_LOCK_VERSION_CACHE_SIZE), healthMetricsLastUpdated(0),
+    detailedHealthMetricsLastUpdated(0), internal(internal), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -891,7 +892,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 	                ? Void()
 	                : clientInfo->onChange();
 
-	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
 	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0;
@@ -1048,7 +1048,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
     GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), metadataVersionCache(0),
+    rangeLockVersionCache(0) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -1233,11 +1234,36 @@ Future<Void> DatabaseContext::onConnected() {
 	return connected;
 }
 
-void DatabaseContext::updateMetadataVersionCache(Version version, Optional<Value> value) {
-	if (version > metadataVersionCache[mvCacheInsertLocation].first) {
-		mvCacheInsertLocation = (mvCacheInsertLocation + 1) % metadataVersionCache.size();
-		metadataVersionCache[mvCacheInsertLocation] = std::make_pair(version, value);
+void DatabaseContext::VersionCache::update(Version version, Optional<Value> value) {
+	if (version > cache[insertLocation].first) {
+		insertLocation = (insertLocation + 1) % cache.size();
+		cache[insertLocation] = std::make_pair(version, value);
 	}
+}
+
+std::pair<bool, Optional<Value>> DatabaseContext::VersionCache::find(Version version) {
+	if (version == cache[insertLocation].first) {
+		return std::make_pair(true, cache[insertLocation].second);
+	}
+
+	int hi = insertLocation;
+	int lo = (insertLocation + 1) % cache.size();
+
+	while (hi != lo) {
+		int cu = hi > lo ? (hi + lo) / 2 : ((hi + cache.size() + lo) / 2) % cache.size();
+		if (version == cache[cu].first) {
+			return std::make_pair(true, cache[cu].second);
+		}
+		if (cu == lo) {
+			break;
+		}
+		if (version < cache[cu].first) {
+			hi = cu;
+		} else {
+			lo = (cu + 1) % cache.size();
+		}
+	}
+	return std::make_pair(false, Optional<Value>());
 }
 
 ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFile> connFile, DatabaseContext* self) {
@@ -2779,7 +2805,11 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 		if (!ver.isReady() || rangeLockVersion.isSet()) {
 			return rangeLockVersion.getFuture();
 		} else {
-			ASSERT(false);
+			if (ver.isError()) return ver.getError();
+			bool found;
+			Optional<Value> result;
+			std::tie(found, result) = cx->rangeLockVersionCache.find(ver.get());
+			if (found) return result;
 		}
 	}
 
@@ -2789,28 +2819,10 @@ Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
 			return metadataVersion.getFuture();
 		} else {
 			if(ver.isError()) return ver.getError();
-			if(ver.get() == cx->metadataVersionCache[cx->mvCacheInsertLocation].first) {
-				return cx->metadataVersionCache[cx->mvCacheInsertLocation].second;
-			}
-
-			Version v = ver.get();
-			int hi = cx->mvCacheInsertLocation;
-			int lo = (cx->mvCacheInsertLocation+1)%cx->metadataVersionCache.size();
-
-			while(hi!=lo) {
-				int cu = hi > lo ? (hi + lo)/2 : ((hi + cx->metadataVersionCache.size() + lo)/2)%cx->metadataVersionCache.size();
-				if(v == cx->metadataVersionCache[cu].first) {
-					return cx->metadataVersionCache[cu].second;
-				}
-				if(cu == lo) {
-					break;
-				}
-				if(v < cx->metadataVersionCache[cu].first) {
-					hi = cu;
-				} else {
-					lo = (cu+1)%cx->metadataVersionCache.size();
-				}
-			}
+			bool found;
+			Optional<Value> result;
+			std::tie(found, result) = cx->metadataVersionCache.find(ver.get());
+			if (found) return result;
 		}
 	}
 
@@ -3522,7 +3534,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					if (info.debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					*pCommittedVersion = v;
-					cx->updateMetadataVersionCache(v, ci.metadataVersion);
+					cx->metadataVersionCache.update(v, ci.metadataVersion);
+					cx->rangeLockVersionCache.update(v, ci.rangeLockVersion);
 
 					Standalone<StringRef> ret = makeString(10);
 					placeVersionstamp(mutateString(ret), v, ci.txnBatchId);
@@ -4040,6 +4053,14 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
+std::pair<Version, Standalone<StringRef>> versionFromValue(const Value& value) {
+	Version parsedVersion;
+	Standalone<StringRef> parsedVersionstamp = makeString(10);
+	memcpy(&parsedVersion, value.begin(), sizeof(Version));
+	memcpy(mutateString(parsedVersionstamp), value.begin(), 10);
+	return { bigEndian64(parsedVersion), parsedVersionstamp };
+}
+
 ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, SpanID parent, DatabaseContext* cx, TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
                                          bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
@@ -4095,10 +4116,24 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 		}
 	}
 
-	cx->updateMetadataVersionCache(rep.version, rep.metadataVersion);
+	cx->metadataVersionCache.update(rep.version, rep.metadataVersion);
+	cx->rangeLockVersionCache.update(rep.version, rep.rangeLockVersion);
 
 	metadataVersion.send(rep.metadataVersion);
 	rangeLockVersion.send(rep.rangeLockVersion);
+
+	if (rep.rangeLockVersion.present()) {
+		Version parsedVersion;
+		Standalone<StringRef> parsedVersionstamp = makeString(10);
+		std::tie(parsedVersion, parsedVersionstamp) = versionFromValue(rep.rangeLockVersion.get());
+		if (!cx->rangeLockCache.hasVersion(parsedVersion)) {
+			// TODO: spawns getRangeLock actor
+			TraceEvent("GetRangeLock").detail("LockVersion", parsedVersion).suppressFor(5.0);
+		}
+	} else {
+		TEST(true); // No range locks
+	}
+
 	return rep.version;
 }
 

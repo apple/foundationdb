@@ -389,6 +389,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Grv
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;
 	rep.metadataVersion = repFromMaster.metadataVersion;
+	rep.rangeLockVersion = repFromMaster.rangeLockVersion;
 	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 

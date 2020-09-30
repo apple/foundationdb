@@ -1103,6 +1103,7 @@ enum class LockMode : uint8_t {
 	LOCK_READ_SHARED,
 	UNLOCK_EXCLUSIVE,
 	UNLOCK_READ_SHARED,
+	MODE_MAX, // Last one, only for type checking in serialization
 };
 
 // Convert the LockMode enum to a text description
@@ -1122,7 +1123,10 @@ struct LockRequest {
 	void serialize(Ar& ar) {
 		uint8_t m = static_cast<uint8_t>(mode);
 		serializer(ar, range, m);
-		mode = static_cast<LockMode>(m);
+		if (ar.isDeserializing) {
+			mode = static_cast<LockMode>(m);
+			UNSTOPPABLE_ASSERT(mode < LockMode::MODE_MAX);
+		}
 	}
 };
 

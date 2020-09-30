@@ -18,24 +18,26 @@
  * limitations under the License.
  */
 
-#ifndef DatabaseContext_h
-#define DatabaseContext_h
+#pragma once
+#ifndef FDBCLIENT_DATABASECONTEXT_H
+#define FDBCLIENT_DATABASECONTEXT_H
+
+#include <vector>
+
+#include "flow/genericactors.actor.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "flow/genericactors.actor.h"
-#include <vector>
-#pragma once
-
+#include "flow/TDMetric.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/SpecialKeySpace.actor.h"
-#include "fdbrpc/QueueModel.h"
-#include "fdbrpc/MultiInterface.h"
-#include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
+#include "fdbclient/LockRange.actor.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/MultiInterface.h"
+#include "fdbrpc/QueueModel.h"
 #include "fdbrpc/Smoother.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
@@ -215,7 +217,18 @@ public:
 
 	void expireThrottles();
 
-	void updateMetadataVersionCache(Version version, Optional<Value> value);
+	struct VersionCache {
+		VersionCache(int capacity) { cache.resize(capacity); };
+
+		void update(Version version, Optional<Value> value);
+
+		// Checks metadata version cache. If found, returns (true, value) pair;
+		// Otherwise, returns (false, Optional<Value>()) pair.
+		std::pair<bool, Optional<Value>> find(Version version);
+
+		int insertLocation = 0;
+		std::vector<std::pair<Version, Optional<Value>>> cache;
+	};
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
@@ -339,8 +352,9 @@ public:
 
 	int apiVersion;
 
-	int mvCacheInsertLocation;
-	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;
+	VersionCache metadataVersionCache;
+	VersionCache rangeLockVersionCache;
+	RangeLockCache rangeLockCache;
 
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;

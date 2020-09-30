@@ -39,7 +39,9 @@ struct LockRangeWorkload : TestWorkload {
 		keyPrefix = getOption(options, "prefix"_sr, "LR_"_sr);
 		Key keyEnd = endOfRange(keyPrefix);
 		range = KeyRangeRef(keyPrefix, keyEnd);
-		std::cout << "LockRange workload range = " << printable(range) << "\n";
+		if (clientId == 0) {
+			std::cout << "LockRange workload range = " << printable(range) << "\n";
+		}
 	}
 
 	virtual std::string description() { return "LockRange"; }
