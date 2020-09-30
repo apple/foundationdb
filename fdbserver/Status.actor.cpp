@@ -2246,7 +2246,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Future<Standalone<RangeResultRef> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<Standalone<RangeResultRef>> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
 			
