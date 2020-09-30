@@ -36,6 +36,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool submitOnly;
 	bool restoreOnly;
 	bool waitForBackup;
+	bool stopBackup;
 	bool checkBeginVersion;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -44,6 +45,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
 		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
+		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
 
@@ -84,6 +86,9 @@ struct IncrementalBackupWorkload : TestWorkload {
 			if (desc.contiguousLogEnd.get() >= v) break;
 			// Avoid spamming requests with a delay
 			wait(delay(5.0));
+		}
+		if (self->stopBackup) {
+			wait(self->backupAgent.discontinueBackup(cx, self->tag));
 		}
 		return true;
 	}

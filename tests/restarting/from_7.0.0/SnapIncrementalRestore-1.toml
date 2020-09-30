@@ -1,3 +1,5 @@
+buggify = false
+
 [[test]] 
 testTitle = 'SubmitBackup'
 simBackupAgents = 'BackupToFile'
@@ -28,7 +30,8 @@ clearAfterTest = false
 
 [[test]]
 testTitle = 'PostSnapWorkloads'
-clearAfterTest = true
+simBackupAgents = 'BackupToFile'
+clearAfterTest = false
 
     [[test.workload]]
     testName = 'Cycle'
@@ -41,6 +44,16 @@ clearAfterTest = true
     testName = 'IncrementalBackup'
     tag = 'default'
     waitForBackup = true
+
+[[test]]
+testTitle = 'StopBackupAndClear'
+simBackupAgents = 'BackupToFile'
+clearAfterTest = true
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    stopBackup = true
 
 [[test]]
 testTitle = 'SnapShutdown'

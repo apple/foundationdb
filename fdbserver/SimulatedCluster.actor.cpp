@@ -642,8 +642,9 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true,
-			                     i == useSeedForMachine, enableExtraDB ? AgentOnly : AgentAddition,
-			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass), whitelistBinPaths),
+			                     i == useSeedForMachine, AgentAddition,
+			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
+			                     whitelistBinPaths),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 

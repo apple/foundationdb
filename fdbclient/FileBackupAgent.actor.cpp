@@ -4505,7 +4505,7 @@ public:
 	                                     Version beginVersion, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
-		state BackupDescription desc = wait(bc->describeBackup());
+		state BackupDescription desc = wait(bc->describeBackup(true, beginVersion));
 		if(cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}

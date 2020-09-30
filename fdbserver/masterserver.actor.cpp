@@ -1572,7 +1572,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	if (self->lastEpochEnd != 0) {
 		Optional<Value> snapRecoveryFlag = self->txnStateStore->readValue(writeRecoveryKey).get();
 		TraceEvent("MasterRecoverySnap")
-		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A");
+		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A")
+		    .detail("LastEpochEnd", self->lastEpochEnd);
 		if (snapRecoveryFlag.present()) {
 			TEST(true); // Recovering from snapshot, writing to snapShotEndVersionKey
 			BinaryWriter bw(Unversioned());
