@@ -82,11 +82,17 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string value = mode.substr(pos+1);
 
 		if (key == "proxies" && isInteger(value)) {
-			printf("\nWarning: Proxy role is being split into GRV Proxy and Commit Proxy, now prefer configuring "
-			       "\"grv_proxies\" and \"commit_proxies\" separately.\n");
+			printf("Warning: Proxy role is being split into GRV Proxy and Commit Proxy, now prefer configuring "
+			       "'grv_proxies' and 'commit_proxies' separately. Generally we should follow that 'commit_proxies'"
+			       " is three times of 'grv_proxies' count and 'grv_proxies' should be not more than 4.\n");
 			int proxiesCount = atoi(value.c_str());
+			if (proxiesCount == -1) {
+				proxiesCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES + CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
+				ASSERT_WE_THINK(proxiesCount >= 2);
+			}
+
 			if (proxiesCount < 2) {
-				printf("Error: At least 2 proxies (1 GRV proxy and Commit proxy) are required.\n");
+				printf("Error: At least 2 proxies (1 GRV proxy and 1 Commit proxy) are required.\n");
 				return out;
 			}
 
@@ -102,7 +108,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			       grvProxyCount, commitProxyCount);
 
 			TraceEvent("DatabaseConfigurationProxiesSpecified")
-			    .detail("SpecifiedProxies", grvProxyCount)
+			    .detail("SpecifiedProxies", atoi(value.c_str()))
+			    .detail("EffectiveSpecifiedProxies", proxiesCount)
 			    .detail("ConvertedGrvProxies", grvProxyCount)
 			    .detail("ConvertedCommitProxies", commitProxyCount);
 		}
