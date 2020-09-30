@@ -471,8 +471,8 @@ void initHelp() {
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
 	    "configure [new] "
-	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|commit_proxies=<"
-	    "COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
+	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 	    "change the database configuration",
 	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
 	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -480,8 +480,13 @@ void initHelp() {
 	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
 	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
 	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
-	    "datasets.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. Must "
-	    "be at least 1, or set to -1 which restores the number of commit proxies to the default "
+	    "datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. The proxy role is being "
+		"deprecated and split into GRV proxy and Commit proxy, now prefer configure 'grv_proxies' and 'commit_proxies' "
+		"separately. Generally we should follow that 'commit_proxies' is three times of 'grv_proxies' and 'grv_proxies' "
+		"should be not more than 4. If 'proxies' is specified, it will be converted to 'grv_proxies' and 'commit_proxies'. "
+		"Must be at least 2 (1 GRV proxy, 1 Commit proxy), or set to -1 which restores the number of proxies to the "
+		"default value.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of commit proxies to the default "
 	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
 	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
 	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
