@@ -549,7 +549,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			while (true) {
 				cycle ++;
 				nQuorum = ((g_simulator.desiredCoordinators+1)/2)*2-1;
-				CoordinatorsResult::Type result = wait( changeQuorum( cx, autoQuorumChange(nQuorum) ) );
+				CoordinatorsResult result = wait(changeQuorum(cx, autoQuorumChange(nQuorum)));
 				TraceEvent(result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES ? SevInfo : SevWarn, "RemoveAndKillQuorumChangeResult").detail("Step", "coordinators auto").detail("Result", (int)result).detail("Attempt", cycle).detail("Quorum", nQuorum).detail("DesiredCoordinators", g_simulator.desiredCoordinators);
 				if (result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES)
 					break;

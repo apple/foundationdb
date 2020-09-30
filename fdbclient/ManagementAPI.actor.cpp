@@ -259,7 +259,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	return out;
 }
 
-ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf ) {
+ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
+                                       std::map<std::string, std::string>& outConf) {
 	for(auto it : modeTokens) {
 		std::string mode = it.toString();
 		auto m = configForToken( mode );
@@ -295,7 +296,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	return ConfigurationResult::SUCCESS;
 }
 
-ConfigurationResult::Type buildConfiguration( std::string const& configMode, std::map<std::string, std::string>& outConf ) {
+ConfigurationResult buildConfiguration(std::string const& configMode, std::map<std::string, std::string>& outConf) {
 	std::vector<StringRef> modes;
 
 	int p = 0;
@@ -335,7 +336,7 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 	}
 }
 
-ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m, bool force ) {
+ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string, std::string> m, bool force) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
 
@@ -852,7 +853,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	return result;
 }
 
-ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
+ACTOR Future<ConfigurationResult> autoConfig(Database cx, ConfigureAutoResult conf) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 
@@ -919,7 +920,8 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 	}
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force ) {
+Future<ConfigurationResult> changeConfig(Database const& cx, std::vector<StringRef> const& modes,
+                                         Optional<ConfigureAutoResult> const& conf, bool force) {
 	if( modes.size() && modes[0] == LiteralStringRef("auto") && conf.present() ) {
 		return autoConfig(cx, conf.get());
 	}
@@ -931,7 +933,7 @@ Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<
 	return changeConfig(cx, m, force);
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes, bool force ) {
+Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& modes, bool force) {
 	TraceEvent("ChangeConfig").detail("Mode", modes);
 	std::map<std::string,std::string> m;
 	auto r = buildConfiguration( modes, m );
@@ -1000,7 +1002,7 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 	}
 }
 
-ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuorumChange> change ) {
+ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change) {
 	state Transaction tr(cx);
 	state int retries = 0;
 	state std::vector<NetworkAddress> desiredCoordinators;
@@ -1020,7 +1022,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if ( cx->getConnectionFile() && old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName() )
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
-			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;
+			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if(!desiredCoordinators.size()) {
 				std::vector<NetworkAddress> _desiredCoordinators = wait( change->getDesiredCoordinators( &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result ) );
 				desiredCoordinators = _desiredCoordinators;
@@ -1090,14 +1092,20 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 struct SpecifiedQuorumChange : IQuorumChange {
 	vector<NetworkAddress> desired;
 	explicit SpecifiedQuorumChange( vector<NetworkAddress> const& desired ) : desired(desired) {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile>,
+	                                                              CoordinatorsResult&) {
 		return desired;
 	}
 };
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const& addresses) { return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses)); }
 
 struct NoQuorumChange : IQuorumChange {
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile>,
+	                                                              CoordinatorsResult&) {
 		return oldCoordinators;
 	}
 };
@@ -1107,7 +1115,10 @@ struct NameQuorumChange : IQuorumChange {
 	std::string newName;
 	Reference<IQuorumChange> otherChange;
 	explicit NameQuorumChange( std::string const& newName, Reference<IQuorumChange> const& otherChange ) : newName(newName), otherChange(otherChange) {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> cf, CoordinatorsResult::Type& t ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile> cf,
+	                                                              CoordinatorsResult& t) {
 		return otherChange->getDesiredCoordinators(tr, oldCoordinators, cf, t);
 	}
 	virtual std::string getDesiredClusterKeyName() {
@@ -1122,7 +1133,10 @@ struct AutoQuorumChange : IQuorumChange {
 	int desired;
 	explicit AutoQuorumChange( int desired ) : desired(desired) {}
 
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> ccf, CoordinatorsResult::Type& err ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile> ccf,
+	                                                              CoordinatorsResult& err) {
 		return getDesired( this, tr, oldCoordinators, ccf, &err );
 	}
 
@@ -1174,7 +1188,10 @@ struct AutoQuorumChange : IQuorumChange {
 		return true; // The status quo seems fine
 	}
 
-	ACTOR static Future<vector<NetworkAddress>> getDesired( AutoQuorumChange* self, Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> ccf, CoordinatorsResult::Type* err ) {
+	ACTOR static Future<vector<NetworkAddress>> getDesired(AutoQuorumChange* self, Transaction* tr,
+	                                                       vector<NetworkAddress> oldCoordinators,
+	                                                       Reference<ClusterConnectionFile> ccf,
+	                                                       CoordinatorsResult* err) {
 		state int desiredCount = self->desired;
 
 		if(desiredCount == -1) {
