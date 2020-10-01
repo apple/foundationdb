@@ -120,8 +120,7 @@ void insert_data(FDBDatabase *db,
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
     break;
@@ -176,8 +175,7 @@ void get_range(fdb::Transaction& tr, const uint8_t* begin_key_name,
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -202,7 +200,7 @@ struct Event {
     cv.notify_all();
   }
 
-private:
+ private:
   std::mutex mutex;
   std::condition_variable cv;
   bool complete = false;
@@ -273,8 +271,7 @@ TEST_CASE("fdb_future_get_int64") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -302,8 +299,7 @@ TEST_CASE("fdb_future_get_key") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -331,8 +327,7 @@ TEST_CASE("fdb_future_get_value") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -360,8 +355,7 @@ TEST_CASE("fdb_future_get_string_array") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -394,8 +388,7 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -469,8 +462,7 @@ TEST_CASE("write system key") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
     break;
@@ -500,8 +492,7 @@ TEST_CASE("fdb_transaction read_your_writes") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -522,7 +513,7 @@ TEST_CASE("fdb_transaction_set_option") {
   clear_data(db);
 
   // SUBCASE("integer parameter value_length != 8") {
-  //   // If the option accepts an int as a paremeter, value_length must be set to
+  //   // If the option accepts an int as a parameter, value_length must be set to
   //   // 8.
   //   int64_t timeout = 100;
   //   CHECK(tr.set_option(FDB_TR_OPTION_TIMEOUT, (const uint8_t *)&timeout, 5));
@@ -539,8 +530,7 @@ TEST_CASE("fdb_transaction_set_option") {
       fdb_error_t err = wait_future(f1);
       if (err) {
         fdb::EmptyFuture f2 = tr.on_error(err);
-        fdb_error_t err2 = wait_future(f2);
-        fdb_check(err2);
+        fdb_check(wait_future(f2));
         continue;
       }
 
@@ -564,8 +554,7 @@ TEST_CASE("fdb_transaction_set_option") {
       fdb_error_t err = wait_future(f1);
       if (err) {
         fdb::EmptyFuture f2 = tr.on_error(err);
-        fdb_error_t err2 = wait_future(f2);
-        fdb_check(err2);
+        fdb_check(wait_future(f2));
         continue;
       }
 
@@ -592,8 +581,7 @@ TEST_CASE("fdb_transaction_set_option") {
       fdb_error_t err = wait_future(f1);
       if (err) {
         fdb::EmptyFuture f3 = tr.on_error(err);
-        fdb_error_t err2 = wait_future(f3);
-        fdb_check(err2);
+        fdb_check(wait_future(f3));
         continue;
       }
 
@@ -608,12 +596,7 @@ TEST_CASE("fdb_transaction_set_option") {
       err = wait_future(f2);
       if (err) {
         fdb::EmptyFuture f3 = tr.on_error(err);
-        fdb_error_t err2 = wait_future(f3);
-
-        if (err2) {
-          fdb_check(err2);
-          break;
-        }
+        fdb_check(wait_future(f3));
         continue;
       }
       fdb_check(f2.get(&out_present, (const uint8_t **)&val, &vallen));
@@ -759,8 +742,7 @@ TEST_CASE("fdb_transaction_clear") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
     break;
@@ -790,8 +772,7 @@ TEST_CASE("fdb_transaction_clear") {
 //     fdb_error_t err = wait_future(f1);
 //     if (err) {
 //       fdb::EmptyFuture f2 = tr.on_error(err);
-//       fdb_error_t err2 = wait_future(f2);
-//       fdb_check(err2);
+//       fdb_check(wait_future(f2));
 //       continue;
 //     }
 //     break;
@@ -809,8 +790,7 @@ TEST_CASE("fdb_transaction_get_committed_version read_only") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -830,8 +810,7 @@ TEST_CASE("fdb_transaction_get_committed_version") {
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      fdb_check(err2);
+      fdb_check(wait_future(f2));
       continue;
     }
 
@@ -852,8 +831,7 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 //     fdb_error_t err = wait_future(f1);
 //     if (err) {
 //       fdb::EmptyFuture f2 = tr.on_error(err);
-//       fdb_error_t err2 = wait_future(f2);
-//       fdb_check(err2);
+//       fdb_check(wait_future(f2));
 //       continue;
 //     }
 //
@@ -918,8 +896,7 @@ TEST_CASE("fdb_transaction_watch") {
     fdb_error_t err = wait_future(f2);
     if (err) {
       fdb::EmptyFuture f3 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f3);
-      fdb_check(err2);
+      fdb_check(wait_future(f3));
       continue;
     }
 

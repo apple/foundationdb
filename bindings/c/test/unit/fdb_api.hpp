@@ -23,7 +23,7 @@
 //
 //   FDBTransaction *tr;
 //   fdb_database_create_transaction(db, &tr);
-//   FDBFuture *f = fdb_transaction_get(tr, (const uint8_t *)"foo", 3, true);
+//   FDBFuture *f = fdb_transaction_get(tr, (const uint8_t*)"foo", 3, true);
 //   fdb_future_block_until_ready(f);
 //   fdb_future_get_value(f, ...);
 //   fdb_future_destroy(f);
@@ -32,7 +32,7 @@
 // Using the wrapper classes defined here, it will instead look like:
 //
 //   fdb::Transaction tr(db);
-//   fdb::ValueFuture f = tr.get((const uint8_t *)"foo", 3, true);
+//   fdb::ValueFuture f = tr.get((const uint8_t*)"foo", 3, true);
 //   f.block_until_ready();
 //   f.get_value(f, ...);
 //
