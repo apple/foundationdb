@@ -104,7 +104,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( WATCH_POLLING_TIME,                      1.0 ); if( randomize && BUGGIFY ) WATCH_POLLING_TIME = 5.0;
 	init( NO_RECENT_UPDATES_DURATION,             20.0 ); if( randomize && BUGGIFY ) NO_RECENT_UPDATES_DURATION = 0.1;
 	init( FAST_WATCH_TIMEOUT,                     20.0 ); if( randomize && BUGGIFY ) FAST_WATCH_TIMEOUT = 1.0;
-	init( WATCH_TIMEOUT,                         900.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
+	init( WATCH_TIMEOUT,                          30.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
