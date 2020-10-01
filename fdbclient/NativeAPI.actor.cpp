@@ -4061,12 +4061,32 @@ std::pair<Version, Standalone<StringRef>> versionFromValue(const Value& value) {
 	return { bigEndian64(parsedVersion), parsedVersionstamp };
 }
 
+ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version version) {
+	state Future<Void> clientTimeout = delay(5.0);
+	loop {
+		choose {
+			when(wait(cx->onProxiesChanged())) {}
+			when(ErrorOr<GetRangeLockSnapshotReply> reply = wait(
+			         errorOr(basicLoadBalance(cx->getCommitProxies(false), &CommitProxyInterface::getRangeLockSnapshot,
+			                                  GetRangeLockSnapshotRequest(version))))) {
+				if (reply.isError()) {
+					throw reply.getError();
+				}
+				cx->rangeLockCache.setSnapshot(version, reply.get().snapshot);
+				std::cout << "Client snapshot: " << cx->rangeLockCache.toString() << "\n";
+				return Void();
+			}
+			when(wait(clientTimeout)) { throw timed_out(); }
+		}
+	}
+}
+
 ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, SpanID parent, DatabaseContext* cx, TransactionPriority priority,
                                          Reference<TransactionLogInfo> trLogInfo, Future<GetReadVersionReply> f,
                                          bool lockAware, double startTime, Promise<Optional<Value>> metadataVersion,
                                          Promise<Optional<Value>> rangeLockVersion, TagSet tags) {
 	state Span span(spanContext, location, { parent });
-	GetReadVersionReply rep = wait(f);
+	state GetReadVersionReply rep = wait(f);
 	double latency = now() - startTime;
 	cx->GRVLatencies.addSample(latency);
 	if (trLogInfo)
@@ -4127,8 +4147,8 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
 		std::tie(parsedVersion, parsedVersionstamp) = versionFromValue(rep.rangeLockVersion.get());
 		if (!cx->rangeLockCache.hasVersion(parsedVersion)) {
-			// TODO: spawns getRangeLock actor
-			TraceEvent("GetRangeLock").detail("LockVersion", parsedVersion).suppressFor(5.0);
+			TraceEvent("NAPI_GetRangeLock").detail("LockVersion", parsedVersion);
+			wait(getRangeLockSnapshot(cx, parsedVersion));
 		}
 	} else {
 		TEST(true); // No range locks

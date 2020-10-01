@@ -932,7 +932,7 @@ ACTOR Future<Void> workerServer(
 		ProcessClass initialClass, std::string folder, int64_t memoryLimit,
 		std::string metricsConnFile, std::string metricsPrefix,
 		Promise<Void> recoveredDiskFiles, int64_t memoryProfileThreshold,
-		std::string _coordFolder, std::string whitelistBinPaths,
+		std::string _coordFolder, std::string allowedBinPaths,
 		Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state PromiseStream< ErrorInfo > errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf( new AsyncVar<Optional<DataDistributorInterface>>() );
@@ -1387,11 +1387,16 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
+				DUMPTOKEN(recruited.getHealthMetrics);
+				DUMPTOKEN(recruited.proxySnapReq);
+				DUMPTOKEN(recruited.exclusionSafetyCheckReq);
+				DUMPTOKEN(recruited.getDDMetrics);
+				DUMPTOKEN(recruited.getRangeLockSnapshot);
 
 				// printf("Recruited as commitProxyServer\n");
 				errorForwarders.add(
 				    zombie(recruited, forwardError(errors, Role::COMMIT_PROXY, recruited.id(),
-				                                   commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
+				                                   commitProxyServer(recruited, req, dbInfo, allowedBinPaths))));
 				req.reply.send(recruited);
 			}
 			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
@@ -1802,7 +1807,7 @@ ACTOR Future<Void> fdbd(
 	std::string metricsConnFile,
 	std::string metricsPrefix,
 	int64_t memoryProfileThreshold,
-	std::string whitelistBinPaths)
+	std::string allowedBinPaths)
 {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
@@ -1810,9 +1815,9 @@ ACTOR Future<Void> fdbd(
 	try {
 		ServerCoordinators coordinators( connFile );
 		if (g_network->isSimulated()) {
-			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
+			allowedBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
-		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", whitelistBinPaths);
+		TraceEvent("StartingFDBD").detail("ZoneID", localities.zoneId()).detail("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder).detail("WhiteListBinPath", allowedBinPaths);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it.
@@ -1842,7 +1847,7 @@ ACTOR Future<Void> fdbd(
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
 		}
 		actors.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
-		actors.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, whitelistBinPaths, dbInfo), "WorkerServer", UID(), &normalWorkerErrors()) );
+		actors.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, memoryProfileThreshold, coordFolder, allowedBinPaths, dbInfo), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		wait( quorum(actors,1) );

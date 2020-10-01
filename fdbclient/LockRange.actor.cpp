@@ -255,6 +255,12 @@ Value RangeLockCache::getChanges(Version from) {
 	return Value();
 }
 
+RangeLockCache::Snapshot RangeLockCache::getSnapshot(Version at) {
+	ASSERT(hasVersion(at));
+	ensureSnapshot(at);
+	return snapshots[at];
+}
+
 std::string RangeLockCache::toString(Version version, Snapshot snapshot) {
 	std::string s;
 	char buf[16];

@@ -56,6 +56,7 @@ struct CommitProxyInterface {
 	RequestStream< struct ProxySnapRequest > proxySnapReq;
 	RequestStream< struct ExclusionSafetyCheckRequest > exclusionSafetyCheckReq;
 	RequestStream< struct GetDDMetricsRequest > getDDMetrics;
+	RequestStream< struct GetRangeLockSnapshotRequest > getRangeLockSnapshot;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -76,6 +77,8 @@ struct CommitProxyInterface {
 			proxySnapReq = RequestStream< struct ProxySnapRequest >( commit.getEndpoint().getAdjustedEndpoint(7) );
 			exclusionSafetyCheckReq = RequestStream< struct ExclusionSafetyCheckRequest >( commit.getEndpoint().getAdjustedEndpoint(8) );
 			getDDMetrics = RequestStream< struct GetDDMetricsRequest >( commit.getEndpoint().getAdjustedEndpoint(9) );
+			getRangeLockSnapshot =
+			    RequestStream<struct GetRangeLockSnapshotRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 		}
 	}
 
@@ -91,6 +94,7 @@ struct CommitProxyInterface {
 		streams.push_back(proxySnapReq.getReceiver());
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
+		streams.push_back(getRangeLockSnapshot.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -498,15 +502,42 @@ struct ExclusionSafetyCheckReply
 struct ExclusionSafetyCheckRequest
 {
 	constexpr static FileIdentifier file_identifier = 13852702;
-	vector<AddressExclusion> exclusions;
+	std::vector<AddressExclusion> exclusions;
 	ReplyPromise<ExclusionSafetyCheckReply> reply;
 
-	ExclusionSafetyCheckRequest() {}
-	explicit ExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+	ExclusionSafetyCheckRequest() = default;
+	explicit ExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+struct GetRangeLockSnapshotReply {
+	constexpr static FileIdentifier file_identifier = 4363468;
+	Standalone<VectorRef<LockRequest>> snapshot;
+
+	GetRangeLockSnapshotReply() = default;
+	explicit GetRangeLockSnapshotReply(Standalone<VectorRef<LockRequest>> snapshot) : snapshot(snapshot) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, snapshot);
+	}
+};
+
+struct GetRangeLockSnapshotRequest {
+	constexpr static FileIdentifier file_identifier = 4363467;
+	Version version;
+	ReplyPromise<GetRangeLockSnapshotReply> reply;
+
+	GetRangeLockSnapshotRequest() = default;
+	explicit GetRangeLockSnapshotRequest(Version v) : version(v) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, reply);
 	}
 };
 

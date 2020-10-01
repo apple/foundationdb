@@ -78,6 +78,13 @@ public:
 	// Serializes all requests from the given version and on.
 	Value getChanges(Version from);
 
+	// PRE-CONDITION: hasVersion(version) must return true
+	Snapshot getSnapshot(Version version);
+
+	void setSnapshot(Version version, Snapshot snapshot) {
+		snapshots[version] = snapshot;
+	}
+
 	// Returns snapshots & lock requests in string.
 	std::string toString();
 
