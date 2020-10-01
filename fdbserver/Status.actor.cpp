@@ -1623,24 +1623,27 @@ static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const
 	if(configuration.regions.size() == 0) {
 		return allZones.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
 	}
-	int extraTlogEligibleZones = configuration.usableRegions == 1 ? 0 : std::numeric_limits<int>::max();
+	int extraTlogEligibleZones = 0;
+	int regionsWithNonNegativePriority = 0;
 	for(auto& region : configuration.regions) {
-		int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
-		//FIXME: does not take into account fallback satellite policies
-		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
-			int totalSatelliteEligible = 0;
-			for(auto& sat : region.satellites) {
-				totalSatelliteEligible += dcId_zone[sat.dcId].size();
+		if( region.priority >= 0 ) {
+			int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
+			//FIXME: does not take into account fallback satellite policies
+			if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
+				int totalSatelliteEligible = 0;
+				for(auto& sat : region.satellites) {
+					totalSatelliteEligible += dcId_zone[sat.dcId].size();
+				}
+				eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
 			}
-			eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
-		}
-		if( configuration.usableRegions == 1 ) {
-			if( region.priority >= 0 ) {
-				extraTlogEligibleZones = std::max( extraTlogEligibleZones, eligible );
+			if(eligible >= 0) {
+				regionsWithNonNegativePriority++;
 			}
-		} else {
-			extraTlogEligibleZones = std::min( extraTlogEligibleZones, eligible );
+			extraTlogEligibleZones = std::max( extraTlogEligibleZones, eligible );
 		}
+	}
+	if(regionsWithNonNegativePriority > 1) {
+		extraTlogEligibleZones++;
 	}
 	return extraTlogEligibleZones;
 }
@@ -1916,7 +1919,8 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 	    log_replication_factor, log_write_anti_quorum, log_fault_tolerance, remote_log_replication_factor,
 	    remote_log_fault_tolerance;
 
-	int maxFaultTolerance = 0;
+	int minFaultTolerance = 1000;
+	int localSetsWithNonNegativeFaultTolerance = 0;
 
 	for (int i = 0; i < tLogs.size(); i++) {
 		int failedLogs = 0;
@@ -1933,9 +1937,15 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 				failedLogs++;
 			}
 		}
-		// The log generation's fault tolerance is the maximum tlog fault tolerance of each region.
-		maxFaultTolerance =
-		    std::max(maxFaultTolerance, tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs);
+
+		if (tLogs[i].isLocal) {
+			int currentFaultTolerance = tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs;
+			if(currentFaultTolerance >= 0) {
+				localSetsWithNonNegativeFaultTolerance++;
+			}
+			minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+		}
+
 		if (tLogs[i].isLocal && tLogs[i].locality == tagLocalitySatellite) {
 			sat_log_replication_factor = tLogs[i].tLogReplicationFactor;
 			sat_log_write_anti_quorum = tLogs[i].tLogWriteAntiQuorum;
@@ -1949,11 +1959,18 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 			remote_log_fault_tolerance = tLogs[i].tLogReplicationFactor - 1 - failedLogs;
 		}
 	}
-	*logFaultTolerance = std::min(*logFaultTolerance, maxFaultTolerance);
+	if(minFaultTolerance == 1000) {
+		//just in case we do not have any tlog sets
+		minFaultTolerance = 0;
+	}
+	if(localSetsWithNonNegativeFaultTolerance > 1) {
+		minFaultTolerance++;
+	}
+	*logFaultTolerance = std::min(*logFaultTolerance, minFaultTolerance);
 	statusObj["log_interfaces"] = logsObj;
 	// We may lose logs in this log generation, storage servers may never be able to catch up this log
 	// generation.
-	statusObj["possibly_losing_data"] = maxFaultTolerance < 0;
+	statusObj["possibly_losing_data"] = minFaultTolerance < 0;
 
 	if (sat_log_replication_factor.present())
 		statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
@@ -1998,12 +2015,13 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<S
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
                                                      std::vector<WorkerDetails>& workers, int extraTlogEligibleZones,
-                                                     int minReplicasRemaining, int oldLogFaultTolerance,
+                                                     int minReplicasRemaining, int oldLogFaultTolerance, 
+													 int fullyReplicatedRegions,
                                                      bool underMaintenance) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
-	int32_t maxZoneFailures = configuration.maxZoneFailuresTolerated();
+	int32_t maxZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, false);
 	if(underMaintenance) {
 		maxZoneFailures--;
 	}
@@ -2041,8 +2059,14 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or availability.
 	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
 	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
+
+	int32_t maxAvaiabilityZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, true);
+	if(underMaintenance) {
+		maxAvaiabilityZoneFailures--;
+	}
+
 	statusObj["max_zone_failures_without_losing_availability"] =
-	    std::max(std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData), -1);
+	    std::max(std::min(maxAvaiabilityZoneFailures,std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
 	return statusObj;
 }
 
@@ -2219,7 +2243,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 	return statusObj;
 }
 
-ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, JsonBuilderArray* messages) {
+ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicatedRegions, JsonBuilderArray* messages) {
 	state ReadYourWritesTransaction tr(cx);
 
 	state Future<Void> readTimeout = delay(5); // so that we won't loop forever
@@ -2230,12 +2254,17 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, JsonBuilderArray* 
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> res = wait(timeoutError(tr.get(primaryDatacenterKey), 5));
-			if (!res.present()) {
+			state Future<Standalone<RangeResultRef>> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
+			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
+			
+			*fullyReplicatedRegions = fReplicaKeys.get().size();
+
+			if (!fPrimaryDatacenterKey.get().present()) {
 				messages->push_back(
 				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter."));
 			}
-			return res;
+			return fPrimaryDatacenterKey.get();
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				messages->push_back(
@@ -2426,7 +2455,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state Future<ErrorOr<vector<std::pair<MasterProxyInterface, EventMap>>>> proxyFuture = errorOr(getProxiesAndMetrics(db, address_workers));
 
 			state int minReplicasRemaining = -1;
-			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &messages);
+			state int fullyReplicatedRegions = -1;
+			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
@@ -2434,6 +2464,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
+			wait(success(primaryDCFO));
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -2444,13 +2475,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				int extraTlogEligibleZones = getExtraTLogEligibleZones(workers, configuration.get());
 				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(
 				    configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining,
-				    logFaultTolerance, loadResult.present() && loadResult.get().healthyZone.present());
+				    logFaultTolerance, fullyReplicatedRegions, loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
 			state JsonBuilderObject configObj =
 			    configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
 
-			wait(success(primaryDCFO));
 			if (primaryDCFO.get().present()) {
 				statusObj["active_primary_dc"] = primaryDCFO.get().get();
 			}
