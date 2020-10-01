@@ -23,13 +23,16 @@
 #define FDB_API_VERSION 620
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
+#include <string.h>
 
 #include <condition_variable>
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #define DOCTEST_CONFIG_IMPLEMENT
@@ -70,7 +73,7 @@ fdb_error_t wait_future(fdb::Future &f) {
 // starts with s. Taken from
 // https://github.com/apple/foundationdb/blob/e7d72f458c6a985fdfa677ae021f357d6f49945b/flow/flow.cpp#L223.
 std::string strinc(const std::string &s) {
-  int index;
+  int index = -1;
   for (index = s.size() - 1; index >= 0; --index) {
     if ((uint8_t)s[index] != 255) {
       break;
@@ -90,6 +93,11 @@ TEST_CASE("strinc") {
   CHECK(strinc("y").compare("z") == 0);
   CHECK(strinc("!").compare("\"") == 0);
   CHECK(strinc("*").compare("+") == 0);
+  CHECK(strinc("fdb").compare("fdc") == 0);
+  CHECK(strinc("foundation database 6").compare("foundation database 7") == 0);
+
+  char terminated[] = {'a', 'b', '\xff'};
+  CHECK(strinc(std::string(terminated, 3)).compare("ac") == 0);
 }
 
 // Helper function to add `prefix` to all keys in the given map. Returns a new
@@ -127,14 +135,12 @@ void insert_data(FDBDatabase *db,
   }
 }
 
-// Get the value associated with `key_name` from the database, storing results
-// in `out_present`, `val`, and `vallen`. Accepts a list of transaction options
-// to apply (values for options not supported). Returns an error if one
-// occurred.
-fdb_error_t get_value(const uint8_t *key_name, int key_name_length,
-                      fdb_bool_t snapshot,
-                      std::vector<FDBTransactionOption> options,
-                      fdb_bool_t *out_present, char **val, int *vallen) {
+// Get the value associated with `key_name` from the database. Accepts a list
+// of transaction options to apply (values for options not supported). Returns
+// an optional which will be populated with the result if one was found.
+std::optional<std::string>
+get_value(const uint8_t *key_name, int key_name_length, fdb_bool_t snapshot,
+          std::vector<FDBTransactionOption> options) {
   fdb::Transaction tr(db);
   while (1) {
     for (auto &option : options) {
@@ -145,27 +151,28 @@ fdb_error_t get_value(const uint8_t *key_name, int key_name_length,
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
-      fdb_error_t err2 = wait_future(f2);
-      if (err2) {
-        return err2;
-      }
+      fdb_check(wait_future(f2));
       continue;
     }
 
-    return f1.get(out_present, (const uint8_t **)val, vallen);
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    return out_present ? std::make_optional(std::string(val, vallen)) : std::nullopt;
   }
 }
 
-// Helper function to get a range of kv pairs and return the results in
-// `out_kv`, `out_count`, and `out_more`.
-void get_range(fdb::Transaction& tr, const uint8_t* begin_key_name,
-               int begin_key_name_length, fdb_bool_t begin_or_equal,
-               int begin_offset, const uint8_t* end_key_name,
-               int end_key_name_length, fdb_bool_t end_or_equal, int end_offset,
-               int limit, int target_bytes, FDBStreamingMode mode,
-               int iteration, fdb_bool_t snapshot, fdb_bool_t reverse,
-               const FDBKeyValue** out_kv, int* out_count,
-               fdb_bool_t* out_more) {
+// Helper function to get a range of kv pairs. Returns a tuple containing a
+// (copied) list of results and a boolean set to true if values remain in the
+// key range requested.
+std::tuple<std::vector<FDBKeyValue>, fdb_bool_t>
+get_range(fdb::Transaction& tr, const uint8_t* begin_key_name,
+          int begin_key_name_length, fdb_bool_t begin_or_equal,
+          int begin_offset, const uint8_t* end_key_name,
+          int end_key_name_length, fdb_bool_t end_or_equal, int end_offset,
+          int limit, int target_bytes, FDBStreamingMode mode,
+          int iteration, fdb_bool_t snapshot, fdb_bool_t reverse) {
   while (1) {
     fdb::KeyValueArrayFuture f1 = tr.get_range(
         begin_key_name, begin_key_name_length, begin_or_equal, begin_offset,
@@ -179,8 +186,20 @@ void get_range(fdb::Transaction& tr, const uint8_t* begin_key_name,
       continue;
     }
 
-    fdb_check(f1.get(out_kv, out_count, out_more));
-    break;
+    const FDBKeyValue *out_kv;
+    int out_count;
+    fdb_bool_t out_more;
+    fdb_check(f1.get(&out_kv, &out_count, &out_more));
+
+    std::vector<FDBKeyValue> results;
+    for (int i = 0; i < out_count; ++i) {
+      results.push_back(out_kv[i]);
+      memcpy(const_cast<void *>(results[i].key), out_kv[i].key,
+             out_kv[i].key_length);
+      memcpy(const_cast<void *>(results[i].value), out_kv[i].value,
+             out_kv[i].value_length);
+    }
+    return std::make_tuple(results, out_more);
   }
 }
 
@@ -427,13 +446,10 @@ TEST_CASE("read system key") {
   fdb::Transaction tr(db);
 
   std::string syskey("\xff/coordinators");
-  int out_present;
-  char *val;
-  int vallen;
-  fdb_check(get_value((const uint8_t *)syskey.c_str(), syskey.size(),
-                      /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS },
-                      &out_present, &val, &vallen));
-  CHECK(out_present);
+  auto value = get_value((const uint8_t *)syskey.c_str(), syskey.size(),
+                         /* snapshot */ false,
+                         { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+  REQUIRE(value.has_value());
 }
 
 TEST_CASE("cannot write system key") {
@@ -468,16 +484,11 @@ TEST_CASE("write system key") {
     break;
   }
 
-  int out_present;
-  char *val;
-  int vallen;
-  fdb_check(get_value((const uint8_t *)syskey.c_str(), syskey.size(),
-                      /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS },
-                      &out_present, &val, &vallen));
-
-  CHECK(out_present);
-  std::string value(val, vallen);
-  CHECK(value.compare("bar") == 0);
+  auto value = get_value((const uint8_t *)syskey.c_str(), syskey.size(),
+                         /* snapshot */ false,
+                         { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+  REQUIRE(value.has_value());
+  CHECK(value->compare("bar") == 0);
 }
 
 TEST_CASE("fdb_transaction read_your_writes") {
@@ -635,31 +646,27 @@ TEST_CASE("fdb_transaction_get_range reverse") {
   insert_data(db, data);
 
   fdb::Transaction tr(db);
+  auto [results, out_more] = get_range(
+      tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(KEY("a"), KEYSIZE("a")),
+      FDB_KEYSEL_LAST_LESS_OR_EQUAL(KEY("d"), KEYSIZE("d")) + 1, /* limit */ 0,
+      /* target_bytes */ 0, /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+      /* iteration */ 0, /* snapshot */ false, /* reverse */ 1);
 
-  FDBKeyValue const *out_kv;
-  int out_count;
-  int out_more;
-  get_range(tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(KEY("a"), KEYSIZE("a")),
-      FDB_KEYSEL_LAST_LESS_OR_EQUAL(KEY("d"), KEYSIZE("d")) + 1,
-      /* limit */ 0, /* target_bytes */ 0,
-      /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL, /* iteration */ 0,
-      /* snapshot */ false, /* reverse */ 1, &out_kv, &out_count, &out_more);
-
-  CHECK(out_count > 0);
-  CHECK(out_count <= 4);
-  if (out_count < 4) {
+  CHECK(results.size() > 0);
+  CHECK(results.size() <= 4);
+  if (results.size() < 4) {
     CHECK(out_more);
   }
 
   // Read data in reverse order, keeping in mind that out_count might be
   // smaller than requested.
   auto it = data.rbegin();
-  std::advance(it, data.size() - out_count);
-  for (; it != data.rend(); ++it) {
+  std::advance(it, data.size() - results.size());
+  for (auto results_it = results.begin(); it != data.rend(); ++it) {
     std::string data_key = it->first;
     std::string data_value = it->second;
 
-    FDBKeyValue kv = *out_kv++;
+    FDBKeyValue kv = *results_it++;
     std::string key((const char *)kv.key, kv.key_length);
     std::string value((const char *)kv.value, kv.value_length);
 
@@ -708,20 +715,17 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 
   fdb::Transaction tr(db);
 
-  FDBKeyValue const *out_kv;
-  int out_count;
-  int out_more;
-  get_range(tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(KEY("a"), KEYSIZE("a")),
-      FDB_KEYSEL_LAST_LESS_OR_EQUAL(KEY("d"), KEYSIZE("d")) + 1,
-      /* limit */ 3, /* target_bytes */ 0,
-      /* FDBStreamingMode */ FDB_STREAMING_MODE_EXACT, /* iteration */ 0,
-      /* snapshot */ false, /* reverse */ 0, &out_kv, &out_count, &out_more);
+  auto [results, out_more] = get_range(
+      tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(KEY("a"), KEYSIZE("a")),
+      FDB_KEYSEL_LAST_LESS_OR_EQUAL(KEY("d"), KEYSIZE("d")) + 1, /* limit */ 3,
+      /* target_bytes */ 0, /* FDBStreamingMode */ FDB_STREAMING_MODE_EXACT,
+      /* iteration */ 0, /* snapshot */ false, /* reverse */ 0);
 
-  CHECK(out_count == 3);
+  CHECK(results.size() == 3);
   CHECK(out_more);
 
-  for (int i = 0; i < out_count; ++i) {
-    FDBKeyValue kv = *out_kv++;
+  for (int i = 0; i < results.size(); ++i) {
+    FDBKeyValue kv = results[i];
 
     std::string key((const char *)kv.key, kv.key_length);
     std::string value((const char *)kv.value, kv.value_length);
@@ -748,38 +752,9 @@ TEST_CASE("fdb_transaction_clear") {
     break;
   }
 
-  int out_present;
-  char *val;
-  int vallen;
-  fdb_check(get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {},
-                      &out_present, &val, &vallen));
-
-  CHECK(!out_present);
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(!value.has_value());
 }
-
-// Atomic operations not supported in FDB 3. TODO: Re-enable for FDB 6 (and add
-// tests for more atomic ops).
-// TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_ADD") {
-//   clear_data(db);
-//
-//   fdb::Transaction tr(db);
-//   int64_t param = 1;
-//   while (1) {
-//     tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)&param,
-//                  sizeof(param), FDB_MUTATION_TYPE_ADD);
-//     fdb::EmptyFuture f1 = tr.commit();
-//
-//     fdb_error_t err = wait_future(f1);
-//     if (err) {
-//       fdb::EmptyFuture f2 = tr.on_error(err);
-//       fdb_check(wait_future(f2));
-//       continue;
-//     }
-//     break;
-//   }
-//
-//   // TODO: Get key "foo" and make sure value has been set to 1
-// }
 
 TEST_CASE("fdb_transaction_get_committed_version read_only") {
   // Read-only transaction should have a committed version of -1.
@@ -821,26 +796,25 @@ TEST_CASE("fdb_transaction_get_committed_version") {
   }
 }
 
-// Not supported in FDB 3. TODO: Re-enable for FDB 6.
-// TEST_CASE("fdb_transaction_get_approximate_size") {
-//   fdb::Transaction tr(db);
-//   while (1) {
-//     tr.set(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"bar", 3);
-//     fdb::Int64Future f1 = tr.get_approximate_size();
-//
-//     fdb_error_t err = wait_future(f1);
-//     if (err) {
-//       fdb::EmptyFuture f2 = tr.on_error(err);
-//       fdb_check(wait_future(f2));
-//       continue;
-//     }
-//
-//     int64_t size;
-//     fdb_check(f1.get(&size));
-//     CHECK(size >= 3);
-//     break;
-//   }
-// }
+TEST_CASE("fdb_transaction_get_approximate_size") {
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.set(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"bar", 3);
+    fdb::Int64Future f1 = tr.get_approximate_size();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int64_t size;
+    fdb_check(f1.get(&size));
+    CHECK(size >= 3);
+    break;
+  }
+}
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
   // Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
