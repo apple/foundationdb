@@ -2019,7 +2019,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	JsonBuilderObject statusObj;
 
 	// without losing data
-	int32_t maxZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions);
+	int32_t maxZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, false);
 	if(underMaintenance) {
 		maxZoneFailures--;
 	}
@@ -2057,8 +2057,14 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or availability.
 	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
 	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
+
+	int32_t maxAvaiabilityZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, true);
+	if(underMaintenance) {
+		maxAvaiabilityZoneFailures--;
+	}
+
 	statusObj["max_zone_failures_without_losing_availability"] =
-	    std::max(std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData), -1);
+	    std::max(std::min(maxAvaiabilityZoneFailures,std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
 	return statusObj;
 }
 
