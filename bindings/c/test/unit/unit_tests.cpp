@@ -163,10 +163,16 @@ get_value(const uint8_t *key_name, int key_name_length, fdb_bool_t snapshot,
   }
 }
 
-// Helper function to get a range of kv pairs. Returns a tuple containing a
-// (copied) list of results and a boolean set to true if values remain in the
-// key range requested.
-std::tuple<std::vector<FDBKeyValue>, fdb_bool_t>
+struct GetRangeResult {
+  // List of key-value pairs in the range read.
+  std::vector<std::pair<std::string, std::string>> kvs;
+  // True if values remain in the key range requested.
+  bool more;
+};
+
+// Helper function to get a range of kv pairs. Returns a GetRangeResult struct
+// containing the results of the range read.
+GetRangeResult
 get_range(fdb::Transaction& tr, const uint8_t* begin_key_name,
           int begin_key_name_length, fdb_bool_t begin_or_equal,
           int begin_offset, const uint8_t* end_key_name,
@@ -191,15 +197,13 @@ get_range(fdb::Transaction& tr, const uint8_t* begin_key_name,
     fdb_bool_t out_more;
     fdb_check(f1.get(&out_kv, &out_count, &out_more));
 
-    std::vector<FDBKeyValue> results;
+    std::vector<std::pair<std::string, std::string>> results;
     for (int i = 0; i < out_count; ++i) {
-      results.push_back(out_kv[i]);
-      memcpy(const_cast<void *>(results[i].key), out_kv[i].key,
-             out_kv[i].key_length);
-      memcpy(const_cast<void *>(results[i].value), out_kv[i].value,
-             out_kv[i].value_length);
+      std::string key((const char *)out_kv[i].key, out_kv[i].key_length);
+      std::string value((const char *)out_kv[i].value, out_kv[i].value_length);
+      results.push_back(std::make_pair(key, value));
     }
-    return std::make_tuple(results, out_more);
+    return GetRangeResult{results, out_more != 0};
   }
 }
 
@@ -646,29 +650,27 @@ TEST_CASE("fdb_transaction_get_range reverse") {
   insert_data(db, data);
 
   fdb::Transaction tr(db);
-  auto [results, out_more] = get_range(
+  auto result = get_range(
       tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(KEY("a"), KEYSIZE("a")),
       FDB_KEYSEL_LAST_LESS_OR_EQUAL(KEY("d"), KEYSIZE("d")) + 1, /* limit */ 0,
       /* target_bytes */ 0, /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
       /* iteration */ 0, /* snapshot */ false, /* reverse */ 1);
 
-  CHECK(results.size() > 0);
-  CHECK(results.size() <= 4);
-  if (results.size() < 4) {
-    CHECK(out_more);
+  CHECK(result.kvs.size() > 0);
+  CHECK(result.kvs.size() <= 4);
+  if (result.kvs.size() < 4) {
+    CHECK(result.more);
   }
 
   // Read data in reverse order, keeping in mind that out_count might be
   // smaller than requested.
   auto it = data.rbegin();
-  std::advance(it, data.size() - results.size());
-  for (auto results_it = results.begin(); it != data.rend(); ++it) {
+  std::advance(it, data.size() - result.kvs.size());
+  for (auto results_it = result.kvs.begin(); it != data.rend(); ++it) {
     std::string data_key = it->first;
     std::string data_value = it->second;
 
-    FDBKeyValue kv = *results_it++;
-    std::string key((const char *)kv.key, kv.key_length);
-    std::string value((const char *)kv.value, kv.value_length);
+    auto [key, value] = *results_it++;
 
     CHECK(data_key.compare(key) == 0);
     CHECK(data[data_key].compare(value) == 0);
@@ -715,21 +717,17 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 
   fdb::Transaction tr(db);
 
-  auto [results, out_more] = get_range(
+  auto result = get_range(
       tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(KEY("a"), KEYSIZE("a")),
       FDB_KEYSEL_LAST_LESS_OR_EQUAL(KEY("d"), KEYSIZE("d")) + 1, /* limit */ 3,
       /* target_bytes */ 0, /* FDBStreamingMode */ FDB_STREAMING_MODE_EXACT,
       /* iteration */ 0, /* snapshot */ false, /* reverse */ 0);
 
-  CHECK(results.size() == 3);
-  CHECK(out_more);
+  CHECK(result.kvs.size() == 3);
+  CHECK(result.more);
 
-  for (int i = 0; i < results.size(); ++i) {
-    FDBKeyValue kv = results[i];
-
-    std::string key((const char *)kv.key, kv.key_length);
-    std::string value((const char *)kv.value, kv.value_length);
-
+  for (int i = 0; i < result.kvs.size(); ++i) {
+    auto [key, value] = result.kvs[i];
     CHECK(data[key].compare(value) == 0);
   }
 }
