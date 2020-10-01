@@ -1920,7 +1920,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 	    remote_log_fault_tolerance;
 
 	int minFaultTolerance = 1000;
-	int localSetsWithPositiveFaultTolerance = 0;
+	int localSetsWithNonNegativeFaultTolerance = 0;
 
 	for (int i = 0; i < tLogs.size(); i++) {
 		int failedLogs = 0;
@@ -1939,10 +1939,9 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 		}
 
 		if (tLogs[i].isLocal) {
-			// The log generation's fault tolerance is the maximum tlog fault tolerance of each region.
 			int currentFaultTolerance = tLogs[i].tLogReplicationFactor - 1 - tLogs[i].tLogWriteAntiQuorum - failedLogs;
 			if(currentFaultTolerance >= 0) {
-				localSetsWithPositiveFaultTolerance++;
+				localSetsWithNonNegativeFaultTolerance++;
 			}
 			minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
 		}
@@ -1964,7 +1963,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 		//just in case we do not have any tlog sets
 		minFaultTolerance = 0;
 	}
-	if(localSetsWithPositiveFaultTolerance > 1) {
+	if(localSetsWithNonNegativeFaultTolerance > 1) {
 		minFaultTolerance++;
 	}
 	*logFaultTolerance = std::min(*logFaultTolerance, minFaultTolerance);
