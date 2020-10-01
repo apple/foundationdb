@@ -1623,24 +1623,27 @@ static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const
 	if(configuration.regions.size() == 0) {
 		return allZones.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
 	}
-	int extraTlogEligibleZones = configuration.usableRegions == 1 ? 0 : std::numeric_limits<int>::max();
+	int extraTlogEligibleZones = 0;
+	int regionsWithNonNegativePriority = 0;
 	for(auto& region : configuration.regions) {
-		int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
-		//FIXME: does not take into account fallback satellite policies
-		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
-			int totalSatelliteEligible = 0;
-			for(auto& sat : region.satellites) {
-				totalSatelliteEligible += dcId_zone[sat.dcId].size();
+		if( region.priority >= 0 ) {
+			int eligible = dcId_zone[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
+			//FIXME: does not take into account fallback satellite policies
+			if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
+				int totalSatelliteEligible = 0;
+				for(auto& sat : region.satellites) {
+					totalSatelliteEligible += dcId_zone[sat.dcId].size();
+				}
+				eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
 			}
-			eligible = std::min<int>( eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
-		}
-		if( configuration.usableRegions == 1 ) {
-			if( region.priority >= 0 ) {
-				extraTlogEligibleZones = std::max( extraTlogEligibleZones, eligible );
+			if(eligible >= 0) {
+				regionsWithNonNegativePriority++;
 			}
-		} else {
-			extraTlogEligibleZones = std::min( extraTlogEligibleZones, eligible );
+			extraTlogEligibleZones = std::max( extraTlogEligibleZones, eligible );
 		}
+	}
+	if(regionsWithNonNegativePriority > 1) {
+		extraTlogEligibleZones++;
 	}
 	return extraTlogEligibleZones;
 }
