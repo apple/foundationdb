@@ -756,6 +756,169 @@ TEST_CASE("fdb_transaction_clear") {
   REQUIRE(!value.has_value());
 }
 
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_ADD") {
+  insert_data(db, create_data({ { "foo", "a" } }));
+
+  fdb::Transaction tr(db);
+  int8_t param = 1;
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)&param,
+                 sizeof(param), FDB_MUTATION_TYPE_ADD);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 'b'); // incrementing 'a' results in 'b'
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_AND") {
+  // Test bitwise and on values of same length:
+  //   db key = foo
+  //   db value = 'a' == 97
+  //   param = 'b' == 98
+  //
+  //   'a' == 97 == 0b01100001
+  // & 'b' == 98 == 0b01100010
+  //   -----------------------
+  //                0b01100000 == 96 == '`'
+  //
+  // Test bitwise and on extended database value:
+  //   db key = bar
+  //   db value = 'c' == 99
+  //   param = "ad"
+  //
+  //   'c' == 99 == 0b0110001100000000 (zero extended on right to match length of param)
+  // & "ad"   ==    0b0110000101100100
+  //   -------------------------------
+  //                0b0110000100000000 == 'a' followed by null (0)
+  //
+  // Test bitwise and on truncated database value:
+  //   db key = baz
+  //   db value = "abc"
+  //   param = 'e' == 101
+  //
+  //   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
+  // & 'e' == 101 0b01100101
+  //   ---------------------
+  //              0b01100001 == 97 == 'a'
+  //
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "c" }, { "baz", "abc" } }));
+
+  fdb::Transaction tr(db);
+  char param[] = { 'a', 'd' };
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BIT_AND);
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)param, 2,
+                 FDB_MUTATION_TYPE_BIT_AND);
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"e", 1,
+                 FDB_MUTATION_TYPE_BIT_AND);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 96);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 2);
+  CHECK(value->data()[0] == 97);
+  CHECK(value->data()[1] == 0);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 97);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_OR") {
+  // Test bitwise or on values of same length:
+  //   db key = foo
+  //   db value = 'a' == 97
+  //   param = 'b' == 98
+  //
+  //   'a' == 97 == 0b01100001
+  // | 'b' == 98 == 0b01100010
+  //   -----------------------
+  //                0b01100011 == 99 == 'c'
+  //
+  // Test bitwise or on extended database value:
+  //   db key = bar
+  //   db value = 'b' == 98
+  //   param = "ad"
+  //
+  //   'b' == 98 -> 0b0110001000000000 (zero extended on right to match length of param)
+  // | "ad"   ==    0b0110000101100100
+  //   -------------------------------
+  //                0b0110001101100100 == "cd"
+  //
+  // Test bitwise or on truncated database value:
+  //   db key = baz
+  //   db value = "abc"
+  //   param = 'd' == 100
+  //
+  //   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
+  // | 'd' == 100 0b01100100
+  //   ---------------------
+  //              0b01100101 == 101 == 'e'
+  //
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
+
+  fdb::Transaction tr(db);
+  char param[] = { 'a', 'd' };
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BIT_OR);
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)param, 2,
+                 FDB_MUTATION_TYPE_BIT_OR);
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"d", 1,
+                 FDB_MUTATION_TYPE_BIT_OR);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 99);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("cd") == 0);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 101);
+}
+
 TEST_CASE("fdb_transaction_get_committed_version read_only") {
   // Read-only transaction should have a committed version of -1.
   fdb::Transaction tr(db);
