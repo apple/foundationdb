@@ -275,7 +275,6 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 			} else if( m.param1 == databaseLockedKey || m.param1 == metadataVersionKey || m.param1 == mustContainSystemMutationsKey || m.param1 == rangeLockVersionKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
 				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) || m.param1.startsWith(testOnlyTxnStateStorePrefixRange.begin) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
-				if (m.param1 == rangeLockVersionKey) TraceEvent("SetRangeLockVersion", dbgid).detail("M", m.toString());
 			}
 			else if (m.param1.startsWith(applyMutationsEndRange.begin)) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));

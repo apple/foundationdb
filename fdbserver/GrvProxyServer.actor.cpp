@@ -385,13 +385,10 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Grv
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion = std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 
-	GetReadVersionReply rep;
-	rep.version = repFromMaster.version;
-	rep.locked = repFromMaster.locked;
-	rep.metadataVersion = repFromMaster.metadataVersion;
-	rep.rangeLockVersion = repFromMaster.rangeLockVersion;
-	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
-
+	GetReadVersionReply rep(repFromMaster.version, repFromMaster.locked, repFromMaster.metadataVersion,
+	                        repFromMaster.rangeLockVersion);
+	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01()
+	                                                      : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.After");
