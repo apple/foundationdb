@@ -243,7 +243,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return StringRef(format("DestroyDB%d", dbIndex));
 	}
 
-	static Future<ConfigurationResult::Type> IssueConfigurationChange( Database cx, const std::string& config, bool force ) {
+	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
 		return changeConfig(cx, config, force);
 	}
