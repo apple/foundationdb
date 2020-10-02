@@ -204,7 +204,16 @@ public:
 		}
 	}
 
-	ThreadSingleAssignmentVarBase() : status(Unset), callback(nullptr), valueReferenceCount(0) {} //, referenceCount(1) {}
+	void blockUntilReadyCheckOnMainThread() {
+		if (!isReady()) {
+			if (g_network->isOnMainThread()) {
+				throw blocked_from_network_thread();
+			}
+			BlockCallback cb(*this);
+		}
+	}
+
+	ThreadSingleAssignmentVarBase() : status(Unset), callback(NULL), valueReferenceCount(0) {} //, referenceCount(1) {}
 	~ThreadSingleAssignmentVarBase() {
 		this->mutex.assertNotEntered();
 
@@ -310,12 +319,12 @@ public:
 	}
 
 	virtual void cancel() {
-		// Cancels the action and decrements the reference count by 1
-		// The if statement is just an optimization. It's ok if we take the wrong path due to a race
-		if(isReadyUnsafe())
-			delref();
-		else
-			onMainThreadVoid( [this](){ this->cancelFuture.cancel(); this->delref(); }, nullptr );
+		onMainThreadVoid(
+		    [this]() {
+			    this->cancelFuture.cancel();
+			    this->delref();
+		    },
+		    nullptr);
 	}
 
 	void releaseMemory() {
@@ -329,6 +338,7 @@ private:
 	int32_t valueReferenceCount;
 
 protected:
+	// The caller of any of these *Unsafe functions should be holding |mutex|
 	bool isReadyUnsafe() const { return status >= Set; }
 	bool isErrorUnsafe() const { return status == ErrorSet; }
 	bool canBeSetUnsafe() const { return status == Unset; }
@@ -425,6 +435,8 @@ public:
 	void blockUntilReady() {
 		sav->blockUntilReady();
 	}
+
+	void blockUntilReadyCheckOnMainThread() { sav->blockUntilReadyCheckOnMainThread(); }
 
 	bool isValid() const {
 		return sav != 0;
