@@ -523,105 +523,236 @@ TEST_CASE("fdb_transaction read_your_writes") {
   }
 }
 
-TEST_CASE("fdb_transaction_set_option") {
-  fdb::Transaction tr(db);
+TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
   clear_data(db);
 
-  // SUBCASE("integer parameter value_length != 8") {
-  //   // If the option accepts an int as a parameter, value_length must be set to
-  //   // 8.
-  //   int64_t timeout = 100;
-  //   CHECK(tr.set_option(FDB_TR_OPTION_TIMEOUT, (const uint8_t *)&timeout, 5));
-  // }
+  fdb::Transaction tr(db);
+  while (1) {
+    fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+    tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ false);
 
-  SUBCASE("read_your_writes_disable") {
-    while (1) {
-      fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-      tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
-      fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ false);
-
-      // Read before committing, shouldn't read the initial write because
-      // read_your_writes is disabled.
-      fdb_error_t err = wait_future(f1);
-      if (err) {
-        fdb::EmptyFuture f2 = tr.on_error(err);
-        fdb_check(wait_future(f2));
-        continue;
-      }
-
-      int out_present;
-      char *val;
-      int vallen;
-      fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
-
-      CHECK(!out_present);
-      break;
+    // Read before committing, shouldn't read the initial write because
+    // read_your_writes is disabled.
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
     }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    CHECK(!out_present);
+    break;
   }
+}
 
-  SUBCASE("snapshot_read_your_writes_enable") {
-    while (1) {
-      // Enable read your writes for snapshot reads.
-      fdb_check(tr.set_option(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE, nullptr, 0));
-      tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
-      fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
+TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
+  clear_data(db);
 
-      fdb_error_t err = wait_future(f1);
-      if (err) {
-        fdb::EmptyFuture f2 = tr.on_error(err);
-        fdb_check(wait_future(f2));
-        continue;
-      }
+  fdb::Transaction tr(db);
+  while (1) {
+    // Enable read your writes for snapshot reads.
+    fdb_check(tr.set_option(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE, nullptr, 0));
+    tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
 
-      int out_present;
-      char *val;
-      int vallen;
-      fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
-
-      CHECK(out_present);
-      std::string value(val, vallen);
-      CHECK(value.compare("bar") == 0);
-      break;
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
     }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    CHECK(out_present);
+    std::string value(val, vallen);
+    CHECK(value.compare("bar") == 0);
+    break;
   }
+}
 
-  SUBCASE("snapshot_read_your_writes_disable") {
-    while (1) {
-      // Disable read your writes for snapshot reads.
-      fdb_check(tr.set_option(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE, nullptr, 0));
-      tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
-      fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
-      fdb::ValueFuture f2 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ false);
+TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
+  clear_data(db);
 
-      fdb_error_t err = wait_future(f1);
-      if (err) {
-        fdb::EmptyFuture f3 = tr.on_error(err);
-        fdb_check(wait_future(f3));
-        continue;
-      }
+  fdb::Transaction tr(db);
+  while (1) {
+    // Disable read your writes for snapshot reads.
+    fdb_check(tr.set_option(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE, nullptr, 0));
+    tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
+    fdb::ValueFuture f2 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ false);
 
-      int out_present;
-      char *val;
-      int vallen;
-      fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
-
-      CHECK(!out_present);
-
-      // Non-snapshot reads should still read writes in the transaction.
-      err = wait_future(f2);
-      if (err) {
-        fdb::EmptyFuture f3 = tr.on_error(err);
-        fdb_check(wait_future(f3));
-        continue;
-      }
-      fdb_check(f2.get(&out_present, (const uint8_t **)&val, &vallen));
-
-      CHECK(out_present);
-      std::string value(val, vallen);
-      CHECK(value.compare("bar") == 0);
-      break;
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f3 = tr.on_error(err);
+      fdb_check(wait_future(f3));
+      continue;
     }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    CHECK(!out_present);
+
+    // Non-snapshot reads should still read writes in the transaction.
+    err = wait_future(f2);
+    if (err) {
+      fdb::EmptyFuture f3 = tr.on_error(err);
+      fdb_check(wait_future(f3));
+      continue;
+    }
+    fdb_check(f2.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    CHECK(out_present);
+    std::string value(val, vallen);
+    CHECK(value.compare("bar") == 0);
+    break;
   }
+}
+
+TEST_CASE("fdb_transaction_set_option timeout") {
+  fdb::Transaction tr(db);
+
+  // Timeout of 1 ms should cause transactions to time out even on localhost.
+  int64_t timeout = 1;
+  fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, (const uint8_t *)&timeout,
+                          sizeof(timeout)));
+  tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+  fdb::EmptyFuture f1 = tr.commit();
+
+  CHECK(wait_future(f1) == 1031); // transaction_timed_out
+}
+
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
+  // Timeout of 1 ms should cause transactions to time out even on localhost.
+  int64_t timeout = 1;
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TIMEOUT,
+                                    (const uint8_t *)&timeout,
+                                    sizeof(timeout)));
+
+  fdb::Transaction tr(db);
+  tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+  fdb::EmptyFuture f1 = tr.commit();
+
+  CHECK(wait_future(f1) == 1031); // transaction_timed_out
+
+  // Reset transaction timeout (disable timeout).
+  timeout = 0;
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TIMEOUT,
+                                    (const uint8_t *)&timeout,
+                                    sizeof(timeout)));
+}
+
+TEST_CASE("fdb_transaction_set_option size_limit too small") {
+  fdb::Transaction tr(db);
+
+  // Size limit must be at least 32 to be valid, so test a smaller size.
+  int64_t size_limit = 31;
+  fdb_check(tr.set_option(FDB_TR_OPTION_SIZE_LIMIT,
+                          (const uint8_t *)&size_limit, sizeof(size_limit)));
+  tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+  fdb::EmptyFuture f1 = tr.commit();
+
+  CHECK(wait_future(f1) == 2006); // invalid_option_value
+}
+
+TEST_CASE("fdb_transaction_set_option size_limit too large") {
+  fdb::Transaction tr(db);
+
+  // Size limit must be less than or equal to 10,000,000.
+  int64_t size_limit = 10000001;
+  fdb_check(tr.set_option(FDB_TR_OPTION_SIZE_LIMIT,
+                          (const uint8_t *)&size_limit, sizeof(size_limit)));
+  tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+  fdb::EmptyFuture f1 = tr.commit();
+
+  CHECK(wait_future(f1) == 2006); // invalid_option_value
+}
+
+TEST_CASE("fdb_transaction_set_option size_limit") {
+  fdb::Transaction tr(db);
+
+  int64_t size_limit = 32;
+  fdb_check(tr.set_option(FDB_TR_OPTION_SIZE_LIMIT,
+                          (const uint8_t *)&size_limit, sizeof(size_limit)));
+  tr.set((const uint8_t *)"foo", 3,
+         (const uint8_t *)"foundation database is amazing", 30);
+  fdb::EmptyFuture f1 = tr.commit();
+
+  CHECK(wait_future(f1) == 2101); // transaction_too_large
+}
+
+// Setting the transaction size limit as a database option causes issues when
+// outside the bounds of acceptable values. TODO: Needs investigating...
+// TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT too small") {
+//   // Size limit must be at least 32 to be valid, so test a smaller size.
+//   int64_t size_limit = 31;
+//   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
+//                                     (const uint8_t *)&size_limit,
+//                                     sizeof(size_limit)));
+//
+//   fdb::Transaction tr(db);
+//   tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+//   fdb::EmptyFuture f1 = tr.commit();
+//
+//   CHECK(wait_future(f1) == 2006); // invalid_option_value
+//
+//   // Set size limit back to default.
+//   size_limit = 10000000;
+//   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
+//                                     (const uint8_t *)&size_limit,
+//                                     sizeof(size_limit)));
+// }
+
+// TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT too large") {
+//   // Size limit must be less than or equal to 10,000,000.
+//   int64_t size_limit = 10000001;
+//   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
+//                                     (const uint8_t *)&size_limit,
+//                                     sizeof(size_limit)));
+//
+//   fdb::Transaction tr(db);
+//   tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
+//   fdb::EmptyFuture f1 = tr.commit();
+//
+//   CHECK(wait_future(f1) == 2006); // invalid_option_value
+//
+//   // Set size limit back to default.
+//   size_limit = 10000000;
+//   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
+//                                     (const uint8_t *)&size_limit,
+//                                     sizeof(size_limit)));
+// }
+
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
+  int64_t size_limit = 32;
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
+                                    (const uint8_t *)&size_limit,
+                                    sizeof(size_limit)));
+
+  fdb::Transaction tr(db);
+  tr.set((const uint8_t *)"foo", 3,
+         (const uint8_t *)"foundation database is amazing", 30);
+  fdb::EmptyFuture f1 = tr.commit();
+
+  CHECK(wait_future(f1) == 2101); // transaction_too_large
+
+  // Set size limit back to default.
+  size_limit = 10000000;
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
+                                    (const uint8_t *)&size_limit,
+                                    sizeof(size_limit)));
 }
 
 TEST_CASE("fdb_transaction_set_read_version old_version") {
@@ -915,6 +1046,285 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_OR") {
   REQUIRE(value.has_value());
   CHECK(value->size() == 1);
   CHECK(value->data()[0] == 101);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_XOR") {
+  // Test bitwise xor on values of same length:
+  //   db key = foo
+  //   db value = 'a' == 97
+  //   param = 'b' == 98
+  //
+  //   'a' == 97 == 0b01100001
+  // ^ 'b' == 98 == 0b01100010
+  //   -----------------------
+  //                0b00000011 == 0x3
+  //
+  // Test bitwise xor on extended database value:
+  //   db key = bar
+  //   db value = 'b' == 98
+  //   param = "ad"
+  //
+  //   'b' == 98 -> 0b0110001000000000 (zero extended on right to match length of param)
+  // ^ "ad"   ==    0b0110000101100100
+  //   -------------------------------
+  //                0b0000001101100100 == 0x3 followed by 0x64
+  //
+  // Test bitwise xor on truncated database value:
+  //   db key = baz
+  //   db value = "abc"
+  //   param = 'd' == 100
+  //
+  //   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
+  // ^ 'd' == 100 0b01100100
+  //   ---------------------
+  //              0b00000101 == 0x5
+  //
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
+
+  fdb::Transaction tr(db);
+  char param[] = { 'a', 'd' };
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BIT_XOR);
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)param, 2,
+                 FDB_MUTATION_TYPE_BIT_XOR);
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"d", 1,
+                 FDB_MUTATION_TYPE_BIT_XOR);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 0x3);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 2);
+  CHECK(value->data()[0] == 0x3);
+  CHECK(value->data()[1] == 0x64);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 1);
+  CHECK(value->data()[0] == 0x5);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_COMPARE_AND_CLEAR") {
+  // Atomically remove a key-value pair from the database based on a value
+  // comparison.
+  insert_data(db, create_data({ { "foo", "bar" }, { "fdb", "foundation" } }));
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"bar", 3,
+                 FDB_MUTATION_TYPE_COMPARE_AND_CLEAR);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  CHECK(!value.has_value());
+
+  value = get_value(KEY("fdb"), KEYSIZE("fdb"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("foundation") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
+  // Atomically append a value to an existing key-value pair, or insert the
+  // key-value pair if an existing key-value pair doesn't exist.
+  insert_data(db, create_data({ { "foo", "f" } }));
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"db", 2,
+                 FDB_MUTATION_TYPE_APPEND_IF_FITS);
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)"foundation", 10,
+                 FDB_MUTATION_TYPE_APPEND_IF_FITS);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("fdb") == 0);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("foundation") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MAX") {
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_MAX);
+    // Value in database will be extended with zeros to match length of param.
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)"aa", 2,
+                 FDB_MUTATION_TYPE_MAX);
+    // Value in database will be truncated to match length of param.
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_MAX);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("b") == 0);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("aa") == 0);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("c") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MIN") {
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_MIN);
+    // Value in database will be extended with zeros to match length of param.
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)"aa", 2,
+                 FDB_MUTATION_TYPE_MIN);
+    // Value in database will be truncated to match length of param.
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_MIN);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("a") == 0);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->size() == 2);
+  CHECK(value->data()[0] == 'b');
+  CHECK(value->data()[1] == 0);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("b") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MAX") {
+  // The difference with FDB_MUTATION_TYPE_MAX is that strings will not be
+  // extended/truncated so lengths match.
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BYTE_MAX);
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)"cc", 2,
+                 FDB_MUTATION_TYPE_BYTE_MAX);
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BYTE_MAX);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("b") == 0);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("cc") == 0);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("cba") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MIN") {
+  // The difference with FDB_MUTATION_TYPE_MIN is that strings will not be
+  // extended/truncated so lengths match.
+  insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BYTE_MIN);
+    tr.atomic_op(KEY("bar"), KEYSIZE("bar"), (const uint8_t *)"aa", 2,
+                 FDB_MUTATION_TYPE_BYTE_MIN);
+    tr.atomic_op(KEY("baz"), KEYSIZE("baz"), (const uint8_t *)"b", 1,
+                 FDB_MUTATION_TYPE_BYTE_MIN);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+    break;
+  }
+
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("a") == 0);
+
+  value = get_value(KEY("bar"), KEYSIZE("bar"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("aa") == 0);
+
+  value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("abc") == 0);
 }
 
 TEST_CASE("fdb_transaction_get_committed_version read_only") {
