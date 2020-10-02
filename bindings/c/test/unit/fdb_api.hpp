@@ -55,8 +55,7 @@ class Future {
   // Wrapper around fdb_future_block_until_ready.
   fdb_error_t block_until_ready();
   // Wrapper around fdb_future_set_callback.
-  fdb_error_t set_callback(FDBCallback callback,
-                                   void* callback_parameter);
+  fdb_error_t set_callback(FDBCallback callback, void* callback_parameter);
   // Wrapper around fdb_future_get_error.
   fdb_error_t get_error();
   // Wrapper around fdb_future_release_memory.
