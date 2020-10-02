@@ -1114,7 +1114,7 @@ struct LockRequest {
 	constexpr static FileIdentifier file_identifier = 1583382;
 	LockRequest() = default;
 	LockRequest(KeyRangeRef range, LockMode mode) : range(range), mode(mode) {}
-	LockRequest(Arena a, const LockRequest& r) : range(r.range), mode(r.mode){};
+	LockRequest(Arena a, const LockRequest& r) : range(a, r.range), mode(r.mode){};
 
 	KeyRangeRef range;
 	LockMode mode; // LockMode
