@@ -623,8 +623,6 @@ namespace fileBackup {
 	// Very simple format compared to KeyRange files.
 	// Header, [Key, Value]... Key len
 	struct LogFileWriter {
-		static const std::string &FFs;
-
 		LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 		  : file(file), blockSize(blockSize), blockEnd(0) {}
 
