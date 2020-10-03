@@ -100,6 +100,8 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
   target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
 
+  add_dependencies(fdb_c_setup_tests doctest)
+  add_dependencies(fdb_c_unit_tests doctest)
   target_include_directories(fdb_c_setup_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(fdb_c_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
