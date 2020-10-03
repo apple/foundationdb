@@ -129,9 +129,9 @@ namespace dbBackup {
 
 	struct BackupRangeTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<int64_t> bytesWritten() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
@@ -421,16 +421,15 @@ namespace dbBackup {
 
 	};
 	StringRef BackupRangeTaskFunc::name = LiteralStringRef("dr_backup_range");
-	const uint32_t BackupRangeTaskFunc::version = 1;
 	const Key BackupRangeTaskFunc::keyAddBackupRangeTasks = LiteralStringRef("addBackupRangeTasks");
 	const Key BackupRangeTaskFunc::keyBackupRangeBeginKey = LiteralStringRef("backupRangeBeginKey");
 	REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
 	struct FinishFullBackupTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			wait(checkTaskVersion(tr, task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
 
@@ -467,14 +466,13 @@ namespace dbBackup {
 
 	};
 	StringRef FinishFullBackupTaskFunc::name = LiteralStringRef("dr_finish_full_backup");
-	const uint32_t FinishFullBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(FinishFullBackupTaskFunc);
 
 	struct EraseLogRangeTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		StringRef getName() const { return name; };
+	    StringRef getName() const { return name; };
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
@@ -523,14 +521,13 @@ namespace dbBackup {
 		}
 	};
 	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("dr_erase_log_range");
-	const uint32_t EraseLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
 
 	struct CopyLogRangeTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<int64_t> bytesWritten() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
@@ -773,15 +770,14 @@ namespace dbBackup {
 		}
 	};
 	StringRef CopyLogRangeTaskFunc::name = LiteralStringRef("dr_copy_log_range");
-	const uint32_t CopyLogRangeTaskFunc::version = 1;
 	const Key CopyLogRangeTaskFunc::keyNextBeginVersion = LiteralStringRef("nextBeginVersion");
 	REGISTER_TASKFUNC(CopyLogRangeTaskFunc);
 
 	struct CopyLogsTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			wait(checkTaskVersion(tr, task, CopyLogsTaskFunc::name, CopyLogsTaskFunc::version));
@@ -876,13 +872,12 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef CopyLogsTaskFunc::name = LiteralStringRef("dr_copy_logs");
-	const uint32_t CopyLogsTaskFunc::version = 1;
 	REGISTER_TASKFUNC(CopyLogsTaskFunc);
 
 	struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
-		static const Key keyInsertTask;
+	    static constexpr uint32_t version = 1;
+	    static const Key keyInsertTask;
 
 		StringRef getName() const { return name; };
 
@@ -976,15 +971,14 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef FinishedFullBackupTaskFunc::name = LiteralStringRef("dr_finished_full_backup");
-	const uint32_t FinishedFullBackupTaskFunc::version = 1;
 	const Key FinishedFullBackupTaskFunc::keyInsertTask = LiteralStringRef("insertTask");
 	REGISTER_TASKFUNC(FinishedFullBackupTaskFunc);
 
 	struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			wait(checkTaskVersion(tr, task, CopyDiffLogsTaskFunc::name, CopyDiffLogsTaskFunc::version));
@@ -1059,15 +1053,14 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef CopyDiffLogsTaskFunc::name = LiteralStringRef("dr_copy_diff_logs");
-	const uint32_t CopyDiffLogsTaskFunc::version = 1;
 	REGISTER_TASKFUNC(CopyDiffLogsTaskFunc);
 
 	// Skip unneeded EraseLogRangeTaskFunc in 5.1
 	struct SkipOldEraseLogRangeTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			return Void();
@@ -1079,16 +1072,15 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef SkipOldEraseLogRangeTaskFunc::name = LiteralStringRef("dr_skip_legacy_task");
-	const uint32_t SkipOldEraseLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(SkipOldEraseLogRangeTaskFunc);
 	REGISTER_TASKFUNC_ALIAS(SkipOldEraseLogRangeTaskFunc, db_erase_log_range);
 
 	// This is almost the same as CopyLogRangeTaskFunc in 5.1. The only purpose is to support DR upgrade
 	struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<int64_t> bytesWritten() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
@@ -1255,15 +1247,14 @@ namespace dbBackup {
 		}
 	};
 	StringRef OldCopyLogRangeTaskFunc::name = LiteralStringRef("db_copy_log_range");
-	const uint32_t OldCopyLogRangeTaskFunc::version = 1;
 	const Key OldCopyLogRangeTaskFunc::keyNextBeginVersion = LiteralStringRef("nextBeginVersion");
 	REGISTER_TASKFUNC(OldCopyLogRangeTaskFunc);
 
 	struct AbortOldBackupTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state DatabaseBackupAgent srcDrAgent(taskBucket->src);
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			state Key tagNameKey;
@@ -1316,7 +1307,6 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortOldBackupTaskFunc::name = LiteralStringRef("dr_abort_legacy_backup");
-	const uint32_t AbortOldBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(AbortOldBackupTaskFunc);
 	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTaskFunc, db_backup_range);
 	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTaskFunc, db_finish_full_backup);
@@ -1328,9 +1318,9 @@ namespace dbBackup {
 	//Upgrade DR from 5.1
 	struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Key logUidValue = task->params[DatabaseBackupAgent::keyConfigLogUid];
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
 			state Subspace config = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(logUidValue);
@@ -1435,14 +1425,13 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef CopyDiffLogsUpgradeTaskFunc::name = LiteralStringRef("db_copy_diff_logs");
-	const uint32_t CopyDiffLogsUpgradeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(CopyDiffLogsUpgradeTaskFunc);
 
 	struct BackupRestorableTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			wait(checkTaskVersion(cx, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
 			state Transaction tr(taskBucket->src);
@@ -1527,14 +1516,13 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef BackupRestorableTaskFunc::name = LiteralStringRef("dr_backup_restorable");
-	const uint32_t BackupRestorableTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupRestorableTaskFunc);
 
 	struct StartFullBackupTaskFunc : TaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Key logUidValue = task->params[DatabaseBackupAgent::keyConfigLogUid];
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
 			wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
@@ -1726,7 +1714,6 @@ namespace dbBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("dr_start_full_backup");
-	const uint32_t StartFullBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 }
 
@@ -1822,7 +1809,7 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 
 class DatabaseBackupAgentImpl {
 public:
-	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
+	static constexpr int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	ACTOR static Future<Void> waitUpgradeToLatestDrVersion(DatabaseBackupAgent* backupAgent, Database cx, Key tagName) {
 		state UID logUid = wait(backupAgent->getLogUid(cx, tagName));
