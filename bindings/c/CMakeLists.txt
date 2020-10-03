@@ -71,8 +71,8 @@ if(NOT WIN32)
     test/mako/mako.h
     test/mako/utils.c
     test/mako/utils.h)
-  find_package(Threads REQUIRED)
   add_subdirectory(test/unit/third_party)
+  find_package(Threads REQUIRED)
   set(UNIT_TEST_SRCS
     test/unit/unit_tests.cpp
     test/unit/fdb_api.cpp
