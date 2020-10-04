@@ -96,8 +96,34 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
+	int recentRequests;
+	Deque<int> requestBuckets;
+	double lastBucketBegin;
+	double bucketInterval;
+
+ 	void updateRequestBuckets() {
+		while(now() - lastBucketBegin > bucketInterval) {
+			lastBucketBegin += bucketInterval;
+			recentRequests -= requestBuckets.front();
+			requestBuckets.pop_front();
+			requestBuckets.push_back(0);
+		}
+	}
+
+ 	void addRequest(int transactionCount) {
+		updateRequestBuckets();
+		recentRequests += transactionCount;
+		requestBuckets.back() += transactionCount;
+	}
+
+ 	int getRecentRequests() {	
+		updateRequestBuckets();
+		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
+	}
+
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()),
+	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
+	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
 		txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
@@ -123,6 +149,9 @@ struct ProxyStats {
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
+			requestBuckets.push_back(0);
+		}
 	}
 };
 
@@ -291,6 +320,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				req.reply.send(rep);
 				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
 			} else {
+				stats->addRequest(req.transactionCount);
 				// TODO: check whether this is reasonable to do in the fast path
 				for(auto tag : req.tags) {
 					(*transactionTagCounter)[tag.first] += tag.second;
@@ -1409,7 +1439,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 			rep = v;
 		}
 	}
-	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
+	rep.processBusyTime = FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION*std::min((std::numeric_limits<int>::max()/FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION)-1,commitData->stats.getRecentRequests());
+	rep.processBusyTime += FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION*(g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");

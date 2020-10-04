@@ -214,7 +214,10 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                     10.0 ); //should be longer than the rate we log network metrics
 	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.10 );
 	init( BASIC_LOAD_BALANCE_MAX_PROB,                         2.0 );
-	init( BASIC_LOAD_BALANCE_MIN_AMOUNT,                     50000 ); //Will not update probabilities if the average proxy busyness is less than 5%
+	init( BASIC_LOAD_BALANCE_MIN_REQUESTS,                      50 );
+	init( BASIC_LOAD_BALANCE_MIN_CPU,                         0.05 );
+	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 );
+	init( BASIC_LOAD_BALANCE_COMPUTE_PRECISION,               1000 );
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
