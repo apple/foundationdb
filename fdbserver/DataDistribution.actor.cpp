@@ -4476,7 +4476,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	loop {
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
-		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies));
+		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies, false));
 
 		choose {
 			when (wait(db->onChange())) {}
