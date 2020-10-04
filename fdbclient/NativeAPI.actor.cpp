@@ -1334,8 +1334,8 @@ ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, b
 }
 
 //Returns a future which will not be set until the ProxyInfo of this DatabaseContext is not NULL
-Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool useProvisionalProxies) {
-	return ::getMasterProxiesFuture(this, useProvisionalProxies);
+Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool useProvisionalProxies, bool useGrvProxies) {
+	return ::getMasterProxiesFuture(this, useProvisionalProxies, useGrvProxies);
 }
 
 void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
