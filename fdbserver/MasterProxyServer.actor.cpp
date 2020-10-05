@@ -121,7 +121,7 @@ struct ProxyStats {
 
  	int getRecentRequests() {	
 		updateRequestBuckets();
-		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
+		return recentRequests/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
 	}
 
 	double getAndResetMaxCompute() {
