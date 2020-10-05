@@ -72,7 +72,7 @@ struct RestoreBackupWorkload : TestWorkload {
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", waitForVersion);
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
-					wait(self->backupAgent.abortBackup(cx, self->tag.toString()));
+					wait(self->backupAgent.discontinueBackup(cx, self->tag));
 					return Void();
 				}
 				wait(delay(5.0));
