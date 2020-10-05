@@ -101,8 +101,8 @@ struct ProxyStats {
 	double lastBucketBegin;
 	double bucketInterval;
 	
-	double maxCompute;
-	double minCompute;
+	int64_t maxComputeNS;
+	int64_t minComputeNS;
 
  	void updateRequestBuckets() {
 		while(now() - lastBucketBegin > bucketInterval) {
@@ -124,21 +124,21 @@ struct ProxyStats {
 		return recentRequests/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
 	}
 
-	double getAndResetMaxCompute() {
-		double r = maxCompute;
-		maxCompute = 0;
+	int64_t getAndResetMaxCompute() {
+		int64_t r = maxComputeNS;
+		maxComputeNS = 0;
 		return r;
 	}
 
-	double getAndResetMinCompute() {
-		double r = minCompute;
-		minCompute = 1000;
+	int64_t getAndResetMinCompute() {
+		int64_t r = minComputeNS;
+		minComputeNS = 1e12;
 		return r;
 	}
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
-	    maxCompute(0), minCompute(1000),
+	    maxCompute(0), minCompute(1e12),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
@@ -1271,8 +1271,8 @@ ACTOR Future<Void> commitBatch(
 		} else {
 			self->commitComputePerOperation[latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*self->commitComputePerOperation[latencyBucket]);
 		}
-		self->stats.maxCompute = std::max(self->stats.maxCompute, self->commitComputePerOperation[latencyBucket]);
-		self->stats.minCompute = std::min(self->stats.minCompute, self->commitComputePerOperation[latencyBucket]);
+		self->stats.maxComputeNS = std::max<int64_t>(self->stats.maxComputeNS, 1e9*self->commitComputePerOperation[latencyBucket]);
+		self->stats.minComputeNS = std::min<int64_t>(self->stats.minComputeNS, 1e9*self->commitComputePerOperation[latencyBucket]);
 	}
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))

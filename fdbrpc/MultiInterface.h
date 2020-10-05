@@ -81,6 +81,9 @@ struct AlternativeInfo {
 template <class T>
 class ModelInterface : public ReferenceCounted<ModelInterface<T>> {
 public:
+	//If balanceOnRequests is true, the client will load balance based on the number of GRVs released by each proxy
+	//If balanceOnRequests is false, the client will load balance based on the CPU usage of each proxy
+	//Only requests which take from the GRV budget on the proxy should set balanceOnRequests to true
 	ModelInterface( const vector<T>& v, bool balanceOnRequests ) : balanceOnRequests(balanceOnRequests) {
 		for(int i = 0; i < v.size(); i++) {
 			alternatives.push_back(AlternativeInfo(v[i], 1.0/v.size(), (i+1.0)/v.size()));
@@ -108,7 +111,8 @@ public:
 	void updateProbabilities() {
 		double totalBusy = 0;
 		for(auto& it : alternatives) {
-			int busyMetric = balanceOnRequests ? it.processBusyTime/FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION : it.processBusyTime%FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+			int busyMetric = balanceOnRequests ? it.processBusyTime/FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION :
+			  it.processBusyTime%FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
 			totalBusy += busyMetric;
 			if(now() - it.lastUpdate > FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/2.0) {
 				return;
@@ -122,7 +126,8 @@ public:
 		
 		double totalProbability = 0;
 		for(auto& it : alternatives) {
-			int busyMetric = balanceOnRequests ? it.processBusyTime/FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION : it.processBusyTime%FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+			int busyMetric = balanceOnRequests ? it.processBusyTime/FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION : 
+			  it.processBusyTime%FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
 			it.probability += (1.0/alternatives.size()-(busyMetric/totalBusy))*FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
 			it.probability = std::max(it.probability, 1/(FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB*alternatives.size()));
 			it.probability = std::min(it.probability, FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB/alternatives.size());
