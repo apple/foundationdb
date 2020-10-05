@@ -905,8 +905,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::MACHINE_ID:
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ) );
+				if( clientInfo->get().proxies.size() ) {
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, false ) );
+					grvProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, true ) );
+				}
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -915,8 +917,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::DATACENTER_ID:
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
-				if( clientInfo->get().proxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
+				if( clientInfo->get().proxies.size() ) {
+					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, false ) );
+					grvProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, true ) );
+				}
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -958,6 +962,7 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 
 	// Reset state from former cluster.
 	self->masterProxies.clear();
+	self->grvProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
@@ -1298,25 +1303,30 @@ void stopNetwork() {
 	closeTraceFile();
 }
 
-Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
+Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies, bool useGrvProxies) {
 	if (masterProxiesLastChange != clientInfo->get().id) {
 		masterProxiesLastChange = clientInfo->get().id;
 		masterProxies.clear();
+		grvProxies.clear();
 		if( clientInfo->get().proxies.size() ) {
-			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies ));
+			masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, false ) );
+			grvProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().proxies, true ) );
 			provisional = clientInfo->get().proxies[0].provisional;
 		}
 	}
 	if(provisional && !useProvisionalProxies) {
 		return Reference<ProxyInfo>();
 	}
+	if(useGrvProxies) {
+		return grvProxies;
+	}
 	return masterProxies;
 }
 
 //Actor which will wait until the MultiInterface<MasterProxyInterface> returned by the DatabaseContext cx is not NULL
-ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, bool useProvisionalProxies) {
+ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, bool useProvisionalProxies, bool useGrvProxies) {
 	loop{
-		Reference<ProxyInfo> proxies = cx->getMasterProxies(useProvisionalProxies);
+		Reference<ProxyInfo> proxies = cx->getMasterProxies(useProvisionalProxies, useGrvProxies);
 		if (proxies)
 			return proxies;
 		wait( cx->onMasterProxiesChanged() );
@@ -1324,8 +1334,8 @@ ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, b
 }
 
 //Returns a future which will not be set until the ProxyInfo of this DatabaseContext is not NULL
-Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool useProvisionalProxies) {
-	return ::getMasterProxiesFuture(this, useProvisionalProxies);
+Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool useProvisionalProxies, bool useGrvProxies) {
+	return ::getMasterProxiesFuture(this, useProvisionalProxies, useGrvProxies);
 }
 
 void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
@@ -3467,7 +3477,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			state GetReadVersionRequest req( transactionCount, priority, flags, tags, debugID );
 			choose {
 				when ( wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
+				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getMasterProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES, true), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if(tags.size() != 0) {
 						auto &priorityThrottledTags = cx->throttledTags[priority];
 						for(auto& tag : tags) {

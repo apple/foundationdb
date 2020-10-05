@@ -3950,7 +3950,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.proxies) );
+		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.proxies, false) );
 		choose {
 			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
 				state GetStorageServerRejoinInfoReply rep = _rep;

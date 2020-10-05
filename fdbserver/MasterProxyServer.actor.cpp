@@ -96,8 +96,50 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
+	int recentRequests;
+	Deque<int> requestBuckets;
+	double lastBucketBegin;
+	double bucketInterval;
+	
+	int64_t maxComputeNS;
+	int64_t minComputeNS;
+
+ 	void updateRequestBuckets() {
+		while(now() - lastBucketBegin > bucketInterval) {
+			lastBucketBegin += bucketInterval;
+			recentRequests -= requestBuckets.front();
+			requestBuckets.pop_front();
+			requestBuckets.push_back(0);
+		}
+	}
+
+ 	void addRequest(int transactionCount) {
+		updateRequestBuckets();
+		recentRequests += transactionCount;
+		requestBuckets.back() += transactionCount;
+	}
+
+ 	int getRecentRequests() {	
+		updateRequestBuckets();
+		return recentRequests/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
+	}
+
+	int64_t getAndResetMaxCompute() {
+		int64_t r = maxComputeNS;
+		maxComputeNS = 0;
+		return r;
+	}
+
+	int64_t getAndResetMinCompute() {
+		int64_t r = minComputeNS;
+		minComputeNS = 1e12;
+		return r;
+	}
+
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()),
+	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
+	    maxComputeNS(0), minComputeNS(1e12),
+	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
 		txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
@@ -122,7 +164,12 @@ struct ProxyStats {
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
+		specialCounter(cc, "MaxCompute", [this](){ return this->getAndResetMaxCompute(); });
+		specialCounter(cc, "MinCompute", [this](){ return this->getAndResetMinCompute(); });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
+		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
+			requestBuckets.push_back(0);
+		}
 	}
 };
 
@@ -291,6 +338,7 @@ ACTOR Future<Void> queueTransactionStartRequests(
 				req.reply.send(rep);
 				TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
 			} else {
+				stats->addRequest(req.transactionCount);
 				// TODO: check whether this is reasonable to do in the fast path
 				for(auto tag : req.tags) {
 					(*transactionTagCounter)[tag.first] += tag.second;
@@ -1216,13 +1264,15 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	computeDuration += g_network->timer() - computeStart;
-	if(computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && batchOperations > 0) {
-		double computePerOperation = computeDuration/batchOperations;
+	if(batchOperations > 0) {
+		double computePerOperation = std::min( SERVER_KNOBS->MAX_COMPUTE_PER_OPERATION, computeDuration/batchOperations );
 		if(computePerOperation <= self->commitComputePerOperation[latencyBucket]) {
 			self->commitComputePerOperation[latencyBucket] = computePerOperation;
 		} else {
 			self->commitComputePerOperation[latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*self->commitComputePerOperation[latencyBucket]);
 		}
+		self->stats.maxComputeNS = std::max<int64_t>(self->stats.maxComputeNS, 1e9*self->commitComputePerOperation[latencyBucket]);
+		self->stats.minComputeNS = std::min<int64_t>(self->stats.minComputeNS, 1e9*self->commitComputePerOperation[latencyBucket]);
 	}
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
@@ -1409,7 +1459,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(ProxyCommitData* commi
 			rep = v;
 		}
 	}
-	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
+	rep.processBusyTime = FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION*std::min((std::numeric_limits<int>::max()/FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION)-1,commitData->stats.getRecentRequests());
+	rep.processBusyTime += FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION*(g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.getLiveCommittedVersion.After");
