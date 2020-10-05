@@ -901,6 +901,9 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 			// else { } It is enable by default for tester
 			TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
 		}},
+	{"protocolVersion", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedProtocolVersion", value);
+		}}
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1285,9 +1288,12 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
 	state vector<WorkerDetails> workers;
 
+	minTestersExpected = 1;
+
 	loop {
 		choose {
 			when( vector<WorkerDetails> w = wait( cc->get().present() ? brokenPromiseToNever( cc->get().get().getWorkers.getReply( GetWorkersRequest( flags ) ) ) : Never() ) ) { 
+				std::cout << "WORKERS RECRUITEED" << std::endl;
 				if (w.size() >= minTestersExpected) {
 					workers = w;
 					break; 
@@ -1297,6 +1303,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			when( wait( cc->onChange() ) ) {}
 			when( wait( testerTimeout ) ) {
 				TraceEvent(SevError, "TesterRecruitmentTimeout");
+				std::cout << "TESTER TIMEOUT" << std::endl;
 				throw timed_out();
 			}
 		}
@@ -1363,10 +1370,13 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	if (at == TEST_HERE) {
 		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
 		vector<TesterInterface> iTesters(1);
+		TraceEvent("BEFORE MONITOR SERVER DBINFO");
 		actors.push_back( reportErrors(monitorServerDBInfo( cc, LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
+		TraceEvent("BEFORE MONITOR TESTER SERVER CORE");
 		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );
 		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration, locality );
 	} else {
+		TraceEvent("BEFORE RUNTESTS");
 		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality), "RunTests");
 	}
 

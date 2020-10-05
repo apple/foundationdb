@@ -19,10 +19,12 @@
  */
 
 #include <cstdint>
+#include <ostream>
 #include <string>
 #include <thread>
 #include <vector>
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/SimulatedCluster.h"
@@ -37,66 +39,10 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<Void> getProtocol(Endpoint endpoint) {
-    std::vector<Future<ProtocolInfoReply>> coordProtocols;
-    RequestStream<ProtocolInfoRequest> requestStream{ endpoint };
-    auto f = retryBrokenPromise(requestStream, ProtocolInfoRequest{});
-    ProtocolInfoReply res = wait(f);
-
-    std::cout << "GOT VERSION: " << res.version.version() << std::endl;
-    return Void();
-}
-
-struct _Struct {
-    static constexpr FileIdentifier file_identifier = 2340487;
-    int oldField = 0;
-};
-
-struct NewStruct : public _Struct {
-    int newField = 0;
-
-    bool isSet() const {
-        return oldField == 1 && newField == 2;
-    }
-    void setFields() {
-        oldField = 1;
-        newField = 2;
-    }
-
-    template <class Archive>
-    void serialize(Archive& ar) {
-        serializer(ar, oldField, newField);
-    }
-};
-
-ACTOR static Future<Void> writeNew(Database cx, int numObjects, Key key) {
-    ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010000LL);
-    protocolVersion.addObjectSerializerFlag();
-    ObjectWriter writer(IncludeVersion(protocolVersion));
-    std::vector<NewStruct> data(numObjects);
-    for (auto& newObject : data) {
-        newObject.setFields();
-    }
-    writer.serialize(data);
-    state Value value = writer.toStringRef();
-
-    state Transaction tr(cx);
-    loop {
-        try {
-            tr.set(key, value);
-            wait(tr.commit());
-            return Void();
-        } catch (Error& e) {
-            wait(tr.onError(e));
-        }
-    }
-}
-
 struct ProtocolVersionWorkload : TestWorkload {
     ProtocolVersionWorkload(WorkloadContext const& wcx)
 	: TestWorkload(wcx) {
-		protocol = ProtocolVersion(getOption(options, LiteralStringRef("protocolVersion"), 0.0));
-        clusterFilePath = getOption(options, LiteralStringRef("clusterFilePath"), LiteralStringRef("")).toString();
+		// protocol = ProtocolVersion(getOption(options, LiteralStringRef("protocolVersion"), 0.0));
 	}
 
 	virtual std::string description() {
@@ -108,51 +54,64 @@ struct ProtocolVersionWorkload : TestWorkload {
 	}
 
     ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
-        CSimpleIni ini;
-		state Reference<ClusterConnectionFile> connFile(new ClusterConnectionFile(self->clusterFilePath));
-        state const char* whitelistBinPaths = "";
-        state std::string dataFolder = "simfdb";
-        state LocalityData localities =  LocalityData(Optional<Standalone<StringRef>>(),
-                                                    Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-                                                    Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-                                                    Optional<Standalone<StringRef>>());
-        state std::string coordFolder = ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
-        state ProcessClass processClass = ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource);
-        state uint16_t listenPerProcess = 1;
-        state uint16_t port = 1;
-        state IPAddress ip = IPAddress(0x01010101);
-        state bool sslEnabled = false;
+        // CSimpleIni ini;
+		// // state Reference<ClusterConnectionFile> connFile(new ClusterConnectionFile(self->clusterFilePath));
+        // state const char* whitelistBinPaths = "";
+        // state std::string dataFolder = "simfdb";
+        // state LocalityData localities =  LocalityData(Optional<Standalone<StringRef>>(),
+        //                                             Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+        //                                             Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+        //                                             Optional<Standalone<StringRef>>());
+        // state std::string coordFolder = ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
+        // state ProcessClass processClass = ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource);
+        // state uint16_t listenPerProcess = 1;
+        // state uint16_t port = 1;
+        // state IPAddress ip = IPAddress(0x01011F11);
+        // state bool sslEnabled = false;
  
-		state ISimulator::ProcessInfo* process = g_pSimulator->newProcess("ProtocolVersionProcess", ip, port, sslEnabled, listenPerProcess,
-                                    // localities, processClass, dataFolder.c_str(), coordFolder.c_str(), currentProtocolVersion);
-                                    localities, processClass, dataFolder.c_str(), coordFolder.c_str(), ProtocolVersion(0x0FDB00B070010000LL));
-        wait(g_pSimulator->onProcess(process, TaskPriority::DefaultYield));
+		// state ISimulator::ProcessInfo* process = g_pSimulator->newProcess("ProtocolVersionProcess", ip, port, sslEnabled, listenPerProcess,
+        //                             localities, processClass, dataFolder.c_str(), coordFolder.c_str(), currentProtocolVersion);
+        //                             // localities, processClass, dataFolder.c_str(), coordFolder.c_str(), ProtocolVersion(0x0FDB00B070010000LL));
+        // wait(g_pSimulator->onProcess(process, TaskPriority::DefaultYield));
 
-        FlowTransport::createInstance(true, 1);
-		Sim2FileSystem::newFileSystem();
+        // FlowTransport::createInstance(true, 1);
+		// Sim2FileSystem::newFileSystem();
 
-        NetworkAddress n(ip, port, true, sslEnabled);
-        FlowTransport::transport().bind( n, n );
+        // NetworkAddress n(ip, port, true, sslEnabled);
+        // FlowTransport::transport().bind( n, n );
 
-        state vector<Future<Void>> actors;
-        actors.push_back(fdbd( connFile, localities, processClass, dataFolder, coordFolder, 500e6, "", "", -1, whitelistBinPaths));
+        // state vector<Future<Void>> actors;
+        // actors.push_back(fdbd( cx->getConnectionFile(), localities, processClass, dataFolder, coordFolder, 500e6, "", "", -1, whitelistBinPaths));
 
-        state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
-        state ISimulator::ProcessInfo* nextProcess = nullptr;
-        for(ISimulator::ProcessInfo* p : allProcesses){
-            if(p->address != process->address){
-                nextProcess = p;
-                break;
-            }
+        // getting coord protocols from current protocol version
+        state vector<Future<ProtocolInfoReply>> coordProtocols;
+        vector<NetworkAddress> coordAddresses = cx->getConnectionFile()->getConnectionString().coordinators();
+        for(int i = 0; i<coordAddresses.size(); i++) {
+            RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { coordAddresses[i] }, WLTOKEN_PROTOCOL_INFO } };
+            coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
         }
 
-        ASSERT(nextProcess);
-        wait(g_pSimulator->onProcess(nextProcess));
+        wait(waitForAll(coordProtocols));
 
-        wait(getProtocol(Endpoint{{process->addresses}, WLTOKEN_PROTOCOL_INFO}));
-        stopAfter(waitForAll(actors));
+        // state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
+        // state int i = 0;
+        // for(; i<allProcesses.size(); i++) {
+        //     auto f = g_pSimulator->onProcess(allProcesses[i], TaskPriority::DefaultYield);
+        //     wait(f);
+        //     std::cout << "PROCESS PRO VESRION: " << g_network->protocolVersion().version() << std::endl;
+        // }
+        std::cout << "CURR VERSION: " << g_network->protocolVersion().version() << std::endl;
+        std::vector<bool> protocolMatches;
+        protocolMatches.reserve(coordProtocols.size());
+        for(int i = 0; i<coordProtocols.size(); i++){
+            if(g_network->protocolVersion() != coordProtocols[i].get().version) std::cout << "MISMATCHED VERSIONS" << std::endl;
+            protocolMatches.push_back(g_network->protocolVersion() == coordProtocols[i].get().version);
+        }
 
-        // wait(writeNew(cx, 1, LiteralStringRef("TEST")));
+        // ASSERT(count(protocolMatches.begin(), protocolMatches.end(), false) >= 1);
+
+        // g_pSimulator->killProcess(process, ISimulator::KillType::KillInstantly);
+        // stopAfter(waitForAll(actors));
 		return Void();
 	}
 

@@ -1030,6 +1030,7 @@ public:
 		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
 			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
+			TraceEvent("SETTING UP SIM2LIstenr");
 			m->listenerMap[address] = Reference<IListener>( new Sim2Listener(m, address) );
 			addressMap[address] = m;
 		}
@@ -1704,7 +1705,7 @@ public:
 			return Void();
 		return delay( 0, taskID, process->machine->machineProcess );
 	}
-
+	
 	virtual ProtocolVersion protocolVersion() override {
 		ASSERT(processProtocolVersion.find(getCurrentProcess()) != processProtocolVersion.end());
 		return processProtocolVersion.at(getCurrentProcess());

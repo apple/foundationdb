@@ -20,6 +20,8 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbrpc/fdbrpc.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -27,6 +29,7 @@
 #include "fdbclient/IClientApi.h"
 
 #include "flow/ThreadHelper.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct future FDBFuture;
@@ -402,8 +405,12 @@ private:
 
 	void setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value);
 
+	void runExternalNetwork();
+
 	Reference<ClientInfo> localClient;
 	std::map<std::string, Reference<ClientInfo>> externalClients;
+	std::map<std::string, Reference<ClientInfo>> clusterFileCompatibleClients; // should this be scoped to clusterfile or coordinator address
+	volatile std::map<std::string, bool> clusterFileCompatibleSet;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;

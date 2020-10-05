@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include <cinttypes>
 #include <cstdint>
 #include <fstream>
 #include <ostream>
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -36,6 +38,7 @@
 #include "fdbclient/versions.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
 
 #undef max
 #undef min
@@ -139,7 +142,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
                                                          std::string* dataFolder, std::string* coordFolder,
                                                          std::string baseFolder, ClusterConnectionString connStr,
                                                          bool useSeedFile, AgentMode runBackupAgents,
-                                                         std::string whitelistBinPaths) {
+                                                         std::string whitelistBinPaths, ProtocolVersion protocolVersion) {
 	state ISimulator::ProcessInfo *simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
@@ -156,7 +159,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 		state ISimulator::ProcessInfo* process =
 		    g_simulator.newProcess("Server", ip, port, sslEnabled, listenPerProcess, localities, processClass, dataFolder->c_str(),
-		                           coordFolder->c_str(), currentProtocolVersion);
+		                           coordFolder->c_str(), protocolVersion);
 		wait(g_simulator.onProcess(process,
 		                           TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
@@ -299,7 +302,7 @@ std::map< Optional<Standalone<StringRef>>, std::vector< std::vector< std::string
 // process count is no longer needed because it is now the length of the vector of ip's, because it was one ip per process
 ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector<IPAddress> ips, bool sslEnabled, LocalityData localities,
                                     ProcessClass processClass, std::string baseFolder, bool restarting,
-                                    bool useSeedFile, AgentMode runBackupAgents, bool sslOnly, std::string whitelistBinPaths) {
+                                    bool useSeedFile, AgentMode runBackupAgents, bool sslOnly, std::string whitelistBinPaths, ProtocolVersion protocolVersion, bool* addedNew) {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
@@ -342,7 +345,11 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
 				const int listenPort = i*listenPerProcess + 1;
 				AgentMode agentMode = runBackupAgents == AgentOnly ? ( i == ips.size()-1 ? AgentOnly : AgentNone ) : runBackupAgents;
-				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths));
+				if(*addedNew == false && i == ips.size()-1) {
+					processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths, currentProtocolVersion)); // currentProtocolVersion
+					*addedNew = true;
+				}
+				else processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths, protocolVersion));
 				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], listenPort, true, false)).detail("ZoneId", localities.zoneId()).detail("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
@@ -547,7 +554,7 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFolder, int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
                                           Standalone<StringRef>* pStartingConfiguration,
-                                          int extraDB, std::string whitelistBinPaths) {
+                                          int extraDB, std::string whitelistBinPaths, ProtocolVersion protocolVersion) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -641,11 +648,12 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
+			bool addedNew = true;
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true,
 			                     i == useSeedForMachine, enableExtraDB ? AgentAddition : AgentNone,
-			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass), whitelistBinPaths),
+			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass), whitelistBinPaths, protocolVersion, &addedNew),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
 
@@ -1052,7 +1060,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFolder, int* pTesterCount,
                           Optional<ClusterConnectionString>* pConnString, Standalone<StringRef>* pStartingConfiguration,
-                          int extraDB, int minimumReplication, int minimumRegions, std::string whitelistBinPaths, bool configureLocked) {
+                          int extraDB, int minimumReplication, int minimumRegions, std::string whitelistBinPaths, bool configureLocked, ProtocolVersion protocolVersion) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(extraDB, minimumReplication, minimumRegions);
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
@@ -1214,6 +1222,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 	bool requiresExtraDBMachines = extraDB && g_simulator.extraDB->toString() != conn.toString();
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = {ProcessClass::UnsetClass, ProcessClass::ResolutionClass, ProcessClass::MasterClass};
+
+	bool addedNew = false;
 	for( int dc = 0; dc < dataCenters; dc++ ) {
 		//FIXME: test unset dcID
 		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
@@ -1271,7 +1281,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled,
-				localities, processClass, baseFolder, false, machine == useSeedForMachine, requiresExtraDBMachines ? AgentOnly : AgentAddition, sslOnly, whitelistBinPaths ), "SimulatedMachine"));
+				localities, processClass, baseFolder, false, machine == useSeedForMachine, requiresExtraDBMachines ? AgentOnly : AgentAddition, sslOnly, whitelistBinPaths, protocolVersion, &addedNew ), "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
 				std::vector<IPAddress> extraIps;
@@ -1285,7 +1295,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 				localities.set(LiteralStringRef("data_hall"), dcUID);
 				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB, extraIps, sslEnabled,
 					localities,
-					processClass, baseFolder, false, machine == useSeedForMachine, AgentNone, sslOnly, whitelistBinPaths ), "SimulatedMachine"));
+					processClass, baseFolder, false, machine == useSeedForMachine, AgentNone, sslOnly, whitelistBinPaths, protocolVersion, &addedNew ), "SimulatedMachine"));
 			}
 
 			assignedMachines++;
@@ -1309,11 +1319,11 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 		std::vector<IPAddress> ips;
 		ips.push_back(makeIPAddressForSim(useIPv6, { 3, 4, 3, i + 1 }));
 		Standalone<StringRef> newZoneId = Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString());
-		LocalityData	localities(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, Optional<Standalone<StringRef>>());
+		LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, Optional<Standalone<StringRef>>());
 		systemActors->push_back( reportErrors( simulatedMachine(
 			conn, ips, sslEnabled && sslOnly,
 			localities, ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
-			baseFolder, false, i == useSeedForMachine, AgentNone, sslEnabled && sslOnly, whitelistBinPaths ),
+			baseFolder, false, i == useSeedForMachine, AgentNone, sslEnabled && sslOnly, whitelistBinPaths, protocolVersion, &addedNew ),
 			"SimulatedTesterMachine") );
 	}
 	*pStartingConfiguration = startingConfigString;
@@ -1333,7 +1343,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 }
 
 void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, int& minimumRegions,
-                   int& configureLocked) {
+                   int& configureLocked, ProtocolVersion& protocolVersion) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -1367,7 +1377,13 @@ void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, 
 		}
 
 		if (attrib == "configureLocked") {
-			sscanf(value.c_str(), "%d", &configureLocked);
+			sscanf( value.c_str(), "%d", &configureLocked );
+		}
+
+		if (attrib == "protocolVersion") {
+			uint64_t protocolVersionInt = 0;
+			sscanf(value.c_str(), "%" SCNx64, &protocolVersionInt);
+			protocolVersion = ProtocolVersion(protocolVersionInt);
 		}
 	}
 
@@ -1383,7 +1399,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int minimumReplication = 0;
 	state int minimumRegions = 0;
 	state int configureLocked = 0;
-	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked);
+	state ProtocolVersion protocolVersion = currentProtocolVersion;
+	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked, protocolVersion);
 
 	// TODO (IPv6) Use IPv6?
 	wait(g_simulator.onProcess(
@@ -1392,7 +1409,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
 	                                        Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
 	                                        Optional<Standalone<StringRef>>()),
-	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "", currentProtocolVersion), // this won't work
+								ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "", protocolVersion),
 	    TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(true, 1);
@@ -1401,7 +1418,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, whitelistBinPaths), 100.0 ) );
+			wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, whitelistBinPaths, protocolVersion), 100.0 ) );
 			// FIXME: snapshot restore does not support multi-region restore, hence restore it as single region always
 			if (restoring) {
 				startingConfiguration = LiteralStringRef("usable_regions=1");
@@ -1410,12 +1427,13 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB,
-			                     minimumReplication, minimumRegions, whitelistBinPaths, configureLocked);
+			                     minimumReplication, minimumRegions, whitelistBinPaths, configureLocked, protocolVersion);
 			wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, deterministicRandom()->randomUniqueID().toString() );
 		platform::createDirectory( clusterFileDir );
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
+		std::cout << "TESTER COUNT: " << testerCount << std::endl;
 		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(
 									   new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))),
 								   TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration),

@@ -24,10 +24,13 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Status.h"
 #include "flow/ActorCollection.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
+#include <cstdint>
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
@@ -204,7 +207,7 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
-	// std::cout << "OPEN DATAASE" << std::endl;
+	std::cout << "OPEN DATABASE" << std::endl;
 
 	++(*clientCount);
 	hasConnectedClients->set(true);
@@ -464,6 +467,7 @@ struct LeaderRegisterCollection {
 	}
 
 	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
+		std::cout << "TRYING TO GET INTERFACE" << std::endl;
 		auto i = registerInterfaces.find( key );
 		if (i == registerInterfaces.end()) {
 			Key k = key;
@@ -504,6 +508,10 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	state ActorCollection forwarders(false);
 
 	wait( LeaderRegisterCollection::init( &regs ) ); 
+
+	// if(g_network->protocolVersion() == currentProtocolVersion){
+	// 	loop choose {}
+	// }
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
