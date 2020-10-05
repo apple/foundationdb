@@ -45,7 +45,6 @@ public:
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
-	double UNFLUSHED_DATA_RATIO;
 	int DESIRED_TOTAL_BYTES;
 	int DESIRED_UPDATE_BYTES;
 	double UPDATE_DELAY;
