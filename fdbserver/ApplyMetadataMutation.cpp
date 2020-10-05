@@ -509,16 +509,19 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 
 				if(!initialCommit) txnStateStore->clear(commonLogRange);
 			}
-		} else if (m.param2.size() && m.type == MutationRef::LockRange && m.param1 == rangeLockKey) {
-			LockRequest request;
-			BinaryReader reader(m.param2, IncludeVersion());
-			reader >> request;
+		} else if (m.param2.size() && m.type == MutationRef::LockRange && m.param1.startsWith(lockedKeyRanges.begin)) {
+			LockRequest request = BinaryReader::fromStringRef<LockRequest>(m.param2, IncludeVersion());
 			TraceEvent("LockRange", dbgid)
 			    .detail("Version", mutationVersion)
 			    .detail("Mode", getLockModeText(request.mode))
 			    .detail("Range", printable(request.range));
 			if (locks != nullptr) {
-				locks->add(mutationVersion, request);
+				auto reason = locks->check(request, mutationVersion);
+				if (reason == RangeLockCache::OK) {
+					locks->add(mutationVersion, request);
+				} else {
+					TraceEvent(SevError, "LockRangeDenied", dbgid).detail("Reason", reason);
+				}
 			}
 		}
 	}

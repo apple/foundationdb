@@ -1021,6 +1021,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 						pProxyCommitData->metadataVersion = v.metadataVersion;
 						pProxyCommitData->rangeLockVersion = v.rangeLockVersion;
 						pProxyCommitData->committedVersion.set(v.version);
+						TraceEvent("UpdateRangeLock", pProxyCommitData->dbgid).detail("Locks", pProxyCommitData->locks.toString());
 					}
 
 					if (pProxyCommitData->committedVersion.get() < self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
@@ -1148,6 +1149,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
 		pProxyCommitData->rangeLockVersion = self->rangeLockVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
+		TraceEvent("UpdateRangeLock", pProxyCommitData->dbgid).detail("Locks", pProxyCommitData->locks.toString());
 	}
 
 	if (self->forceRecovery) {
@@ -1628,21 +1630,9 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID, Reference<AsyncVar<ServerDBI
 }
 
 ACTOR Future<Void> getRangeLockSnapshot(ProxyCommitData* self, GetRangeLockSnapshotRequest request) {
-	loop {
-		if (self->locks.hasVersion(request.version)) {
-			GetRangeLockSnapshotReply reply(self->locks.getSnapshot(request.version));
-			request.reply.send(reply);
-			break;
-		} else {
-			if (self->committedVersion.get() > request.version) {
-				TraceEvent("RangeLockInvalid", self->dbgid).detail("ReqVersion", request.version).detail("CommitVersion", self->committedVersion.get()).suppressFor(1.0);
-				request.reply.sendError(range_locks_invalid_version());
-				break;
-			} else {
-				wait(self->committedVersion.whenAtLeast(request.version));
-			}
-		}
-	}
+	wait(self->committedVersion.whenAtLeast(request.version));
+	GetRangeLockSnapshotReply reply(self->locks.getSnapshot(request.version));
+	request.reply.send(reply);
 	return Void();
 }
 
@@ -1825,7 +1815,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy, MasterInter
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();
 					commitData.locked = lockedKey.present() && lockedKey.get().size();
 					commitData.metadataVersion = commitData.txnStateStore->readValue(metadataVersionKey).get();
-					commitData.rangeLockVersion = commitData.txnStateStore->readValue(rangeLockVersionKey).get();
+					// load from txnStateStore the latest snapshot
+					// commitData.loadRangeLocks();
+					// TraceEvent("LoadRangeLock", commitData.dbgid).detail("Locks", commitData.locks.toString());
 
 					commitData.txnStateStore->enableSnapshot();
 				}

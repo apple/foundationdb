@@ -27,6 +27,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/LockRange.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -147,12 +148,26 @@ struct ProxyCommitData {
 
 	RangeLockCache locks;
 
+	// Loads rangeLockVersion and latest snapshot of locks from txnStateStore
+	void loadRangeLocks() {
+		ASSERT(txnStateStore != nullptr);
+		rangeLockVersion = txnStateStore->readValue(rangeLockVersionKey).get();
+		if (rangeLockVersion.present()) {
+			auto pair = parseVersionStampFromValue(rangeLockVersion.get());
+			Arena arena;
+			KeyRef key = lockedKeyRanges.begin.withSuffix(pair.second.substr(0, sizeof(Version)), arena);
+			Optional<Value> value = txnStateStore->readValue(key).get();
+			ASSERT(value.present());
+			locks.setSnapshotValue(pair.first, value.get());
+		}
+	}
+
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
 	const vector<Tag>& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
-		if (!tags.size()) {
+		if (tags.empty()) {
 			auto& r = keyInfo.rangeContaining(key).value();
 			r.populateTags();
 			return r.tags;

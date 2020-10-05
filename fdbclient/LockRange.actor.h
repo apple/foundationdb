@@ -32,18 +32,15 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-// Locks a range in the normal key space. If the database is already locked,
+// TODO: use LockRequest as parameters for lockRange(s) and unlockRange(s)
+
+// (Un)Locks a range in the normal key space. If the database is already locked,
 // then a database_locked error is thrown. If (part of) the range is already
 // locked, then a range_locked error is thrown during commit.
-ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range, LockMode mode = LockMode::LOCK_EXCLUSIVE);
-ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode = LockMode::LOCK_EXCLUSIVE);
+ACTOR Future<Void> lockRange(Database cx, LockRequest request);
+ACTOR Future<Void> lockRanges(Database cx, std::vector<LockRequest> requests);
 
-// Unlocks a range in the normal key space. If the database is already locked,
-// then a database_locked error is thrown. If the range is not locked, then
-// a range_unlocked error is thrown during commit.
-ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode = LockMode::UNLOCK_EXCLUSIVE);
-ACTOR Future<Void> unlockRanges(Database cx, std::vector<KeyRangeRef> ranges,
-                                LockMode mode = LockMode::UNLOCK_EXCLUSIVE);
+class Transaction;
 
 class RangeLockCache {
 public:
@@ -55,11 +52,12 @@ public:
 		OK,
 		DENIED_EXCLUSIVE_LOCK,
 		DENIED_READ_LOCK, // Write access is denied because of read lock held
-		DENIED_OLD_VERSION // Request is denied because old lock version is used
+		DENIED_OLD_VERSION, // Request is denied because old lock version is used
+		ALREADY_LOCKED, // Attempts to lock an already locked range
+		ALREADY_UNLOCKED, // Attempts to release locks for an unlocked range
 	};
 
 	RangeLockCache() = default;
-	RangeLockCache(Snapshot snapshot, Version ver);
 
 	// Adds lock requests for the given lock version.
 	void add(Version version, const Requests& requests);
@@ -74,16 +72,25 @@ public:
 	// Returns if the key/range can be written/read for the given version.
 	Reason check(KeyRef key, Version version, bool write = true);
 	Reason check(KeyRangeRef range, Version version, bool write = true);
+	Reason check(const LockRequest& request, Version version);
+
+	// Client tries to add a lock request. If the request can proceed, reason
+	// is set to OK and mutations are added to the transaction object.
+	// Otherwise, reason gives the error and transaction object is intact.
+	Reason tryAdd(Transaction* tr, const LockRequest& request);
 
 	// Serializes all requests from the given version and on.
 	Value getChanges(Version from);
 
 	// PRE-CONDITION: hasVersion(version) must return true
 	Snapshot getSnapshot(Version version);
+	Value getSnapshotValue(Version version);
 
 	void setSnapshot(Version version, Snapshot snapshot) {
 		snapshots[version] = snapshot;
 	}
+
+	void setSnapshotValue(Version version, Value snapshot);
 
 	// Returns snapshots & lock requests in string.
 	std::string toString();
@@ -106,6 +113,9 @@ private:
 	// A version ordered locked ranges
 	std::map<Version, Snapshot> snapshots;
 	std::map<Version, Requests> requests;
+
+	Version lockVersion = invalidVersion; // the latest commit version of locks
+	KeyRangeMap<LockStatus> locks; // locked key ranges
 };
 
 #include "flow/unactorcompiler.h"

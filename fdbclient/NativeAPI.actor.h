@@ -365,5 +365,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
 }
+
+// Returns the version and a copy for version stamps from first 10 bytes of value
+std::pair<Version, Standalone<StringRef>> parseVersionStampFromValue(const Value& value);
+
 #include "flow/unactorcompiler.h"
 #endif

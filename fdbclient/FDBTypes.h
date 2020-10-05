@@ -1106,6 +1106,15 @@ enum class LockMode : uint8_t {
 	MODE_MAX, // Last one, only for type checking in serialization
 };
 
+inline bool isLocking(LockMode mode) {
+	return mode == LockMode::LOCK_EXCLUSIVE || mode == LockMode::LOCK_READ_SHARED;
+}
+inline bool isUnlocking(LockMode mode) {
+	return mode == LockMode::UNLOCK_EXCLUSIVE || mode == LockMode::UNLOCK_READ_SHARED;
+}
+
+enum LockStatus : uint8_t { UNLOCKED, SHARED_READ_LOCKED, EXCLUSIVE_LOCKED };
+
 // Convert the LockMode enum to a text description
 extern const char* getLockModeText(LockMode mode);
 
@@ -1117,7 +1126,8 @@ struct LockRequest {
 	LockRequest(Arena a, const LockRequest& r) : range(a, r.range), mode(r.mode){};
 
 	KeyRangeRef range;
-	LockMode mode; // LockMode
+	LockMode mode;
+	Version version = invalidVersion; // to be filled by applyMetadataMutation
 
 	template <class Ar>
 	void serialize(Ar& ar) {

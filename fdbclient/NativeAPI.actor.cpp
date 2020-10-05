@@ -4053,7 +4053,8 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<Databas
 	}
 }
 
-std::pair<Version, Standalone<StringRef>> versionFromValue(const Value& value) {
+std::pair<Version, Standalone<StringRef>> parseVersionStampFromValue(const Value& value) {
+	ASSERT(value.size() >= 10);
 	Version parsedVersion;
 	Standalone<StringRef> parsedVersionstamp = makeString(10);
 	memcpy(&parsedVersion, value.begin(), sizeof(Version));
@@ -4073,7 +4074,7 @@ ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version vers
 					throw reply.getError();
 				}
 				cx->rangeLockCache.setSnapshot(version, reply.get().snapshot);
-				std::cout << "Client snapshot: " << cx->rangeLockCache.toString() << "\n";
+				if (deterministicRandom()->random01() < 0.01) std::cout << "Client snapshot 1%: " << cx->rangeLockCache.toString() << "\n";
 				return Void();
 			}
 			when(wait(clientTimeout)) { throw timed_out(); }
@@ -4145,9 +4146,9 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 	if (rep.rangeLockVersion.present()) {
 		Version parsedVersion;
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
-		std::tie(parsedVersion, parsedVersionstamp) = versionFromValue(rep.rangeLockVersion.get());
+		std::tie(parsedVersion, parsedVersionstamp) = parseVersionStampFromValue(rep.rangeLockVersion.get());
 		if (!cx->rangeLockCache.hasVersion(parsedVersion)) {
-			TraceEvent("NAPI_GetRangeLock").detail("LockVersion", parsedVersion);
+			TraceEvent("NAPI_GetRangeLock").suppressFor(1.0).detail("LockVersion", parsedVersion);
 			wait(getRangeLockSnapshot(cx, parsedVersion));
 		}
 	} else {

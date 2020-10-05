@@ -70,7 +70,7 @@ struct LockRangeWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> lockAndSave(Database cx, LockRangeWorkload* self) {
-		wait(lockRange(cx, self->range));
+		wait(lockRange(cx, LockRequest(self->range, LockMode::LOCK_EXCLUSIVE)));
 		TraceEvent("LockRangeWorkload").detail("LockedRange", self->range.toString());
 
 		state Transaction tr(cx);
@@ -89,7 +89,7 @@ struct LockRangeWorkload : TestWorkload {
 
 	ACTOR static Future<Void> unlockAndCheck(Database cx, LockRangeWorkload* self, UID lockID,
 	                                         Standalone<RangeResultRef> data) {
-		wait(unlockRange(cx, self->range));
+		wait(lockRange(cx, LockRequest(self->range, LockMode::UNLOCK_EXCLUSIVE)));
 		TraceEvent("LockRangeWorkload").detail("UnlockedRange", self->range.toString());
 
 		// TODO: other workload has to be stopped, otherwise the data can be changed while checking.

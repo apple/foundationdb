@@ -912,15 +912,13 @@ const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00"
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 const KeyRef mustContainSystemMutationsKey = LiteralStringRef("\xff/mustContainSystemMutations");
 
-const KeyRangeRef lockedKeyRanges(
-	LiteralStringRef("\xff/rangeLocked/"),
-	LiteralStringRef("\xff/rangeLocked0")
-);
-const KeyRef rangeLockKey = LiteralStringRef("\xff/rangeLocked");
-const KeyRef rangeLockVersionKey = LiteralStringRef("\xff/rangeLockVersion");
-const KeyRef rangeLockVersionKeyEnd = LiteralStringRef("\xff/rangeLockVersion\x00");
-const KeyRef rangeLockVersionRequiredValue =
-    LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
+// Range locks are ordered in this range with 8 bytes Version that is monotonically
+// increasing. Thus they can be reconstructed by reading from this range.
+const KeyRangeRef lockedKeyRanges("\xff/rangeLocked/"_sr, "\xff/rangeLocked0"_sr);
+const KeyRef rangeLockKey = "\xff/rangeLocked/\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0e\x00\x00\x00"_sr;
+const KeyRef rangeLockVersionKey = "\xff/rangeLockVersion"_sr;
+const KeyRef rangeLockVersionKeyEnd = "\xff/rangeLockVersion\x00"_sr;
+const KeyRef rangeLockVersionRequiredValue = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"_sr;
 
 const KeyRangeRef monitorConfKeys(
 	LiteralStringRef("\xff\x02/monitorConf/"),

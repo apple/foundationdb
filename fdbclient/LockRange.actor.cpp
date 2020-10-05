@@ -21,8 +21,10 @@
 #include <cinttypes>
 #include <vector>
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/LockRange.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/UnitTest.h"
 
@@ -47,10 +49,7 @@ const char* getLockModeText(LockMode mode) {
 	}
 }
 
-ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
+ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest request, bool checkDBLock) {
 	if (checkDBLock) {
 		Optional<Value> val = wait(tr->get(databaseLockedKey));
 
@@ -59,21 +58,39 @@ ACTOR Future<Void> lockRange(Transaction* tr, KeyRangeRef range, bool checkDBLoc
 		}
 	}
 
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLockRangeValue()));
-	wr << LockRequest(range, mode);
-	tr->atomicOp(rangeLockKey, wr.toValue(), MutationRef::LockRange);
+	// TODO: use cache to check request and generate mutations
+	RangeLockCache::Reason reason = cache->tryAdd(tr, request);
+	if (reason != RangeLockCache::OK) {
+		throw range_locks_access_denied();
+	}
+
+	//BinaryWriter wr(IncludeVersion(ProtocolVersion::withLockRangeValue()));
+	//wr << request;
+	//tr->set(rangeLockKey, wr.toValue(), MutationRef::SetVersionstampedKey);
+
+	// Update range lock version
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
 	}
-	tr->addWriteConflictRange(range);
+
+	if (request.mode == LockMode::LOCK_EXCLUSIVE || request.mode == LockMode::LOCK_READ_SHARED) {
+		tr->addReadConflictRange(KeyRangeRef(request.range));
+	}
+
 	return Void();
 }
 
-ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range, LockMode mode) {
+ACTOR Future<Void> lockRange(Database cx, LockRequest request) {
 	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
 	loop {
 		try {
-			wait(lockRange(&tr, range, true, mode));
+			wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, request, true));
+
+			// Make concurrent lockRange() calls conflict.
+			tr.addReadConflictRange(KeyRangeRef(rangeLockVersionKey, keyAfter(rangeLockVersionKey)));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -83,25 +100,16 @@ ACTOR Future<Void> lockRange(Database cx, KeyRangeRef range, LockMode mode) {
 	}
 }
 
-ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode) {
-	if (ranges.size() > 1) {
-		// Check ranges are disjoint
-		std::sort(ranges.begin(), ranges.end(), [](const KeyRangeRef& a, const KeyRangeRef& b) {
-			return a.begin == b.begin ? a.end < b.end : a.begin < b.begin;
-		});
-		for (int i = 1; i < ranges.size(); i++) {
-			if (ranges[i - 1].intersects(ranges[i])) {
-				throw client_invalid_operation();
-			}
-		}
-	}
-
+ACTOR Future<Void> lockRanges(Database cx, std::vector<LockRequest> requests) {
 	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
 	loop {
 		try {
 			state bool checkDBLock = true;
-			for (const auto& range : ranges) {
-				wait(lockRange(&tr, range, checkDBLock, mode));
+			for (const auto& r : requests) {
+				wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, r, checkDBLock));
 				checkDBLock = false;
 			}
 			wait(tr.commit());
@@ -111,78 +119,6 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<KeyRangeRef> ranges, Lock
 			wait(tr.onError(e));
 		}
 	}
-}
-
-ACTOR Future<Void> unlockRange(Transaction* tr, KeyRangeRef range, bool checkDBLock, LockMode mode) {
-	ASSERT(mode == LockMode::UNLOCK_EXCLUSIVE || mode == LockMode::UNLOCK_READ_SHARED);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-	if (checkDBLock) {
-		Optional<Value> val = wait(tr->get(databaseLockedKey));
-
-		if (val.present()) {
-			throw database_locked();
-		}
-	}
-
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLockRangeValue()));
-	wr << LockRequest(range, mode);
-	tr->atomicOp(rangeLockKey, wr.toValue(), MutationRef::LockRange);
-	if (checkDBLock) {
-		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
-	}
-	tr->addWriteConflictRange(range);
-	return Void();
-}
-
-ACTOR Future<Void> unlockRange(Database cx, KeyRangeRef range, LockMode mode) {
-	ASSERT(mode == LockMode::UNLOCK_EXCLUSIVE || mode == LockMode::UNLOCK_READ_SHARED);
-	state Transaction tr(cx);
-	loop {
-		try {
-			wait(unlockRange(&tr, range, true, mode));
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw e;
-			wait(tr.onError(e));
-		}
-	}
-}
-
-ACTOR Future<Void> unlockRange(Database cx, std::vector<KeyRangeRef> ranges, LockMode mode) {
-	if (ranges.size() > 1) {
-		// Check ranges are disjoint
-		std::sort(ranges.begin(), ranges.end(), [](const KeyRangeRef& a, const KeyRangeRef& b) {
-			return a.begin == b.begin ? a.end < b.end : a.begin < b.begin;
-		});
-		for (int i = 1; i < ranges.size(); i++) {
-			if (ranges[i - 1].intersects(ranges[i])) {
-				throw client_invalid_operation();
-			}
-		}
-	}
-
-	state Transaction tr(cx);
-	loop {
-		try {
-			state bool checkDBLock = true;
-			for (const auto& range : ranges) {
-				wait(unlockRange(&tr, range, checkDBLock, mode));
-				checkDBLock = false;
-			}
-			wait(tr.commit());
-			return Void();
-		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw e;
-			wait(tr.onError(e));
-		}
-	}
-}
-
-RangeLockCache::RangeLockCache(Snapshot snapshot, Version version) {
-	snapshots[version] = snapshot;
 }
 
 void RangeLockCache::add(Version version, const Requests& more) {
@@ -194,6 +130,54 @@ void RangeLockCache::add(Version version, const Requests& more) {
 void RangeLockCache::add(Version version, const LockRequest& request) {
 	auto& current = requests[version];
 	current.push_back_deep(current.arena(), request);
+	TraceEvent("RangeLockCache::add").detail("V", toString());
+}
+
+/*
+void krmSetPreviouslyEmptyRange( Transaction* tr, const KeyRef& mapPrefix, const KeyRangeRef& keys, const ValueRef& newValue, const ValueRef& oldEndValue )
+{
+	KeyRange withPrefix = KeyRangeRef( mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString() );
+	tr->set( withPrefix.begin, newValue );
+	tr->set( withPrefix.end, oldEndValue );
+}*/
+
+RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest& request) {
+	LockStatus oldValue = locks[request.range.end];
+	auto ranges = locks.intersectingRanges(request.range);
+
+	if (isLocking(request.mode)) {
+		// For now, deny any repeated locking ops, including READ locks.
+		// In the future, we may allow upgrade read locks to exclusive locks.
+		if (!ranges.empty()) return ALREADY_LOCKED;
+
+		LockStatus newValue =
+		    request.mode == LockMode::LOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::SHARED_READ_LOCKED;
+		krmSetPreviouslyEmptyRange(tr, lockedKeyRanges.begin, request.range,
+		                           StringRef(reinterpret_cast<uint8_t*>(&newValue), sizeof(uint8_t)),
+		                           StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
+		return OK;
+	}
+
+	// Handle unlock requests
+	if (ranges.empty()) return ALREADY_UNLOCKED;
+
+	LockStatus expectedStatus =
+	    request.mode == LockMode::UNLOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::SHARED_READ_LOCKED;
+	for (const auto& r : ranges) {
+		if (r.cvalue() != expectedStatus) {
+			throw range_locks_access_denied();
+		}
+	}
+
+	// Use toString() to be consistent with how krmSetPreviouslyEmptyRange sets keys
+	KeyRange withPrefix = KeyRangeRef(lockedKeyRanges.begin.toString() + request.range.begin.toString(),
+	                                  lockedKeyRanges.begin.toString() + request.range.end.toString());
+	tr->clear(withPrefix);
+	LockStatus newValue = LockStatus::UNLOCKED;
+	tr->set(withPrefix.begin, StringRef(reinterpret_cast<uint8_t*>(&newValue), sizeof(uint8_t)));
+	tr->set(withPrefix.end, StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
+
+	return OK;
 }
 
 // PRE-CONDITION: there are lock versions larger than "upTo".
@@ -250,6 +234,23 @@ RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, Version version,
 	return OK;
 }
 
+RangeLockCache::Reason RangeLockCache::check(const LockRequest& request, Version version) {
+	switch (request.mode) {
+	case LockMode::LOCK_EXCLUSIVE:
+	case LockMode::UNLOCK_EXCLUSIVE:
+		return check(request.range, version, true);
+
+	case LockMode::LOCK_READ_SHARED:
+	case LockMode::UNLOCK_READ_SHARED:
+		return check(request.range, version, false);
+
+	default: break;
+	}
+
+	ASSERT(false);
+	return OK;
+}
+
 Value RangeLockCache::getChanges(Version from) {
 	ASSERT(false);
 	return Value();
@@ -259,6 +260,21 @@ RangeLockCache::Snapshot RangeLockCache::getSnapshot(Version at) {
 	ASSERT(hasVersion(at));
 	ensureSnapshot(at);
 	return snapshots[at];
+}
+
+// TODO: serialization across restarts? return value is stored at txnStateStore
+Value RangeLockCache::getSnapshotValue(Version at) {
+	Snapshot snapshot = getSnapshot(at);
+	std::cout << __FUNCTION__ << toString() << "\n";
+	return BinaryWriter::toValue(snapshot, IncludeVersion());
+}
+
+void RangeLockCache::setSnapshotValue(Version at, Value value) {
+	TraceEvent("LockRangeValueDecode").detail("V", value);
+
+	Snapshot snapshot = BinaryReader::fromStringRef<Snapshot>(value, IncludeVersion());
+	setSnapshot(at, snapshot);
+	std::cout << __FUNCTION__ << toString() << "\n";
 }
 
 std::string RangeLockCache::toString(Version version, Snapshot snapshot) {
@@ -383,6 +399,16 @@ RangeLockCache::SnapshotIterator RangeLockCache::buildSnapshot(RangeLockCache::S
 }
 
 namespace {
+TEST_CASE("/fdbclient/LockRange/KeyRangeMap") {
+	KeyRangeMap<LockStatus> locks;
+
+	LockStatus a = locks["a"_sr];
+	ASSERT(a == LockStatus::UNLOCKED);
+	std::cout << "a status is: " << (uint8_t)a << "\n";
+
+	return Void();
+}
+
 TEST_CASE("/fdbclient/LockRange/Cache") {
 	RangeLockCache cache;
 
