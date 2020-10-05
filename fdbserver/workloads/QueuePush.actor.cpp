@@ -54,12 +54,12 @@ struct QueuePushWorkload : TestWorkload {
 		startingKey = LiteralStringRef("0000000000000001");
 	}
 
-	virtual std::string description() { return "QueuePush"; }
-	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
+	std::string description() const override { return "QueuePush"; }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(std::vector<PerfMetric>& m ) {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		int writes = transactions.getValue();
 		m.emplace_back("Measured Duration", duration, true);

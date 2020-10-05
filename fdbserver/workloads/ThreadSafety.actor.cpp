@@ -139,17 +139,11 @@ struct ThreadSafetyWorkload : TestWorkload {
 		noUnseed = true;
 	}
 
-	virtual std::string description() {
-		return "ThreadSafety";
-	}
+	std::string description() const override { return "ThreadSafety"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
-		return _start(cx, this);
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR Future<Void> _start(Database cx, ThreadSafetyWorkload *self) {
 		state std::vector<ThreadInfo*> threadInfo;
@@ -293,13 +287,9 @@ struct ThreadSafetyWorkload : TestWorkload {
 		}
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory("ThreadSafety");

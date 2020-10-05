@@ -49,15 +49,11 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		resultLimit = 10*maxDiff;
 	}
 
-	virtual std::string description() { return "BackgroundSelector"; }
+	std::string description() const override { return "BackgroundSelector"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR Future<Void> _start( Database cx, BackgroundSelectorWorkload *self ) {
 		for(int c=0; c<self->actorsPerClient; c++)
@@ -68,7 +64,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		bool ok = true;
 		for( int i = 0; i < clients.size(); i++ )
 			if( clients[i].isError() )
@@ -77,7 +73,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
 		m.push_back( operations.getMetric() );

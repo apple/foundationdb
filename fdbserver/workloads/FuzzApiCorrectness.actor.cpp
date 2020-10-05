@@ -173,24 +173,20 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		TraceEvent("RemapEventSeverity").detail("TargetEvent", "LargeTransaction").detail("OriginalSeverity", SevWarnAlways).detail("NewSeverity", SevInfo);
 	}
 
-	virtual std::string description() { return "FuzzApiCorrectness"; }
+	std::string description() const override { return "FuzzApiCorrectness"; }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 ) {
 			return loadAndRun( cx, this );
 		}
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	Key getRandomKey() {
-		return getKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
-	}
+	Key getRandomKey() const { return getKeyForIndex(deterministicRandom()->randomInt(0, nodes)); }
 
-	Key getKeyForIndex( int idx ) {
+	Key getKeyForIndex(int idx) const {
 		idx += minNode;
 		if( adjacentKeys ) {
 			return Key( keyPrefix + std::string( idx, '\x00' ) );
@@ -199,11 +195,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	Value getRandomValue() {
+	Value getRandomValue() const {
 		return Value( std::string( deterministicRandom()->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		//m.push_back( transactions.getMetric() );
 		//m.push_back( retries.getMetric() );
 	}

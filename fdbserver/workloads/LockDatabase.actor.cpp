@@ -38,23 +38,18 @@ struct LockDatabaseWorkload : TestWorkload {
 		ASSERT(unlockAfter > lockAfter);
 	}
 
-	virtual std::string description() { return "LockDatabase"; }
+	std::string description() const override { return "LockDatabase"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) return onlyCheckLocked ? timeout(checkLocked(cx, this), 60, Void()) : lockWorker(cx, this);
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return ok;
-	}
+	Future<bool> check(Database const& cx) override { return ok; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Standalone<RangeResultRef>> lockAndSave( Database cx, LockDatabaseWorkload* self, UID lockID ) {
 		state Transaction tr(cx);

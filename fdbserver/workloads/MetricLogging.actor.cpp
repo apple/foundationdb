@@ -54,11 +54,9 @@ struct MetricLoggingWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return "MetricLogging"; }
+	std::string description() const override { return "MetricLogging"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return _setup( this, cx );
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	ACTOR Future<Void> _setup( MetricLoggingWorkload* self, Database cx ) {
 		wait( delay(2.0) );
@@ -72,18 +70,18 @@ struct MetricLoggingWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		for(int c = 0; c < actorCount; c++)
 			clients.push_back( timeout( MetricLoggingClient( cx, this, clientId, c ), testDuration, Void() ) );
 		return waitForAll( clients );
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( changes.getMetric() );
 		m.push_back( PerfMetric( "Changes/sec", changes.getValue() / testDuration, false ) );
 	}

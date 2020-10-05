@@ -59,7 +59,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100);
 	}
 
-	std::string description() override { return "ReportConflictingKeysWorkload"; }
+	std::string description() const override { return "ReportConflictingKeysWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

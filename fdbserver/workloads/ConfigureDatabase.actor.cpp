@@ -216,22 +216,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		g_simulator.usableRegions = 1;
 	}
 
-	virtual std::string description() { return "DestroyDatabaseWorkload"; }
+	std::string description() const override { return "DestroyDatabaseWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return _setup( cx, this );
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( this, cx );
-	}
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		m.push_back( retries.getMetric() );
-	}
+	void getMetrics(vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
 	static inline uint64_t valueToUInt64( const StringRef& v ) {
 		long long unsigned int x = 0;

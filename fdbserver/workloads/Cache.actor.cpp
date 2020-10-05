@@ -12,22 +12,17 @@ struct CacheWorkload : TestWorkload {
 		keyPrefix = unprintable( getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString() );
 	}
 
-	virtual std::string description() { return "CacheWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
-        if (clientId == 0) {
-            //Call management API to cache keys under the given prefix
-            return addCachedRange(cx, prefixRange(keyPrefix));
-        }
-        return Void();
+	std::string description() const override { return "CacheWorkload"; }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0) {
+			// Call management API to cache keys under the given prefix
+			return addCachedRange(cx, prefixRange(keyPrefix));
+		}
+		return Void();
 	}
-	virtual Future<Void> start( Database const& cx ) {
-        return Void();
-	}
-	virtual Future<bool> check( Database const& cx ) {
-        return true;
-	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<Void> start(Database const& cx) override { return Void(); }
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<CacheWorkload> CacheWorkloadFactory("Cache");

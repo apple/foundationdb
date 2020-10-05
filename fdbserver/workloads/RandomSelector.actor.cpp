@@ -45,25 +45,23 @@ struct RandomSelectorWorkload : TestWorkload {
 		fail = false;
 	}
 
-	virtual std::string description() { return "RandomSelector"; }
+	std::string description() const override { return "RandomSelector"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
-		return randomSelectorSetup( cx->clone(), this );
-	}
+	Future<Void> setup(Database const& cx) override { return randomSelectorSetup(cx->clone(), this); }
 
-	virtual Future<Void> start( Database const& cx ) { 
+	Future<Void> start(Database const& cx) override {
 		clients.push_back(
 			timeout(
 			randomSelectorClient( cx->clone(), this), testDuration, Void()) );
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return !fail;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 	}

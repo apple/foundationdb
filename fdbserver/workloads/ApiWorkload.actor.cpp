@@ -55,7 +55,7 @@ ACTOR Future<Void> setup(Database cx, ApiWorkload *self) {
 	return Void();
 }
 
-Future<Void> ApiWorkload::setup(Database const& cx) {
+Future<Void> ApiWorkload::setup(Database const& cx) override {
 	if(clientId < maxClients || maxClients < 0)
 		return ::setup(cx, this);
 
@@ -82,7 +82,7 @@ ACTOR Future<Void> start(Database cx, ApiWorkload *self) {
 	return Void();
 }
 
-Future<Void> ApiWorkload::start(Database const& cx) {
+Future<Void> ApiWorkload::start(Database const& cx) override {
 	if(clientId < maxClients || maxClients < 0)
 		return ::start(cx, this);
 
@@ -99,7 +99,7 @@ void ApiWorkload::testFailure(std::string reason)
 	success = false;
 }
 
-Future<bool> ApiWorkload::check(Database const& cx) {
+Future<bool> ApiWorkload::check(Database const& cx) override {
 	return success;
 }
 
