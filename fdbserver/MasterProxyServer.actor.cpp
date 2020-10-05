@@ -100,6 +100,9 @@ struct ProxyStats {
 	Deque<int> requestBuckets;
 	double lastBucketBegin;
 	double bucketInterval;
+	
+	double maxCompute;
+	double minCompute;
 
  	void updateRequestBuckets() {
 		while(now() - lastBucketBegin > bucketInterval) {
@@ -121,8 +124,21 @@ struct ProxyStats {
 		return recentRequests*FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
 	}
 
+	double getAndResetMaxCompute() {
+		double r = maxCompute;
+		maxCompute = 0;
+		return r;
+	}
+
+	double getAndResetMinCompute() {
+		double r = minCompute;
+		minCompute = 1000;
+		return r;
+	}
+
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
+	    maxCompute(0), minCompute(1000),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
@@ -148,6 +164,8 @@ struct ProxyStats {
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
+		specialCounter(cc, "MaxCompute", [this](){ return this->getAndResetMaxCompute(); });
+		specialCounter(cc, "MinCompute", [this](){ return this->getAndResetMinCompute(); });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
 			requestBuckets.push_back(0);
@@ -1246,13 +1264,15 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	computeDuration += g_network->timer() - computeStart;
-	if(computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && batchOperations > 0) {
-		double computePerOperation = computeDuration/batchOperations;
+	if(batchOperations > 0) {
+		double computePerOperation = std::min( SERVER_KNOBS->MAX_COMPUTE_PER_OPERATION, computeDuration/batchOperations );
 		if(computePerOperation <= self->commitComputePerOperation[latencyBucket]) {
 			self->commitComputePerOperation[latencyBucket] = computePerOperation;
 		} else {
 			self->commitComputePerOperation[latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*self->commitComputePerOperation[latencyBucket]);
 		}
+		self->stats.maxCompute = std::max(self->stats.maxCompute, self->commitComputePerOperation[latencyBucket]);
+		self->stats.minCompute = std::min(self->stats.minCompute, self->commitComputePerOperation[latencyBucket]);
 	}
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
