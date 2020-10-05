@@ -138,7 +138,7 @@ struct ProxyStats {
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
-	    maxCompute(0), minCompute(1e12),
+	    maxComputeNS(0), minComputeNS(1e12),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
