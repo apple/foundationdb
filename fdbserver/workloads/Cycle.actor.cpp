@@ -38,7 +38,6 @@ struct CycleWorkload : TestWorkload {
 	vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
-	bool verifyOnly;
 
 	CycleWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx),
@@ -52,7 +51,6 @@ struct CycleWorkload : TestWorkload {
 		keyPrefix = unprintable( getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString() );
 		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
-		verifyOnly = getOption(options, "verifyOnly"_sr, false);
 	}
 
 	virtual std::string description() { return "CycleWorkload"; }
@@ -60,9 +58,6 @@ struct CycleWorkload : TestWorkload {
 		return bulkSetup( cx, this, nodeCount, Promise<double>() );
 	}
 	virtual Future<Void> start( Database const& cx ) {
-		if (verifyOnly) {
-			return Void();
-		}
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				timeout(

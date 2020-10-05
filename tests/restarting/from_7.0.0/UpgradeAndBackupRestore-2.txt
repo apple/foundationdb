@@ -1,5 +1,6 @@
 testTitle=SecondCycleTest
 simBackupAgents=BackupToFile
+clearAfterTest=false
 
     testName=Cycle
     nodeCount = 30000
@@ -14,7 +15,6 @@ simBackupAgents=BackupToFile
     testDuration = 30.0
     expectedRate = 0
     keyPrefix=BeforeRestart
-    verifyOnly = true
 
     testName=RandomClogging
     testDuration = 90.0
@@ -37,18 +37,20 @@ simBackupAgents=BackupToFile
     
 testTitle=RestoreBackup
 simBackupAgents=BackupToFile
+clearAfterTest=false
 
     testName=RestoreBackup
     tag=default
-    
+
+testTitle=CheckCycles
+checkOnly=true
+
     testName=Cycle
     nodeCount=30000
     keyPrefix=AfterRestart
     expectedRate=0
-    verifyOnly=true
      
     testName=Cycle
     nodeCount = 30000
     keyPrefix=BeforeRestart
     expectedRate = 0
-    verifyOnly = true
