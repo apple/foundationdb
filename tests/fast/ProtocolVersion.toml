@@ -1,3 +1,5 @@
+protocolVersion = 0x0FDB00B070010000
+
 [[test]]
 testTitle = 'ProtocolVersionTest'
 
