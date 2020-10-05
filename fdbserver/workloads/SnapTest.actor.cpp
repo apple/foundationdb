@@ -82,6 +82,7 @@ public: // variables
 	std::string restartInfoLocation; // file location to store the snap restore info
 	int maxRetryCntToRetrieveMessage; // number of retires to do trackLatest
 	bool skipCheck; // disable check if the exec fails
+	int retryLimit; // -1 if no limit
 
 public: // ctor & dtor
 	SnapTestWorkload(WorkloadContext const& wcx)
@@ -97,6 +98,7 @@ public: // ctor & dtor
 		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
 		        .toString();
 		skipCheck = false;
+		retryLimit = getOption(options, LiteralStringRef("retryLimit"), 5);
 	}
 
 public: // workload functions
@@ -216,7 +218,7 @@ public: // workload functions
 					}
 					++retry;
 					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
-					if (retry > 5) {
+					if (self->retryLimit != -1 && retry > self->retryLimit) {
 						snapFailed = true;
 						break;
 					}
