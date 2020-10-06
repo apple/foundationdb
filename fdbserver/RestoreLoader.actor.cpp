@@ -57,6 +57,9 @@ ACTOR Future<Void> sendMutationsToApplier(
 ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
                                                            SerializedMutationListMap* mutationMap,
                                                            Reference<IBackupContainer> bc, RestoreAsset asset);
+ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
+                                                          SerializedMutationListMap* mutationMap,
+                                                          Reference<IBackupContainer> bc, RestoreAsset asset);
 ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
     std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
@@ -279,8 +282,8 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int no
 				when(wait(error)) { TraceEvent("FastRestoreLoaderActorCollectionError", self->id()); }
 			}
 		} catch (Error& e) {
-			TraceEvent(e.code() == error_code_broken_promise ? SevError : SevWarnAlways, "FastRestoreLoaderError",
-			           self->id())
+			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
+			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreLoaderError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
 			actors.clear(false);
@@ -352,6 +355,8 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	state Reference<IAsyncFile> file = wait(bc->readFile(asset.filename));
 	int rLen = wait(file->read(mutateString(buf), asset.len, asset.offset));
 	if (rLen != asset.len) throw restore_bad_read();
+
+	simulateBlobFailure();
 
 	TraceEvent("FastRestoreLoaderDecodingLogFile")
 	    .detail("BatchIndex", asset.batchIndex)
@@ -459,6 +464,39 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 	return Void();
 }
 
+// wrapper of _parsePartitionedLogFileOnLoader to retry on blob error
+ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
+    KeyRangeMap<Version>* pRangeVersions, NotifiedVersion* processedFileOffset,
+    std::map<LoadingParam, VersionedMutationsMap>::iterator kvOpsIter,
+    std::map<LoadingParam, SampledMutationsVec>::iterator samplesIter, LoaderCounters* cc,
+    Reference<IBackupContainer> bc, RestoreAsset asset) {
+	state int readFileRetries = 0;
+	loop {
+		try {
+			wait(_parsePartitionedLogFileOnLoader(pRangeVersions, processedFileOffset, kvOpsIter, samplesIter, cc, bc,
+			                                      asset));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
+			    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedPartitionedLogFileBlock").error(e);
+				throw;
+			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+				// blob http request failure, retry
+				TraceEvent(SevWarnAlways, "FastRestoreDecodedPartitionedLogFileConnectionFailure")
+				    .detail("Retries", ++readFileRetries)
+				    .error(e);
+				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParsePartitionedLogFileOnLoaderUnexpectedError").error(e);
+				throw;
+			}
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, LoadingParam param,
                                         Reference<LoaderBatchData> batchData, UID loaderID,
                                         Reference<IBackupContainer> bc) {
@@ -495,12 +533,12 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions, Lo
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
-				fileParserFutures.push_back(_parsePartitionedLogFileOnLoader(pRangeVersions, &processedFileOffset,
-				                                                             kvOpsPerLPIter, samplesIter,
-				                                                             &batchData->counters, bc, subAsset));
+				fileParserFutures.push_back(parsePartitionedLogFileOnLoader(pRangeVersions, &processedFileOffset,
+				                                                            kvOpsPerLPIter, samplesIter,
+				                                                            &batchData->counters, bc, subAsset));
 			} else {
 				fileParserFutures.push_back(
-				    _parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, bc, subAsset));
+				    parseLogFileToMutationsOnLoader(&processedFileOffset, &mutationMap, bc, subAsset));
 			}
 		}
 	}
@@ -585,9 +623,10 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		state int samplesMessages = fSendSamples.size();
 		wait(waitForAll(fSendSamples));
 	} catch (Error& e) { // In case ci.samples throws broken_promise due to unstable network
-		if (e.code() == error_code_broken_promise) {
+		if (e.code() == error_code_broken_promise || e.code() == error_code_operation_cancelled) {
 			TraceEvent(SevWarnAlways, "FastRestoreLoaderPhaseLoadFileSendSamples")
-			    .detail("SamplesMessages", samplesMessages);
+			    .detail("SamplesMessages", samplesMessages)
+			    .error(e, true);
 		} else {
 			TraceEvent(SevError, "FastRestoreLoaderPhaseLoadFileSendSamplesUnexpectedError").error(e, true);
 		}
@@ -1108,20 +1147,39 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 	// Sanity check the range file is within the restored version range
 	ASSERT_WE_THINK(asset.isInVersionRange(version));
 
-	// The set of key value version is rangeFile.version. the key-value set in the same range file has the same version
-	Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 	state Standalone<VectorRef<KeyValueRef>> blockData;
-	try {
-		Standalone<VectorRef<KeyValueRef>> kvs =
-		    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
-		TraceEvent("FastRestoreLoaderDecodedRangeFile")
-		    .detail("BatchIndex", asset.batchIndex)
-		    .detail("Filename", asset.filename)
-		    .detail("DataSize", kvs.contents().size());
-		blockData = kvs;
-	} catch (Error& e) {
-		TraceEvent(SevError, "FileRestoreCorruptRangeFileBlock").error(e);
-		throw;
+	// should retry here
+	state int readFileRetries = 0;
+	loop {
+		try {
+			// The set of key value version is rangeFile.version. the key-value set in the same range file has the same
+			// version
+			Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
+			Standalone<VectorRef<KeyValueRef>> kvs =
+			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+			TraceEvent("FastRestoreLoaderDecodedRangeFile")
+			    .detail("BatchIndex", asset.batchIndex)
+			    .detail("Filename", asset.filename)
+			    .detail("DataSize", kvs.contents().size());
+			blockData = kvs;
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
+			    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedRangeFileBlock").error(e);
+				throw;
+			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+				// blob http request failure, retry
+				TraceEvent(SevWarnAlways, "FastRestoreDecodedRangeFileConnectionFailure")
+				    .detail("Retries", ++readFileRetries)
+				    .error(e);
+				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParseRangeFileOnLoaderUnexpectedError").error(e);
+				throw;
+			}
+		}
 	}
 
 	// First and last key are the range for this file
@@ -1216,6 +1274,36 @@ ACTOR static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pPro
 		pProcessedFileOffset->set(asset.offset + asset.len);
 	}
 
+	return Void();
+}
+
+// retry on _parseLogFileToMutationsOnLoader
+ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessedFileOffset,
+                                                          SerializedMutationListMap* pMutationMap,
+                                                          Reference<IBackupContainer> bc, RestoreAsset asset) {
+	state int readFileRetries = 0;
+	loop {
+		try {
+			wait(_parseLogFileToMutationsOnLoader(pProcessedFileOffset, pMutationMap, bc, asset));
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_restore_bad_read || e.code() == error_code_restore_unsupported_file_version ||
+			    e.code() == error_code_restore_corrupted_data_padding) { // non retriable error
+				TraceEvent(SevError, "FastRestoreFileRestoreCorruptedLogFileBlock").error(e);
+				throw;
+			} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+				// blob http request failure, retry
+				TraceEvent(SevWarnAlways, "FastRestoreDecodedLogFileConnectionFailure")
+				    .detail("Retries", ++readFileRetries)
+				    .error(e);
+				wait(delayJittered(0.1));
+			} else {
+				TraceEvent(SevError, "FastRestoreParseLogFileToMutationsOnLoaderUnexpectedError").error(e);
+				throw;
+			}
+		}
+	}
 	return Void();
 }
 

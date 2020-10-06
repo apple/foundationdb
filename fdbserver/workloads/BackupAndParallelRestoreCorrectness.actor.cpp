@@ -468,6 +468,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("RestoreAfter", self->restoreAfter)
 				    .detail("BackupTag", printable(self->backupTag));
+				// start restoring
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait(container->describeBackup());

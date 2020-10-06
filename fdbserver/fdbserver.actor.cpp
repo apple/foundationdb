@@ -1889,11 +1889,13 @@ int main(int argc, char* argv[]) {
 				g_network->run();
 			}
 		} else if (role == MultiTester) {
+			setupRunLoopProfiler();
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE,
 			                       opts.testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, opts.minTesterCount,
 			                       opts.testFile, StringRef(), opts.localities));
 			g_network->run();
 		} else if (role == Test) {
+			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(),
 			                       opts.localities));
