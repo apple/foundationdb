@@ -49,7 +49,6 @@ static const char* typeString[] = { "SetValue",
 	                                "MinV2",
 	                                "AndV2",
 	                                "CompareAndClear",
-	                                "LockRange",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -76,7 +75,6 @@ struct MutationRef {
 		MinV2,
 		AndV2,
 		CompareAndClear,
-		LockRange,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.
@@ -127,11 +125,11 @@ struct MutationRef {
 	enum {
 		ATOMIC_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << AppendIfFits) | (1 << Max) |
 		              (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) |
-		              (1 << ByteMax) | (1 << MinV2) | (1 << AndV2) | (1 << CompareAndClear) | (1 << LockRange),
+		              (1 << ByteMax) | (1 << MinV2) | (1 << AndV2) | (1 << CompareAndClear),
 		SINGLE_KEY_MASK = ATOMIC_MASK | (1 << SetValue),
 		NON_ASSOCIATIVE_MASK = (1 << AddValue) | (1 << Or) | (1 << Xor) | (1 << Max) | (1 << Min) |
 		                       (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << MinV2) |
-		                       (1 << CompareAndClear) | (1 << LockRange)
+		                       (1 << CompareAndClear)
 	};
 };
 

@@ -377,6 +377,19 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
 			}
+			else if (m.param1.startsWith(lockedKeyRanges.begin)) {
+				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+
+				uint8_t status = BinaryReader::fromStringRef<uint8_t>(m.param2, Unversioned());
+				StringRef key = m.param1.removePrefix(lockedKeyRanges.begin);
+				TraceEvent("LockRange", dbgid)
+				    .detail("Version", mutationVersion)
+				    .detail("Status", status)
+				    .detail("Key", key);
+				if (locks != nullptr) {
+					locks->add(key, static_cast<LockStatus>(status), mutationVersion);
+				}
+			}
 		} else if (m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
 			KeyRangeRef range(m.param1, m.param2);
 
@@ -509,18 +522,19 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 
 				if(!initialCommit) txnStateStore->clear(commonLogRange);
 			}
-		} else if (m.param2.size() && m.type == MutationRef::LockRange && m.param1.startsWith(lockedKeyRanges.begin)) {
-			if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			if (range.intersects(lockedKeyRanges)) {
+				KeyRangeRef commonRange(range & lockedKeyRanges);
 
-			uint8_t status = BinaryReader::fromStringRef<uint8_t>(m.param2, Unversioned());
-			StringRef key = m.param1.removePrefix(lockedKeyRanges.begin);
-			TraceEvent("LockRange", dbgid)
-			    .detail("Version", mutationVersion)
-			    .detail("Status", status)
-			    .detail("Key", key);
-			if (locks != nullptr) {
-				locks->add(key, static_cast<LockStatus>(status), mutationVersion);
+				if (!initialCommit) txnStateStore->clear(commonRange);
+
+				TraceEvent("LockRangeClear", dbgid)
+				    .detail("Version", mutationVersion)
+				    .detail("Range", commonRange);
+				if (locks != nullptr) {
+					locks->clear(commonRange);
+				}
 			}
+
 		}
 	}
 

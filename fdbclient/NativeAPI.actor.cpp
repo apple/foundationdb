@@ -3066,10 +3066,6 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 			operationType = MutationRef::AndV2;
 	}
 
-	if (operationType == MutationRef::LockRange && key != rangeLockKey) {
-		throw client_invalid_operation();
-	}
-
 	auto &req = tr;
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );

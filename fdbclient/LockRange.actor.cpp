@@ -64,10 +64,6 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 		throw range_locks_access_denied();
 	}
 
-	//BinaryWriter wr(IncludeVersion(ProtocolVersion::withLockRangeValue()));
-	//wr << request;
-	//tr->set(rangeLockKey, wr.toValue(), MutationRef::SetVersionstampedKey);
-
 	// Update range lock version
 	if (checkDBLock) {
 		tr->atomicOp(rangeLockVersionKey, rangeLockVersionRequiredValue, MutationRef::SetVersionstampedValue);
@@ -191,6 +187,10 @@ void RangeLockCache::add(KeyRef beginKey, LockStatus status, Version commitVersi
 	// TODO
 }
 
+void RangeLockCache::clear(KeyRangeRef range) {
+	// TODO
+}
+
 RangeLockCache::Snapshot RangeLockCache::getSnapshot() {
 	return Value();
 }
@@ -205,7 +205,7 @@ TEST_CASE("/fdbclient/LockRange/KeyRangeMap") {
 
 	LockStatus a = locks["a"_sr];
 	ASSERT(a == LockStatus::UNLOCKED);
-	std::cout << "a status is: " << static_cast<uint8_t>(a) << "\n";
+	std::cout << "a status is: " << static_cast<uint32_t>(a) << "\n";
 
 	return Void();
 }

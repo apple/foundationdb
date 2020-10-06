@@ -416,7 +416,7 @@ public:
 	static RYWMutation coalesce(RYWMutation existingEntry, RYWMutation newEntry, Arena& arena) {
 		ASSERT(newEntry.value.present());
 
-		if (newEntry.type == MutationRef::SetValue || newEntry.type == MutationRef::LockRange) {
+		if (newEntry.type == MutationRef::SetValue) {
 			return newEntry;
 		} else if (newEntry.type == MutationRef::AddValue) {
 			switch(existingEntry.type) {
