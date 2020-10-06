@@ -155,7 +155,7 @@ struct StorageServerDisk {
 
 	void makeNewStorageServerDurable();
 	// Asyncronously move data from mutation log into SE's commit buffer for next commit.
-	Future<bool> asyncPrepareVersionsForCommit(Version desiredOldestVersion, Future<Void> durable, Future<Void>durableDelay);
+	Future<bool> asyncPrepareVersionsForCommit(Version desiredOldestVersion, Future<Void> durable, Future<Void>durableMinDelay);
 	void makeVersionDurable( Version version );
 	Future<bool> restoreDurableState();
 
@@ -3077,7 +3077,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		state Version desiredOldestVersion = data->desiredOldestVersion.get();
 
-		state Future<Void> durableDelay = Void();
+		state Future<Void> durableMinDelay = Void();
 		state Future<Void> durable = Void();
 
 		state int64_t ssCommitQuotaBytes;
@@ -3092,13 +3092,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			durableInProgress.reset();
 			data->durableInProgress = durableInProgress.getFuture();
 			durable = data->storage.commit(); // Commit data up to(inclusive) version pendingCommitVersion
-			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
+			durableMinDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
 			if (finalCommit) {
-				wait(durable && durableDelay);
+				wait(durable && durableMinDelay);
 				done = true;
 			} else {
 				// Move data start from pendingCommitVersion+1 to SE's commit buffer.
-				bool _finalCommit = wait(data->storage.asyncPrepareVersionsForCommit(desiredOldestVersion, durable, durableDelay));
+				bool _finalCommit = wait(data->storage.asyncPrepareVersionsForCommit(desiredOldestVersion, durable, durableMinDelay));
 				finalCommit = _finalCommit;
 			}
 			debug_advanceMinCommittedVersion( data->thisServerID, pendingCommitVersion );
@@ -3229,7 +3229,7 @@ ACTOR Future<int64_t> asyncWriteMutationsToCommitBuffer(StorageServer* data, Vec
 	return ssCommitQuotaBytes;
 }
 
-ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, StorageServer* data, Version desiredOldestVersion, Future<Void> durable, Future<Void>durableDelay) {
+ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, StorageServer* data, Version desiredOldestVersion, Future<Void> durable, Future<Void>durableMinDelay) {
 	state int64_t ssCommitQuotaBytes = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 	state bool finalCommit = false;
 	state Version startOldestVersion = data->storageVersion();
@@ -3243,7 +3243,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 		//    3.) no data in mutation log to write.
 		if (!data->storage.canPipelineCommits()) {
 			// Don't write version data while a commit is going on if the storage engine does not support pipelining
-			wait(durable && durableDelay);
+			wait(durable && durableMinDelay);
 		}
 		// Apply mutations from the mutationLog
 		auto u = data->getMutationLog().upper_bound(newOldestVersion);
@@ -3263,10 +3263,10 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			data->oldestVersion.set( newOldestVersion );
 			if (ssCommitQuotaBytes <= 0) {
 				// No quota left. Wait for previous commit to finish.
-				wait(durable && durableDelay);
+				wait(durable && durableMinDelay);
 				break;
 			}
-			if (data->storage.canPipelineCommits() && durable.isReady() && durableDelay.isReady()) {
+			if (data->storage.canPipelineCommits() && durable.isReady() && durableMinDelay.isReady()) {
 				// Previous commit is done.
 				break;
 			}
@@ -3284,7 +3284,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			finalCommit = true;
 
 			// Wait the previously written data to be committed
-			wait(durable && durableDelay);
+			wait(durable && durableMinDelay);
 
 			break;
 		}
@@ -3300,8 +3300,8 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 	return finalCommit;
 }
 
-Future<bool> StorageServerDisk::asyncPrepareVersionsForCommit(Version desiredOldestVersion, Future<Void> durable, Future<Void>durableDelay) {
-	return asyncPrepareVersionsForCommit_impl(this, data, desiredOldestVersion, durable, durableDelay);
+Future<bool> StorageServerDisk::asyncPrepareVersionsForCommit(Version desiredOldestVersion, Future<Void> durable, Future<Void>durableMinDelay) {
+	return asyncPrepareVersionsForCommit_impl(this, data, desiredOldestVersion, durable, durableMinDelay);
 }
 
 // Update data->storage to persist the changes from (data->storageVersion(),version]
