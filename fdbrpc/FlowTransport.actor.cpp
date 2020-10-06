@@ -157,16 +157,7 @@ struct PingReceiver : NetworkMessageReceiver {
 
 class TransportData {
 public:
-	TransportData(uint64_t transportId)
-	  : endpointNotFoundReceiver(endpoints),
-		pingReceiver(endpoints),
-		warnAlwaysForLargePacket(true),
-		lastIncompatibleMessage(0),
-		transportId(transportId),
-		numIncompatibleConnections(0)
-	{
-		degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
-	}
+	TransportData(uint64_t transportId);
 
 	~TransportData();
 
@@ -189,6 +180,7 @@ public:
 	std::vector<Future<Void>> listeners;
 	std::unordered_map<NetworkAddress, Reference<struct Peer>> peers;
 	std::unordered_map<NetworkAddress, std::pair<double, double>> closedPeers;
+	std::set<NetworkAddress> orderedAddresses;
 	Reference<AsyncVar<bool>> degraded;
 	bool warnAlwaysForLargePacket;
 
@@ -212,7 +204,42 @@ public:
 	uint64_t transportId;
 
 	Future<Void> multiVersionCleanup;
+	Future<Void> pingLogger;
 };
+
+ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
+	state NetworkAddress lastAddress = NetworkAddress();
+	loop {
+		wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
+		if(self->orderedAddresses.size()) {
+			auto it = self->orderedAddresses.upper_bound(lastAddress);
+			if(it == self->orderedAddresses.end()) {
+				it = self->orderedAddresses.begin();
+			}
+			lastAddress = *it;
+			auto peer = self->getPeer(lastAddress);
+			if(peer && peer->totalPingCount > 0) {
+				TraceEvent("PingLatency").detail("PeerAddr", lastAddress).detail("MinLatency", peer->minPingLatency).detail("MaxLatency", peer->maxPingLatency).detail("AvgLatency", peer->totalPingLatency/peer->totalPingCount).detail("Count", peer->totalPingCount);
+				peer->minPingLatency = 1000;
+				peer->maxPingLatency = 0;
+				peer->totalPingLatency = 0;
+				peer->totalPingCount = 0;
+			}
+		}
+	}
+}
+
+TransportData::TransportData(uint64_t transportId)
+	  : endpointNotFoundReceiver(endpoints),
+		pingReceiver(endpoints),
+		warnAlwaysForLargePacket(true),
+		lastIncompatibleMessage(0),
+		transportId(transportId),
+		numIncompatibleConnections(0)
+{
+	degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
+	pingLogger = pingLatencyLogger(this);
+}
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
 #define CONNECT_PACKET_V0_SIZE 14
@@ -339,6 +366,7 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 		FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePingEndpoint, true );
 		state int64_t startingBytes = peer->bytesReceived;
 		state int timeouts = 0;
+		state double startTime = now();
 		loop {
 			choose {
 				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
@@ -356,6 +384,11 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 					timeouts++;
 				}
 				when (wait( reply.getFuture() )) {
+					double pingLatency = now() - startTime;
+					peer->minPingLatency = std::min(peer->minPingLatency, pingLatency);
+					peer->maxPingLatency = std::max(peer->maxPingLatency, pingLatency);
+					peer->totalPingLatency += pingLatency;
+					peer->totalPingCount++;
 					break;
 				}
 				when (wait( peer->resetPing.onTrigger())) {
@@ -542,6 +575,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				TraceEvent("PeerDestroy").error(e).suppressFor(1.0).detail("PeerAddr", self->destination);
 				self->connect.cancel();
 				self->transport->peers.erase(self->destination);
+				self->transport->orderedAddresses.erase(self->destination);
 				return Void();
 			}
 		}
@@ -1029,6 +1063,7 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 			peer->connect = connectionKeeper(peer);
 		}
 		peers[address] = peer;
+		orderedAddresses.insert(address);
 	}
 
 	return peer;
