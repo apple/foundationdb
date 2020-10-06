@@ -131,11 +131,19 @@ struct IncrementalBackupWorkload : TestWorkload {
 						TraceEvent("IBackupCheckSpecialKeys")
 							.detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
 							.detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
+						if (!versionValue.present()) {
+							TraceEvent("IBackupCheckSpecialKeysFailure");
+							// Snapshot failed to write to special keys, possibly due to snapshot itself failing
+							throw key_not_found();
+						}
 						beginVersion = BinaryReader::fromStringRef<Version>(versionValue.get(), Unversioned());
 						TraceEvent("IBackupCheckBeginVersion").detail("Version", beginVersion);
 						break;
 					} catch (Error& e) {
 						TraceEvent("IBackupReadSystemKeysError").error(e);
+						if (e.code() == error_code_key_not_found) {
+							throw;
+						}
 						wait(tr->onError(e));
 					}
 				}
