@@ -623,29 +623,41 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
 
 TEST_CASE("fdb_transaction_set_option timeout") {
   fdb::Transaction tr(db);
-
-  // Timeout of 1 ms should cause transactions to time out even on localhost.
+  // Set smallest possible timeout, retry until a timeout occurs.
   int64_t timeout = 1;
   fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, (const uint8_t *)&timeout,
                           sizeof(timeout)));
-  tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
-  fdb::EmptyFuture f1 = tr.commit();
 
-  CHECK(wait_future(f1) == 1031); // transaction_timed_out
+  fdb_error_t err;
+  while (!err) {
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /* snapshot */ false);
+    err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      err = wait_future(f2);
+    }
+  }
+  CHECK(err == 1031); // transaction_timed_out
 }
 
 TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
-  // Timeout of 1 ms should cause transactions to time out even on localhost.
+  // Set smallest possible timeout, retry until a timeout occurs.
   int64_t timeout = 1;
   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TIMEOUT,
                                     (const uint8_t *)&timeout,
                                     sizeof(timeout)));
 
   fdb::Transaction tr(db);
-  tr.set((const uint8_t *)"foo", 3, (const uint8_t *)"bar", 3);
-  fdb::EmptyFuture f1 = tr.commit();
-
-  CHECK(wait_future(f1) == 1031); // transaction_timed_out
+  fdb_error_t err;
+  while (!err) {
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /* snapshot */ false);
+    err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      err = wait_future(f2);
+    }
+  }
+  CHECK(err == 1031); // transaction_timed_out
 
   // Reset transaction timeout (disable timeout).
   timeout = 0;
