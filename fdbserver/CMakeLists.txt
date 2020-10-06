@@ -187,6 +187,18 @@ add_library(fdb_sqlite STATIC
   sqlite/sqliteLimit.h
   sqlite/sqlite3.amalgamation.c)
 
+if (WITH_ROCKSDB_EXPERIMENTAL)
+  add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
+  # Set this to 0 if you want to compile RocksDB with `-march=native`.
+  set(PORTABLE_ROCKSDB 1)
+
+  include(CompileRocksDB)
+  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
+  # statically, so find the static library here.
+  find_library(lz4_STATIC_LIBRARIES
+    NAMES liblz4.a REQUIRED)
+endif()
+
 # Suppress warnings in sqlite since it's third party
 if(NOT WIN32)
   target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
@@ -204,7 +216,7 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} lz4)
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
