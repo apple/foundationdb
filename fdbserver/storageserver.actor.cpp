@@ -3074,7 +3074,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait( delay(0, TaskPriority::UpdateStorage) );
 
 		state Promise<Void> durableInProgress;
-		data->durableInProgress = durableInProgress.getFuture();
 
 		state Version desiredOldestVersion = data->desiredOldestVersion.get();
 
@@ -3241,7 +3240,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 		// While committing previously written data, keep writting new data from later versions until
 		//    1.) commit is done, or
 		//    2.) ssCommitQuotaBytes <= 0, or
-		//    3.) no data in mutaion log to write.
+		//    3.) no data in mutation log to write.
 		if (!data->storage.canPipelineCommits()) {
 			// Don't write version data while a commit is going on if the storage engine does not support pipelining
 			wait(durable && durableDelay);
@@ -4232,4 +4231,3 @@ void versionedMapTest() {
 	printf("Memory used: %f MB\n",
 		 (after - before)/ 1e6);
 }
-
