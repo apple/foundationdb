@@ -1631,7 +1631,8 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID, Reference<AsyncVar<ServerDBI
 
 ACTOR Future<Void> getRangeLockSnapshot(ProxyCommitData* self, GetRangeLockSnapshotRequest request) {
 	wait(self->committedVersion.whenAtLeast(request.version));
-	GetRangeLockSnapshotReply reply(self->locks.getSnapshot());
+	auto pair = self->locks.getSnapshot();
+	GetRangeLockSnapshotReply reply(pair.first, pair.second);
 	request.reply.send(reply);
 	return Void();
 }

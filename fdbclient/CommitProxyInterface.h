@@ -516,14 +516,18 @@ struct ExclusionSafetyCheckRequest
 
 struct GetRangeLockSnapshotReply {
 	constexpr static FileIdentifier file_identifier = 4363468;
-	Value snapshot;
+	std::vector<std::pair<KeyRange, LockStatus>> snapshot;
+	Version version;
 
 	GetRangeLockSnapshotReply() = default;
-	explicit GetRangeLockSnapshotReply(Value snapshot) : snapshot(snapshot) {}
+	GetRangeLockSnapshotReply(std::vector<std::pair<KeyRange, LockStatus>>& snapshot, Version version)
+	  : version(version) {
+		this->snapshot.swap(snapshot);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapshot);
+		serializer(ar, snapshot, version);
 	}
 };
 

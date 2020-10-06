@@ -4069,7 +4069,8 @@ ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version vers
 				if (reply.isError()) {
 					throw reply.getError();
 				}
-				cx->rangeLockCache.setSnapshot(version, reply.get().snapshot);
+				ASSERT(reply.get().version >= version);
+				cx->rangeLockCache.setSnapshot(reply.get().version, reply.get().snapshot);
 				if (deterministicRandom()->random01() < 0.01) std::cout << "Client snapshot 1%: " << cx->rangeLockCache.toString() << "\n";
 				return Void();
 			}

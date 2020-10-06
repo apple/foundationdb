@@ -1113,10 +1113,12 @@ inline bool isUnlocking(LockMode mode) {
 	return mode == LockMode::UNLOCK_EXCLUSIVE || mode == LockMode::UNLOCK_READ_SHARED;
 }
 
-enum LockStatus : uint8_t { UNLOCKED, SHARED_READ_LOCKED, EXCLUSIVE_LOCKED };
-
 // Convert the LockMode enum to a text description
-extern const char* getLockModeText(LockMode mode);
+extern const std::string lockModeToString(LockMode mode);
+
+enum LockStatus : uint8_t { UNLOCKED, READ_LOCKED, EXCLUSIVE_LOCKED };
+
+extern const std::string lockStatusToString(LockStatus s);
 
 // A lock or unlock request for a key range.
 struct LockRequest {

@@ -30,7 +30,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-const char* getLockModeText(LockMode mode) {
+const std::string lockModeToString(LockMode mode) {
 	switch (mode) {
 	case LockMode::LOCK_EXCLUSIVE:
 		return "LOCK_EXCLUSIVE";
@@ -47,6 +47,20 @@ const char* getLockModeText(LockMode mode) {
 	default:
 		return "<undefined>";
 	}
+}
+
+const std::string lockStatusToString(LockStatus s) {
+	switch (s) {
+	case LockStatus::EXCLUSIVE_LOCKED:
+		return "EXCLUSIVE_LOCKED";
+	case LockStatus::READ_LOCKED:
+		return "READ_LOCKED";
+	case LockStatus::UNLOCKED:
+		return "UNLOCKED";
+	}
+
+	ASSERT(false);
+	throw internal_error();
 }
 
 ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest request, bool checkDBLock) {
@@ -127,7 +141,7 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 		if (!ranges.empty()) return ALREADY_LOCKED;
 
 		LockStatus newValue =
-		    request.mode == LockMode::LOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::SHARED_READ_LOCKED;
+		    request.mode == LockMode::LOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::READ_LOCKED;
 		krmSetPreviouslyEmptyRange(tr, lockedKeyRanges.begin, request.range,
 		                           StringRef(reinterpret_cast<uint8_t*>(&newValue), sizeof(uint8_t)),
 		                           StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
@@ -138,7 +152,7 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 	if (ranges.empty()) return ALREADY_UNLOCKED;
 
 	LockStatus expectedStatus =
-	    request.mode == LockMode::UNLOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::SHARED_READ_LOCKED;
+	    request.mode == LockMode::UNLOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::READ_LOCKED;
 	for (const auto& r : ranges) {
 		if (r.cvalue() != expectedStatus) {
 			throw range_locks_access_denied();
@@ -156,29 +170,32 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 	return OK;
 }
 
-
-RangeLockCache::Reason RangeLockCache::check(KeyRef key, bool write) {
+RangeLockCache::Reason RangeLockCache::check(KeyRef key, bool write) const {
 	Key end = keyAfter(key);
 	return check(KeyRangeRef(key, end), write);
 }
 
-RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, bool write) {
+RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, bool write) const {
 	auto ranges = locks.intersectingRanges(range);
 
 	for (const auto& r : ranges) {
 		if (r.cvalue() == LockStatus::EXCLUSIVE_LOCKED) {
 			return DENIED_EXCLUSIVE_LOCK;
 		}
-		if (write && r.cvalue() == LockStatus::SHARED_READ_LOCKED) {
+		if (write && r.cvalue() == LockStatus::READ_LOCKED) {
 			return DENIED_READ_LOCK;
 		}
 	}
 	return OK;
 }
 
-std::string RangeLockCache::toString() {
+std::string RangeLockCache::toString() const {
 	std::string s;
-	// TODO
+	for (const auto& r : locks.ranges()) {
+		s.append(r.begin().toString()).append(" - ").append(r.end().toString());
+		s.append(" " + lockStatusToString(r.cvalue()) + "\n");
+	}
+
 	return s;
 }
 
@@ -195,12 +212,22 @@ void RangeLockCache::clear(KeyRangeRef range) {
 	locks.insert(range, LockStatus::UNLOCKED);
 }
 
-RangeLockCache::Snapshot RangeLockCache::getSnapshot() {
-	return Value();
+std::pair<RangeLockCache::Snapshot, Version> RangeLockCache::getSnapshot() const {
+	Snapshot snapshot;
+
+	for (const auto& r : locks.ranges()) {
+		snapshot.emplace_back(r.range(), r.cvalue());
+	}
+	return { snapshot, lockVersion };
 }
 
-void RangeLockCache::setSnapshot(Version version, RangeLockCache::Snapshot snapshot) {
-	// TODO
+void RangeLockCache::setSnapshot(Version version, const RangeLockCache::Snapshot& snapshot) {
+	lockVersion = version;
+	clear(allKeys);
+
+	for (const auto& pair : snapshot) {
+		locks.insert(pair.first, pair.second);
+	}
 }
 
 namespace {
@@ -230,7 +257,7 @@ TEST_CASE("/fdbclient/LockRange/KeyRangeMap") {
 	const Version v2 = 200;
 	cache.add("d"_sr, LockStatus::EXCLUSIVE_LOCKED, v2);
 	cache.add("e"_sr, LockStatus::UNLOCKED, v2);
-	cache.add("ee"_sr, LockStatus::SHARED_READ_LOCKED, v2);
+	cache.add("ee"_sr, LockStatus::READ_LOCKED, v2);
 	cache.add("exxx"_sr, LockStatus::UNLOCKED, v2);
 
 	ASSERT_EQ(cache.hasVersion(v1), false);
@@ -256,10 +283,11 @@ TEST_CASE("/fdbclient/LockRange/Unlock") {
 	const Version v2 = 200;
 	cache.add("d"_sr, LockStatus::EXCLUSIVE_LOCKED, v2);
 	cache.add("e"_sr, LockStatus::UNLOCKED, v2);
-	cache.add("ee"_sr, LockStatus::SHARED_READ_LOCKED, v2);
+	cache.add("ee"_sr, LockStatus::READ_LOCKED, v2);
 	cache.add("exxx"_sr, LockStatus::UNLOCKED, v2);
 
 	const Version v3 = 300;
+	// clear [d, e) lock
 	cache.clear(KeyRangeRef("d"_sr, "e"_sr));
 	cache.add("p"_sr, LockStatus::EXCLUSIVE_LOCKED, v3);
 	cache.add("t"_sr, LockStatus::UNLOCKED, v3);
@@ -267,26 +295,34 @@ TEST_CASE("/fdbclient/LockRange/Unlock") {
 	ASSERT_EQ(cache.hasVersion(v1), false);
 	ASSERT_EQ(cache.hasVersion(v2), false);
 	ASSERT_EQ(cache.hasVersion(v3), true);
+	std::cout << "Cache: " << cache.toString() << "\n";
 
-	ASSERT_EQ(cache.check("a"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("b"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("d"_sr, true), RangeLockCache::OK);
-	ASSERT_EQ(cache.check("p"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("q"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	auto pair = cache.getSnapshot();
+	RangeLockCache cache2;
+	cache2.setSnapshot(pair.second, pair.first);
+	std::cout << "Cache2: " << cache.toString() << "\n";
+	ASSERT_EQ(cache2.hasVersion(v3), true);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("c"_sr, "e"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), true), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "9"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check("a"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache2.check("b"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache2.check("d"_sr, true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check("p"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache2.check("q"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), true), RangeLockCache::DENIED_READ_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), /*write=*/false), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("b"_sr, "d"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("c"_sr, "e"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("d"_sr, "e"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("0"_sr, "9"_sr), true), RangeLockCache::OK);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), true), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), /*write=*/false), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), true), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("f"_sr, "p"_sr), true), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("t"_sr, "ta"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("ef"_sr, "eg"_sr), true), RangeLockCache::DENIED_READ_LOCK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("ef"_sr, "eg"_sr), /*write=*/false), RangeLockCache::OK);
+
+	ASSERT_EQ(cache2.check(KeyRangeRef("ea"_sr, "ee"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("ea"_sr, "ee"_sr), /*write=*/false), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("ey"_sr, "g"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("f"_sr, "p"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache2.check(KeyRangeRef("t"_sr, "ta"_sr), true), RangeLockCache::OK);
+
 	return Void();
 }
 
