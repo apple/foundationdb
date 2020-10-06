@@ -749,7 +749,6 @@ public:
 					throw connection_failed();
 				}
 			}
-			return Void();
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
 			if(e.code() != error_code_actor_cancelled) {
