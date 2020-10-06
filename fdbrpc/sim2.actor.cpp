@@ -1039,7 +1039,8 @@ public:
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
-		processProtocolVersion[m] = protocol; // do we want protocol to be part of protocol info?
+		processProtocolVersion[m] = protocol;
+		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);

@@ -163,7 +163,7 @@ public:
 	virtual flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 
-	virtual ProtocolVersion protocolVersion() override { return currentProtocolVersion; /* is this correct? */ }
+	virtual ProtocolVersion protocolVersion() override { return currentProtocolVersion; }
 
 	std::vector<flowGlobalType>		globals;
 

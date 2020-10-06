@@ -34,6 +34,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
 
 //#define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
@@ -1308,7 +1309,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for(int i = 0; i < all.size(); i++) {
-			if( all[i]->isReliable() && all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass ) {
+			if( all[i]->isReliable() && all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass && all[i]->protocolVersion == g_network->protocolVersion() ) {
 				if(!workerAddresses.count(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
 					return false;

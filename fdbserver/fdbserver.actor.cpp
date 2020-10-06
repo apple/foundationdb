@@ -781,11 +781,6 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(const Cl
 	NetworkAddressList listenNetworkAddresses;
 
 	auto& coordinators = connectionFile.getConnectionString().coordinators();
-	std::cout << "COORDINATORS: ";
-	for(auto& coordinator : coordinators){
-		std::cout << coordinator.toString() << " ";
-	}
-	std::cout << std::endl;
 	ASSERT(coordinators.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {

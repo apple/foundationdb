@@ -69,6 +69,8 @@ public:
 
 		UID uid;
 
+		ProtocolVersion protocolVersion;
+
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
 		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
@@ -326,6 +328,9 @@ public:
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+
+	bool hasDiffProtocol;
+	bool setDiffProtocol;
 
 	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
