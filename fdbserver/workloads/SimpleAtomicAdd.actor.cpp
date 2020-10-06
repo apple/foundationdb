@@ -77,12 +77,12 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		state Value val = StringRef((const uint8_t*)&self->initialValue, sizeof(self->initialValue));
 		loop {
 			try {
-				TraceEvent("SimpleAtomicAddSetInitialValue").detail("Key", self->sumKey).detail("Value", val);
+				TraceEvent("SAASetInitialValue").detail("Key", self->sumKey).detail("Value", val);
 				tr.set(self->sumKey, val);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
-				TraceEvent("SimpleAtomicAddSetInitialValueError").error(e);
+				TraceEvent("SAASetInitialValueError").error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -94,12 +94,12 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		state Value val = StringRef((const uint8_t*)&self->addValue, sizeof(self->addValue));
 		loop {
 			try {
-				TraceEvent("SimpleAtomicAddBegin").detail("Key", self->sumKey).detail("Value", val);
+				TraceEvent("SAABegin").detail("Key", self->sumKey).detail("Value", val);
 				tr.atomicOp(self->sumKey, val, MutationRef::AddValue);
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
-				TraceEvent("SimpleAtomicAddError").error(e);
+				TraceEvent("SAABeginError").error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -112,13 +112,23 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		if (self->initialize) {
 			expectedValue += self->initialValue;
 		}
-		Optional<Value> actualValue = wait(tr.get(self->sumKey));
-		uint64_t actualValueInt = 0;
-		if (actualValue.present()) {
-			memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());
+		loop {
+			try {
+				TraceEvent("SAACheckKey");
+				Optional<Value> actualValue = wait(tr.get(self->sumKey));
+				uint64_t actualValueInt = 0;
+				if (actualValue.present()) {
+					memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());
+				}
+				TraceEvent("SAACheckEqual")
+				    .detail("ExpectedValue", expectedValue)
+				    .detail("ActualValue", actualValueInt);
+				return (expectedValue == actualValueInt);
+			} catch (Error& e) {
+				TraceEvent("SAACheckError").error(e);
+				wait(tr.onError(e));
+			}
 		}
-		TraceEvent("SimpleAtomicAddCheck").detail("ExpectedValue", expectedValue).detail("ActualValue", actualValueInt);
-		return (expectedValue == actualValueInt);
 	}
 
 	virtual void getMetrics(vector<PerfMetric>& m) {}
