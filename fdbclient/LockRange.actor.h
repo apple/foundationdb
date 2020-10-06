@@ -44,76 +44,42 @@ class Transaction;
 
 class RangeLockCache {
 public:
-	using Snapshot = Standalone<VectorRef<LockRequest>>;
-	using SnapshotIterator = std::map<Version, Snapshot>::iterator;
-	using Requests = Standalone<VectorRef<LockRequest>>;
+	// using Snapshot = Standalone<VectorRef<LockRequest>>;
+	using Snapshot = Value;
 
 	enum Reason {
 		OK,
 		DENIED_EXCLUSIVE_LOCK,
 		DENIED_READ_LOCK, // Write access is denied because of read lock held
-		DENIED_OLD_VERSION, // Request is denied because old lock version is used
 		ALREADY_LOCKED, // Attempts to lock an already locked range
 		ALREADY_UNLOCKED, // Attempts to release locks for an unlocked range
 	};
 
 	RangeLockCache() = default;
 
-	// Adds lock requests for the given lock version.
-	void add(Version version, const Requests& requests);
-	void add(Version version, const LockRequest& request);
-
-	// Expire cached snapshots or requests up to the given version.
-	void expire(Version upTo);
-
-	// Returns if the cache has data for the given lock version.
-	bool hasVersion(Version version);
-
-	// Returns if the key/range can be written/read for the given version.
-	Reason check(KeyRef key, Version version, bool write = true);
-	Reason check(KeyRangeRef range, Version version, bool write = true);
-	Reason check(const LockRequest& request, Version version);
-
 	// Client tries to add a lock request. If the request can proceed, reason
 	// is set to OK and mutations are added to the transaction object.
 	// Otherwise, reason gives the error and transaction object is intact.
 	Reason tryAdd(Transaction* tr, const LockRequest& request);
 
-	// Serializes all requests from the given version and on.
-	Value getChanges(Version from);
+	Reason check(KeyRef key, bool write);
+	Reason check(KeyRangeRef range, bool write);
 
-	// PRE-CONDITION: hasVersion(version) must return true
-	Snapshot getSnapshot(Version version);
-	Value getSnapshotValue(Version version);
-
-	void setSnapshot(Version version, Snapshot snapshot) {
-		snapshots[version] = snapshot;
+	bool hasVersion(Version version) {
+		return lockVersion == version;
 	}
 
-	void setSnapshotValue(Version version, Value snapshot);
+	void setSnapshot(Version version, Value snapshot);
 
 	// Returns snapshots & lock requests in string.
 	std::string toString();
 
+	// Proxy uses the following methods
+
+	void add(KeyRef beginKey, LockStatus status, Version version);
+	Snapshot getSnapshot();
+
 private:
-	std::string toString(Version version, Snapshot snapshot);
-
-	// Make sure a snapshot for the version exists.
-	void ensureSnapshot(Version version);
-
-	// From a base snapshot, builds the next snapshot and returns the iterator to it.
-	SnapshotIterator buildSnapshot(SnapshotIterator it);
-
-	// PRE-CONDITION: a and b do not overlap.
-	static bool rangeLess(const KeyRangeRef& a, const KeyRangeRef& b) { return a.begin < b.begin; }
-
-	// PRE-CONDITION: a and b do not overlap.
-	static bool lockLess(const LockRequest& a, const LockRequest& b) { return rangeLess(a.range, b.range); }
-
-	// A version ordered locked ranges
-	std::map<Version, Snapshot> snapshots;
-	std::map<Version, Requests> requests;
-
 	Version lockVersion = invalidVersion; // the latest commit version of locks
 	KeyRangeMap<LockStatus> locks; // locked key ranges
 };

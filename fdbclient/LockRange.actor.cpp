@@ -121,18 +121,6 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<LockRequest> requests) {
 	}
 }
 
-void RangeLockCache::add(Version version, const Requests& more) {
-	auto& current = requests[version];
-	current.append(current.arena(), more.begin(), more.size());
-	current.arena().dependsOn(more.arena());
-}
-
-void RangeLockCache::add(Version version, const LockRequest& request) {
-	auto& current = requests[version];
-	current.push_back_deep(current.arena(), request);
-	TraceEvent("RangeLockCache::add").detail("V", toString());
-}
-
 /*
 void krmSetPreviouslyEmptyRange( Transaction* tr, const KeyRef& mapPrefix, const KeyRangeRef& keys, const ValueRef& newValue, const ValueRef& oldEndValue )
 {
@@ -180,222 +168,35 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 	return OK;
 }
 
-// PRE-CONDITION: there are lock versions larger than "upTo".
-void RangeLockCache::expire(Version upTo) {
-	// Make sure we have a snapshot right after "upTo" version
-	auto snapIter = snapshots.upper_bound(upTo);
-	auto reqIter = requests.upper_bound(upTo);
-	if (snapIter != snapshots.end()) {
-		if (reqIter != requests.end() && reqIter->first < snapIter->first) {
-			ensureSnapshot(reqIter->first);
-		}
-	} else if (reqIter != requests.end()) {
-		ensureSnapshot(reqIter->first);
-	} else {
-		TraceEvent(SevError, "RLCExpireNone");
-		return;
-	}
 
-	TraceEvent("RLCExpire").detail("Version", upTo);
-	for (auto it = snapshots.begin(); it != snapshots.end() && it->first <= upTo;) {
-		it = snapshots.erase(it);
-	}
-
-	for (auto it = requests.begin(); it != requests.end() && it->first <= upTo;) {
-		it = requests.erase(it);
-	}
-}
-
-bool RangeLockCache::hasVersion(Version version) {
-	return snapshots.find(version) != snapshots.end() || requests.find(version) != requests.end();
-}
-
-RangeLockCache::Reason RangeLockCache::check(KeyRef key, Version version, bool write) {
+RangeLockCache::Reason RangeLockCache::check(KeyRef key, bool write) {
 	Key end = keyAfter(key);
-	return check(KeyRangeRef(key, end), version, write);
+	return check(KeyRangeRef(key, end), write);
 }
 
-RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, Version version, bool write) {
-	if (!hasVersion(version)) return DENIED_OLD_VERSION;
-
-	ensureSnapshot(version);
-	auto& snapshot = snapshots[version];
+RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, bool write) {
 	// TODO: change snapshot for O(log N) cost
-	for (const auto& lock : snapshot) {
-		if (range.end <= lock.range.begin) break;
-		if (range.begin >= lock.range.end) continue;
-
-		if (lock.mode == LockMode::LOCK_EXCLUSIVE) {
-			return DENIED_EXCLUSIVE_LOCK;
-		} else if (lock.mode == LockMode::LOCK_READ_SHARED && write) {
-			return DENIED_READ_LOCK;
-		}
-	}
 	return OK;
-}
-
-RangeLockCache::Reason RangeLockCache::check(const LockRequest& request, Version version) {
-	switch (request.mode) {
-	case LockMode::LOCK_EXCLUSIVE:
-	case LockMode::UNLOCK_EXCLUSIVE:
-		return check(request.range, version, true);
-
-	case LockMode::LOCK_READ_SHARED:
-	case LockMode::UNLOCK_READ_SHARED:
-		return check(request.range, version, false);
-
-	default: break;
-	}
-
-	ASSERT(false);
-	return OK;
-}
-
-Value RangeLockCache::getChanges(Version from) {
-	ASSERT(false);
-	return Value();
-}
-
-RangeLockCache::Snapshot RangeLockCache::getSnapshot(Version at) {
-	ASSERT(hasVersion(at));
-	ensureSnapshot(at);
-	return snapshots[at];
-}
-
-// TODO: serialization across restarts? return value is stored at txnStateStore
-Value RangeLockCache::getSnapshotValue(Version at) {
-	Snapshot snapshot = getSnapshot(at);
-	std::cout << __FUNCTION__ << toString() << "\n";
-	return BinaryWriter::toValue(snapshot, IncludeVersion());
-}
-
-void RangeLockCache::setSnapshotValue(Version at, Value value) {
-	TraceEvent("LockRangeValueDecode").detail("V", value);
-
-	Snapshot snapshot = BinaryReader::fromStringRef<Snapshot>(value, IncludeVersion());
-	setSnapshot(at, snapshot);
-	std::cout << __FUNCTION__ << toString() << "\n";
-}
-
-std::string RangeLockCache::toString(Version version, Snapshot snapshot) {
-	std::string s;
-	char buf[16];
-	sprintf(buf, "%" PRId64, version);
-	s.append("Version: ").append(buf);
-	s.append("\n");
-	for (const auto& req : snapshot) {
-		s.append("  Range: " + printable(req.range));
-		s.append(", mode: ").append(getLockModeText(req.mode));
-		s.append("\n");
-	}
-	return s;
 }
 
 std::string RangeLockCache::toString() {
 	std::string s;
-	bool first = true;
-	for (const auto& [version, snapshot] : snapshots) {
-		if (first) {
-			s.append("=== Snapshots ===\n");
-			first = false;
-		} else {
-			s.append("\n");
-		}
-		s.append(toString(version, snapshot));
-	}
-
-	first = true;
-	for (const auto& [version, snapshot] : requests) {
-		if (first) {
-			s.append("=== Requests ===\n");
-			first = false;
-		} else {
-			s.append("\n");
-		}
-		s.append(toString(version, snapshot));
-	}
+	// TODO
 	return s;
 }
 
-void RangeLockCache::ensureSnapshot(Version version) {
-	auto snapIter = snapshots.lower_bound(version);
-	if (snapIter != snapshots.end() && snapIter->first == version) return;
+void RangeLockCache::add(KeyRef beginKey, LockStatus status, Version commitVersion) {
+	lockVersion = commitVersion;
 
-	ASSERT(requests.find(version) != requests.end());
-
-	if (snapIter != snapshots.begin()) {
-		snapIter--;
-	}
-	if (snapIter == snapshots.end()) {
-		// No snapshots before, build first one.
-		const auto reqIter = requests.begin();
-		ASSERT(reqIter != requests.end());
-
-		std::vector<LockRequest> fLocks;
-		for (const auto& req : reqIter->second) {
-			ASSERT(req.mode == LockMode::LOCK_EXCLUSIVE || req.mode == LockMode::LOCK_READ_SHARED);
-			fLocks.push_back(req);
-		}
-		std::sort(fLocks.begin(), fLocks.end(), RangeLockCache::lockLess);
-
-		auto& snap = snapshots[reqIter->first];
-		for (const auto& req : fLocks) {
-			snap.push_back_deep(snap.arena(), req);
-		}
-		snapIter = snapshots.begin();
-	}
-
-	// Start building snapshots till version
-	while (snapIter->first < version) {
-		snapIter = buildSnapshot(snapIter);
-	}
-	ASSERT(snapIter->first == version);
+	// TODO
 }
 
-RangeLockCache::SnapshotIterator RangeLockCache::buildSnapshot(RangeLockCache::SnapshotIterator it) {
-	const auto reqIter = requests.lower_bound(it->first + 1);
-	ASSERT(reqIter != requests.end());
+RangeLockCache::Snapshot RangeLockCache::getSnapshot() {
+	return Value();
+}
 
-	std::map<KeyRangeRef, LockRequest, bool (*)(const KeyRangeRef&, const KeyRangeRef&)> locks(rangeLess);
-	for (const auto& req : it->second) {
-		locks.insert(std::make_pair(req.range, req));
-	}
-
-	for (const auto& req : reqIter->second) {
-		auto it = locks.lower_bound(req.range);
-
-		switch (req.mode) {
-		case LockMode::LOCK_EXCLUSIVE:
-		case LockMode::LOCK_READ_SHARED:
-			if (it == locks.end()) {
-				if (!locks.empty()) {
-					ASSERT(rangeLess(locks.rbegin()->first, req.range));
-				}
-			} else {
-				ASSERT(req.range.end <= it->first.begin); // No overlap
-			}
-			locks.insert(std::make_pair(req.range, req));
-			break;
-
-		case LockMode::UNLOCK_EXCLUSIVE:
-		case LockMode::UNLOCK_READ_SHARED:
-			ASSERT(it != locks.end());
-			ASSERT(it->first == req.range);
-			locks.erase(it);
-			break;
-
-		default:
-			ASSERT(false);
-		}
-	}
-
-	Snapshot& snapshot = snapshots[reqIter->first];
-	ASSERT_EQ(snapshot.size(), 0);
-	for (const auto& [_, req] : locks) {
-		snapshot.push_back_deep(snapshot.arena(), req);
-	}
-	it++;
-	return it;
+void RangeLockCache::setSnapshot(Version version, RangeLockCache::Snapshot snapshot) {
+	// TODO
 }
 
 namespace {
@@ -404,19 +205,18 @@ TEST_CASE("/fdbclient/LockRange/KeyRangeMap") {
 
 	LockStatus a = locks["a"_sr];
 	ASSERT(a == LockStatus::UNLOCKED);
-	std::cout << "a status is: " << (uint8_t)a << "\n";
+	std::cout << "a status is: " << static_cast<uint8_t>(a) << "\n";
 
 	return Void();
 }
 
 TEST_CASE("/fdbclient/LockRange/Cache") {
 	RangeLockCache cache;
+	Transaction tr;
 
-	RangeLockCache::Requests requests;
-	const Version v1 = 100;
-	requests.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("a"_sr, "d"_sr), LockMode::LOCK_EXCLUSIVE));
-	cache.add(v1, requests);
-
+	LockRequest r1(KeyRangeRef("a"_sr, "d"_sr), LockMode::LOCK_EXCLUSIVE);
+	cache.tryAdd(&tr, r1);
+/*
 	ASSERT_EQ(cache.hasVersion(v1), true);
 	ASSERT_EQ(cache.check("a"_sr, v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
 	ASSERT_EQ(cache.check("b"_sr, v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
@@ -443,14 +243,14 @@ TEST_CASE("/fdbclient/LockRange/Cache") {
 
 	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v2), RangeLockCache::OK);
 	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), v2), RangeLockCache::OK);
-
+*/
 	std::cout << cache.toString() << "\n";
 	return Void();
 }
 
+#if 0
 TEST_CASE("/fdbclient/LockRange/CacheExpire") {
 	RangeLockCache cache;
-
 	RangeLockCache::Requests requests;
 	const Version v1 = 100;
 	requests.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("a"_sr, "d"_sr), LockMode::LOCK_EXCLUSIVE));
@@ -492,7 +292,6 @@ TEST_CASE("/fdbclient/LockRange/CacheExpire") {
 	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v2, /*write=*/false), RangeLockCache::OK);
 	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), v2), RangeLockCache::OK);
 	std::cout << cache.toString() << "\n";
-
 	return Void();
 }
 
@@ -544,8 +343,8 @@ TEST_CASE("/fdbclient/LockRange/Unlock") {
 	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), v3), RangeLockCache::OK);
 	ASSERT_EQ(cache.check(KeyRangeRef("f"_sr, "p"_sr), v3), RangeLockCache::OK);
 	ASSERT_EQ(cache.check(KeyRangeRef("t"_sr, "ta"_sr), v3), RangeLockCache::OK);
-
 	return Void();
 }
+#endif
 
 } // anonymous namespace

@@ -516,10 +516,10 @@ struct ExclusionSafetyCheckRequest
 
 struct GetRangeLockSnapshotReply {
 	constexpr static FileIdentifier file_identifier = 4363468;
-	Standalone<VectorRef<LockRequest>> snapshot;
+	Value snapshot;
 
 	GetRangeLockSnapshotReply() = default;
-	explicit GetRangeLockSnapshotReply(Standalone<VectorRef<LockRequest>> snapshot) : snapshot(snapshot) {}
+	explicit GetRangeLockSnapshotReply(Value snapshot) : snapshot(snapshot) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
