@@ -219,11 +219,18 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			lastAddress = *it;
 			auto peer = self->getPeer(lastAddress);
 			if(peer && peer->totalPingCount > 0) {
-				TraceEvent("PingLatency").detail("PeerAddr", lastAddress).detail("MinLatency", peer->minPingLatency).detail("MaxLatency", peer->maxPingLatency).detail("AvgLatency", peer->totalPingLatency/peer->totalPingCount).detail("Count", peer->totalPingCount);
+				TraceEvent("PingLatency")
+				  .detail("PeerAddr", lastAddress)
+				  .detail("MinLatency", peer->minPingLatency)
+				  .detail("MaxLatency", peer->maxPingLatency)
+				  .detail("AvgLatency", peer->totalPingLatency/peer->totalPingCount)
+				  .detail("Count", peer->totalPingCount)
+				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived);
 				peer->minPingLatency = 1000;
 				peer->maxPingLatency = 0;
 				peer->totalPingLatency = 0;
 				peer->totalPingCount = 0;
+				peer->lastLoggedBytesReceived = peer->bytesReceived;
 			}
 		}
 	}
