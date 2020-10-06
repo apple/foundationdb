@@ -18,17 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
-#include "fdbclient/Status.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
-#include "fdbrpc/fdbrpc.h"
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
-#include "flow/network.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 void throwIfError(FdbCApi::fdb_error_t e) {
@@ -693,8 +689,6 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi *api, std::string clu
 	dbState->db = db;
 	dbState->dbVar->set(db);
 
-	std::cout << "TRYING TO ADD CONNECTION" << std::endl;
-
 	if(!openConnectors) {
 		dbState->currentClientIndex = 0;
 	}
@@ -883,143 +877,7 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	currentClientIndex = newIndex;
 }
 
-ACTOR Future<Void> getServerProtocol(Endpoint endpoint) {
-    RequestStream<ProtocolInfoRequest> requestStream{ endpoint };
-    auto f = retryBrokenPromise(requestStream, ProtocolInfoRequest{});
-	std::cout << " MAKING REQUEST FOR PROTOCOL INFO FROM: " << requestStream.getEndpoint().addresses.toString() << std::endl;
-
-	while(!f.isReady()) { // TODO figure out how to make this work
-		if(f.isError() || !f.isValid()) {
-			std::cout << "SOMEE ERROR OCCURED" << std::endl;
-		}
-	}
-    ProtocolInfoReply res = wait(f);
-
-    std::cout << "GOT VERSION: " << res.version.version() << std::endl;
-    return Void();
-}
-
-// Check if a quorum of coordination servers is reachable
-// Will not throw, will just return non-present Optional if error
-ACTOR Future<Optional<StatusObject>> multiVersionClientCoordinatorsStatusFetcher(Reference<ClusterConnectionFile> f, bool *quorum_reachable, int *coordinatorsFaultTolerance) {
-	try {
-		std::cout << "TYING TO GET STATUS" << std::endl;
-		state ClientCoordinators coord(f);
-		state StatusObject statusObj;
-
-		state vector<Future<Optional<LeaderInfo>>> leaderServers;
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskPriority::CoordinationReply));
-		}
-
-		state vector<Future<ProtocolInfoReply>> coordProtocols;
-		coordProtocols.reserve(coord.clientLeaderServers.size());
-		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-			std::cout << "SENDING TO : " << coord.clientLeaderServers[i].getLeader.getEndpoint().addresses.toString() << std::endl;
-			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
-				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
-			Future<ProtocolInfoReply> r = retryBrokenPromise(requestStream, ProtocolInfoRequest{});
-			while(!r.isReady()) { // TODO figure out how to make this work
-				if(r.isError() || !r.isValid()) {
-					std::cout << "SOMEE ERROR OCCURED" << std::endl;
-				}
-			}
-			coordProtocols.push_back(r);
-			// coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-		}
-		// wait(getServerProtocol(Endpoint{{ coord.clientLeaderServers[0].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } ));
-		// return Optional<StatusObject>();
-		
-
-		wait(waitForAll(coordProtocols));
-
-		for(Future<ProtocolInfoReply> r : coordProtocols) {
-			std::cout << "PROTOCOL VESRION: " << r.get().version.version() << std::endl;
-		}
-
-		std::cout << "WAITING FOR LEADER SERVERS" << std::endl;
-		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
-		         smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
-		     delay(2.0));
-		std::cout << "GOT LEADER SERVERS" << std::endl;
-
-		statusObj["quorum_reachable"] = *quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
-
-		StatusArray coordsStatus;
-		int coordinatorsUnavailable = 0;
-		for (int i = 0; i < leaderServers.size(); i++) {
-			StatusObject coordStatus;
-			coordStatus["address"] = coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress().toString();
-			
-			if (leaderServers[i].isReady()){
-				coordStatus["reachable"] = true;
-			}
-			else {
-				coordinatorsUnavailable++;
-				coordStatus["reachable"] = false;
-			}
-			if (coordProtocols[i].isReady()) {
-				coordStatus["protocol"] = coordProtocols[i].get().version.version();
-			}
-			coordsStatus.push_back(coordStatus);
-		}
-		statusObj["coordinators"] = coordsStatus;
-		
-		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
-		return statusObj;
-	}
-	catch (Error &e){
-		*quorum_reachable = false;
-		return Optional<StatusObject>();
-	}
-}
-
-void getCoordinatorProtocolFromStatusObject(StatusObjectReader statusObj) {
-	// StatusObjectReader statusObjClient;
-	// statusObj.get("client", statusObjClient);
-	StatusObjectReader statusObjCoordinators;
-	StatusArray coordinatorsArr;
-
-	if (statusObj.get("coordinators", statusObjCoordinators)) {
-		std::cout << "IN HERE" << std::endl;
-		// Look for a second "coordinators", under the first one.
-		if (statusObjCoordinators.has("coordinators"))
-			coordinatorsArr = statusObjCoordinators.last().get_array();
-	}
-
-	for (StatusObjectReader coor : coordinatorsArr){
-		uint64_t version;
-		coor.get("protocol", version);
-		std::cout << "COORD PROTOCOL VERSION: " << version << std::endl; 
-	}
-}
-
-ACTOR Future<Void> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	state bool quorum_reachable = false;
-	state int coordinatorsFaultTolerance = 0;
-
-	Optional<StatusObject> statusObjOptional = wait(multiVersionClientCoordinatorsStatusFetcher(f, &quorum_reachable, &coordinatorsFaultTolerance));
-	if(!quorum_reachable) {
-		std::cout << "QUORUM NOT REACHABLE" << std::endl;
-	}
-	std::cout << "GOT STATUS OBJECT" << std::endl;
-
-	StatusObject statusObj= statusObjOptional.get();
-	getCoordinatorProtocolFromStatusObject(statusObj);
-
-	return Void();
-}
-
-// TODO: adding connections here and attempt connections
 void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
-	// do check if compatible - call StatusClient::statusFetcher(Database)?
-		// why doesn't Database inherit from IDatabase
-		// could use clusterFilePath to directly ask for coordinators protocols - statusFetcher requires a Database object to be passed in
-	// clientCoordinatorsStatusFetcher(Reference<ClusterConnectionFile> f, bool *quorum_reachable, int *coordinatorsFaultTolerance) can't be accessed
-	// statusObj["coordinators"] -> array of coordStatus JSON. coordStatus[protocol]
-
-	// should we be adding the client first and then use runOnExternalClient to check if the protocol is compatible?
-	// or can we check if a client is compatible here and only get the coordinator protocol versions once?
 	clients.push_back(client);
 	connectionAttempts.push_back(Reference<Connector>(new Connector(Reference<DatabaseState>::addRef(this), client, clusterFilePath)));
 }
@@ -1165,7 +1023,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		if(externalClients.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 			externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(lib), lib));
-		}
+		}	
 	}
 }
 
@@ -1258,10 +1116,8 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	}
 }
 
-// TODO: should the check be happening here? Before we setup network? the network should be setup before external connections are added
 void MultiVersionApi::setupNetwork() {
 	if(!externalClient) {
-		std::cout << "SETTING UP ENV VARIABLES" << std::endl;
 		loadEnvironmentVariableNetworkOptions();
 	}
 
@@ -1287,14 +1143,12 @@ void MultiVersionApi::setupNetwork() {
 	}
 
 	localClient->loadProtocolVersion();
-	std::cout << "SET UP NETWORK LOCAL CLIENT PROTOCOL VERSION: " << localClient->protocolVersion.version() << std::endl;
 
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([this](Reference<ClientInfo> client) {
 			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
 			client->api->selectApiVersion(apiVersion);
 			client->loadProtocolVersion();
-			std::cout << "EXTERNAL CLIENT PROTOCOL VERSION: " << client->protocolVersion.version() << std::endl;
 		});
 
 		MutexHolder holder(lock);
@@ -1337,40 +1191,6 @@ void MultiVersionApi::runNetwork() {
 
 	lock.leave();
 
-	std::cout << "STARTING NETWORK THREAD" << std::endl;
-
-	// TODO: ONLY RUN NETWORK THREADS OF OTHER CLIENTS IF WE KNOW THAT THEY ARE COMPATIBLE??
-	// OR ALLOW THE NETWORK THREADS TO START, BUT KILL THEM AFTER REALIZING THEY'RE INCOMPATIBLE
-	// MAYBE: ONLY CREATE NETWORK THREAD FOR CURRENT CLIENT. THEN WHEN CREATING DATABASE, START NETWORK THREADS FOR OTHER AS WELL?
-
-	// std::vector<THREAD_HANDLE> handles;
-	// if(!bypassMultiClientApi) {
-	// 	runOnExternalClients([&handles](Reference<ClientInfo> client) {
-	// 		if(client->external) {
-	// 			handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
-	// 		}
-	// 	});
-	// }
-
-	localClient->api->runNetwork();
-
-	// for(auto h : handles) {
-	// 	waitThread(h);
-	// }
-	// std::cout << "DONE WAITING FOR EXTERNAL CLIENTS" << std::endl;
-}
-
-void MultiVersionApi::runExternalNetwork() {
-	lock.enter();
-	if(!networkSetup) {
-		lock.leave();
-		throw network_not_setup();
-	}
-
-	lock.leave();
-
-	std::cout << "STARTING EXTERNAL NETWORK THREAD" << std::endl;
-
 	std::vector<THREAD_HANDLE> handles;
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([&handles](Reference<ClientInfo> client) {
@@ -1385,7 +1205,6 @@ void MultiVersionApi::runExternalNetwork() {
 	for(auto h : handles) {
 		waitThread(h);
 	}
-	std::cout << "DONE WAITING FOR EXTERNAL CLIENTS" << std::endl;
 }
 
 void MultiVersionApi::stopNetwork() {
@@ -1423,33 +1242,20 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 }
 
 Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath) {
-	std::cout << "CREATING DATABASE FROM MULTIVERSIONAPI" << std::endl;
 	lock.enter();
 	if(!networkSetup) {
-		std::cout << "NETWORK NOT SETUP" << std::endl;
 		lock.leave();
 		throw network_not_setup();
 	}
 	lock.leave();
 
 	std::string clusterFile(clusterFilePath);
-
-	// TODO: may need to keep map of compatible clients per cluster file 
-	// how to wait to get coordinator protocol? createDatabase cannot be an Actor
-	
-	// May have to setup a reciever on this end?
-
-	// async try to find which clients are compatible. Set map varialbe to true if compatible?
-	auto f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
-	getCoordinatorProtocols(f);
-
 	if(localClientDisabled) {
 		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, Reference<IDatabase>()));
 	}
 
 	auto db = localClient->api->createDatabase(clusterFilePath);
 	if(bypassMultiClientApi) {
-		std::cout << "IS BYPASS" << std::endl;
 		return db;
 	}
 	else {
