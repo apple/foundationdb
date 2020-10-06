@@ -628,7 +628,7 @@ TEST_CASE("fdb_transaction_set_option timeout") {
   fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, (const uint8_t *)&timeout,
                           sizeof(timeout)));
 
-  fdb_error_t err;
+  fdb_error_t err = 0;
   while (!err) {
     fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /* snapshot */ false);
     err = wait_future(f1);
@@ -648,7 +648,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
                                     sizeof(timeout)));
 
   fdb::Transaction tr(db);
-  fdb_error_t err;
+  fdb_error_t err = 0;
   while (!err) {
     fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /* snapshot */ false);
     err = wait_future(f1);
