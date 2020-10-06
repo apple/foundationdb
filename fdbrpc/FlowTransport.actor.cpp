@@ -210,7 +210,6 @@ public:
 ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	state NetworkAddress lastAddress = NetworkAddress();
 	loop {
-		wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 		if(self->orderedAddresses.size()) {
 			auto it = self->orderedAddresses.upper_bound(lastAddress);
 			if(it == self->orderedAddresses.end()) {
@@ -218,20 +217,24 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			}
 			lastAddress = *it;
 			auto peer = self->getPeer(lastAddress);
-			if(peer && peer->totalPingCount > 0) {
+			if(peer && peer->getPopulationSize() >= 10) {
 				TraceEvent("PingLatency")
 				  .detail("PeerAddr", lastAddress)
-				  .detail("MinLatency", peer->minPingLatency)
-				  .detail("MaxLatency", peer->maxPingLatency)
-				  .detail("AvgLatency", peer->totalPingLatency/peer->totalPingCount)
-				  .detail("Count", peer->totalPingCount)
+				  .detail("MinLatency", peer->pingLatencies.min())
+				  .detail("MaxLatency", peer->pingLatencies.max())
+				  .detail("MeanLatency", peer->pingLatencies.mean())
+				  .detail("MedianLatency", peer->pingLatencies.median())
+				  .detail("P90Latency", peer->pingLatencies.percentile(0.90))
+				  .detail("Count", peer->getPopulationSize())
 				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived);
-				peer->minPingLatency = 1000;
-				peer->maxPingLatency = 0;
-				peer->totalPingLatency = 0;
-				peer->totalPingCount = 0;
+				peer->pingLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
+				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
+			} else if(it == self->orderedAddresses.begin()) {
+				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 			}
+		} else {
+			wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 		}
 	}
 }
@@ -391,11 +394,9 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 					timeouts++;
 				}
 				when (wait( reply.getFuture() )) {
-					double pingLatency = now() - startTime;
-					peer->minPingLatency = std::min(peer->minPingLatency, pingLatency);
-					peer->maxPingLatency = std::max(peer->maxPingLatency, pingLatency);
-					peer->totalPingLatency += pingLatency;
-					peer->totalPingCount++;
+					if(peer->destination.isPublic()) {
+						peer->pingLatencies.addSample(now() - startTime);
+					}
 					break;
 				}
 				when (wait( peer->resetPing.onTrigger())) {
@@ -1070,7 +1071,9 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 			peer->connect = connectionKeeper(peer);
 		}
 		peers[address] = peer;
-		orderedAddresses.insert(address);
+		if(address.isPublic()) {
+			orderedAddresses.insert(address);
+		}
 	}
 
 	return peer;
