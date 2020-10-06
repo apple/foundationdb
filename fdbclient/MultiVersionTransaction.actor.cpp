@@ -1357,7 +1357,7 @@ void ClientInfo::loadProtocolVersion() {
 	}
 
 	char *next;
-	std::string protocolVersionStr = ClientVersionRef(version).protocolVersion.toString();
+	std::string protocolVersionStr = ClientVersionRef(StringRef(version)).protocolVersion.toString();
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
 
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
