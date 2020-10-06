@@ -117,14 +117,6 @@ ACTOR Future<Void> lockRanges(Database cx, std::vector<LockRequest> requests) {
 	}
 }
 
-/*
-void krmSetPreviouslyEmptyRange( Transaction* tr, const KeyRef& mapPrefix, const KeyRangeRef& keys, const ValueRef& newValue, const ValueRef& oldEndValue )
-{
-	KeyRange withPrefix = KeyRangeRef( mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString() );
-	tr->set( withPrefix.begin, newValue );
-	tr->set( withPrefix.end, oldEndValue );
-}*/
-
 RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest& request) {
 	LockStatus oldValue = locks[request.range.end];
 	auto ranges = locks.intersectingRanges(request.range);
@@ -171,7 +163,16 @@ RangeLockCache::Reason RangeLockCache::check(KeyRef key, bool write) {
 }
 
 RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, bool write) {
-	// TODO: change snapshot for O(log N) cost
+	auto ranges = locks.intersectingRanges(range);
+
+	for (const auto& r : ranges) {
+		if (r.cvalue() == LockStatus::EXCLUSIVE_LOCKED) {
+			return DENIED_EXCLUSIVE_LOCK;
+		}
+		if (write && r.cvalue() == LockStatus::SHARED_READ_LOCKED) {
+			return DENIED_READ_LOCK;
+		}
+	}
 	return OK;
 }
 
@@ -182,13 +183,16 @@ std::string RangeLockCache::toString() {
 }
 
 void RangeLockCache::add(KeyRef beginKey, LockStatus status, Version commitVersion) {
+	ASSERT(commitVersion >= lockVersion);
 	lockVersion = commitVersion;
 
-	// TODO
+	if (beginKey == allKeys.end) return;
+	KeyRef end = locks.rangeContaining(beginKey).end();
+	locks.insert(KeyRangeRef(beginKey, end), status);
 }
 
 void RangeLockCache::clear(KeyRangeRef range) {
-	// TODO
+	locks.insert(range, LockStatus::UNLOCKED);
 }
 
 RangeLockCache::Snapshot RangeLockCache::getSnapshot() {
@@ -207,144 +211,83 @@ TEST_CASE("/fdbclient/LockRange/KeyRangeMap") {
 	ASSERT(a == LockStatus::UNLOCKED);
 	std::cout << "a status is: " << static_cast<uint32_t>(a) << "\n";
 
-	return Void();
-}
-
-TEST_CASE("/fdbclient/LockRange/Cache") {
 	RangeLockCache cache;
-	Transaction tr;
 
-	LockRequest r1(KeyRangeRef("a"_sr, "d"_sr), LockMode::LOCK_EXCLUSIVE);
-	cache.tryAdd(&tr, r1);
-/*
+	const Version v1 = 100;
+	cache.add("a"_sr, LockStatus::EXCLUSIVE_LOCKED, v1);
+	cache.add("d"_sr, LockStatus::UNLOCKED, v1);
+
 	ASSERT_EQ(cache.hasVersion(v1), true);
 	ASSERT_EQ(cache.check("a"_sr, v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
 	ASSERT_EQ(cache.check("b"_sr, v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
 	ASSERT_EQ(cache.check("d"_sr, v1), RangeLockCache::OK);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("c"_sr, "e"_sr), v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), v1), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "9"_sr), v1), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("c"_sr, "e"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "9"_sr), true), RangeLockCache::OK);
 
-	RangeLockCache::Requests requests2;
 	const Version v2 = 200;
-	requests2.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("d"_sr, "e"_sr), LockMode::LOCK_EXCLUSIVE));
-	requests2.push_back_deep(requests.arena(),
-	                         LockRequest(KeyRangeRef("ee"_sr, "exxx"_sr), LockMode::LOCK_READ_SHARED));
-	cache.add(v2, requests2);
+	cache.add("d"_sr, LockStatus::EXCLUSIVE_LOCKED, v2);
+	cache.add("e"_sr, LockStatus::UNLOCKED, v2);
+	cache.add("ee"_sr, LockStatus::SHARED_READ_LOCKED, v2);
+	cache.add("exxx"_sr, LockStatus::UNLOCKED, v2);
 
-	ASSERT_EQ(cache.hasVersion(v1), true);
+	ASSERT_EQ(cache.hasVersion(v1), false);
 	ASSERT_EQ(cache.hasVersion(v2), true);
 	ASSERT_EQ(cache.check("a"_sr, v1), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), v2), RangeLockCache::DENIED_READ_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), true), RangeLockCache::DENIED_READ_LOCK);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v2), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), v2), RangeLockCache::OK);
-*/
-	std::cout << cache.toString() << "\n";
-	return Void();
-}
+	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), true), RangeLockCache::OK);
 
-#if 0
-TEST_CASE("/fdbclient/LockRange/CacheExpire") {
-	RangeLockCache cache;
-	RangeLockCache::Requests requests;
-	const Version v1 = 100;
-	requests.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("a"_sr, "d"_sr), LockMode::LOCK_EXCLUSIVE));
-	cache.add(v1, requests);
-
-	RangeLockCache::Requests requests2;
-	const Version v2 = 200;
-	requests2.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("d"_sr, "e"_sr), LockMode::LOCK_EXCLUSIVE));
-	requests2.push_back_deep(requests.arena(),
-	                         LockRequest(KeyRangeRef("ee"_sr, "exxx"_sr), LockMode::LOCK_READ_SHARED));
-	cache.add(v2, requests2);
-
-	ASSERT_EQ(cache.hasVersion(v1), true);
-	ASSERT_EQ(cache.hasVersion(v1 - 1), false);
-	ASSERT_EQ(cache.hasVersion(v1 + 1), false);
-	ASSERT_EQ(cache.hasVersion(v2), true);
-	ASSERT_EQ(cache.hasVersion(v2 - 10), false);
-	ASSERT_EQ(cache.hasVersion(v2 + 100), false);
-
-	cache.expire(v1);
-	ASSERT_EQ(cache.check("a"_sr, v1), RangeLockCache::DENIED_OLD_VERSION);
-	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "6"_sr), v1, /*write=*/false), RangeLockCache::DENIED_OLD_VERSION);
-
-	ASSERT_EQ(cache.check("a"_sr, v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("b"_sr, v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("d"_sr, v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-
-	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("c"_sr, "e"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "9"_sr), v2), RangeLockCache::OK);
-
-	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), v2), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), v2), RangeLockCache::DENIED_READ_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), v2, /*write=*/false), RangeLockCache::OK);
-
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v2), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v2, /*write=*/false), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), v2), RangeLockCache::OK);
-	std::cout << cache.toString() << "\n";
+	std::cout << "Cache: " << cache.toString() << "\n";
 	return Void();
 }
 
 TEST_CASE("/fdbclient/LockRange/Unlock") {
 	RangeLockCache cache;
-
-	RangeLockCache::Requests requests;
 	const Version v1 = 100;
-	requests.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("a"_sr, "d"_sr), LockMode::LOCK_EXCLUSIVE));
-	cache.add(v1, requests);
+	cache.add("a"_sr, LockStatus::EXCLUSIVE_LOCKED, v1);
+	cache.add("d"_sr, LockStatus::UNLOCKED, v1);
 
-	RangeLockCache::Requests requests2;
 	const Version v2 = 200;
-	requests2.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("d"_sr, "e"_sr), LockMode::LOCK_EXCLUSIVE));
-	requests2.push_back_deep(requests.arena(),
-	                         LockRequest(KeyRangeRef("ee"_sr, "exxx"_sr), LockMode::LOCK_READ_SHARED));
-	cache.add(v2, requests2);
+	cache.add("d"_sr, LockStatus::EXCLUSIVE_LOCKED, v2);
+	cache.add("e"_sr, LockStatus::UNLOCKED, v2);
+	cache.add("ee"_sr, LockStatus::SHARED_READ_LOCKED, v2);
+	cache.add("exxx"_sr, LockStatus::UNLOCKED, v2);
 
-	RangeLockCache::Requests requests3; // Unlocks [d, e), Lock [p, t)
 	const Version v3 = 300;
-	requests3.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("d"_sr, "e"_sr), LockMode::UNLOCK_EXCLUSIVE));
-	requests3.push_back_deep(requests.arena(), LockRequest(KeyRangeRef("p"_sr, "t"_sr), LockMode::LOCK_EXCLUSIVE));
-	cache.add(v3, requests3);
+	cache.clear(KeyRangeRef("d"_sr, "e"_sr));
+	cache.add("p"_sr, LockStatus::EXCLUSIVE_LOCKED, v3);
+	cache.add("t"_sr, LockStatus::UNLOCKED, v3);
 
-	ASSERT_EQ(cache.hasVersion(v1), true);
-	ASSERT_EQ(cache.hasVersion(v2), true);
+	ASSERT_EQ(cache.hasVersion(v1), false);
+	ASSERT_EQ(cache.hasVersion(v2), false);
 	ASSERT_EQ(cache.hasVersion(v3), true);
 
-	std::cout << "Before expire: \n" << cache.toString() << "\n";
-	cache.expire(v2);
+	ASSERT_EQ(cache.check("a"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check("b"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check("d"_sr, true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check("p"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check("q"_sr, true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
 
-	ASSERT_EQ(cache.check("a"_sr, v3), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("b"_sr, v3), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	std::cout << cache.toString() << "\n";
-	ASSERT_EQ(cache.check("d"_sr, v3), RangeLockCache::OK);
-	ASSERT_EQ(cache.check("p"_sr, v3), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check("q"_sr, v3), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("c"_sr, "e"_sr), true), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "9"_sr), true), RangeLockCache::OK);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("b"_sr, "d"_sr), v3), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("c"_sr, "e"_sr), v3), RangeLockCache::DENIED_EXCLUSIVE_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("d"_sr, "e"_sr), v3), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("0"_sr, "9"_sr), v3), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), true), RangeLockCache::DENIED_READ_LOCK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), /*write=*/false), RangeLockCache::OK);
 
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), v3), RangeLockCache::DENIED_READ_LOCK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ef"_sr, "eg"_sr), v3, /*write=*/false), RangeLockCache::OK);
-
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v3), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), v3, /*write=*/false), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), v3), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("f"_sr, "p"_sr), v3), RangeLockCache::OK);
-	ASSERT_EQ(cache.check(KeyRangeRef("t"_sr, "ta"_sr), v3), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ea"_sr, "ee"_sr), /*write=*/false), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("ey"_sr, "g"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("f"_sr, "p"_sr), true), RangeLockCache::OK);
+	ASSERT_EQ(cache.check(KeyRangeRef("t"_sr, "ta"_sr), true), RangeLockCache::OK);
 	return Void();
 }
-#endif
 
 } // anonymous namespace

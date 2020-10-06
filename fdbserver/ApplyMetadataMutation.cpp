@@ -527,14 +527,13 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 
 				if (!initialCommit) txnStateStore->clear(commonRange);
 
-				TraceEvent("LockRangeClear", dbgid)
-				    .detail("Version", mutationVersion)
-				    .detail("Range", commonRange);
+				KeyRangeRef clearRange(commonRange.begin.removePrefix(keyServersPrefix),
+				                       commonRange.end.removePrefix(keyServersPrefix));
+				TraceEvent("LockRangeClear", dbgid).detail("Version", mutationVersion).detail("Range", clearRange);
 				if (locks != nullptr) {
-					locks->clear(commonRange);
+					locks->clear(clearRange);
 				}
 			}
-
 		}
 	}
 

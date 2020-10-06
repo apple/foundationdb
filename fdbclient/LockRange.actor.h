@@ -24,9 +24,6 @@
 #elif !defined(FDBCLIENT_LOCKRANGE_ACTOR_H)
 	#define FDBCLIENT_LOCKRANGE_ACTOR_H
 
-#include <vector>
-#include <map>
-
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 
