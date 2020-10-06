@@ -2949,7 +2949,6 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			registerWorker( req, &self );
 		}
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
-			std::cout << "GOT WORKER FROM: " << req.reply.getEndpoint().addresses.toString() << std::endl;
 			++self.getWorkersRequests;
 			vector<WorkerDetails> workers;
 

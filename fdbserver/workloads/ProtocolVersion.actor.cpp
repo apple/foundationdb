@@ -42,8 +42,8 @@
 struct ProtocolVersionWorkload : TestWorkload {
     ProtocolVersionWorkload(WorkloadContext const& wcx)
 	: TestWorkload(wcx) {
-		// protocol = ProtocolVersion(getOption(options, LiteralStringRef("protocolVersion"), 0.0));
-	}
+        
+    }
 
 	virtual std::string description() {
 		return "ProtocolVersionWorkload";
@@ -54,34 +54,15 @@ struct ProtocolVersionWorkload : TestWorkload {
 	}
 
     ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
-        // CSimpleIni ini;
-		// // state Reference<ClusterConnectionFile> connFile(new ClusterConnectionFile(self->clusterFilePath));
-        // state const char* whitelistBinPaths = "";
-        // state std::string dataFolder = "simfdb";
-        // state LocalityData localities =  LocalityData(Optional<Standalone<StringRef>>(),
-        //                                             Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-        //                                             Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-        //                                             Optional<Standalone<StringRef>>());
-        // state std::string coordFolder = ini.GetValue(printable(localities.machineId()).c_str(), "coordinationFolder", "");
-        // state ProcessClass processClass = ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource);
-        // state uint16_t listenPerProcess = 1;
-        // state uint16_t port = 1;
-        // state IPAddress ip = IPAddress(0x01011F11);
-        // state bool sslEnabled = false;
- 
-		// state ISimulator::ProcessInfo* process = g_pSimulator->newProcess("ProtocolVersionProcess", ip, port, sslEnabled, listenPerProcess,
-        //                             localities, processClass, dataFolder.c_str(), coordFolder.c_str(), currentProtocolVersion);
-        //                             // localities, processClass, dataFolder.c_str(), coordFolder.c_str(), ProtocolVersion(0x0FDB00B070010000LL));
-        // wait(g_pSimulator->onProcess(process, TaskPriority::DefaultYield));
+        state ISimulator::ProcessInfo* oldProcess = g_pSimulator->getCurrentProcess();
 
-        // FlowTransport::createInstance(true, 1);
-		// Sim2FileSystem::newFileSystem();
-
-        // NetworkAddress n(ip, port, true, sslEnabled);
-        // FlowTransport::transport().bind( n, n );
-
-        // state vector<Future<Void>> actors;
-        // actors.push_back(fdbd( cx->getConnectionFile(), localities, processClass, dataFolder, coordFolder, 500e6, "", "", -1, whitelistBinPaths));
+        state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
+        state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess = find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p){
+            return p->protocolVersion != currentProtocolVersion;
+        });
+        
+        ASSERT(diffVersionProcess != allProcesses.end());
+        wait(g_pSimulator->onProcess(*diffVersionProcess, TaskPriority::DefaultYield));
 
         // getting coord protocols from current protocol version
         state vector<Future<ProtocolInfoReply>> coordProtocols;
@@ -93,25 +74,16 @@ struct ProtocolVersionWorkload : TestWorkload {
 
         wait(waitForAll(coordProtocols));
 
-        // state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
-        // state int i = 0;
-        // for(; i<allProcesses.size(); i++) {
-        //     auto f = g_pSimulator->onProcess(allProcesses[i], TaskPriority::DefaultYield);
-        //     wait(f);
-        //     std::cout << "PROCESS PRO VESRION: " << g_network->protocolVersion().version() << std::endl;
-        // }
-        std::cout << "CURR VERSION: " << g_network->protocolVersion().version() << std::endl;
         std::vector<bool> protocolMatches;
         protocolMatches.reserve(coordProtocols.size());
         for(int i = 0; i<coordProtocols.size(); i++){
-            if(g_network->protocolVersion() != coordProtocols[i].get().version) std::cout << "MISMATCHED VERSIONS" << std::endl;
             protocolMatches.push_back(g_network->protocolVersion() == coordProtocols[i].get().version);
         }
 
-        // ASSERT(count(protocolMatches.begin(), protocolMatches.end(), false) >= 1);
+        ASSERT(count(protocolMatches.begin(), protocolMatches.end(), false) >= 1);
 
-        // g_pSimulator->killProcess(process, ISimulator::KillType::KillInstantly);
-        // stopAfter(waitForAll(actors));
+        // go back to orig process for consistency check
+        wait(g_pSimulator->onProcess(oldProcess, TaskPriority::DefaultYield));
 		return Void();
 	}
 
@@ -121,9 +93,6 @@ struct ProtocolVersionWorkload : TestWorkload {
 
 	virtual void getMetrics(vector<PerfMetric>& m) {
 	}
-
-    ProtocolVersion protocol;
-    std::string clusterFilePath;
 };
 
 WorkloadFactory<ProtocolVersionWorkload> ProtocolVersionWorkloadFactory("ProtocolVersion");

@@ -207,8 +207,6 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
-	std::cout << "OPEN DATABASE" << std::endl;
-
 	++(*clientCount);
 	hasConnectedClients->set(true);
 	
@@ -467,7 +465,6 @@ struct LeaderRegisterCollection {
 	}
 
 	LeaderElectionRegInterface& getInterface(KeyRef key, UID id) {
-		std::cout << "TRYING TO GET INTERFACE" << std::endl;
 		auto i = registerInterfaces.find( key );
 		if (i == registerInterfaces.end()) {
 			Key k = key;
@@ -508,10 +505,6 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf, OnDemandStore
 	state ActorCollection forwarders(false);
 
 	wait( LeaderRegisterCollection::init( &regs ) ); 
-
-	// if(g_network->protocolVersion() == currentProtocolVersion){
-	// 	loop choose {}
-	// }
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {

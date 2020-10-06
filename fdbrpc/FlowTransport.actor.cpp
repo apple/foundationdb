@@ -782,7 +782,6 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
-			std::cout << "INCOMPATIBLE" << std::endl;
 			// TODO(anoyes): Report incompatibility somehow
 			return;
 		}
@@ -996,12 +995,9 @@ ACTOR static Future<Void> connectionReader(
 						BinaryReader pktReader(unprocessed_begin, connectPacketSize, AssumeVersion(protocolVersion));
 						ConnectPacket pkt;
 						serializer(pktReader, pkt);
-						std::cout << "INCOMING PKT VERSION: " << pkt.protocolVersion.version() << std::endl;
-						// std::cout << "INCOMING PKT VERSION: " << pkt.protocolVersion.version() << " FROM " << peer->destination.toString() << " TO " << conn->getPeerAddress().toString() << std::endl;
 
 						uint64_t connectionId = pkt.connectionId;
 						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
-						    // !pkt.protocolVersion.hasStableInterfaces()) {
 							!pkt.protocolVersion.isCompatible(g_network->protocolVersion())) {
 							incompatibleProtocolVersionNewer = pkt.protocolVersion > g_network->protocolVersion();
 							NetworkAddress addr = pkt.canonicalRemotePort
@@ -1078,7 +1074,7 @@ ACTOR static Future<Void> connectionReader(
 						}
 					}
 				}
-				if (compatible || peerProtocolVersion.hasStableInterfaces()) { // if compatible or peerProtocolVersion.hasStableInterfaces
+				if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 				}
 				else if(!expectConnectPacket) {
