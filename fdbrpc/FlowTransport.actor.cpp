@@ -30,6 +30,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/ContinuousSample.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/flow.h"
