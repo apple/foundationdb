@@ -384,6 +384,9 @@ ACTOR Future<Void> connectionMonitor( Reference<Peer> peer ) {
 			choose {
 				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) {
 					if(startingBytes == peer->bytesReceived) {
+						if(peer->destination.isPublic()) {
+							peer->pingLatencies.addSample(now() - startTime);
+						}
 						TraceEvent("ConnectionTimeout").suppressFor(1.0).detail("WithAddr", peer->destination);
 						throw connection_failed();
 					}
