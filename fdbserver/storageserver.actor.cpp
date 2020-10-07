@@ -151,7 +151,7 @@ struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
 };
 
 struct StorageServerDisk {
-	explicit StorageServerDisk( struct StorageServer* data, IKeyValueStore* storage ) : data(data), storage(storage) {}
+	explicit StorageServerDisk( struct StorageServer* data, IKeyValueStore* storage ) : data(data), storage(storage), _canPipelineCommits(storage->canPipelineCommits()) {}
 
 	void makeNewStorageServerDurable();
 	// Asyncronously move data from mutation log into SE's commit buffer for next commit.
@@ -179,13 +179,14 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 	
-	bool canPipelineCommits() const {return storage->canPipelineCommits();}
+	bool canPipelineCommits() const {return _canPipelineCommits;}
 	void set(KeyValueRef kv) { storage->set(kv);}
 	void clear(KeyRangeRef kr) { storage->clear(kr);}
 
 private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
+	bool _canPipelineCommits;
 
 	ACTOR static Future<Key> readFirstKey( IKeyValueStore* storage, KeyRangeRef range ) {
 		Standalone<RangeResultRef> r = wait( storage->readRange( range, 1 ) );
@@ -3234,8 +3235,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 	state bool finalCommit = false;
 	state Version startOldestVersion = data->storageVersion();
 	state Version newOldestVersion = data->storageVersion();
-	state ActorCollection forgetter(true);
-	state bool forgetting = false;
+	state SignalableActorCollection forgetter;
 	loop {
 		// While committing previously written data, keep writting new data from later versions until
 		//    1.) commit is done, or
@@ -3245,6 +3245,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			// Don't write version data while a commit is going on if the storage engine does not support pipelining
 			wait(durable && durableMinDelay);
 		}
+		state Future<Void> stopEarly = data->storage.canPipelineCommits() ? (durable && durableMinDelay) : Never();
 		// Apply mutations from the mutationLog
 		auto u = data->getMutationLog().upper_bound(newOldestVersion);
 		if (u != data->getMutationLog().end() && u->first <= desiredOldestVersion) {
@@ -3259,14 +3260,13 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
 			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
 			forgetter.add(data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage ));
-			forgetting = true;
 			data->oldestVersion.set( newOldestVersion );
 			if (ssCommitQuotaBytes <= 0) {
 				// No quota left. Wait for previous commit to finish.
 				wait(durable && durableMinDelay);
 				break;
 			}
-			if (data->storage.canPipelineCommits() && durable.isReady() && durableMinDelay.isReady()) {
+			if (stopEarly.isReady()) {
 				// Previous commit is done.
 				break;
 			}
@@ -3277,7 +3277,6 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
 			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
 			forgetter.add(data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage ));
-			forgetting = true;
 			data->oldestVersion.set( newOldestVersion );
 
 			// No more data in mutation log can be written.
@@ -3294,9 +3293,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 		data->storage.makeVersionDurable( newOldestVersion );
 	}
 	debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
-	if (forgetting) {
-		wait(forgetter.getResult());
-	}
+	wait(forgetter.signal());
 	return finalCommit;
 }
 
