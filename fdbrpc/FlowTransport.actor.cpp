@@ -218,7 +218,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			lastAddress = *it;
 			auto peer = self->getPeer(lastAddress);
 			if(!peer) {
-				TraceEvent(SevWarnAlways, "MissingNetworkAddress").detail("PeerAddr", lastAddress);
+				TraceEvent(SevWarnAlways, "MissingNetworkAddress").suppressFor(10.0).detail("PeerAddr", lastAddress);
 			}
 			if(peer && peer->pingLatencies.getPopulationSize() >= 10) {
 				TraceEvent("PingLatency")
