@@ -2489,7 +2489,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	try {
 		state Version version = wait( fVersion );
 		cx->validateVersion(version);
-		if (cx->rangeLockCache.check(KeyRangeRef(begin.getKey(), end.getKey()), /*write=*/false) != RangeLockCache::OK) {
+		if (begin.getKey() < end.getKey() && cx->rangeLockCache.check(KeyRangeRef(begin.getKey(), end.getKey()),
+		                                                              /*write=*/false) != RangeLockCache::OK) {
 			throw range_locks_access_denied();
 		}
 
@@ -4096,7 +4097,6 @@ ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version vers
 					break;
 				}
 				cx->rangeLockCache.setSnapshot(reply.get().version, reply.get().snapshot);
-				if (deterministicRandom()->random01() < 0.01) std::cout << "Client snapshot 1%: " << cx->rangeLockCache.toString() << "\n";
 				return Void();
 			}
 			when(wait(clientTimeout)) { throw timed_out(); }
