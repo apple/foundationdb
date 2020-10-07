@@ -1932,6 +1932,9 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	state Version ver = wait( version );
 	state Span span("NAPI:getValue"_loc, info.spanID);
 	cx->validateVersion(ver);
+	if (cx->rangeLockCache.check(key, /*write=*/false) != RangeLockCache::OK) {
+		throw range_locks_access_denied();
+	}
 
 	loop {
 		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, key, &StorageServerInterface::getValue, info) );
@@ -2486,6 +2489,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	try {
 		state Version version = wait( fVersion );
 		cx->validateVersion(version);
+		if (cx->rangeLockCache.check(KeyRangeRef(begin.getKey(), end.getKey()), /*write=*/false) != RangeLockCache::OK) {
+			throw range_locks_access_denied();
+		}
 
 		state double startTime = now();
 		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the version that the first one completed
@@ -3040,6 +3046,9 @@ void Transaction::set( const KeyRef& key, const ValueRef& value, bool addConflic
 		throw key_too_large();
 	if(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
+	if (cx->rangeLockCache.check(key, /*write=*/true) != RangeLockCache::OK) {
+		throw range_locks_access_denied();
+	}
 
 	auto &req = tr;
 	auto &t = req.transaction;
@@ -3058,6 +3067,9 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 		throw key_too_large();
 	if(operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
+	if (cx->rangeLockCache.check(key, /*write=*/true) != RangeLockCache::OK) {
+		throw range_locks_access_denied();
+	}
 
 	if (apiVersionAtLeast(510)) {
 		if (operationType == MutationRef::Min)
@@ -3080,6 +3092,10 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 }
 
 void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
+	if (cx->rangeLockCache.check(range, /*write=*/true) != RangeLockCache::OK) {
+		throw range_locks_access_denied();
+	}
+
 	++cx->transactionClearMutations;
 	auto &req = tr;
 	auto &t = req.transaction;
@@ -3103,6 +3119,10 @@ void Transaction::clear( const KeyRangeRef& range, bool addConflictRange ) {
 		t.write_conflict_ranges.push_back( req.arena, r );
 }
 void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
+	if (cx->rangeLockCache.check(key, /*write=*/true) != RangeLockCache::OK) {
+		throw range_locks_access_denied();
+	}
+
 	++cx->transactionClearMutations;
 	//There aren't any keys in the database with size larger than KEY_SIZE_LIMIT
 	if(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -3120,6 +3140,7 @@ void Transaction::clear( const KeyRef& key, bool addConflictRange ) {
 	if(addConflictRange)
 		t.write_conflict_ranges.emplace_back(req.arena, KeyRef(data, key.size()), KeyRef(data, key.size() + 1));
 }
+
 void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 	ASSERT( !keys.empty() );
 	auto &req = tr;
@@ -3606,6 +3627,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_transaction_too_old
 				&& e.code() != error_code_not_committed
 				&& e.code() != error_code_database_locked
+				&& e.code() != error_code_range_locks_access_denied
 				&& e.code() != error_code_proxy_memory_limit_exceeded
 				&& e.code() != error_code_batch_transaction_throttled
 				&& e.code() != error_code_tag_throttled)
@@ -4061,7 +4083,7 @@ std::pair<Version, Standalone<StringRef>> parseVersionStampFromValue(const Value
 ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version version) {
 	state Future<Void> clientTimeout = delay(5.0);
 	loop {
-		choose {
+		loop choose {
 			when(wait(cx->onProxiesChanged())) {}
 			when(ErrorOr<GetRangeLockSnapshotReply> reply = wait(
 			         errorOr(basicLoadBalance(cx->getCommitProxies(false), &CommitProxyInterface::getRangeLockSnapshot,
@@ -4069,7 +4091,10 @@ ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version vers
 				if (reply.isError()) {
 					throw reply.getError();
 				}
-				ASSERT(reply.get().version >= version);
+				if (reply.get().version < version) {
+					//TraceEvent("NAPI_GetRangeLockSnapshot").detail("RequestVersion", version).detail("ReplyVersion", reply.get().version);
+					break;
+				}
 				cx->rangeLockCache.setSnapshot(reply.get().version, reply.get().snapshot);
 				if (deterministicRandom()->random01() < 0.01) std::cout << "Client snapshot 1%: " << cx->rangeLockCache.toString() << "\n";
 				return Void();
@@ -4256,6 +4281,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 	if (e.code() == error_code_not_committed ||
 		e.code() == error_code_commit_unknown_result ||
 		e.code() == error_code_database_locked ||
+		e.code() == error_code_range_locks_access_denied ||
 		e.code() == error_code_proxy_memory_limit_exceeded ||
 		e.code() == error_code_process_behind ||
 		e.code() == error_code_batch_transaction_throttled ||

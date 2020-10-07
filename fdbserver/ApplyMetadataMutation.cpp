@@ -382,7 +382,7 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 
 				uint8_t status = BinaryReader::fromStringRef<uint8_t>(m.param2, Unversioned());
 				StringRef key = m.param1.removePrefix(lockedKeyRanges.begin);
-				TraceEvent("LockRange", dbgid)
+				TraceEvent("LockRangeSet", dbgid)
 				    .detail("Version", mutationVersion)
 				    .detail("Status", status)
 				    .detail("Key", key);
@@ -527,8 +527,8 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 
 				if (!initialCommit) txnStateStore->clear(commonRange);
 
-				KeyRangeRef clearRange(commonRange.begin.removePrefix(keyServersPrefix),
-				                       commonRange.end.removePrefix(keyServersPrefix));
+				KeyRangeRef clearRange(commonRange.begin.removePrefix(lockedKeyRanges.begin),
+				                       commonRange.end.removePrefix(lockedKeyRanges.begin));
 				TraceEvent("LockRangeClear", dbgid).detail("Version", mutationVersion).detail("Range", clearRange);
 				if (locks != nullptr) {
 					locks->clear(clearRange);

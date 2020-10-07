@@ -72,7 +72,6 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 		}
 	}
 
-	// TODO: use cache to check request and generate mutations
 	RangeLockCache::Reason reason = cache->tryAdd(tr, request);
 	if (reason != RangeLockCache::OK) {
 		throw range_locks_access_denied();
@@ -136,9 +135,10 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 	auto ranges = locks.intersectingRanges(request.range);
 
 	if (isLocking(request.mode)) {
-		// For now, deny any repeated locking ops, including READ locks.
-		// In the future, we may allow upgrade read locks to exclusive locks.
-		if (!ranges.empty()) return ALREADY_LOCKED;
+		for (const auto& r : ranges) {
+			if (r.cvalue() == LockStatus::UNLOCKED) continue;
+			if (request.mode == LockMode::LOCK_EXCLUSIVE) return ALREADY_LOCKED;
+		}
 
 		LockStatus newValue =
 		    request.mode == LockMode::LOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::READ_LOCKED;
@@ -165,8 +165,9 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 	tr->clear(withPrefix);
 	LockStatus newValue = LockStatus::UNLOCKED;
 	tr->set(withPrefix.begin, StringRef(reinterpret_cast<uint8_t*>(&newValue), sizeof(uint8_t)));
-	tr->set(withPrefix.end, StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
-
+	if (newValue != oldValue) {
+		tr->set(withPrefix.end, StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
+	}
 	return OK;
 }
 
@@ -191,6 +192,7 @@ RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, bool write) cons
 
 std::string RangeLockCache::toString() const {
 	std::string s;
+	s.append(format("Version: %" PRId64 "\n", lockVersion));
 	for (const auto& r : locks.ranges()) {
 		s.append(r.begin().toString()).append(" - ").append(r.end().toString());
 		s.append(" " + lockStatusToString(r.cvalue()) + "\n");

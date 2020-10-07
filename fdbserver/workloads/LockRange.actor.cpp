@@ -31,6 +31,8 @@ struct LockRangeWorkload : TestWorkload {
 	Key keyPrefix;
 	KeyRange range;
 	bool ok = true;
+	bool writeLocked = true;
+	UID uid;
 
 	LockRangeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		lockAfter = getOption(options, "lockAfter"_sr, 0.0);
@@ -39,6 +41,8 @@ struct LockRangeWorkload : TestWorkload {
 		keyPrefix = getOption(options, "prefix"_sr, "LR_"_sr);
 		Key keyEnd = endOfRange(keyPrefix);
 		range = KeyRangeRef(keyPrefix, keyEnd);
+		uid = deterministicRandom()->randomUniqueID();
+		writeLocked = deterministicRandom()->coinflip();
 		if (clientId == 0) {
 			std::cout << "LockRange workload range = " << printable(range) << "\n";
 		}
@@ -70,47 +74,37 @@ struct LockRangeWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Standalone<RangeResultRef>> lockAndSave(Database cx, LockRangeWorkload* self) {
-		try {
-			wait(lockRange(cx, LockRequest(self->range, LockMode::LOCK_EXCLUSIVE)));
-		} catch (Error& e) {
-			if (e.code() != error_code_range_locks_access_denied) throw;
-		}
-		TraceEvent("LockRangeWorkload").detail("LockedRange", self->range.toString());
-
 		state Transaction tr(cx);
 		loop {
 			try {
+				// Even with LOCK_AWARE flag, still can't access the locked range.
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Standalone<RangeResultRef> data = wait(tr.getRange(self->range, 50000));
 				ASSERT(!data.more);
 				wait(tr.commit());
 				return data;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				if (e.code() == error_code_range_locks_access_denied) {
+					TraceEvent("LockRangeWorkloadLocked", self->uid);
+					return Standalone<RangeResultRef>();
+				} else {
+					wait(tr.onError(e));
+				}
 			}
 		}
 	}
 
-	ACTOR static Future<Void> unlockAndCheck(Database cx, LockRangeWorkload* self, UID lockID,
-	                                         Standalone<RangeResultRef> data) {
-		try {
-			wait(lockRange(cx, LockRequest(self->range, LockMode::UNLOCK_EXCLUSIVE)));
-		} catch (Error& e) {
-			if (e.code() != error_code_range_locks_access_denied) throw;
-		}
+	ACTOR static Future<Void> unlockAndCheck(Database cx, LockRangeWorkload* self, Standalone<RangeResultRef> data) {
+		wait(lockRange(cx, LockRequest(self->range, LockMode::UNLOCK_EXCLUSIVE)));
 		TraceEvent("LockRangeWorkload").detail("UnlockedRange", self->range.toString());
 
 		// TODO: other workload has to be stopped, otherwise the data can be changed while checking.
 		state Transaction tr(cx);
 		loop {
 			try {
-				// Optional<Value> val = wait( tr.get(databaseLockedKey) );
-				// if(!val.present())
-				//	return Void();
-
 				state Standalone<RangeResultRef> data2 = wait(tr.getRange(self->range, 50000));
 				if (data.size() != data2.size()) {
-					TraceEvent(SevError, "DataChangedWhileLocked")
+					TraceEvent(SevError, "DataChangedWhileLocked", self->uid)
 					    .detail("BeforeSize", data.size())
 					    .detail("AfterSize", data2.size());
 					self->ok = false;
@@ -118,7 +112,7 @@ struct LockRangeWorkload : TestWorkload {
 					TraceEvent(SevError, "DataChangedWhileLocked").detail("Size", data.size());
 					for (int i = 0; i < data.size(); i++) {
 						if (data[i] != data2[i]) {
-							TraceEvent(SevError, "DataChangedWhileLocked")
+							TraceEvent(SevError, "DataChangedWhileLocked", self->uid)
 							    .detail("I", i)
 							    .detail("Before", printable(data[i]))
 							    .detail("After", printable(data2[i]));
@@ -136,28 +130,76 @@ struct LockRangeWorkload : TestWorkload {
 
 	// Writes to the locked range should be blocked.
 	ACTOR static Future<Void> checkLocked(Database cx, LockRangeWorkload* self) {
-		state Transaction tr(cx);
 		loop {
+			state Transaction tr(cx);
+			state bool reset = false;
 			try {
-				// TODO: write to the range
-				wait(Never());
-				self->ok = false;
-				return Void();
+				Version ver = wait(tr.getReadVersion());
+
+				std::string str = deterministicRandom()->randomAlphaNumeric(30);
+				Key key = self->range.begin.withSuffix(StringRef(str));
+				Key endKey = key.withSuffix("_more"_sr);
+
+				ASSERT(self->range.begin < key && self->range.end > key);
+				state int choice = deterministicRandom()->randomInt(0, 5);
+				if (choice == 0) {
+					// SET
+					TraceEvent("LockRangeWorkloadSet", self->uid).detail("Key", key).detail("GRV", ver);
+					tr.set(key, "setxxx"_sr);
+				} else if (choice == 1) {
+					// GET
+					TraceEvent("LockRangeWorkloadGet", self->uid).detail("Key", key).detail("GRV", ver);
+					Optional<Value> v = wait(tr.get(key));
+				} else if (choice == 2) {
+					// GET_RANGE
+					TraceEvent("LockRangeWorkloadGetRange", self->uid).detail("Key", key).detail("GRV", ver);
+					Standalone<RangeResultRef> r = wait(tr.getRange(KeyRangeRef(key, endKey), 10));
+				} else if (choice == 3) {
+					// CLEAR
+					TraceEvent("LockRangeWorkloadClear", self->uid).detail("Key", key).detail("GRV", ver);
+					tr.clear(KeyRangeRef(key, endKey));
+				} else if (choice == 4) {
+					// ATOMIC OP
+					TraceEvent("LockRangeWorkloadAtomicOp", self->uid).detail("Key", key).detail("GRV", ver);
+					uint64_t value = 1000;
+					Value val = StringRef((const uint8_t*)&value, sizeof(uint64_t));
+					tr.atomicOp(key, val, MutationRef::AddValue);
+				}
+
+				wait(tr.commit());
+				Version commitVer = tr.getCommittedVersion();
+				if (self->writeLocked || (choice == 0 || choice == 3 || choice == 4)) {
+					self->ok = false;
+					TraceEvent(SevError, "LockRangeWorkloadAccessToLockedRange", self->uid).detail("CommittedVersion", commitVer);
+					return Void();
+				}
 			} catch (Error& e) {
-				TEST(e.code() == error_code_database_locked); // Database confirmed locked
-				wait(tr.onError(e));
+				if (e.code() == error_code_range_locks_access_denied) {
+					TEST(true); // The range confirmed locked
+					tr.reset();
+					reset = true;
+				} else {
+					wait(tr.onError(e));
+				}
 			}
+			if (reset) wait(delay(0.01));
 		}
 	}
 
 	ACTOR static Future<Void> _start(Database cx, LockRangeWorkload* self) {
-		state UID lockID = deterministicRandom()->randomUniqueID();
 		wait(delay(self->lockAfter));
-		state Standalone<RangeResultRef> data = wait(lockAndSave(cx, self));
+
+		const LockMode mode = self->writeLocked ? LockMode::LOCK_EXCLUSIVE : LockMode::LOCK_READ_SHARED;
+		wait(lockRange(cx, LockRequest(self->range, mode)));
+		TraceEvent("LockRangeWorkload", self->uid).detail("LockedRange", self->range.toString());
+
 		state Future<Void> checker = checkLocked(cx, self);
 		wait(delay(self->unlockAfter - self->lockAfter));
 		checker.cancel();
-		wait(unlockAndCheck(cx, self, lockID, data));
+
+		const LockMode unlockMode = self->writeLocked ? LockMode::UNLOCK_EXCLUSIVE : LockMode::UNLOCK_READ_SHARED;
+		wait(lockRange(cx, LockRequest(self->range, unlockMode)));
+		TraceEvent("LockRangeWorkload", self->uid).detail("UnlockedRange", self->range.toString());
 
 		// TODO: verify when database is locked, can't lock/unlock ranges.
 

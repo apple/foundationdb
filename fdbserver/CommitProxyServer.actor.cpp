@@ -1021,7 +1021,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 						pProxyCommitData->metadataVersion = v.metadataVersion;
 						pProxyCommitData->rangeLockVersion = v.rangeLockVersion;
 						pProxyCommitData->committedVersion.set(v.version);
-						TraceEvent("UpdateRangeLock", pProxyCommitData->dbgid).detail("Locks", pProxyCommitData->locks.toString());
+						//TraceEvent("UpdateRangeLock", pProxyCommitData->dbgid).detail("Locks", pProxyCommitData->locks.toString());
 					}
 
 					if (pProxyCommitData->committedVersion.get() < self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
@@ -1149,7 +1149,7 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		pProxyCommitData->metadataVersion = self->metadataVersionAfter;
 		pProxyCommitData->rangeLockVersion = self->rangeLockVersionAfter;
 		pProxyCommitData->committedVersion.set(self->commitVersion);
-		TraceEvent("UpdateRangeLock", pProxyCommitData->dbgid).detail("Locks", pProxyCommitData->locks.toString());
+		//TraceEvent("UpdateRangeLock", pProxyCommitData->dbgid).detail("Locks", pProxyCommitData->locks.toString());
 	}
 
 	if (self->forceRecovery) {

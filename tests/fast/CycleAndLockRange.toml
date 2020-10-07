@@ -4,7 +4,7 @@ testTitle = 'Clogged'
     [[test.workload]]
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
-    testDuration = 60.0
+    testDuration = 100.0
     expectedRate = 0
     keyPrefix = 'LR_'
 
@@ -12,8 +12,8 @@ testTitle = 'Clogged'
     testName = 'LockRange'
     lockAfter = 15.0
 
-    # Unlock must happen after Cycle has finished
-    unlockAfter = 100.0
+    # Unlock happen BEFORE Cycle has finished
+    unlockAfter = 60.0
 
     # prefix must match Cycle test's keyPrefix
     prefix = 'LR_'
