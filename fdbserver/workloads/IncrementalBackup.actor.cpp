@@ -70,11 +70,16 @@ struct IncrementalBackupWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
 		state Reference<IBackupContainer> backupContainer;
 		state UID backupUID;
-		EBackupState waitResult =
-		    wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID));
-		TraceEvent("IBackupCheckWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Version v = wait(tr->getReadVersion());
+		// Wait for backup container to be created and avoid race condition
+		TraceEvent("IBackupWaitContainer");
+		loop {
+			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+			state bool e = wait(backupContainer->exists());
+			if (e) break;
+			delay(5.0);
+		}
 		loop {
 			BackupDescription desc = wait(backupContainer->describeBackup(true));
 			TraceEvent("IBackupVersionGate")
@@ -101,10 +106,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 			try {
 				wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
 				                                    false, true));
-				// Wait for backup container to be created and avoid race condition
-				wait(delay(90.0));
-				EBackupState waitResult = wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false));
-				TraceEvent("IBackupSubmitWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
