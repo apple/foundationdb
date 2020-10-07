@@ -27,6 +27,7 @@
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Net2Packet.h"
+#include "fdbrpc/ContinuousSample.h"
 
 #pragma pack(push, 4)
 class Endpoint {
