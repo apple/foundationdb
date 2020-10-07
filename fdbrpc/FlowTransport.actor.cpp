@@ -217,7 +217,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			}
 			lastAddress = *it;
 			auto peer = self->getPeer(lastAddress);
-			if(peer && peer->getPopulationSize() >= 10) {
+			if(peer && peer->pingLatencies.getPopulationSize() >= 10) {
 				TraceEvent("PingLatency")
 				  .detail("PeerAddr", lastAddress)
 				  .detail("MinLatency", peer->pingLatencies.min())
@@ -225,7 +225,7 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				  .detail("MeanLatency", peer->pingLatencies.mean())
 				  .detail("MedianLatency", peer->pingLatencies.median())
 				  .detail("P90Latency", peer->pingLatencies.percentile(0.90))
-				  .detail("Count", peer->getPopulationSize())
+				  .detail("Count", peer->pingLatencies.getPopulationSize())
 				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived);
 				peer->pingLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
