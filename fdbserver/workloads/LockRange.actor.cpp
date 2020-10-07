@@ -94,40 +94,6 @@ struct LockRangeWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> unlockAndCheck(Database cx, LockRangeWorkload* self, Standalone<RangeResultRef> data) {
-		wait(lockRange(cx, LockRequest(self->range, LockMode::UNLOCK_EXCLUSIVE)));
-		TraceEvent("LockRangeWorkload").detail("UnlockedRange", self->range.toString());
-
-		// TODO: other workload has to be stopped, otherwise the data can be changed while checking.
-		state Transaction tr(cx);
-		loop {
-			try {
-				state Standalone<RangeResultRef> data2 = wait(tr.getRange(self->range, 50000));
-				if (data.size() != data2.size()) {
-					TraceEvent(SevError, "DataChangedWhileLocked", self->uid)
-					    .detail("BeforeSize", data.size())
-					    .detail("AfterSize", data2.size());
-					self->ok = false;
-				} else if (data != data2) {
-					TraceEvent(SevError, "DataChangedWhileLocked").detail("Size", data.size());
-					for (int i = 0; i < data.size(); i++) {
-						if (data[i] != data2[i]) {
-							TraceEvent(SevError, "DataChangedWhileLocked", self->uid)
-							    .detail("I", i)
-							    .detail("Before", printable(data[i]))
-							    .detail("After", printable(data2[i]));
-						}
-					}
-					self->ok = false;
-				}
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Writes to the locked range should be blocked.
 	ACTOR static Future<Void> checkLocked(Database cx, LockRangeWorkload* self) {
 		loop {
@@ -200,8 +166,6 @@ struct LockRangeWorkload : TestWorkload {
 		const LockMode unlockMode = self->writeLocked ? LockMode::UNLOCK_EXCLUSIVE : LockMode::UNLOCK_READ_SHARED;
 		wait(lockRange(cx, LockRequest(self->range, unlockMode)));
 		TraceEvent("LockRangeWorkload", self->uid).detail("UnlockedRange", self->range.toString());
-
-		// TODO: verify when database is locked, can't lock/unlock ranges.
 
 		return Void();
 	}
