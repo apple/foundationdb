@@ -79,9 +79,16 @@ public:
 
 	std::pair<Snapshot, Version> getSnapshot() const;
 
+	// Allow access for all key ranges. This is useful for fdbserver processes
+	// and clients that wish to do so.
+	void setBypassCheck() { ignoreLocks = true; }
+
+	bool bypassCheck() { return ignoreLocks; }
+
 private:
 	Version lockVersion = invalidVersion; // the latest commit version of locks
 	KeyRangeMap<LockStatus> locks; // locked key ranges
+	bool ignoreLocks = false;
 };
 
 #include "flow/unactorcompiler.h"

@@ -1051,8 +1051,14 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), metadataVersionCache(0),
     rangeLockVersionCache(0) {}
 
-Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
-	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
+Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor,
+                                 LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID,
+                                 bool lockAware, int apiVersion, bool switchable) {
+	DatabaseContext* context =
+	    new DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor,
+	                        taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable);
+	context->rangeLockCache.setBypassCheck();
+	return Database(context);
 }
 
 DatabaseContext::~DatabaseContext() {
@@ -4165,7 +4171,7 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 	metadataVersion.send(rep.metadataVersion);
 	rangeLockVersion.send(rep.rangeLockVersion);
 
-	if (rep.rangeLockVersion.present()) {
+	if (rep.rangeLockVersion.present() && !cx->rangeLockCache.bypassCheck()) {
 		Version parsedVersion;
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
 		std::tie(parsedVersion, parsedVersionstamp) = parseVersionStampFromValue(rep.rangeLockVersion.get());

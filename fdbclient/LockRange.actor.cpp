@@ -172,11 +172,13 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 }
 
 RangeLockCache::Reason RangeLockCache::check(KeyRef key, bool write) const {
+	if (ignoreLocks) return OK;
 	Key end = keyAfter(key);
 	return check(KeyRangeRef(key, end), write);
 }
 
 RangeLockCache::Reason RangeLockCache::check(KeyRangeRef range, bool write) const {
+	if (ignoreLocks) return OK;
 	auto ranges = locks.intersectingRanges(range);
 
 	for (const auto& r : ranges) {
