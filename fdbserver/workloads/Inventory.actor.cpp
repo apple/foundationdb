@@ -87,7 +87,7 @@ struct InventoryTestWorkload : TestWorkload {
 			transactions.getValue() * 2 * fractionWriteTransactions / testDuration, true ) );
 	}
 
-	Key chooseProduct() override {
+	Key chooseProduct() const {
 		int p = deterministicRandom()->randomInt(0,nProducts);
 		return doubleToTestKey( (double)p / nProducts );
 		//std::string s = std::string(1,'a' + (p%26)) + format("%d",p/26);

@@ -83,7 +83,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	}
 
 	// disable the default timeout setting
-	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
+	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
 	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {

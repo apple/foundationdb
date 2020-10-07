@@ -289,7 +289,7 @@ struct CompoundWorkload : TestWorkload {
 				m.push_back( p[i].withPrefix( workloads[w]->description()+"." ) );
 		}
 	}
-	double getCheckTimeout() override {
+	double getCheckTimeout() const override {
 		double m = 0;
 		for(int w=0; w<workloads.size(); w++)
 			m = std::max( workloads[w]->getCheckTimeout(), m );
