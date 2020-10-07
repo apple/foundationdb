@@ -19,8 +19,10 @@
  */
 
 #include <cinttypes>
+#include <string>
 #include <vector>
 
+#include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
@@ -33,6 +35,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
@@ -78,8 +81,42 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if ((key == "logs" || key == "proxies" || key == "grv_proxies" || key == "resolvers" || key == "remote_logs" ||
-		     key == "log_routers" || key == "usable_regions" || key == "repopulate_anti_quorum") &&
+		if (key == "proxies" && isInteger(value)) {
+			printf("Warning: Proxy role is being split into GRV Proxy and Commit Proxy, now prefer configuring "
+			       "'grv_proxies' and 'commit_proxies' separately. Generally we should follow that 'commit_proxies'"
+			       " is three times of 'grv_proxies' count and 'grv_proxies' should be not more than 4.\n");
+			int proxiesCount = atoi(value.c_str());
+			if (proxiesCount == -1) {
+				proxiesCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES + CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
+				ASSERT_WE_THINK(proxiesCount >= 2);
+			}
+
+			if (proxiesCount < 2) {
+				printf("Error: At least 2 proxies (1 GRV proxy and 1 Commit proxy) are required.\n");
+				return out;
+			}
+
+			int grvProxyCount =
+			    std::max(1, std::min(CLIENT_KNOBS->DEFAULT_MAX_GRV_PROXIES,
+			                         proxiesCount / (CLIENT_KNOBS->DEFAULT_COMMIT_GRV_PROXIES_RATIO + 1)));
+			int commitProxyCount = proxiesCount - grvProxyCount;
+			ASSERT_WE_THINK(grvProxyCount >= 1 && commitProxyCount >= 1);
+
+			out[p + "grv_proxies"] = std::to_string(grvProxyCount);
+			out[p + "commit_proxies"] = std::to_string(commitProxyCount);
+			printf("%d proxies are automatically converted into %d GRV proxies and %d Commit proxies.\n", proxiesCount,
+			       grvProxyCount, commitProxyCount);
+
+			TraceEvent("DatabaseConfigurationProxiesSpecified")
+			    .detail("SpecifiedProxies", atoi(value.c_str()))
+			    .detail("EffectiveSpecifiedProxies", proxiesCount)
+			    .detail("ConvertedGrvProxies", grvProxyCount)
+			    .detail("ConvertedCommitProxies", commitProxyCount);
+		}
+
+		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
+		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
+		     key == "repopulate_anti_quorum") &&
 		    isInteger(value)) {
 			out[p+key] = value;
 		}
@@ -229,7 +266,8 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	return out;
 }
 
-ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf ) {
+ConfigurationResult buildConfiguration(std::vector<StringRef> const& modeTokens,
+                                       std::map<std::string, std::string>& outConf) {
 	for(auto it : modeTokens) {
 		std::string mode = it.toString();
 		auto m = configForToken( mode );
@@ -265,7 +303,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	return ConfigurationResult::SUCCESS;
 }
 
-ConfigurationResult::Type buildConfiguration( std::string const& configMode, std::map<std::string, std::string>& outConf ) {
+ConfigurationResult buildConfiguration(std::string const& configMode, std::map<std::string, std::string>& outConf) {
 	std::vector<StringRef> modes;
 
 	int p = 0;
@@ -305,7 +343,7 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 	}
 }
 
-ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std::string, std::string> m, bool force ) {
+ACTOR Future<ConfigurationResult> changeConfig(Database cx, std::map<std::string, std::string> m, bool force) {
 	state StringRef initIdKey = LiteralStringRef( "\xff/init_id" );
 	state Transaction tr(cx);
 
@@ -656,7 +694,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 			}
 
 			if (processClass.classType() == ProcessClass::TransactionClass ||
-			    processClass.classType() == ProcessClass::ProxyClass ||
+			    processClass.classType() == ProcessClass::CommitProxyClass ||
 			    processClass.classType() == ProcessClass::GrvProxyClass ||
 			    processClass.classType() == ProcessClass::ResolutionClass ||
 			    processClass.classType() == ProcessClass::StatelessClass ||
@@ -701,7 +739,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 			if (proc.second == ProcessClass::StatelessClass) {
 				existingStatelessCount++;
 			}
-			if(proc.second == ProcessClass::ProxyClass) {
+			if (proc.second == ProcessClass::CommitProxyClass) {
 				existingProxyCount++;
 			}
 			if (proc.second == ProcessClass::GrvProxyClass) {
@@ -734,19 +772,18 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		resolverCount = result.old_resolvers;
 	}
 
-	result.desired_proxies = std::max(std::min(12, processCount / 15), 1);
+	result.desired_commit_proxies = std::max(std::min(12, processCount / 15), 1);
 	int proxyCount;
-	if (!statusObjConfig.get("proxies", result.old_proxies)) {
-		result.old_proxies = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
-		statusObjConfig.get("auto_proxies", result.old_proxies);
-		result.auto_proxies = result.desired_proxies;
-		proxyCount = result.auto_proxies;
+	if (!statusObjConfig.get("commit_proxies", result.old_commit_proxies)) {
+		result.old_commit_proxies = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
+		statusObjConfig.get("auto_commit_proxies", result.old_commit_proxies);
+		result.auto_commit_proxies = result.desired_commit_proxies;
+		proxyCount = result.auto_commit_proxies;
 	} else {
-		result.auto_proxies = result.old_proxies;
-		proxyCount = result.old_proxies;
+		result.auto_commit_proxies = result.old_commit_proxies;
+		proxyCount = result.old_commit_proxies;
 	}
 
-	// Need to configure a good number.
 	result.desired_grv_proxies = std::max(std::min(4, processCount / 20), 1);
 	int grvProxyCount;
 	if (!statusObjConfig.get("grv_proxies", result.old_grv_proxies)) {
@@ -823,7 +860,7 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	return result;
 }
 
-ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoResult conf ) {
+ACTOR Future<ConfigurationResult> autoConfig(Database cx, ConfigureAutoResult conf) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 
@@ -857,8 +894,8 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 			if (conf.auto_logs != conf.old_logs)
 				tr.set(configKeysPrefix.toString() + "auto_logs", format("%d", conf.auto_logs));
 
-			if(conf.auto_proxies != conf.old_proxies)
-				tr.set(configKeysPrefix.toString() + "auto_proxies", format("%d", conf.auto_proxies));
+			if (conf.auto_commit_proxies != conf.old_commit_proxies)
+				tr.set(configKeysPrefix.toString() + "auto_commit_proxies", format("%d", conf.auto_commit_proxies));
 
 			if (conf.auto_grv_proxies != conf.old_grv_proxies)
 				tr.set(configKeysPrefix.toString() + "auto_grv_proxies", format("%d", conf.auto_grv_proxies));
@@ -890,7 +927,8 @@ ACTOR Future<ConfigurationResult::Type> autoConfig( Database cx, ConfigureAutoRe
 	}
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force ) {
+Future<ConfigurationResult> changeConfig(Database const& cx, std::vector<StringRef> const& modes,
+                                         Optional<ConfigureAutoResult> const& conf, bool force) {
 	if( modes.size() && modes[0] == LiteralStringRef("auto") && conf.present() ) {
 		return autoConfig(cx, conf.get());
 	}
@@ -902,7 +940,7 @@ Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<
 	return changeConfig(cx, m, force);
 }
 
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& modes, bool force ) {
+Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& modes, bool force) {
 	TraceEvent("ChangeConfig").detail("Mode", modes);
 	std::map<std::string,std::string> m;
 	auto r = buildConfiguration( modes, m );
@@ -971,7 +1009,7 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 	}
 }
 
-ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuorumChange> change ) {
+ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change) {
 	state Transaction tr(cx);
 	state int retries = 0;
 	state std::vector<NetworkAddress> desiredCoordinators;
@@ -991,7 +1029,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if ( cx->getConnectionFile() && old.clusterKeyName().toString() != cx->getConnectionFile()->getConnectionString().clusterKeyName() )
 				return CoordinatorsResult::BAD_DATABASE_STATE;  // Someone changed the "name" of the database??
 
-			state CoordinatorsResult::Type result = CoordinatorsResult::SUCCESS;
+			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if(!desiredCoordinators.size()) {
 				std::vector<NetworkAddress> _desiredCoordinators = wait( change->getDesiredCoordinators( &tr, old.coordinators(), Reference<ClusterConnectionFile>(new ClusterConnectionFile(old)), result ) );
 				desiredCoordinators = _desiredCoordinators;
@@ -1061,14 +1099,20 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 struct SpecifiedQuorumChange : IQuorumChange {
 	vector<NetworkAddress> desired;
 	explicit SpecifiedQuorumChange( vector<NetworkAddress> const& desired ) : desired(desired) {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile>,
+	                                                              CoordinatorsResult&) {
 		return desired;
 	}
 };
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const& addresses) { return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses)); }
 
 struct NoQuorumChange : IQuorumChange {
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile>,
+	                                                              CoordinatorsResult&) {
 		return oldCoordinators;
 	}
 };
@@ -1078,7 +1122,10 @@ struct NameQuorumChange : IQuorumChange {
 	std::string newName;
 	Reference<IQuorumChange> otherChange;
 	explicit NameQuorumChange( std::string const& newName, Reference<IQuorumChange> const& otherChange ) : newName(newName), otherChange(otherChange) {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> cf, CoordinatorsResult::Type& t ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile> cf,
+	                                                              CoordinatorsResult& t) {
 		return otherChange->getDesiredCoordinators(tr, oldCoordinators, cf, t);
 	}
 	virtual std::string getDesiredClusterKeyName() {
@@ -1093,7 +1140,10 @@ struct AutoQuorumChange : IQuorumChange {
 	int desired;
 	explicit AutoQuorumChange( int desired ) : desired(desired) {}
 
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> ccf, CoordinatorsResult::Type& err ) {
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile> ccf,
+	                                                              CoordinatorsResult& err) {
 		return getDesired( this, tr, oldCoordinators, ccf, &err );
 	}
 
@@ -1145,7 +1195,10 @@ struct AutoQuorumChange : IQuorumChange {
 		return true; // The status quo seems fine
 	}
 
-	ACTOR static Future<vector<NetworkAddress>> getDesired( AutoQuorumChange* self, Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile> ccf, CoordinatorsResult::Type* err ) {
+	ACTOR static Future<vector<NetworkAddress>> getDesired(AutoQuorumChange* self, Transaction* tr,
+	                                                       vector<NetworkAddress> oldCoordinators,
+	                                                       Reference<ClusterConnectionFile> ccf,
+	                                                       CoordinatorsResult* err) {
 		state int desiredCount = self->desired;
 
 		if(desiredCount == -1) {

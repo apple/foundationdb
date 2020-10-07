@@ -34,7 +34,7 @@ void PacketWriter::init(PacketBuffer* buf, ReliablePacket* reliable) {
 PacketBuffer* PacketWriter::finish() {
 	length += buffer->bytes_written;
 	if (reliable) {
-		reliable->cont = NULL;
+		reliable->cont = nullptr;
 		reliable->end = buffer->bytes_written;
 	}
 	return buffer;
@@ -154,7 +154,7 @@ void UnsentPacketQueue::sent(int bytes) {
 		b->bytes_sent = b->bytes_written;
 		ASSERT(b->bytes_written <= b->size());
 		unsent_first = b->nextPacketBuffer();
-		if (!unsent_first) unsent_last = NULL;
+		if (!unsent_first) unsent_last = nullptr;
 		b->delref();
 	}
 }

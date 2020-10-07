@@ -7,17 +7,17 @@
 (This assumes a basic familiarity with [FoundationDB's architecture](https://www.youtu.be/EMwhsGsxfPU).)
 
 Transaction logs are a distributed Write-Ahead-Log for FoundationDB.  They
-receive commits from proxies, and are responsible for durably storing those
-commits, and making them available to storage servers for reading.
+receive commits from commit proxies, and are responsible for durably storing 
+those commits, and making them available to storage servers for reading.
 
 Clients send *mutations*, the list of their set, clears, atomic operations,
-etc., to proxies.  Proxies collect mutations into a *batch*, which is the list
-of all changes that need to be applied to the database to bring it from version
-`N-1` to `N`.  Proxies then walk through their in-memory mapping of shard
-boundaries to associate one or more *tags*, a small integer uniquely
-identifying a destination storage server, with each mutation.  They then send a
-*commit*, the full list of `(tags, mutation)` for each mutation in a batch, to
-the transaction logs.
+etc., to commit proxies. Commit proxies collect mutations into a *batch*, which
+is the list of all changes that need to be applied to the database to bring it
+from version `N-1` to `N`. Commit proxies then walk through their in-memory 
+mapping of shard boundaries to associate one or more *tags*, a small integer 
+uniquely identifying a destination storage server, with each mutation. They 
+then send a *commit*, the full list of `(tags, mutation)` for each mutation in
+a batch, to the transaction logs.
 
 The transaction log has two responsibilities: it must persist the commits to
 disk and notify the proxy when a commit is durably stored, and it must make the

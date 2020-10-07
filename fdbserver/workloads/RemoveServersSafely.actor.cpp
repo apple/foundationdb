@@ -277,7 +277,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			processesLeft.insert(processesLeft.end(), killProcArray.begin(), killProcArray.end());
 
 			// Check if we can kill the added process
-			bCanKillProcess = g_simulator.canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, NULL);
+			bCanKillProcess = g_simulator.canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, nullptr);
 
 			// Remove the added processes
 			processesLeft.resize(processesLeft.size() - killProcArray.size());
@@ -331,7 +331,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		self->excludeAddresses(toKill1);
 
-		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, NULL, false), self->kill1Timeout ) );
+		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, nullptr, false), self->kill1Timeout ) );
 
 		bClearedFirst = result.present();
 		TraceEvent("RemoveAndKill")
@@ -365,7 +365,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// so we expect to succeed after a finite amount of time
 		TraceEvent("RemoveAndKill").detail("Step", "exclude second list").detail("ToKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
 			.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL, true), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
+		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : nullptr, true), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
 
 		TraceEvent("RemoveAndKill").detail("Step", "excluded second list").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 
@@ -549,7 +549,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			while (true) {
 				cycle ++;
 				nQuorum = ((g_simulator.desiredCoordinators+1)/2)*2-1;
-				CoordinatorsResult::Type result = wait( changeQuorum( cx, autoQuorumChange(nQuorum) ) );
+				CoordinatorsResult result = wait(changeQuorum(cx, autoQuorumChange(nQuorum)));
 				TraceEvent(result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES ? SevInfo : SevWarn, "RemoveAndKillQuorumChangeResult").detail("Step", "coordinators auto").detail("Result", (int)result).detail("Attempt", cycle).detail("Quorum", nQuorum).detail("DesiredCoordinators", g_simulator.desiredCoordinators);
 				if (result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES)
 					break;

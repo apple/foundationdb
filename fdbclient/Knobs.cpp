@@ -52,7 +52,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
-	init( MAX_MASTER_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_MASTER_PROXY_CONNECTIONS = 1;
+	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 
@@ -104,7 +104,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( WATCH_POLLING_TIME,                      1.0 ); if( randomize && BUGGIFY ) WATCH_POLLING_TIME = 5.0;
 	init( NO_RECENT_UPDATES_DURATION,             20.0 ); if( randomize && BUGGIFY ) NO_RECENT_UPDATES_DURATION = 0.1;
 	init( FAST_WATCH_TIMEOUT,                     20.0 ); if( randomize && BUGGIFY ) FAST_WATCH_TIMEOUT = 1.0;
-	init( WATCH_TIMEOUT,                         900.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
+	init( WATCH_TIMEOUT,                          30.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
@@ -171,10 +171,12 @@ void ClientKnobs::initialize(bool randomize) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 
 	// Configuration
-	init( DEFAULT_AUTO_PROXIES,                      3 );
+	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
 	init( DEFAULT_AUTO_GRV_PROXIES,                  1 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
+	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
+	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
 
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 

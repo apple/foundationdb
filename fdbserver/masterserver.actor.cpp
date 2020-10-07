@@ -52,18 +52,18 @@ using std::vector;
 using std::min;
 using std::max;
 
-struct ProxyVersionReplies {
+struct CommitProxyVersionReplies {
 	std::map<uint64_t, GetCommitVersionReply> replies;
 	NotifiedVersion latestRequestNum;
 
-	ProxyVersionReplies(ProxyVersionReplies&& r) noexcept
+	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
-	void operator=(ProxyVersionReplies&& r) noexcept {
+	void operator=(CommitProxyVersionReplies&& r) noexcept {
 		replies = std::move(r.replies);
 		latestRequestNum = std::move(r.latestRequestNum);
 	}
 
-	ProxyVersionReplies() : latestRequestNum(0) {}
+	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
 
 ACTOR Future<Void> masterTerminateOnConflict( UID dbgid, Promise<Void> fullyRecovered, Future<Void> onConflict, Future<Void> switchedState ) {
@@ -177,7 +177,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		recoveryTransactionVersion;  // The first version in this epoch
 	double lastCommitTime;
 
-	Version liveCommittedVersion; // The largest live committed version reported by proxies.
+	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.
 	bool databaseLocked;
 	Optional<Value> proxyMetadataVersion;
 	Version minKnownCommittedVersion;
@@ -207,13 +207,13 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		return maxLocality + 1;
 	}
 
-	std::vector<MasterProxyInterface> masterProxies;
-	std::vector<MasterProxyInterface> provisionalMasterProxies;
+	std::vector<CommitProxyInterface> commitProxies;
+	std::vector<CommitProxyInterface> provisionalCommitProxies;
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<GrvProxyInterface> provisionalGrvProxies;
 	std::vector<ResolverInterface> resolvers;
 
-	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
+	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
 	Standalone<StringRef> dbId;
 
@@ -283,21 +283,24 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	~MasterData() { if(txnStateStore) txnStateStore->close(); }
 };
 
-ACTOR Future<Void> newMasterProxies( Reference<MasterData> self, RecruitFromConfigurationReply recr ) {
-	vector<Future<MasterProxyInterface>> initializationReplies;
-	for( int i = 0; i < recr.masterProxies.size(); i++ ) {
-		InitializeMasterProxyRequest req;
+ACTOR Future<Void> newCommitProxies(Reference<MasterData> self, RecruitFromConfigurationReply recr) {
+	vector<Future<CommitProxyInterface>> initializationReplies;
+	for (int i = 0; i < recr.commitProxies.size(); i++) {
+		InitializeCommitProxyRequest req;
 		req.master = self->myInterface;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
-		TraceEvent("MasterProxyReplies",self->dbgid).detail("WorkerID", recr.masterProxies[i].id());
-		initializationReplies.push_back( transformErrors( throwErrorOr( recr.masterProxies[i].masterProxy.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
+		TraceEvent("CommitProxyReplies", self->dbgid).detail("WorkerID", recr.commitProxies[i].id());
+		initializationReplies.push_back(
+		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
+		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+		                    master_recovery_failed()));
 	}
 
-	vector<MasterProxyInterface> newRecruits = wait( getAll( initializationReplies ) );
-	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->proxies[0] is the firstProxy.
-	self->masterProxies = newRecruits;
+	vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
+	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
+	self->commitProxies = newRecruits;
 
 	return Void();
 }
@@ -322,7 +325,7 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 	for( int i = 0; i < recr.resolvers.size(); i++ ) {
 		InitializeResolverRequest req;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
-		req.proxyCount = recr.masterProxies.size();
+		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
 		TraceEvent("ResolverReplies",self->dbgid).detail("WorkerID", recr.resolvers[i].id());
 		initializationReplies.push_back( transformErrors( throwErrorOr( recr.resolvers[i].resolver.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
@@ -426,15 +429,15 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 	return Void();
 }
 
-Future<Void> waitProxyFailure( vector<MasterProxyInterface> const& proxies ) {
+Future<Void> waitCommitProxyFailure(vector<CommitProxyInterface> const& commitProxies) {
 	std::vector<Future<Void>> failed;
-	for (auto proxy : proxies) {
-		failed.push_back(waitFailureClient(proxy.waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
+	for (auto commitProxy : commitProxies) {
+		failed.push_back(waitFailureClient(commitProxy.waitFailure, SERVER_KNOBS->TLOG_TIMEOUT,
 		                                   -SERVER_KNOBS->TLOG_TIMEOUT / SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY,
 		                                   /*trace=*/true));
 	}
 	ASSERT( failed.size() >= 1 );
-	return tagError<Void>(quorum( failed, 1 ), master_proxy_failed());
+	return tagError<Void>(quorum(failed, 1), commit_proxy_failed());
 }
 
 Future<Void> waitGrvProxyFailure( vector<GrvProxyInterface> const& grvProxies ) {
@@ -499,14 +502,14 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 }
 
 Future<Void> sendMasterRegistration(MasterData* self, LogSystemConfig const& logSystemConfig,
-                                    vector<MasterProxyInterface> proxies, vector<GrvProxyInterface> grvProxies,
+                                    vector<CommitProxyInterface> commitProxies, vector<GrvProxyInterface> grvProxies,
                                     vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount,
                                     vector<UID> priorCommittedLogServers) {
 	RegisterMasterRequest masterReq;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
 	masterReq.logSystemConfig = logSystemConfig;
-	masterReq.masterProxies = proxies;
+	masterReq.commitProxies = commitProxies;
 	masterReq.grvProxies = grvProxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
@@ -536,14 +539,14 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 		    .detail("Logs", describe(logSystemConfig.tLogs));
 
 		if (!self->cstateUpdated.isSet()) {
-			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->provisionalMasterProxies,
+			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->provisionalCommitProxies,
 			                            self->provisionalGrvProxies, self->resolvers,
 			                            self->cstate.myDBState.recoveryCount,
 			                            self->cstate.prevDBState.getPriorCommittedLogServers()));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);
-			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->masterProxies, self->grvProxies, self->resolvers,
-			                            self->cstate.myDBState.recoveryCount, vector<UID>()));
+			wait(sendMasterRegistration(self.getPtr(), logSystemConfig, self->commitProxies, self->grvProxies,
+			                            self->resolvers, self->cstate.myDBState.recoveryCount, vector<UID>()));
 		}
 	}
 }
@@ -551,14 +554,15 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<MasterData> parent, Future<Void> activate ) {
 	wait(activate);
 
-	// Register a fake master proxy (to be provided right here) to make ourselves available to clients
-	parent->provisionalMasterProxies = vector<MasterProxyInterface>(1);
-	parent->provisionalMasterProxies[0].provisional = true;
-	parent->provisionalMasterProxies[0].initEndpoints();
+	// Register a fake commit proxy (to be provided right here) to make ourselves available to clients
+	parent->provisionalCommitProxies = vector<CommitProxyInterface>(1);
+	parent->provisionalCommitProxies[0].provisional = true;
+	parent->provisionalCommitProxies[0].initEndpoints();
 	parent->provisionalGrvProxies = vector<GrvProxyInterface>(1);
 	parent->provisionalGrvProxies[0].provisional = true;
 	parent->provisionalGrvProxies[0].initEndpoints();
-	state Future<Void> waitMasterProxyFailure = waitFailureServer(parent->provisionalMasterProxies[0].waitFailure.getFuture());
+	state Future<Void> waitCommitProxyFailure =
+	    waitFailureServer(parent->provisionalCommitProxies[0].waitFailure.getFuture());
 	state Future<Void> waitGrvProxyFailure = waitFailureServer(parent->provisionalGrvProxies[0].waitFailure.getFuture());
 	parent->registrationTrigger.trigger();
 
@@ -567,8 +571,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 
 	state Optional<Value> metadataVersion = parent->txnStateStore->readValue(metadataVersionKey).get();
 
-	// We respond to a minimal subset of the master proxy protocol.  Our sole purpose is to receive a single write-only transaction
-	// which might repair our configuration, and return it.
+	// We respond to a minimal subset of the commit proxy protocol.  Our sole purpose is to receive a single write-only
+	// transaction which might repair our configuration, and return it.
 	loop choose {
 		when ( GetReadVersionRequest req = waitNext( parent->provisionalGrvProxies[0].getConsistentReadVersion.getFuture() ) ) {
 			if ( req.flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY && parent->lastEpochEnd ) {
@@ -580,7 +584,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 			} else
 				req.reply.send(Never());  // We can't perform causally consistent reads without recovering
 		}
-		when ( CommitTransactionRequest req = waitNext( parent->provisionalMasterProxies[0].commit.getFuture() ) ) {
+		when(CommitTransactionRequest req = waitNext(parent->provisionalCommitProxies[0].commit.getFuture())) {
 			req.reply.send(Never()); // don't reply (clients always get commit_unknown_result)
 			auto t = &req.transaction;
 			if (t->read_snapshot == parent->lastEpochEnd && //< So no transactions can fall between the read snapshot and the recovery transaction this (might) be merged with
@@ -600,10 +604,11 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				}
 			}
 		}
-		when ( GetKeyServerLocationsRequest req = waitNext( parent->provisionalMasterProxies[0].getKeyServersLocations.getFuture() ) ) {
+		when(GetKeyServerLocationsRequest req =
+		         waitNext(parent->provisionalCommitProxies[0].getKeyServersLocations.getFuture())) {
 			req.reply.send(Never());
 		}
-		when ( wait( waitMasterProxyFailure ) ) { throw worker_removed(); }
+		when(wait(waitCommitProxyFailure)) { throw worker_removed(); }
 		when ( wait( waitGrvProxyFailure ) ) { throw worker_removed(); }
 	}
 }
@@ -634,8 +639,8 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
 		    .detail("RequiredTLogs", self->configuration.tLogReplicationFactor)
 		    .detail("DesiredTLogs", self->configuration.getDesiredLogs())
-		    .detail("RequiredProxies", 1)
-		    .detail("DesiredProxies", self->configuration.getDesiredProxies())
+		    .detail("RequiredCommitProxies", 1)
+		    .detail("DesiredCommitProxies", self->configuration.getDesiredCommitProxies())
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("DesiredGrvProxies", self->configuration.getDesiredGrvProxies())
 		    .detail("RequiredResolvers", 1)
@@ -664,20 +669,20 @@ ACTOR Future<vector<Standalone<CommitTransactionRef>>> recruitEverything( Refere
 	self->backupWorkers.swap(recruits.backupWorkers);
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
-		.detail("MasterProxies", recruits.masterProxies.size())
-		.detail("GrvProxies", recruits.grvProxies.size())
-		.detail("TLogs", recruits.tLogs.size())
-		.detail("Resolvers", recruits.resolvers.size())
-		.detail("BackupWorkers", self->backupWorkers.size())
-		.trackLatest("MasterRecoveryState");
+	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
+	    .detail("CommitProxies", recruits.commitProxies.size())
+	    .detail("GrvProxies", recruits.grvProxies.size())
+	    .detail("TLogs", recruits.tLogs.size())
+	    .detail("Resolvers", recruits.resolvers.size())
+	    .detail("BackupWorkers", self->backupWorkers.size())
+	    .trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	wait( newSeedServers( self, recruits, seedServers ) );
 	state vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newMasterProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
+	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 	return confChanges;
 }
@@ -803,7 +808,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 	state int64_t dataOutstanding = 0;
 
 	state std::vector<Endpoint> endpoints;
-	for(auto& it : self->masterProxies) {
+	for (auto& it : self->commitProxies) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
 
@@ -973,9 +978,9 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, { req.spanContext });
-	state std::map<UID, ProxyVersionReplies>::iterator proxyItr = self->lastProxyVersionReplies.find(req.requestingProxy); // lastProxyVersionReplies never changes
+	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr = self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
 
-	if (proxyItr == self->lastProxyVersionReplies.end()) {
+	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
 		// Request from invalid proxy (e.g. from duplicate recruitment request)
 		req.reply.send(Never());
 		return Void();
@@ -1042,8 +1047,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->masterProxies)
-		self->lastProxyVersionReplies[p.id()] = ProxyVersionReplies();
+	for (auto& p : self->commitProxies) self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 
 	loop {
 		choose {
@@ -1183,8 +1187,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 				//	TraceEvent("KeyResolver").detail("Range", it.range()).detail("Value", it.value());
 
 				self->resolverChangesVersion = self->version + 1;
-				for (auto& p : self->masterProxies)
-					self->resolverNeedingChanges.insert(p.id());
+				for (auto& p : self->commitProxies) self->resolverNeedingChanges.insert(p.id());
 				self->resolverChanges.set(movedRanges);
 			} catch( Error&e ) {
 				if(e.code() != error_code_operation_failed)
@@ -1199,7 +1202,7 @@ static std::set<int> const& normalMasterErrors() {
 	if (s.empty()) {
 		s.insert( error_code_tlog_stopped );
 		s.insert( error_code_master_tlog_failed );
-		s.insert( error_code_master_proxy_failed );
+		s.insert(error_code_commit_proxy_failed);
 		s.insert( error_code_grv_proxy_failed );
 		s.insert( error_code_master_resolver_failed );
 		s.insert( error_code_master_backup_worker_failed );
@@ -1544,8 +1547,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	recoverAndEndEpoch.cancel();
 
-	ASSERT(self->masterProxies.size() <= self->configuration.getDesiredProxies());
-	ASSERT(self->masterProxies.size() >= 1);
+	ASSERT(self->commitProxies.size() <= self->configuration.getDesiredCommitProxies());
+	ASSERT(self->commitProxies.size() >= 1);
 	ASSERT(self->grvProxies.size() <= self->configuration.getDesiredGrvProxies());
 	ASSERT(self->grvProxies.size() >= 1);
 	ASSERT( self->resolvers.size() <= self->configuration.getDesiredResolvers() );
@@ -1620,10 +1623,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.read_snapshot = self->recoveryTransactionVersion;  // lastEpochEnd would make more sense, but isn't in the initial window of the resolver(s)
 
 	TraceEvent("MasterRecoveryCommit", self->dbgid);
-	state Future<ErrorOr<CommitID>> recoveryCommit = self->masterProxies[0].commit.tryGetReply(recoveryCommitRequest);
+	state Future<ErrorOr<CommitID>> recoveryCommit = self->commitProxies[0].commit.tryGetReply(recoveryCommitRequest);
 	self->addActor.send( self->logSystem->onError() );
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
-	self->addActor.send( waitProxyFailure( self->masterProxies) );
+	self->addActor.send( waitCommitProxyFailure(self->commitProxies));
 	self->addActor.send( waitGrvProxyFailure( self->grvProxies ) );
 	self->addActor.send( provideVersions(self) );
 	self->addActor.send( serveLiveCommittedVersion(self) );
@@ -1758,7 +1761,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 		}
 
 		TEST(err.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
-		TEST(err.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
+		TEST(err.code() == error_code_commit_proxy_failed); // Master: terminated because of a commit proxy failure
 		TEST(err.code() == error_code_grv_proxy_failed);  // Master: terminated because of a GRV proxy failure
 		TEST(err.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure
 		TEST(err.code() == error_code_master_backup_worker_failed);  // Master: terminated because of a backup worker failure

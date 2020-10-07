@@ -120,6 +120,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementTest.toml)
   add_fdb_test(TEST_FILES fast/InventoryTestAlmostReadOnly.toml)
   add_fdb_test(TEST_FILES fast/InventoryTestSomeWrites.toml)
@@ -165,7 +166,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/RedwoodCorrectnessBTree.toml)
   add_fdb_test(TEST_FILES rare/TransactionTagApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
-
+  add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
                restarting/from_7.0.0/ConfigureTestRestart-2.txt)

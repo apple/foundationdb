@@ -32,7 +32,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
@@ -131,12 +131,12 @@ struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
 		delete adding;
 	}
 
-	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, NULL, NULL); }
-	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, NULL, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), NULL); }
-	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), NULL); }
+	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
+	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), nullptr); }
+	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), nullptr); }
 
-	bool isReadable() const { return readWrite!=NULL; }
+	bool isReadable() const { return readWrite!=nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
@@ -501,7 +501,7 @@ public:
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-				if (rate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
+				if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
@@ -1021,6 +1021,11 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	return Void();
 };
 
+// Pessimistic estimate the number of overhead bytes used by each
+// watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
+// must be kept alive until the watch is finished.
+static constexpr size_t WATCH_OVERHEAD_BYTES = 1000;
+
 ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, SpanID parent ) {
 	state Location spanLocation = "SS:WatchValueImpl"_loc;
 	state Span span(spanLocation, { parent });
@@ -1071,7 +1076,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, 
 				}
 
 				++data->numWatches;
-				data->watchBytes += ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+				data->watchBytes += (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				try {
 					if(latest < minVersion) {
 						// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur up to or including minVersion
@@ -1084,10 +1089,10 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, 
 					}
 					wait(watchFuture);
 					--data->numWatches;
-					data->watchBytes -= ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+					data->watchBytes -= (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				} catch( Error &e ) {
 					--data->numWatches;
-					data->watchBytes -= ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+					data->watchBytes -= (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 					throw;
 				}
 			} catch( Error &e ) {
@@ -3002,7 +3007,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(injectedChanges) data->lastVersionWithData = ver;
 
-		data->updateEagerReads = NULL;
+		data->updateEagerReads = nullptr;
 		data->debug_inApplyUpdate = false;
 
 		if(ver == invalidVersion && !fii.changes.empty() ) {
@@ -3266,7 +3271,7 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	data->addMutationToMutationLogOrStorage(version, MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
-ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* storage, Key begin, Key end, std::vector<Standalone<VectorRef<KeyValueRef>>>* results = NULL) {
+ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* storage, Key begin, Key end, std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;
@@ -3985,9 +3990,13 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.masterProxies) );
+		state Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(self->db->get().client.commitProxies));
 		choose {
-			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
+			when(GetStorageServerRejoinInfoReply _rep =
+			         wait(commitProxies->size()
+			                  ? basicLoadBalance(commitProxies, &CommitProxyInterface::getStorageServerRejoinInfo,
+			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
+			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 				try {
 					tr.reset();

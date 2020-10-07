@@ -31,7 +31,7 @@
 
 namespace FDB {
 	struct CFuture : NonCopyable, ReferenceCounted<CFuture>, FastAllocated<CFuture> {
-		CFuture() : f(NULL) {}
+		CFuture() : f(nullptr) {}
 		explicit CFuture(FDBFuture* f) : f(f) {}
 		~CFuture() {
 			if (f) {

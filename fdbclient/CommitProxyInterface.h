@@ -1,6 +1,6 @@
 
 /*
- * MasterProxyInterface.h
+ * CommitProxyInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_MASTERPROXYINTERFACE_H
-#define FDBCLIENT_MASTERPROXYINTERFACE_H
+#ifndef FDBCLIENT_COMMITPROXYINTERFACE_H
+#define FDBCLIENT_COMMITPROXYINTERFACE_H
 #pragma once
 
 #include <utility>
@@ -36,7 +36,7 @@
 #include "fdbrpc/TimedRequest.h"
 #include "GrvProxyInterface.h"
 
-struct MasterProxyInterface {
+struct CommitProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
@@ -59,8 +59,8 @@ struct MasterProxyInterface {
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
-	bool operator == (MasterProxyInterface const& r) const { return id() == r.id(); }
-	bool operator != (MasterProxyInterface const& r) const { return id() != r.id(); }
+	bool operator==(CommitProxyInterface const& r) const { return id() == r.id(); }
+	bool operator!=(CommitProxyInterface const& r) const { return id() != r.id(); }
 	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
 
 	template <class Archive>
@@ -100,9 +100,10 @@ struct MasterProxyInterface {
 struct ClientDBInfo {
 	constexpr static FileIdentifier file_identifier = 5355080;
 	UID id;  // Changes each time anything else changes
-	vector< GrvProxyInterface > grvProxies;
-	vector< MasterProxyInterface > masterProxies;
-	Optional<MasterProxyInterface> firstProxy; //not serialized, used for commitOnFirstProxy when the proxies vector has been shrunk
+	vector<GrvProxyInterface> grvProxies;
+	vector<CommitProxyInterface> commitProxies;
+	Optional<CommitProxyInterface>
+	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	double clientTxnInfoSampleRate;
 	int64_t clientTxnInfoSizeLimit;
 	Optional<Value> forward;
@@ -122,7 +123,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, masterProxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward,
+		serializer(ar, grvProxies, commitProxies, id, clientTxnInfoSampleRate, clientTxnInfoSizeLimit, forward,
 		           transactionTagSampleRate, transactionTagSampleCost);
 	}
 };

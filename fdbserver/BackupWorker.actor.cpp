@@ -21,7 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"

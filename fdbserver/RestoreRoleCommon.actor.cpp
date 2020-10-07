@@ -178,10 +178,15 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 	loop {
 		int batchIndex = self->finishedBatch.get();
 		int maxBatchIndex = self->versionBatchId.get();
+		int maxPrintBatchIndex = batchIndex + SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM;
 
 		TraceEvent ev("FastRestoreVersionBatchProgressState", self->nodeID);
 		ev.detail("Role", role).detail("Node", self->nodeID).detail("FinishedBatch", batchIndex).detail("InitializedBatch", maxBatchIndex);
 		while (batchIndex <= maxBatchIndex) {
+			if (batchIndex > maxPrintBatchIndex) {
+				ev.detail("SkipVersionBatches", maxBatchIndex - batchIndex + 1);
+				break;
+			}
 			std::stringstream typeName;
 			typeName << "VersionBatch" << batchIndex;
 			ev.detail(typeName.str(), self->getVersionBatchState(batchIndex));

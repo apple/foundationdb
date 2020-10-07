@@ -153,7 +153,7 @@ void fdb_future_destroy( FDBFuture* f ) {
 
 extern "C" DLLEXPORT
 fdb_error_t fdb_future_block_until_ready( FDBFuture* f ) {
-	CATCH_AND_RETURN( TSAVB(f)->blockUntilReady(); );
+	CATCH_AND_RETURN(TSAVB(f)->blockUntilReadyCheckOnMainThread(););
 }
 
 fdb_bool_t fdb_future_is_error_v22( FDBFuture* f ) {
@@ -596,7 +596,7 @@ fdb_error_t fdb_transaction_set_option_impl( FDBTransaction* tr,
 void fdb_transaction_set_option_v13( FDBTransaction* tr,
 									 FDBTransactionOption option )
 {
-	fdb_transaction_set_option_impl( tr, option, NULL, 0 );
+	fdb_transaction_set_option_impl( tr, option, nullptr, 0 );
 }
 
 extern "C" DLLEXPORT

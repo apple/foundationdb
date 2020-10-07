@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/TagThrottle.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -104,7 +104,7 @@ TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
 
 TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	TagThrottleValue throttleValue;
-	BinaryReader reader(value, IncludeVersion());
+	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
 }
@@ -228,7 +228,7 @@ namespace ThrottleApi {
 		}
 		TagThrottleValue throttle(tpsRate, expirationTime.present() ? expirationTime.get() : 0, initialDuration,
 	                              reason.present() ? reason.get() : TagThrottledReason::UNSET);
-		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValue()));
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 		wr << throttle;
 		state Value value = wr.toValue();
 
@@ -347,6 +347,7 @@ namespace ThrottleApi {
 
 					removed = true;
 					tr.clear(tag.key);
+					unthrottledTags ++;
 				}
 
 				if(manualUnthrottledTags > 0) {

@@ -204,6 +204,15 @@ public:
 		}
 	}
 
+	void blockUntilReadyCheckOnMainThread() {
+		if (!isReady()) {
+			if (g_network->isOnMainThread()) {
+				throw blocked_from_network_thread();
+			}
+			BlockCallback cb(*this);
+		}
+	}
+
 	ThreadSingleAssignmentVarBase() : status(Unset), callback(NULL), valueReferenceCount(0) {} //, referenceCount(1) {}
 	~ThreadSingleAssignmentVarBase() {
 		this->mutex.assertNotEntered();
@@ -238,14 +247,14 @@ public:
 		}
 		auto func = callback;
 		if (!callback->isMultiCallback())
-			callback = NULL;
+			callback = nullptr;
 
 		if (!func->canFire(0)) {
 			this->mutex.leave();
 		} else {
 			this->mutex.leave();
 
-			//Thread safe because status is now ErrorSet and callback is NULL, meaning than callback cannot change
+			//Thread safe because status is now ErrorSet and callback is nullptr, meaning than callback cannot change
 			int userParam = 0;
 			func->error(err, userParam);
 		}
@@ -296,8 +305,8 @@ public:
 		// Only clear the callback if it belongs to the caller, because
 		// another actor could be waiting on it now!
 		if (callback == cb)
-			callback = NULL;
-		else if (callback != NULL)
+			callback = nullptr;
+		else if (callback != nullptr)
 			callback->clearCallback( cb );
 
 		this->mutex.leave();
@@ -310,12 +319,12 @@ public:
 	}
 
 	virtual void cancel() {
-		// Cancels the action and decrements the reference count by 1
-		// The if statement is just an optimization. It's ok if we take the wrong path due to a race
-		if(isReadyUnsafe())
-			delref();
-		else
-			onMainThreadVoid( [this](){ this->cancelFuture.cancel(); this->delref(); }, NULL );
+		onMainThreadVoid(
+		    [this]() {
+			    this->cancelFuture.cancel();
+			    this->delref();
+		    },
+		    nullptr);
 	}
 
 	void releaseMemory() {
@@ -329,6 +338,7 @@ private:
 	int32_t valueReferenceCount;
 
 protected:
+	// The caller of any of these *Unsafe functions should be holding |mutex|
 	bool isReadyUnsafe() const { return status >= Set; }
 	bool isErrorUnsafe() const { return status == ErrorSet; }
 	bool canBeSetUnsafe() const { return status == Unset; }
@@ -392,14 +402,14 @@ public:
 
 		auto func = callback;
 		if(!callback->isMultiCallback())
-			callback = NULL;
+			callback = nullptr;
 
 		if (!func->canFire(0)) {
 			this->mutex.leave();
 		} else {
 			this->mutex.leave();
 
-			//Thread safe because status is now Set and callback is NULL, meaning than callback cannot change
+			//Thread safe because status is now Set and callback is nullptr, meaning than callback cannot change
 			int userParam = 0;
 			func->fire(Void(), userParam);
 		}
@@ -425,6 +435,8 @@ public:
 	void blockUntilReady() {
 		sav->blockUntilReady();
 	}
+
+	void blockUntilReadyCheckOnMainThread() { sav->blockUntilReadyCheckOnMainThread(); }
 
 	bool isValid() const {
 		return sav != 0;
@@ -494,7 +506,7 @@ public:
 	bool operator != (const ThreadFuture& rhs) { return rhs.sav != sav; }
 
 	ThreadSingleAssignmentVarBase* getPtr() const { return sav; }
-	ThreadSingleAssignmentVarBase* extractPtr() { auto *p = sav; sav = NULL; return p; }
+	ThreadSingleAssignmentVarBase* extractPtr() { auto *p = sav; sav = nullptr; return p; }
 
 private:
 	ThreadSingleAssignmentVar<T>* sav;

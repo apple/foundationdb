@@ -43,41 +43,35 @@ standard API and some knowledge of the contents of the system key space.
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.
-class ConfigurationResult {
-public:
-	enum Type {
-		NO_OPTIONS_PROVIDED,
-		CONFLICTING_OPTIONS,
-		UNKNOWN_OPTION,
-		INCOMPLETE_CONFIGURATION,
-		INVALID_CONFIGURATION,
-		DATABASE_ALREADY_CREATED,
-		DATABASE_CREATED,
-		DATABASE_UNAVAILABLE,
-		STORAGE_IN_UNKNOWN_DCID,
-		REGION_NOT_FULLY_REPLICATED,
-		MULTIPLE_ACTIVE_REGIONS,
-		REGIONS_CHANGED,
-		NOT_ENOUGH_WORKERS,
-		REGION_REPLICATION_MISMATCH,
-		DCID_MISSING,
-		LOCKED_NOT_NEW,
-		SUCCESS,
-	};
+enum class ConfigurationResult {
+	NO_OPTIONS_PROVIDED,
+	CONFLICTING_OPTIONS,
+	UNKNOWN_OPTION,
+	INCOMPLETE_CONFIGURATION,
+	INVALID_CONFIGURATION,
+	DATABASE_ALREADY_CREATED,
+	DATABASE_CREATED,
+	DATABASE_UNAVAILABLE,
+	STORAGE_IN_UNKNOWN_DCID,
+	REGION_NOT_FULLY_REPLICATED,
+	MULTIPLE_ACTIVE_REGIONS,
+	REGIONS_CHANGED,
+	NOT_ENOUGH_WORKERS,
+	REGION_REPLICATION_MISMATCH,
+	DCID_MISSING,
+	LOCKED_NOT_NEW,
+	SUCCESS,
 };
 
-class CoordinatorsResult {
-public:
-	enum Type {
-		INVALID_NETWORK_ADDRESSES,
-		SAME_NETWORK_ADDRESSES,
-		NOT_COORDINATORS, //FIXME: not detected
-		DATABASE_UNREACHABLE, //FIXME: not detected
-		BAD_DATABASE_STATE,
-		COORDINATOR_UNREACHABLE,
-		NOT_ENOUGH_MACHINES,
-		SUCCESS
-	};
+enum class CoordinatorsResult {
+	INVALID_NETWORK_ADDRESSES,
+	SAME_NETWORK_ADDRESSES,
+	NOT_COORDINATORS, // FIXME: not detected
+	DATABASE_UNREACHABLE, // FIXME: not detected
+	BAD_DATABASE_STATE,
+	COORDINATOR_UNREACHABLE,
+	NOT_ENOUGH_MACHINES,
+	SUCCESS
 };
 
 struct ConfigureAutoResult {
@@ -86,7 +80,7 @@ struct ConfigureAutoResult {
 	int32_t machines;
 
 	std::string old_replication;
-	int32_t old_proxies;
+	int32_t old_commit_proxies;
 	int32_t old_grv_proxies;
 	int32_t old_resolvers;
 	int32_t old_logs;
@@ -94,38 +88,46 @@ struct ConfigureAutoResult {
 	int32_t old_machines_with_transaction;
 
 	std::string auto_replication;
-	int32_t auto_proxies;
+	int32_t auto_commit_proxies;
 	int32_t auto_grv_proxies;
 	int32_t auto_resolvers;
 	int32_t auto_logs;
 	int32_t auto_processes_with_transaction;
 	int32_t auto_machines_with_transaction;
 
-	int32_t desired_proxies;
+	int32_t desired_commit_proxies;
 	int32_t desired_grv_proxies;
 	int32_t desired_resolvers;
 	int32_t desired_logs;
 
 	ConfigureAutoResult()
-	  : processes(-1), machines(-1), old_proxies(-1), old_grv_proxies(-1), old_resolvers(-1), old_logs(-1),
-	    old_processes_with_transaction(-1), old_machines_with_transaction(-1), auto_proxies(-1), auto_grv_proxies(-1),
-	    auto_resolvers(-1), auto_logs(-1), auto_processes_with_transaction(-1), auto_machines_with_transaction(-1),
-	    desired_proxies(-1), desired_grv_proxies(-1), desired_resolvers(-1), desired_logs(-1) {}
+	  : processes(-1), machines(-1), old_commit_proxies(-1), old_grv_proxies(-1), old_resolvers(-1), old_logs(-1),
+	    old_processes_with_transaction(-1), old_machines_with_transaction(-1), auto_commit_proxies(-1),
+	    auto_grv_proxies(-1), auto_resolvers(-1), auto_logs(-1), auto_processes_with_transaction(-1),
+	    auto_machines_with_transaction(-1), desired_commit_proxies(-1), desired_grv_proxies(-1), desired_resolvers(-1),
+	    desired_logs(-1) {}
 
 	bool isValid() const { return processes != -1; }
 };
 
-ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf );  // Accepts a vector of configuration tokens
-ConfigurationResult::Type buildConfiguration( std::string const& modeString, std::map<std::string, std::string>& outConf );				// Accepts tokens separated by spaces in a single string
+ConfigurationResult buildConfiguration(
+    std::vector<StringRef> const& modeTokens,
+    std::map<std::string, std::string>& outConf); // Accepts a vector of configuration tokens
+ConfigurationResult buildConfiguration(
+    std::string const& modeString,
+    std::map<std::string, std::string>& outConf); // Accepts tokens separated by spaces in a single string
 
 bool isCompleteConfiguration( std::map<std::string, std::string> const& options );
 
 // All versions of changeConfig apply the given set of configuration tokens to the database, and return a ConfigurationResult (or error).
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::string const& configMode, bool force );  // Accepts tokens separated by spaces in a single string
+Future<ConfigurationResult> changeConfig(Database const& cx, std::string const& configMode,
+                                         bool force); // Accepts tokens separated by spaces in a single string
 
 ConfigureAutoResult parseConfig( StatusObject const& status );
-Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::vector<StringRef> const& modes, Optional<ConfigureAutoResult> const& conf, bool force );  // Accepts a vector of configuration tokens
-ACTOR Future<ConfigurationResult::Type> changeConfig(
+Future<ConfigurationResult> changeConfig(Database const& cx, std::vector<StringRef> const& modes,
+                                         Optional<ConfigureAutoResult> const& conf,
+                                         bool force); // Accepts a vector of configuration tokens
+ACTOR Future<ConfigurationResult> changeConfig(
     Database cx, std::map<std::string, std::string> m,
     bool force); // Accepts a full configuration in key/value format (from buildConfiguration)
 
@@ -134,12 +136,15 @@ ACTOR Future<Void> waitForFullReplication(Database cx);
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators( Transaction* tr, vector<NetworkAddress> oldCoordinators, Reference<ClusterConnectionFile>, CoordinatorsResult::Type& ) = 0;
+	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
+	                                                              vector<NetworkAddress> oldCoordinators,
+	                                                              Reference<ClusterConnectionFile>,
+	                                                              CoordinatorsResult&) = 0;
 	virtual std::string getDesiredClusterKeyName() { return std::string(); }
 };
 
 // Change to use the given set of coordination servers
-ACTOR Future<CoordinatorsResult::Type> changeQuorum(Database cx, Reference<IQuorumChange> change);
+ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> noQuorumChange();
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const&);

@@ -27,8 +27,6 @@
 
 class ClientKnobs : public Knobs {
 public:
-	int BYTE_LIMIT_UNLIMITED;
-	int ROW_LIMIT_UNLIMITED;
 
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
@@ -48,7 +46,7 @@ public:
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_MASTER_PROXY_CONNECTIONS;
+	int MAX_COMMIT_PROXY_CONNECTIONS;
 	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
 
@@ -169,8 +167,10 @@ public:
 	double MIN_CLEANUP_SECONDS;
 
 	// Configuration
-	int32_t DEFAULT_AUTO_PROXIES;
+	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
 	int32_t DEFAULT_AUTO_GRV_PROXIES;
+	int32_t DEFAULT_COMMIT_GRV_PROXIES_RATIO;
+	int32_t DEFAULT_MAX_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 

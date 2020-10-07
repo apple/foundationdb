@@ -46,7 +46,7 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
-  MasterProxyServer.actor.cpp
+  CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
   MutationTracking.cpp
@@ -153,6 +153,7 @@ set(FDBSERVER_SRCS
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp

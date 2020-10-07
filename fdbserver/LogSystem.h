@@ -819,7 +819,7 @@ struct LengthPrefixedStringRef {
 	int expectedSize() const { ASSERT(length); return *length; }
 	uint32_t* getLengthPtr() const { return length; }
 
-	LengthPrefixedStringRef() : length(NULL) {}
+	LengthPrefixedStringRef() : length(nullptr) {}
 	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
 };
 
