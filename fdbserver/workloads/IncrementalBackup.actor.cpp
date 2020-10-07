@@ -118,7 +118,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
-			TraceEvent("IBackupRestoreAttempt");
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
 			if (self->checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys");
@@ -149,6 +148,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 					}
 				}
 			}
+			TraceEvent("IBackupRestoreAttempt")
+				.detail("BeginVersion", beginVersion);
 			wait(
 			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
 			                                      true, invalidVersion, true, normalKeys, Key(), Key(), true, true, beginVersion)));

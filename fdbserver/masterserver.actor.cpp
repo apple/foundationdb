@@ -1579,7 +1579,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			BinaryWriter bw(Unversioned());
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
-			self->txnStateStore->clear(singleKeyRange(writeRecoveryKey));
 			tr.clear(recoveryCommitRequest.arena, singleKeyRange(writeRecoveryKey));
 		}
 		if(self->forceRecovery) {
