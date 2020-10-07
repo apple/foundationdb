@@ -318,9 +318,9 @@ private:
 		void connect();
 		void cancel();
 
-		bool canFire(int notMadeActive) { return true; }
-		void fire(const Void &unused, int& userParam);
-		void error(const Error& e, int& userParam);
+		bool canFire(int notMadeActive) const override { return true; }
+		void fire(const Void& unused, int& userParam) override;
+		void error(const Error& e, int& userParam) override;
 
 		const Reference<ClientInfo> client;
 		const std::string clusterFilePath;

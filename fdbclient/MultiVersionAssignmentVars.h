@@ -36,21 +36,21 @@ public:
 		// abortSignal comes first, because otherwise future could immediately call fire/error and attempt to remove this callback from abortSignal prematurely
 		abortSignal.callOrSetAsCallback(this, userParam, 0);
 		future.callOrSetAsCallback(this, userParam, 0);
-	} 
+	}
 
-	virtual void cancel() {
+	void cancel() override {
 		cancelCallbacks();
 		ThreadSingleAssignmentVar<T>::cancel();
 	}
 
-	virtual void cleanupUnsafe() {
+	void cleanupUnsafe() override {
 		future.getPtr()->releaseMemory();
 		ThreadSingleAssignmentVar<T>::cleanupUnsafe();
 	}
 
-	bool canFire(int notMadeActive) { return true; }
+	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) override {
 		lock.enter();
 		if(!hasBeenSet) {
 			hasBeenSet = true;
@@ -74,7 +74,7 @@ public:
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		ASSERT(future.isError());
 		lock.enter();
 		if(!hasBeenSet) {
@@ -169,7 +169,7 @@ public:
 		return destroyNow;
 	}
 
-	virtual void cancel() {
+	void cancel() override {
 		if(addFutureRef()) {
 			api->futureCancel(f);
 			delFutureRef();
@@ -178,7 +178,7 @@ public:
 		ThreadSingleAssignmentVar<T>::cancel();
 	}
 
-	virtual void cleanupUnsafe() {
+	void cleanupUnsafe() override {
 		delFutureRef();
 		ThreadSingleAssignmentVar<T>::cleanupUnsafe();
 	}
@@ -233,25 +233,25 @@ public:
 		source.callOrSetAsCallback(this, userParam, 0);
 	}
 
-	virtual void cancel() {
+	void cancel() override {
 		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback gets destroyed
 		source.getPtr()->cancel();
 		ThreadSingleAssignmentVar<T>::cancel();
 	}
-	
-	virtual void cleanupUnsafe() {
+
+	void cleanupUnsafe() override {
 		source.getPtr()->releaseMemory();
 		ThreadSingleAssignmentVar<T>::cleanupUnsafe();
 	}
 
-	bool canFire(int notMadeActive) { return true; }
+	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) override {
 		sendResult(mapValue(source.get()));
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		sendResult(mapValue(source.getError()));
 		ThreadSingleAssignmentVar<T>::delref();
 	}
@@ -285,7 +285,7 @@ public:
 		source.callOrSetAsCallback(this, userParam, 0);
 	}
 
-	virtual void cancel() {
+	void cancel() override {
 		source.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this callback gets destroyed
 		source.getPtr()->cancel();
 
@@ -302,8 +302,8 @@ public:
 
 		ThreadSingleAssignmentVar<T>::cancel();
 	}
-	
-	virtual void cleanupUnsafe() {
+
+	void cleanupUnsafe() override {
 		source.getPtr()->releaseMemory();
 
 		lock.enter();
@@ -319,9 +319,9 @@ public:
 		ThreadSingleAssignmentVar<T>::cleanupUnsafe();
 	}
 
-	bool canFire(int notMadeActive) { return true; }
+	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) override {
 		if(mappedFuture.isValid()) {
 			sendResult(mappedFuture.get());
 		}
@@ -332,7 +332,7 @@ public:
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		if(mappedFuture.isValid()) {
 			sendResult(mappedFuture.getError());
 		}

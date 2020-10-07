@@ -793,13 +793,13 @@ namespace fileBackup {
 			return Void();
 		}
 
-		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
+	    StringRef getName() const override {
+		    TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
-		}
+	    }
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveZeroBackupTask::name = LiteralStringRef("abort_legacy_backup");
@@ -863,13 +863,13 @@ namespace fileBackup {
 			return Void();
 		}
 
-		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
+	    StringRef getName() const override {
+		    TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
-		}
+	    }
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveOneBackupTask::name = LiteralStringRef("abort_legacy_backup_5.2");
@@ -940,24 +940,18 @@ namespace fileBackup {
 	// Backup and Restore taskFunc definitions will inherit from one of the following classes which
 	// servers to catch and log to the appropriate config any error that execute/finish didn't catch and log.
 	struct RestoreTaskFuncBase : TaskFuncBase {
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
-		}
-		virtual std::string toString(Reference<Task> task)
-		{
-			return "";
-		}
-	};
+	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) override {
+		    return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
+	    }
+	    std::string toString(Reference<Task> task) const override { return ""; }
+    };
 
 	struct BackupTaskFuncBase : TaskFuncBase {
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
-		}
-		virtual std::string toString(Reference<Task> task)
-		{
-			return "";
-		}
-	};
+	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) override {
+		    return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
+	    }
+	    std::string toString(Reference<Task> task) const override { return ""; }
+    };
 
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
 

@@ -1099,20 +1099,18 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 struct SpecifiedQuorumChange : IQuorumChange {
 	vector<NetworkAddress> desired;
 	explicit SpecifiedQuorumChange( vector<NetworkAddress> const& desired ) : desired(desired) {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                              vector<NetworkAddress> oldCoordinators,
-	                                                              Reference<ClusterConnectionFile>,
-	                                                              CoordinatorsResult&) {
+	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr, vector<NetworkAddress> oldCoordinators,
+	                                                      Reference<ClusterConnectionFile>,
+	                                                      CoordinatorsResult&) override {
 		return desired;
 	}
 };
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const& addresses) { return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses)); }
 
 struct NoQuorumChange : IQuorumChange {
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                              vector<NetworkAddress> oldCoordinators,
-	                                                              Reference<ClusterConnectionFile>,
-	                                                              CoordinatorsResult&) {
+	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr, vector<NetworkAddress> oldCoordinators,
+	                                                      Reference<ClusterConnectionFile>,
+	                                                      CoordinatorsResult&) override {
 		return oldCoordinators;
 	}
 };
@@ -1122,15 +1120,12 @@ struct NameQuorumChange : IQuorumChange {
 	std::string newName;
 	Reference<IQuorumChange> otherChange;
 	explicit NameQuorumChange( std::string const& newName, Reference<IQuorumChange> const& otherChange ) : newName(newName), otherChange(otherChange) {}
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                              vector<NetworkAddress> oldCoordinators,
-	                                                              Reference<ClusterConnectionFile> cf,
-	                                                              CoordinatorsResult& t) {
+	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr, vector<NetworkAddress> oldCoordinators,
+	                                                      Reference<ClusterConnectionFile> cf,
+	                                                      CoordinatorsResult& t) override {
 		return otherChange->getDesiredCoordinators(tr, oldCoordinators, cf, t);
 	}
-	virtual std::string getDesiredClusterKeyName() {
-		return newName;
-	}
+	std::string getDesiredClusterKeyName() const override { return newName; }
 };
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other) {
 	return Reference<IQuorumChange>(new NameQuorumChange( name, other ));
@@ -1140,10 +1135,9 @@ struct AutoQuorumChange : IQuorumChange {
 	int desired;
 	explicit AutoQuorumChange( int desired ) : desired(desired) {}
 
-	virtual Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr,
-	                                                              vector<NetworkAddress> oldCoordinators,
-	                                                              Reference<ClusterConnectionFile> ccf,
-	                                                              CoordinatorsResult& err) {
+	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr, vector<NetworkAddress> oldCoordinators,
+	                                                      Reference<ClusterConnectionFile> ccf,
+	                                                      CoordinatorsResult& err) override {
 		return getDesired( this, tr, oldCoordinators, ccf, &err );
 	}
 

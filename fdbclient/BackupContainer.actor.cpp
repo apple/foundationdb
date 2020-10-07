@@ -1884,7 +1884,7 @@ public:
 		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
 	}
 
-	virtual ~BackupContainerBlobStore() {}
+	~BackupContainerBlobStore() = default;
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) final {
 		return Reference<IAsyncFile>(
