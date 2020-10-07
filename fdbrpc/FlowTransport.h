@@ -27,6 +27,7 @@
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Net2Packet.h"
+#include "fdbrpc/ContinuousSample.h"
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -124,11 +125,14 @@ struct Peer : public ReferenceCounted<Peer> {
 	int64_t bytesReceived;
 	double lastDataPacketSentTime;
 	int outstandingReplies;
+	ContinuousSample<double> pingLatencies;
+	int64_t lastLoggedBytesReceived;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination)
 	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
 	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
-	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()) {}
+	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
+		pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0) {}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
