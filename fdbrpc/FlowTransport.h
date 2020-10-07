@@ -132,7 +132,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
 	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
 	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
-		pingLatencies(destination.isPublic() ? 100 : 1), lastLoggedBytesReceived(0) {}
+		pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0) {}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
