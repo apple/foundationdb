@@ -433,10 +433,10 @@ public:
 	bool canBeSet() const { return int16_t(error_state.code()) == UNSET_ERROR_CODE; }
 	bool isError() const { return int16_t(error_state.code()) > SET_ERROR_CODE; }
 
-	T const& get() {
+	T const& get() const {
 		ASSERT(isSet());
 		if (isError()) throw error_state;
-		return value();
+		return *(T const*)&value_storage;
 	}
 
 	template <class U>
@@ -534,8 +534,8 @@ public:
 	int getFutureReferenceCount() const { return futures; }
 	int getPromiseReferenceCount() const { return promises; }
 
-	virtual void destroy() { delete this; }
-	virtual void cancel() {}
+	void destroy() override { delete this; }
+	void cancel() override {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
 		// We are always *logically* dropping one future reference from this, but if we are adding a first callback
@@ -558,8 +558,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>

@@ -199,8 +199,8 @@ public:
 		m_stopOnError = stopOnError( this );
 	}
 
-	virtual Future<Void> getError() { return pool->anyError.getResult(); }
-	virtual void addThread( IThreadPoolReceiver* userData ) {
+	Future<Void> getError() const override { return pool->anyError.getResult(); }
+	void addThread(IThreadPoolReceiver* userData) override {
 		checkError();
 
 		auto w = new Worker(pool.getPtr(), userData);
@@ -217,7 +217,7 @@ public:
 		wait( delay(0, g_network->getCurrentTask() ));
 		w->start();
 	}
-	virtual void post( PThreadAction action ) {
+	void post(PThreadAction action) override {
 		checkError();
 
 		pool->queueLock.enter();
@@ -230,7 +230,7 @@ public:
 		} else
 			pool->queueLock.leave();
 	}
-	virtual Future<Void> stop(Error const& e) {
+	Future<Void> stop(Error const& e) override {
 		if (error.code() == invalid_error_code) {
 			error = e;
 		}
@@ -256,9 +256,9 @@ public:
 
 		return pool->allStopped.getResult();
 	}
-	virtual bool isCoro() const { return IS_CORO; }
-	virtual void addref() { ReferenceCounted<WorkPool>::addref(); }
-	virtual void delref() { ReferenceCounted<WorkPool>::delref(); }
+	bool isCoro() const override { return IS_CORO; }
+	void addref() override { ReferenceCounted<WorkPool>::addref(); }
+	void delref() override { ReferenceCounted<WorkPool>::delref(); }
 };
 
 typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
