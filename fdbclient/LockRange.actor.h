@@ -77,6 +77,9 @@ public:
 	void add(KeyRef beginKey, LockStatus status, Version version);
 	void clear(KeyRangeRef range);
 
+	// Only commit proxy sets version when recovering from txnStateStore.
+	void setVersion(Version version) { lockVersion = version; }
+
 	std::pair<Snapshot, Version> getSnapshot() const;
 
 	// Allow access for all key ranges. This is useful for fdbserver processes

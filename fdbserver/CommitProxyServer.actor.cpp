@@ -1816,9 +1816,11 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy, MasterInter
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();
 					commitData.locked = lockedKey.present() && lockedKey.get().size();
 					commitData.metadataVersion = commitData.txnStateStore->readValue(metadataVersionKey).get();
-					// load from txnStateStore the latest snapshot
-					// commitData.loadRangeLocks();
-					// TraceEvent("LoadRangeLock", commitData.dbgid).detail("Locks", commitData.locks.toString());
+					commitData.rangeLockVersion = commitData.txnStateStore->readValue(rangeLockVersionKey).get();
+					if (commitData.rangeLockVersion.present()) {
+						auto pair = parseVersionStampFromValue(commitData.rangeLockVersion.get());
+						commitData.locks.setVersion(pair.first);
+					}
 
 					commitData.txnStateStore->enableSnapshot();
 				}

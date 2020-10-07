@@ -4089,24 +4089,19 @@ std::pair<Version, Standalone<StringRef>> parseVersionStampFromValue(const Value
 
 ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version version) {
 	state Future<Void> clientTimeout = delay(5.0);
-	loop {
-		loop choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(ErrorOr<GetRangeLockSnapshotReply> reply = wait(
-			         errorOr(basicLoadBalance(cx->getCommitProxies(false), &CommitProxyInterface::getRangeLockSnapshot,
-			                                  GetRangeLockSnapshotRequest(version))))) {
-				if (reply.isError()) {
-					throw reply.getError();
-				}
-				if (reply.get().version < version) {
-					//TraceEvent("NAPI_GetRangeLockSnapshot").detail("RequestVersion", version).detail("ReplyVersion", reply.get().version);
-					break;
-				}
-				cx->rangeLockCache.setSnapshot(reply.get().version, reply.get().snapshot);
-				return Void();
+	loop choose {
+		when(wait(cx->onProxiesChanged())) {}
+		when(ErrorOr<GetRangeLockSnapshotReply> reply =
+		         wait(errorOr(basicLoadBalance(cx->getCommitProxies(false), &CommitProxyInterface::getRangeLockSnapshot,
+		                                       GetRangeLockSnapshotRequest(version))))) {
+			if (reply.isError()) {
+				throw reply.getError();
 			}
-			when(wait(clientTimeout)) { throw timed_out(); }
+			ASSERT(reply.get().version >= version);
+			cx->rangeLockCache.setSnapshot(reply.get().version, reply.get().snapshot);
+			return Void();
 		}
+		when(wait(clientTimeout)) { throw timed_out(); }
 	}
 }
 
