@@ -765,6 +765,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				} else {
 					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 				}
+				TraceEvent("DDMedianAvailableSpace", self->distributorId).detail("Primary", self->medianAvailableSpace);
 			}
 
 			bool foundSrc = false;
@@ -850,8 +851,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				while( randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT && nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES ) {
 					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() &&
-					          (!req.preferLowerUtilization || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));					
+					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
+					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
 
 					for(int i=0; ok && i<randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
