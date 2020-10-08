@@ -23,10 +23,13 @@ set(FDBSERVER_SRCS
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
+  GrpcService.cpp
+  GrpcService.h
   GrvProxyServer.actor.cpp
   IDiskQueue.h
   IKeyValueStore.h
   IPager.h
+  IRpcInterface.h
   IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
@@ -83,6 +86,8 @@ set(FDBSERVER_SRCS
   Resolver.actor.cpp
   ResolverInterface.h
   ServerDBInfo.actor.h
+  RpcProxy.actor.cpp
+  RpcProxyInterface.h
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
