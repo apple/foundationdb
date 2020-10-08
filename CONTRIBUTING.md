@@ -32,7 +32,7 @@ We draw inspiration from the Apache Software Foundation's informal motto: ["comm
 
 The project technical lead is Evan Tschannen (ejt@apple.com).
 
-Members of the Apple FoundationDB team are part of the initial core committers helping review individual contributions; you'll see them commenting on your pull requests. Future committers to the open source project, and the process for adding individuals in this role will be formalized in the future.
+Members of the Apple FoundationDB team are part of the core committers helping review individual contributions; you'll see them commenting on your pull requests.  As the FDB open source community has grown, some members of the community have consistently produced high quality code reviews and other significant contributions to FoundationDB.  The project technical lead maintains a list of external committers that actively contribute in this way, and gives them permission to review and merge pull requests.
 
 ## Contributing
 ### Opening a Pull Request

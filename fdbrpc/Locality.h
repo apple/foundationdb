@@ -33,7 +33,8 @@ struct ProcessClass {
 		TransactionClass,
 		ResolutionClass,
 		TesterClass,
-		ProxyClass,
+		CommitProxyClass,
+		GrvProxyClass,
 		MasterClass,
 		StatelessClass,
 		LogClass,
@@ -49,7 +50,21 @@ struct ProcessClass {
 	};
 
 	enum Fitness { BestFit, GoodFit, UnsetFit, OkayFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController, DataDistributor, Ratekeeper, StorageCache, Backup, NoRole };
+	enum ClusterRole {
+		Storage,
+		TLog,
+		CommitProxy,
+		GrvProxy,
+		Master,
+		Resolver,
+		LogRouter,
+		ClusterController,
+		DataDistributor,
+		Ratekeeper,
+		StorageCache,
+		Backup,
+		NoRole
+	};
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -62,7 +77,13 @@ public:
 		if (s=="storage") _class = StorageClass;
 		else if (s=="transaction") _class = TransactionClass;
 		else if (s=="resolution") _class = ResolutionClass;
-		else if (s=="proxy") _class = ProxyClass;
+		else if (s=="commit_proxy") _class = CommitProxyClass;
+		else if (s=="proxy") {
+			_class = CommitProxyClass;
+			printf("WARNING: 'proxy' machine class is deprecated and will be automatically converted "
+					"'commit_proxy' machine class. Please use 'grv_proxy' or 'commit_proxy' specifically\n");
+		}
+		else if (s=="grv_proxy") _class = GrvProxyClass;
 		else if (s=="master") _class = MasterClass;
 		else if (s=="test") _class = TesterClass;
 		else if (s=="unset") _class = UnsetClass;
@@ -83,7 +104,13 @@ public:
 		if (classStr=="storage") _class = StorageClass;
 		else if (classStr=="transaction") _class = TransactionClass;
 		else if (classStr=="resolution") _class = ResolutionClass;
-		else if (classStr=="proxy") _class = ProxyClass;
+		else if (classStr=="commit_proxy") _class = CommitProxyClass;
+		else if (classStr=="proxy") {
+			_class = CommitProxyClass;
+			printf("WARNING: 'proxy' machine class is deprecated and will be automatically converted "
+					"'commit_proxy' machine class. Please use 'grv_proxy' or 'commit_proxy' specifically\n");
+		}
+		else if (classStr=="grv_proxy") _class = GrvProxyClass;
 		else if (classStr=="master") _class = MasterClass;
 		else if (classStr=="test") _class = TesterClass;
 		else if (classStr=="unset") _class = UnsetClass;
@@ -120,7 +147,8 @@ public:
 			case StorageClass: return "storage";
 			case TransactionClass: return "transaction";
 			case ResolutionClass: return "resolution";
-			case ProxyClass: return "proxy";
+			case CommitProxyClass: return "commit_proxy";
+			case GrvProxyClass: return "grv_proxy";
 			case MasterClass: return "master";
 			case TesterClass: return "test";
 			case StatelessClass: return "stateless";
@@ -179,6 +207,7 @@ public:
 		return ((_data.size() == rhs._data.size())													&&
 					  (std::equal(_data.begin(), _data.end(), rhs._data.begin())));
 	}
+	bool operator!=(LocalityData const& rhs) const { return !(*this == rhs); }
 
 	Optional<Standalone<StringRef>>	get(StringRef key) const {
 		auto pos = _data.find(key);

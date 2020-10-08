@@ -763,8 +763,8 @@ Special keys
 Keys starting with the bytes ``\xff\xff`` are called "special" keys, and they are materialized when read. :doc:`\\xff\\xff/status/json <mr-status>` is an example of a special key.
 As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into "modules".
 
-Modules
--------
+Read-only modules
+-----------------
 
 A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
 By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
@@ -838,7 +838,7 @@ Caveats
 
 #. ``\xff\xff/transaction/read_conflict_range/`` The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.
 #. ``\xff\xff/transaction/write_conflict_range/`` The conflict range range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
-#. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server (i.e., proxy and resolver) resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
+#. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server (i.e., commit proxy and resolver) resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
 
 Metrics module
 --------------
@@ -911,6 +911,59 @@ Caveats
 ~~~~~~~
 
 #. ``\xff\xff/metrics/health/`` These keys may return data that's several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.
+
+
+Read/write modules
+------------------
+
+As of api version 700, some modules in the special key space allow writes as
+well as reads. In these modules, a user can expect that mutations (i.e. sets,
+clears, etc) do not have side-effects outside of the current transaction
+until commit is called (the same is true for writes to the normal key space).
+A user can also expect the effects on commit to be atomic. Reads to
+special keys may require reading system keys (whose format is an implementation
+detail), and for those reads appropriate read conflict ranges are added on
+the underlying system keys.
+
+Writes to read/write modules in the special key space are disabled by
+default. Use the ``special_key_space_enable_writes`` transaction option to
+enable them [#special_key_space_enable_writes]_.
+
+
+.. _special-key-space-management-module:
+
+Management module
+~~~~~~~~~~~~~~~~~
+
+The management module is for temporary cluster configuration changes. For
+example, in order to safely remove a process from the cluster, one can add an
+exclusion to the ``\xff\xff/management/excluded/`` key prefix that matches
+that process, and wait for necessary data to be moved away.
+
+#. ``\xff\xff/management/excluded/<exclusion>`` Read/write. Indicates that the cluster should move data away from processes matching ``<exclusion>``, so that they can be safely removed. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
+#. ``\xff\xff/management/failed/<exclusion>`` Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
+#. ``\xff\xff/management/inProgressExclusion/<address>`` Read-only. Indicates that the process matching ``<address>`` matches an exclusion, but still has necessary data and can't yet be safely removed.
+#. ``\xff\xff/management/options/excluded/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/excluded/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
+#. ``\xff\xff/management/options/failed/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed/<exclusion>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
+
+An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
+an ip address and port (e.g. ``127.0.0.1:4500``). If no port is specified,
+then all processes on that host match the exclusion.
+
+Error message module
+~~~~~~~~~~~~~~~~~~~~
+
+Each module written to validates the transaction before committing, and this
+validation failing is indicated by a ``special_keys_api_failure`` error.
+More detailed information about why this validation failed can be accessed through the ``\xff\xff/error_message`` key, whose value is a json document with the following schema.
+
+========================== ======== ===============
+**Field**                  **Type** **Description**
+-------------------------- -------- ---------------
+retriable                  boolean  Whether or not this operation might succeed if retried
+command                    string   The fdbcli command corresponding to this operation
+message                    string   Help text explaining the reason this operation failed
+========================== ======== ===============
 
 Performance considerations
 ==========================
@@ -1006,22 +1059,21 @@ How Versions are Generated and Assigned
 
 Versions are generated by the process that runs the *master* role. FoundationDB guarantees that no version will be generated twice and that the versions are monotonically increasing.
 
-In order to assign read and commit versions to transactions, a client will never talk to the master. Instead it will get both from a proxy. Getting a read version is more complex than a commit version. Let's first look at commit versions:
+In order to assign read and commit versions to transactions, a client will never talk to the master. Instead it will get them from a GRV proxy and a commit proxy. Getting a read version is more complex than a commit version. Let's first look at commit versions:
 
-#. The client will send a commit message to a proxy.
-#. The proxy will put this commit message in a queue in order to build a batch.
-#. In parallel, the proxy will ask for a new version from the master (note that this means that only proxies will ever ask for new versions - which scales much better as it puts less stress on the network).
-#. The proxy will then resolve all transactions within that batch (discussed later) and assign the version it got from the master to *all* transactions within that batch. It will then write the transactions to the transaction log system to make it durable.
+#. The client will send a commit message to a commit proxy.
+#. The commit proxy will put this commit message in a queue in order to build a batch.
+#. In parallel, the commit proxy will ask for a new version from the master (note that this means that only commit proxies will ever ask for new versions - which scales much better as it puts less stress on the network).
+#. The commit proxy will then resolve all transactions within that batch (discussed later) and assign the version it got from the master to *all* transactions within that batch. It will then write the transactions to the transaction log system to make it durable.
 #. If the transaction succeeded, it will send back the version as commit version to the client. Otherwise it will send back an error.
 
-As mentioned before, the algorithm to assign read versions is a bit more complex. At the start of a transaction, a client will ask a proxy server for a read version. The proxy will reply with the last committed version as of the time it received the request - this is important to guarantee external consistency. This is how this is achieved:
+As mentioned before, the algorithm to assign read versions is a bit more complex. At the start of a transaction, a client will ask a GRV proxy server for a read version. The GRV proxy will reply with the last committed version as of the time it received the request - this is important to guarantee external consistency. This is how this is achieved:
 
-#. The client will send a GRV (get read version) request to a proxy.
-#. The proxy will batch GRV requests for a short amount of time (it depends on load and configuartion how big these batches will be).
+#. The client will send a GRV (get read version) request to a GRV proxy.
+#. The GRV proxy will batch GRV requests for a short amount of time (it depends on load and configuartion how big these batches will be).
 #. The proxy will do the following steps in parallel:
-   * Ask all other proxies for their most recent committed version (the largest version they received from the master for which it successfully wrote the transactions to the transaction log system).
-   * Send a message to the transaction log system to verify that it is still writable. This is to prevent that we fetch read versions from a proxy that has been declared to be dead.
-#. It will then take the largest committed version from all proxies (including its own) and send it back to the clients.
+   * Ask master for their most recent committed version (the largest version of proxies' committed version for which the transactions are successfully written to the transaction log system).
+   * Send a message to the transaction log system to verify that it is still writable. This is to prevent that we fetch read versions from a GRV proxy that has been declared to be dead.
 
 Checking whether the log-system is still writeable can be especially expensive if a clusters runs in a multi-region configuration. If a user is fine to sacrifice strict serializability they can use :ref:`option-causal-read-risky <api-python-option-set-causal-read-risky>`.
 
@@ -1095,8 +1147,8 @@ The ``commit_unknown_result`` Error
 
 ``commit_unknown_result`` can be thrown during a commit. This error is difficult to handle as you won't know whether your transaction was committed or not. There are mostly two reasons why you might see this error:
 
-#. The client lost the connection to the proxy to which it did send the commit. So it never got a reply and therefore can't know whether the commit was successful or not.
-#. There was a FoundationDB failure - for example a proxy failed during the commit. In that case there is no way for the client know whether the transaction succeeded or not.
+#. The client lost the connection to the commit proxy to which it did send the commit. So it never got a reply and therefore can't know whether the commit was successful or not.
+#. There was a FoundationDB failure - for example a commit proxy failed during the commit. In that case there is no way for the client know whether the transaction succeeded or not.
 
 However, there is one guarantee FoundationDB gives to the caller: at the point of time where you receive this error, the transaction either committed or not and if it didn't commit, it will never commit in the future. Or: it is guaranteed that the transaction is not in-flight anymore. This is an important guarantee as it means that if your transaction is idempotent you can simply retry. For more explanations see developer-guide-unknown-results_.
 
@@ -1114,3 +1166,4 @@ At a first glance this looks very similar to an ``commit_unknown_result``. Howev
 
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
 .. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
+.. [#special_key_space_enable_writes] Enabling this option enables other transaction options, such as ``ACCESS_SYSTEM_KEYS``. This may change in the future.

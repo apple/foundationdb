@@ -38,7 +38,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_VERSIONS_IN_FLIGHT_FORCED,         6e5 * VERSIONS_PER_SECOND ); //one week of versions
 	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
 	init( MAX_WRITE_TRANSACTION_LIFE_VERSIONS,     5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_WRITE_TRANSACTION_LIFE_VERSIONS=std::max<int>(1, 1 * VERSIONS_PER_SECOND);
-	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	init( MAX_COMMIT_BATCH_INTERVAL,                             2.0 ); if( randomize && BUGGIFY ) MAX_COMMIT_BATCH_INTERVAL = 0.5; // Each commit proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 	MAX_COMMIT_BATCH_INTERVAL = std::min(MAX_COMMIT_BATCH_INTERVAL, MAX_READ_TRANSACTION_LIFE_VERSIONS/double(2*VERSIONS_PER_SECOND)); // Ensure that the proxy commits 2 times every MAX_READ_TRANSACTION_LIFE_VERSIONS, otherwise the master will not give out versions fast enough
 
 	// TLogs
@@ -46,7 +46,6 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( RECOVERY_TLOG_SMART_QUORUM_DELAY,                     0.25 ); if( randomize && BUGGIFY ) RECOVERY_TLOG_SMART_QUORUM_DELAY = 0.0; // smaller might be better for bug amplification
 	init( TLOG_STORAGE_MIN_UPDATE_INTERVAL,                      0.5 );
 	init( BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL,               30 );
-	init( UNFLUSHED_DATA_RATIO,                                 0.05 ); if( randomize && BUGGIFY ) UNFLUSHED_DATA_RATIO = 0.0;
 	init( DESIRED_TOTAL_BYTES,                                150000 ); if( randomize && BUGGIFY ) DESIRED_TOTAL_BYTES = 10000;
 	init( DESIRED_UPDATE_BYTES,                2*DESIRED_TOTAL_BYTES );
 	init( UPDATE_DELAY,                                        0.001 );
@@ -328,7 +327,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( POLLING_FREQUENCY,                                     2.0 ); if( longLeaderElection ) POLLING_FREQUENCY = 8.0;
 	init( HEARTBEAT_FREQUENCY,                                   0.5 ); if( longLeaderElection ) HEARTBEAT_FREQUENCY = 1.0;
 
-	// Master Proxy
+	// Commit CommitProxy and GRV CommitProxy
 	init( START_TRANSACTION_BATCH_INTERVAL_MIN,                 1e-6 );
 	init( START_TRANSACTION_BATCH_INTERVAL_MAX,                0.010 );
 	init( START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.5 );
@@ -374,6 +373,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
+	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -437,7 +437,8 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
 	init( EXPECTED_TLOG_FITNESS,              ProcessClass::UnsetFit );
 	init( EXPECTED_LOG_ROUTER_FITNESS,        ProcessClass::UnsetFit );
-	init( EXPECTED_PROXY_FITNESS,             ProcessClass::UnsetFit );
+	init( EXPECTED_COMMIT_PROXY_FITNESS,      ProcessClass::UnsetFit );
+	init( EXPECTED_GRV_PROXY_FITNESS,         ProcessClass::UnsetFit );
 	init( EXPECTED_RESOLVER_FITNESS,          ProcessClass::UnsetFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && BUGGIFY ) RECRUITMENT_TIMEOUT = deterministicRandom()->coinflip() ? 60.0 : 1.0;
 
@@ -547,6 +548,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
+	init( STORAGE_COMMIT_PIPELINE_BYTES_PER_YIELD,            100000 );
 	init( STORAGE_DURABILITY_LAG_REJECT_THRESHOLD,              0.25 );
 	init( STORAGE_DURABILITY_LAG_MIN_RATE,                       0.1 );
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
@@ -564,9 +566,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( BEHIND_CHECK_COUNT,                                      2 );
 	init( BEHIND_CHECK_VERSIONS,             5 * VERSIONS_PER_SECOND );
 	init( WAIT_METRICS_WRONG_SHARD_CHANCE,   isSimulated ? 1.0 : 0.1 );
-	init( MIN_TAG_PAGES_READ_RATE,                             1.0e4 ); if( randomize && BUGGIFY ) MIN_TAG_PAGES_READ_RATE = 0;
-	init( READ_TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) READ_TAG_MEASUREMENT_INTERVAL = 1.0;
-	init( OPERATION_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) OPERATION_COST_BYTE_FACTOR = 4096;
+	init( MIN_TAG_READ_PAGES_RATE,                             1.0e4 ); if( randomize && BUGGIFY ) MIN_TAG_READ_PAGES_RATE = 0;
+	init( MIN_TAG_WRITE_PAGES_RATE,                             3200 ); if( randomize && BUGGIFY ) MIN_TAG_WRITE_PAGES_RATE = 0;
+	init( TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 1.0;
+	init( READ_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
 
 	//Wait Failure
@@ -678,6 +681,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// clang-format on
 
-	if(clientKnobs)
-		clientKnobs->IS_ACCEPTABLE_DELAY = clientKnobs->IS_ACCEPTABLE_DELAY*std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS)/(5.0*VERSIONS_PER_SECOND);
+	if (clientKnobs) {
+		clientKnobs->IS_ACCEPTABLE_DELAY =
+		    clientKnobs->IS_ACCEPTABLE_DELAY *
+		    std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS) /
+		    (5.0 * VERSIONS_PER_SECOND);
+		clientKnobs->INIT_MID_SHARD_BYTES = MIN_SHARD_BYTES;
+	}
 }

@@ -583,7 +583,7 @@ Clients should also specify their datacenter with the database option ``datacent
 Changing the region configuration
 ---------------------------------
 
-To change the region configure, use the ``fileconfigure`` command ``fdbcli``. For example::
+To change the region configuration, use the ``fileconfigure`` command ``fdbcli``. For example::
 
     user@host$ fdbcli
     Using cluster file `/etc/foundationdb/fdb.cluster'.
@@ -777,16 +777,17 @@ The 6.2 release still has a number of rough edges related to region configuratio
 Guidelines for setting process class
 ====================================
 
-In a FoundationDB cluster, each of the ``fdbserver`` processes perform different tasks. Each process is recruited to do a particular task based on its process ``class``. For example, processes with ``class=storage`` are given preference to be recruited for doing storage server tasks, ``class=transaction`` are for log server processes and ``class=stateless`` are for stateless processes like proxies, resolvers, etc.,
+In a FoundationDB cluster, each of the ``fdbserver`` processes perform different tasks. Each process is recruited to do a particular task based on its process ``class``. For example, processes with ``class=storage`` are given preference to be recruited for doing storage server tasks, ``class=transaction`` are for log server processes and ``class=stateless`` are for stateless processes like commit proxies, resolvers, etc.,
 
-The recommended minimum number of ``class=transaction`` (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for ``class=stateless`` processes is 4 (proxy) + 1 (resolver) + 1 (cluster controller) + 1 (master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.
+The recommended minimum number of ``class=transaction`` (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for ``class=stateless`` processes is 1 (GRV proxy) + 3 (commit proxy) + 1 (resolver) + 1 (cluster controller) + 1 (master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.
 
 ``fdbcli`` is used to set the desired number of processes of a particular process type. To do so, you would issue the ``fdbcli`` commands::
 
-  fdb> configure proxies=5
+  fdb> configure grv_proxies=1
+  fdb> configure grv_proxies=4
   fdb> configure logs=8
 
-.. note:: In the present release, the default value for proxies and log servers is 3 and for resolvers is 1. You should not set the value of a process type to less than its default.
+.. note:: In the present release, the default value for commit proxies and log servers is 3 and for GRV proxies and resolvers is 1. You should not set the value of a process type to less than its default.
 
 .. warning:: The conflict-resolution algorithm used by FoundationDB is conservative: it guarantees that no conflicting transactions will be committed, but it may fail to commit some transactions that theoretically could have been. The effects of this conservatism may increase as you increase the number of resolvers. It is therefore important to employ the recommended techniques for :ref:`minimizing conflicts <developer-guide-transaction-conflicts>` when increasing the number of resolvers.
 

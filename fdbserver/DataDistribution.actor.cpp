@@ -20,6 +20,10 @@
 
 #include <set>
 #include <sstream>
+#include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -35,9 +39,11 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/serialize.h"
 
 class TCTeamInfo;
 struct TCMachineInfo;
@@ -343,6 +349,7 @@ struct ServerStatus {
 	const char* toString() const { return isFailed ? "Failed" : isUndesired ? "Undesired" : "Healthy"; }
 
 	bool operator == (ServerStatus const& r) const { return isFailed == r.isFailed && isUndesired == r.isUndesired && isWrongConfiguration == r.isWrongConfiguration && locality == r.locality && initialized == r.initialized; }
+	bool operator!=(ServerStatus const& r) const { return !(*this == r); }
 
 	//If a process has reappeared without the storage server that was on it (isFailed == true), we don't need to exclude it
 	//We also don't need to exclude processes who are in the wrong configuration (since those servers will be removed)
@@ -505,10 +512,10 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				beginKey = keyServers.end()[-1].key;
 				break;
 			} catch (Error& e) {
-				wait( tr.onError(e) );
+				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
 
+				wait(tr.onError(e));
 				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("GetInitialTeamsKeyServersRetry", distributorId);
 			}
 		}
 
@@ -1451,9 +1458,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		if (!shouldPrint) return;
 		// Record all team collections IDs
 		for (int i = 0; i < teamCollections.size(); ++i) {
-			TraceEvent("TraceAllInfo", distributorId)
-			    .detail("TeamCollectionIndex", i)
-			    .detail("Primary", teamCollections[i]->primary);
+			if (teamCollections[i] != nullptr) {
+				TraceEvent("TraceAllInfo", distributorId)
+				    .detail("TeamCollectionIndex", i)
+				    .detail("Primary", teamCollections[i]->primary);
+			}
 		}
 
 		TraceEvent("TraceAllInfo", distributorId).detail("Primary", primary);
@@ -3203,7 +3212,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 										                                             : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 									}
 								} else {
-									TEST(true); // A removed server is still associated with a team in SABTF
+									TEST(true); // A removed server is still associated with a team in
+									            // ShardsAffectedByTeamFailure
 								}
 							}
 						}
@@ -4476,12 +4486,12 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	loop {
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
-		state Reference<ProxyInfo> proxies(new ProxyInfo(db->get().client.proxies, false));
+		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
 
 		choose {
 			when (wait(db->onChange())) {}
-			when (GetHealthMetricsReply reply = wait(proxies->size() ?
-					basicLoadBalance(proxies, &MasterProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
+			when (GetHealthMetricsReply reply = wait(grvProxies->size() ?
+					basicLoadBalance(grvProxies, &GrvProxyInterface::getHealthMetrics, GetHealthMetricsRequest(false))
 					: Never())) {
 				if (reply.healthMetrics.batchLimited) {
 					*lastLimited = now();
@@ -4635,8 +4645,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
 				if (initData->shards[shard].hasDest) {
-					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
-					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
+					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
+					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
+					// easier to just (with low priority) schedule it for movement.
 					bool unhealthy = initData->shards[shard].primarySrc.size() != configuration.storageTeamSize;
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
@@ -4817,21 +4828,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	return Void();
 }
 
-ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req, PromiseStream<GetMetricsListRequest> getShardMetricsList) {
-	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(errorOr(brokenPromiseToNever(
-		getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
-
-	if(result.isError()) {
-		req.reply.sendError(result.getError());
-	} else {
-		GetDataDistributorMetricsReply rep;
-		rep.storageMetricsList = result.get();
-		req.reply.send(rep);
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!setDDEnabled(false, snapReq.snapUID)) {
@@ -4931,6 +4927,87 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	return Void();
 }
 
+ACTOR Future<Void> waitFailCacheServer(Database* db, StorageServerInterface ssi) {
+	state Transaction tr(*db);
+	state Key key = storageCacheServerKey(ssi.id());
+	wait(waitFailureClient(ssi.waitFailure));
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			tr.addReadConflictRange(storageCacheServerKeys);
+			tr.clear(key);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> cacheServerWatcher(Database* db) {
+	state Transaction tr(*db);
+	state ActorCollection actors(false);
+	state std::set<UID> knownCaches;
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			Standalone<RangeResultRef> range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!range.more);
+			std::set<UID> caches;
+			for (auto& kv : range) {
+				UID id;
+				BinaryReader reader{kv.key.removePrefix(storageCacheServersPrefix), Unversioned()};
+				reader >> id;
+				caches.insert(id);
+				if (knownCaches.find(id) == knownCaches.end()) {
+					StorageServerInterface ssi;
+					BinaryReader reader{kv.value, IncludeVersion()};
+					reader >> ssi;
+					actors.add(waitFailCacheServer(db, ssi));
+				}
+			}
+			knownCaches = std::move(caches);
+			tr.reset();
+			wait(delay(5.0) || actors.getResult());
+			ASSERT(!actors.getResult().isReady());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
+	std::nth_element(metricVec.begin(), metricVec.begin() + metricVec.size() / 2, metricVec.end(),
+	                 [](const DDMetricsRef& d1, const DDMetricsRef& d2) { return d1.shardBytes < d2.shardBytes; });
+	return metricVec[metricVec.size() / 2].shardBytes;
+}
+
+ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
+                                PromiseStream<GetMetricsListRequest> getShardMetricsList) {
+	ErrorOr<Standalone<VectorRef<DDMetricsRef>>> result = wait(
+	    errorOr(brokenPromiseToNever(getShardMetricsList.getReply(GetMetricsListRequest(req.keys, req.shardLimit)))));
+
+	if (result.isError()) {
+		req.reply.sendError(result.getError());
+	} else {
+		GetDataDistributorMetricsReply rep;
+		if (!req.midOnly) {
+			rep.storageMetricsList = result.get();
+		} else {
+			auto& metricVec = result.get();
+			if (metricVec.empty())
+				rep.midShardSize = 0;
+			else {
+				rep.midShardSize = getMedianShardSize(metricVec.contents());
+			}
+		}
+		req.reply.send(rep);
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Reference<DataDistributorData> self( new DataDistributorData(db, di.id()) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
@@ -4943,6 +5020,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	try {
 		TraceEvent("DataDistributorRunning", di.id());
 		self->addActor.send( waitFailureServer(di.waitFailure.getFuture()) );
+		self->addActor.send(cacheServerWatcher(&cx));
 		state Future<Void> distributor = reportErrorsExcept( dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors() );
 
 		loop choose {
@@ -5094,7 +5172,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
 
-	if (collection == NULL) {
+	if (collection == nullptr) {
 		fprintf(stderr, "collection is null\n");
 		return Void();
 	}

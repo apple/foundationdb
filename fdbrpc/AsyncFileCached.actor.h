@@ -132,7 +132,7 @@ struct OpenFileInfo : NonCopyable {
 	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
 
 	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo && r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
+	OpenFileInfo(OpenFileInfo&& r) noexcept : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
 
 	Future<Reference<IAsyncFile>> get() {
 		if (f) return Reference<IAsyncFile>::addRef(f);
@@ -160,7 +160,7 @@ public:
 		return openFiles[filename].get();
 	}
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileCacheReads;
 		++countCacheReads;
 		if (offset + length > this->length) {
@@ -190,17 +190,15 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl(this, data, length, offset);
 	}
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset );
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset );
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override;
+	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 
 	// This waits for previously started truncates to finish and then truncates
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl(this, size);
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
 	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
 	Future<Void> changeFileSize( int64_t size );
@@ -215,21 +213,13 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> sync() {
-		return waitAndSync( this, flush() );
-	}
+	Future<Void> sync() override { return waitAndSync(this, flush()); }
 
-	virtual Future<int64_t> size() {
-		return length;
-	}
+	Future<int64_t> size() const override { return length; }
 
-	virtual int64_t debugFD() {
-		return uncached->debugFD();
-	}
+	int64_t debugFD() const override { return uncached->debugFD(); }
 
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
 	virtual void addref() { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
@@ -337,7 +327,7 @@ private:
 		}
 	}
 
-	virtual Future<Void> flush();
+	Future<Void> flush() override;
 
 	Future<Void> quiesce();
 
@@ -356,7 +346,7 @@ private:
 };
 
 struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
-	virtual bool evict() {
+	bool evict() override {
 		if ( notReading.isReady() && notFlushing.isReady() && !dirty && !zeroCopyRefCount && !truncated ) {
 			owner->remove_page( this );
 			delete this;

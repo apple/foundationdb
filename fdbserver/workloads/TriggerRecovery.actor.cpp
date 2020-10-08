@@ -71,7 +71,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		state StringRef configStr(format("resolvers=%d", numResolversToSet));
 		loop {
 			Optional<ConfigureAutoResult> conf;
-			ConfigurationResult::Type r = wait(changeConfig(cx, { configStr }, conf, true));
+			ConfigurationResult r = wait(changeConfig(cx, { configStr }, conf, true));
 			if (r == ConfigurationResult::SUCCESS) {
 				self->currentNumOfResolvers = numResolversToSet;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess").detail("NumOfResolvers", self->currentNumOfResolvers.get());
@@ -103,7 +103,11 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 					address_interface[ip_port] = it.value;
 				}
 				for (auto it : address_interface) {
-					tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
+					if (cx->apiVersionAtLeast(700))
+						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
+						    .reboot.send(RebootRequest());
+					else
+						tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
 				}
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll");
 				return Void();

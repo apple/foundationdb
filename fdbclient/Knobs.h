@@ -27,8 +27,6 @@
 
 class ClientKnobs : public Knobs {
 public:
-	int BYTE_LIMIT_UNLIMITED;
-	int ROW_LIMIT_UNLIMITED;
 
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
@@ -48,7 +46,8 @@ public:
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
-	int MAX_PROXY_CONNECTIONS;
+	int MAX_COMMIT_PROXY_CONNECTIONS;
+	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
@@ -60,6 +59,8 @@ public:
 	double BACKOFF_GROWTH_RATE;
 	double RESOURCE_CONSTRAINED_MAX_BACKOFF;
 	int PROXY_COMMIT_OVERHEAD_BYTES;
+	double SHARD_STAT_SMOOTH_AMOUNT;
+	int INIT_MID_SHARD_BYTES;
 
 	int TRANSACTION_SIZE_LIMIT;
 	int64_t KEY_SIZE_LIMIT;
@@ -85,6 +86,7 @@ public:
 	double STORAGE_METRICS_TOO_MANY_SHARDS_DELAY;
 	double AGGREGATE_HEALTH_METRICS_MAX_STALENESS;
 	double DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	double MID_SHARD_SIZE_MAX_STALENESS;
 	bool TAG_ENCODE_KEY_SERVERS;
 
 	//KeyRangeMap
@@ -139,6 +141,11 @@ public:
 	int BACKUP_MAP_KEY_UPPER_LIMIT;
 	int BACKUP_COPY_TASKS;
 	int BACKUP_BLOCK_SIZE;
+	int COPY_LOG_BLOCK_SIZE;
+	int COPY_LOG_BLOCKS_PER_TASK;
+	int COPY_LOG_PREFETCH_BLOCKS;
+	int COPY_LOG_READ_AHEAD_BYTES;
+	double COPY_LOG_TASK_DURATION_NANOS;
 	int BACKUP_TASKS_PER_AGENT;
 	int BACKUP_POLL_PROGRESS_SECONDS;
 	int64_t VERSIONS_PER_SECOND; // Copy of SERVER_KNOBS, as we can't link with it
@@ -160,7 +167,10 @@ public:
 	double MIN_CLEANUP_SECONDS;
 
 	// Configuration
-	int32_t DEFAULT_AUTO_PROXIES;
+	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
+	int32_t DEFAULT_AUTO_GRV_PROXIES;
+	int32_t DEFAULT_COMMIT_GRV_PROXIES_RATIO;
+	int32_t DEFAULT_MAX_GRV_PROXIES;
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
@@ -209,6 +219,9 @@ public:
 	// transaction tags
 	int MAX_TRANSACTION_TAG_LENGTH;
 	int MAX_TAGS_PER_TRANSACTION;
+	int COMMIT_SAMPLE_COST; // The expectation of sampling is every COMMIT_SAMPLE_COST sample once
+	int WRITE_COST_BYTE_FACTOR;
+	int INCOMPLETE_SHARD_PLUS; // The size of (possible) incomplete shard when estimate clear range
 	double READ_TAG_SAMPLE_RATE; // Communicated to clients from cluster
 	double TAG_THROTTLE_SMOOTHING_WINDOW;
 	double TAG_THROTTLE_RECHECK_INTERVAL;

@@ -156,7 +156,7 @@ Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
 		return endpointKnownFailed.onChange(endpoint);
 }
 
-FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) {
+FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) const {
 	if (failedEndpoints.count(endpoint))
 		return FailureStatus(true);
 	else {
@@ -170,7 +170,7 @@ FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) {
 	}
 }
 
-FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
+FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) const {
 	auto a = addressStatus.find(address);
 	if (a == addressStatus.end())
 		return FailureStatus();
@@ -178,7 +178,7 @@ FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
 		return a->second;
 }
 
-bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
+bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) const {
 	if (!failedEndpoints.count(endpoint)) return false;
 	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end())
@@ -187,7 +187,7 @@ bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
 		return !a->second.failed;
 }
 
-bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) {
+bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) const {
 	return failedEndpoints.count(endpoint);
 }
 

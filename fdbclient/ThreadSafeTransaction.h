@@ -96,9 +96,9 @@ public:
 	ThreadFuture<Void> onError( Error const& e ) override;
 
 	// These are to permit use as state variables in actors:
-	ThreadSafeTransaction() : tr(NULL) {}
-	void operator=(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
-	ThreadSafeTransaction(ThreadSafeTransaction&& r) BOOST_NOEXCEPT;
+	ThreadSafeTransaction() : tr(nullptr) {}
+	void operator=(ThreadSafeTransaction&& r) noexcept;
+	ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept;
 
 	void reset() override;
 

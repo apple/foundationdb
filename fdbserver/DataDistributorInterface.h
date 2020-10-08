@@ -70,12 +70,13 @@ struct HaltDataDistributorRequest {
 struct GetDataDistributorMetricsReply {
 	constexpr static FileIdentifier file_identifier = 1284337;
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
+	Optional<int64_t> midShardSize;
 
 	GetDataDistributorMetricsReply() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,storageMetricsList);
+		serializer(ar, storageMetricsList, midShardSize);
 	}
 };
 
@@ -84,19 +85,21 @@ struct GetDataDistributorMetricsRequest {
 	KeyRange keys;
 	int shardLimit;
 	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
+	bool midOnly = false;
 
 	GetDataDistributorMetricsRequest() {}
-	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false)
+	  : keys(keys), shardLimit(shardLimit), midOnly(midOnly) {}
 
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, shardLimit, reply);
+		serializer(ar, keys, shardLimit, reply, midOnly);
 	}
 };
 
 struct DistributorSnapRequest
 {
-	constexpr static FileIdentifier file_identifier = 22204900;
+	constexpr static FileIdentifier file_identifier = 5427684;
 	Arena arena;
 	StringRef snapPayload;
 	UID snapUID;
@@ -114,7 +117,7 @@ struct DistributorSnapRequest
 
 struct DistributorExclusionSafetyCheckReply
 {
-	constexpr static FileIdentifier file_identifier = 382104712;
+	constexpr static FileIdentifier file_identifier = 13005960;
 	bool safe;
 
 	DistributorExclusionSafetyCheckReply() : safe(false) {}

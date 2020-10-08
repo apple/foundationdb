@@ -1,20 +1,20 @@
 ; This file is used by the Atlas Load Generator
 testTitle=RandomReadWriteTest
-testName=ReadWrite
-testDuration=600.0
-transactionsPerSecond=10000
-writesPerTransactionA=0
-readsPerTransactionA=10
-writesPerTransactionB=10
-readsPerTransactionB=1
-; Fraction of transactions that will be of type B
-alpha=0.1
-; Produces 12TB
-nodeCount=20000000000
-valueBytes=1000
-; average 600
-minValueBytes=200
-discardEdgeMeasurements=false
-warmingDelay=20.0
-timeout=300000.0
-databasePingDelay=300000.0
+    testName=ReadWrite
+    testDuration=600.0
+    transactionsPerSecond=10000
+    writesPerTransactionA=0
+    readsPerTransactionA=10
+    writesPerTransactionB=10
+    readsPerTransactionB=1
+    ; Fraction of transactions that will be of type B
+    alpha=0.1
+    ; Produces 12TB
+    nodeCount=20000000000
+    valueBytes=1000
+    ; average 600
+    minValueBytes=200
+    discardEdgeMeasurements=false
+    warmingDelay=20.0
+    timeout=300000.0
+    databasePingDelay=300000.0

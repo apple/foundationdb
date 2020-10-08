@@ -149,14 +149,14 @@ void recordAllocation( void *ptr, size_t size ) {
 #elif defined(_WIN32)
 		// We could be using fourth parameter to get a hash, but we'll do this
 		//  in a unified way between platforms
-		int nptrs = CaptureStackBackTrace( 1, 100, buffer, NULL );
+		int nptrs = CaptureStackBackTrace( 1, 100, buffer, nullptr );
 #else
 #error Instrumentation not supported on this platform
 #endif
 
 		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
+			a = crc32c_append( 0xfdbeefdb, reinterpret_cast<uint8_t*>(buffer), nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);

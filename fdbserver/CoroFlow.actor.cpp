@@ -48,7 +48,7 @@ protected:
 struct Coroutine /*: IThreadlike*/ {
 	Coroutine() {
 		coro = Coro_new();
-		if (coro == NULL)
+		if (coro == nullptr)
 			platform::outOfMemory();
 	}
 
@@ -294,7 +294,7 @@ void CoroThreadPool::init()
 {
 	if (!current_coro) {
 		current_coro = main_coro = Coro_new();
-		if (main_coro == NULL) 
+		if (main_coro == nullptr) 
 			platform::outOfMemory();
 
 		Coro_initializeMainCoro(main_coro);

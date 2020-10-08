@@ -8,12 +8,12 @@ This document explains at the high level how the recovery works in a single clus
 
 ## `ServerDBInfo` data structure
 
-This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration. Only part of the data structure, such as `ClientDBInfo` that contains the list of proxies, is  available to the client.
+This data structure contains transient information which is broadcast to all workers for a database, permitting them to communicate with each other. It contains, for example, the interfaces for cluster controller (CC), master, ratekeeper, and resolver, and holds the log system's configuration. Only part of the data structure, such as `ClientDBInfo` that contains the list of GRV proxies and commit proxies, is available to the client.
 
 Whenever a field of the `ServerDBInfo`is changed, the new value of the field, say new master's interface, will be sent to the CC and CC will propagate the new `ServerDBInfo` to all workers in the cluster.
 
 ## When will recovery happen?
-Failure of certain roles in FDB can cause recovery. Those roles are cluster controller, master, proxy, transaction logs (tLog), resolvers, and log router.
+Failure of certain roles in FDB can cause recovery. Those roles are cluster controller, master, GRV proxy, commit proxy, transaction logs (tLog), resolvers, log router, and backup workers.
 
 Network partition or failures can make CC unable to reach some roles, treating those roles as dead and causing recovery. If CC cannot connect to a majority of coordinators, it will be treated as dead by coordinators and recovery will happen.
 
@@ -97,7 +97,7 @@ Master interface is stored in `serverDBInfo`. Once the CC recruits the master, i
 Once the master locks the cstate, it will recruit the still-alive tLogs from the previous generation for the benefit of faster recovery. The master gets the old tLogs’ interfaces from the READING_CSTATE phase and uses those interfaces to track which old tLog are still alive, the implementation of which is in `trackRejoins()`.
 
 
-Once the master gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a proxy tells a given tLog that it had durably committed on *all* tLogs. The master's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation. That is, any versions larger than the master's `knownCommittedVersion` is not guaranteed to persist on all replicas. The master chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
+Once the master gets enough tLogs, it calculates the known committed version (i.e., `knownCommittedVersion` in code). `knownCommittedVersion` is the highest version that a commit proxy tells a given tLog that it had durably committed on *all* tLogs. The master's is the maximum of all of that. `knownCommittedVersion` is  important, because it defines the lower bound of what version range of mutations need to be copied to the new generation. That is, any versions larger than the master's `knownCommittedVersion` is not guaranteed to persist on all replicas. The master chooses a *recovery version*, which is the minimum of durable versions on all tLogs of the old generation, and recruits a new set of tLogs that copy all data between `knownCommittedVersion + 1` and `recoveryVersion` from old tLogs. This copy makes sure data within the range has enough replicas to satisfy the replication policy.
 
 Later, the master will use the recruited tLogs to create a new `TagPartitionedLogSystem` for the new generation.
 
@@ -121,9 +121,9 @@ Consider an old generation with three TLogs: `A, B, C`. Their durable versions a
 
 Once we have a `knownCommittedVersion`, the master will reconstruct the transaction state store (txnStateStore) by peeking the txnStateTag in oldLogSystem.
 Recall that the txnStateStore includes the transaction system’s configuration, such as the assignment of shards to SS and to tLogs and that the txnStateStore was durable on disk in the oldLogSystem.
-Once we get the txnStateStore, we know the configuration of the transaction system, such as the number of proxies. The master then can ask the CC to recruit roles for the new generation in the `recruitEverything()` function. Those recruited roles includes proxies, tLogs and seed SSes, which are the storage servers created for an empty database in the first generation to host the first shard and serve as the starting point of the bootstrap process to recruit more SSes. Once all roles are recruited, the master starts a new epoch in `newEpoch()`.
+Once we get the txnStateStore, we know the configuration of the transaction system, such as the number of GRV proxies and commit proxies. The master then can ask the CC to recruit roles for the new generation in the `recruitEverything()` function. Those recruited roles includes GRV proxies, commit proxies, tLogs and seed SSes, which are the storage servers created for an empty database in the first generation to host the first shard and serve as the starting point of the bootstrap process to recruit more SSes. Once all roles are recruited, the master starts a new epoch in `newEpoch()`.
 
-At this point, we have recovered the txnStateStore, recruited new proxies and tLogs, and copied data from old tLogs to new tLogs. We have a working transaction system in the new generation now.
+At this point, we have recovered the txnStateStore, recruited new GRV proxies, commit proxies and tLogs, and copied data from old tLogs to new tLogs. We have a working transaction system in the new generation now.
 
 ### Where can the recovery get stuck in this phase?
 
@@ -151,7 +151,7 @@ Not every FDB role participates in the recovery phases 1-3. This phase tells the
 Storage servers (SSes) are not involved in the recovery phase 1 - 3. To notify SSes about the recovery, the master commits a recovery transaction, the first transaction in the new generation, which contains the txnStateStore information. Once storage servers receive the recovery transaction, it will compare its latest data version and the recovery version, and rollback to the recovery version if its data version is newer. Note that storage servers may have newer data than the recovery version because they pre-fetch mutations from tLogs before the mutations are durable to reduce the latency to read newly written data.
 
 
-Proxies haven’t recovered the transaction system state and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to proxies through proxies’ (`txnState`) interfaces in `sendIntialCommitToResolvers()` function. Once proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on proxies will be processed.
+Commit proxies haven’t recovered the transaction system state and cannot accept transactions yet. The master recovers proxies’ states by sending the txnStateStore to commit proxies through commit proxies’ (`txnState`) interfaces in `sendIntialCommitToResolvers()` function. Once commit proxies have recovered their states, they can start processing transactions. The recovery transaction that was waiting on commit proxies will be processed.
 
 
 The resolvers haven’t known the recovery version either. The master needs to send the lastEpochEnd version (i.e., last commit of the previous generation) to resolvers via resolvers’ (`resolve`) interface.
@@ -162,7 +162,7 @@ At the end of this phase, every role should be aware of the recovery and start r
 
 ## Phase 5: WRITING_CSTATE
 
-Coordinators store the transaction systems’ information. The master needs to write the new tLogs into coordinators’ states to achieve consensus and fault tolerance. Only when the coordinators’ states are updated with the new transaction system’s configuration will the cluster controller tell clients about the new transaction system (such as the new proxies).
+Coordinators store the transaction systems’ information. The master needs to write the new tLogs into coordinators’ states to achieve consensus and fault tolerance. Only when the coordinators’ states are updated with the new transaction system’s configuration will the cluster controller tell clients about the new transaction system (such as the new GRV proxies and commit proxies).
 
 The master only needs to write the new tLogs to a quorum of coordinators for a running cluster. The only time the master has to write all coordinators is when creating a brand new database.
 

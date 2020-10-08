@@ -215,7 +215,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
 				std::string s;
 #ifdef __linux__
-				char *demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+				char *demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
 					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))

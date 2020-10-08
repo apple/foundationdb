@@ -1,0 +1,42 @@
+[[test]]
+testTitle = 'MoveKeysNew'
+
+    [[test.workload]]
+    testName = 'Sideband'
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 300.0
+    swizzle = 1
+    scale = 5.0
+    clogginess = 0.5
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 300.0
+    meanDelay = 10.0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 300.0
+    meanDelay = 5
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 300.0
+
+    [[test.workload]]
+    testName = 'ChangeConfig'
+    maxDelayBeforeChange = 300.0
+    coordinators = 'auto'

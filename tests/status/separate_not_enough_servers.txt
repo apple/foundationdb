@@ -2,6 +2,6 @@ Using cluster file `tcf/separatecoordinator.cluster'.
 
 Recruiting new transaction servers.
 
-Need at least 3 log servers, 1 proxies and 1 resolvers.
+Need at least 3 log servers, 1 commit proxies, 1 grv proxies and 1 resolvers.
 
 Have 1 processes on 1 machines.

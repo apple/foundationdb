@@ -1,0 +1,47 @@
+[[test]] 
+testTitle = 'SubmitBackup'
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    submitOnly = true
+
+[[test]]
+testTitle = 'CycleTest'
+clearAfterTest = true
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 3000.0
+    testDuration = 10.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    waitForBackup = true
+
+[[test]]
+testTitle = 'SubmitRestore'
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'IncrementalBackup'
+    tag = 'default'
+    restoreOnly = true
+
+
+[[test]]
+testTitle = 'VerifyCycle'
+checkOnly = true
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 3000.0
+    testDuration = 10.0
+    expectedRate = 0

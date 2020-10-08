@@ -160,7 +160,7 @@ THREAD_HANDLE startThread(void (func) (void *), void *arg, int stackSize = 0);
 #define THREAD_FUNC_RETURN void *
 #define THREAD_HANDLE pthread_t
 THREAD_HANDLE startThread(void *(func) (void *), void *arg, int stackSize = 0);
-#define THREAD_RETURN return NULL
+#define THREAD_RETURN return nullptr
 #else
 #error How do I start a new thread on this platform?
 #endif
@@ -517,7 +517,7 @@ inline static int64_t flowInterlockedAnd64( int64_t* p, int64_t a ) { auto old=*
 #if defined(_WIN32)
 inline static void flushOutputStreams() { _flushall(); }
 #elif defined(__unixish__)
-inline static void flushOutputStreams() { fflush(NULL); }
+inline static void flushOutputStreams() { fflush(nullptr); }
 #else
 #error Missing flush output stream
 #endif
@@ -617,9 +617,6 @@ inline static int clz( uint32_t value ) {
 #define ctz __builtin_ctz
 #define clz __builtin_clz
 #endif
-
-#include <boost/config.hpp>
-// The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
 
 // These return thread local counts
 int64_t getNumProfilesDeferred();

@@ -785,7 +785,7 @@ public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit )
 		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit) ), dbgid(dbgid), diskQueueVersion(diskQueueVersion), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
-		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
+		  nextReadLocation(-1), readBufPage(nullptr), readBufPos(0), pushed_page_buffer(nullptr), recovered(false), initialized(false), lastCommittedSeq(-1), warnAlwaysForMemory(true)
 	{
 	}
 
@@ -1019,7 +1019,7 @@ private:
 		ASSERT( nextPageSeq%sizeof(Page)==0 );
 
 		auto& p = backPage();
-		memset(&p, 0, sizeof(Page)); // FIXME: unnecessary?
+		memset(static_cast<void*>(&p), 0, sizeof(Page)); // FIXME: unnecessary?
 		p.magic = 0xFDB;
 		switch (diskQueueVersion) {
 		case DiskQueueVersion::V0:

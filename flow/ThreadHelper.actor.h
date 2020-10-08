@@ -247,14 +247,14 @@ public:
 		}
 		auto func = callback;
 		if (!callback->isMultiCallback())
-			callback = NULL;
+			callback = nullptr;
 
 		if (!func->canFire(0)) {
 			this->mutex.leave();
 		} else {
 			this->mutex.leave();
 
-			//Thread safe because status is now ErrorSet and callback is NULL, meaning than callback cannot change
+			//Thread safe because status is now ErrorSet and callback is nullptr, meaning than callback cannot change
 			int userParam = 0;
 			func->error(err, userParam);
 		}
@@ -305,8 +305,8 @@ public:
 		// Only clear the callback if it belongs to the caller, because
 		// another actor could be waiting on it now!
 		if (callback == cb)
-			callback = NULL;
-		else if (callback != NULL)
+			callback = nullptr;
+		else if (callback != nullptr)
 			callback->clearCallback( cb );
 
 		this->mutex.leave();
@@ -402,14 +402,14 @@ public:
 
 		auto func = callback;
 		if(!callback->isMultiCallback())
-			callback = NULL;
+			callback = nullptr;
 
 		if (!func->canFire(0)) {
 			this->mutex.leave();
 		} else {
 			this->mutex.leave();
 
-			//Thread safe because status is now Set and callback is NULL, meaning than callback cannot change
+			//Thread safe because status is now Set and callback is nullptr, meaning than callback cannot change
 			int userParam = 0;
 			func->fire(Void(), userParam);
 		}
@@ -472,10 +472,12 @@ public:
 	ThreadFuture( const ThreadFuture<T>& rhs ) : sav(rhs.sav) {
 		if (sav) sav->addref();
 	}
-	ThreadFuture(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
-		rhs.sav = 0;
+	ThreadFuture(ThreadFuture<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+	ThreadFuture( const T& presentValue ) 
+		: sav(new ThreadSingleAssignmentVar<T>())
+	{
+		sav->send(presentValue);
 	}
-	ThreadFuture(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
 	ThreadFuture( Never )
 		: sav(new ThreadSingleAssignmentVar<T>())
 	{
@@ -493,7 +495,7 @@ public:
 		if (sav) sav->delref();
 		sav = rhs.sav;
 	}
-	void operator=(ThreadFuture<T>&& rhs) BOOST_NOEXCEPT {
+	void operator=(ThreadFuture<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delref();
 			sav = rhs.sav;
@@ -504,7 +506,7 @@ public:
 	bool operator != (const ThreadFuture& rhs) { return rhs.sav != sav; }
 
 	ThreadSingleAssignmentVarBase* getPtr() const { return sav; }
-	ThreadSingleAssignmentVarBase* extractPtr() { auto *p = sav; sav = NULL; return p; }
+	ThreadSingleAssignmentVarBase* extractPtr() { auto *p = sav; sav = nullptr; return p; }
 
 private:
 	ThreadSingleAssignmentVar<T>* sav;

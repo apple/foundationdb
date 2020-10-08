@@ -50,6 +50,9 @@ public:
 			if (hi>r.hi) return false;
 			return lo < r.lo;
 		}
+		bool operator>(location const& r) const { return r < *this; }
+		bool operator<=(location const& r) const { return !(*this > r); }
+		bool operator>=(location const& r) const { return !(*this < r); }
 
 		bool operator == (const location& r) const {
 			return hi == r.hi && lo == r.lo;

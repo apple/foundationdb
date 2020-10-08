@@ -21,7 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -32,6 +32,8 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
 
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
@@ -424,13 +426,14 @@ struct BackupData {
 	}
 
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
+		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(0, TransactionPriority::DEFAULT,
+			GetReadVersionRequest request(span.context, 1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
-				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
-				                                                  &MasterProxyInterface::getConsistentReadVersion,
+				when(wait(self->cx->onProxiesChanged())) {}
+				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(false),
+				                                                  &GrvProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
 					return reply.version;
 				}
@@ -729,13 +732,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		MutationRef m;
 		if (!message.isBackupMessage(&m)) continue;
 
-		if (debugMutation("addMutation", message.version.version, m)) {
-			TraceEvent("BackupWorkerDebug", self->myId)
+		DEBUG_MUTATION("addMutation", message.version.version, m)
 			    .detail("Version", message.version.toString())
-			    .detail("Mutation", m.toString())
+			    .detail("Mutation", m)
 			    .detail("KCV", self->minKnownCommittedVersion)
 			    .detail("SavedVersion", self->savedVersion);
-		}
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {

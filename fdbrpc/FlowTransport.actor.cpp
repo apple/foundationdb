@@ -163,13 +163,8 @@ struct EndpointNotFoundReceiver : NetworkMessageReceiver {
 		endpoints.insert(this, e, TaskPriority::DefaultEndpoint);
 		ASSERT( e == WLTOKEN_ENDPOINT_NOT_FOUND );
 	}
-	virtual void receive( ArenaReader& reader ) {
+	virtual void receive(ArenaObjectReader& reader) override {
 		// Remote machine tells us it doesn't have endpoint e
-		Endpoint e; reader >> e;
-		IFailureMonitor::failureMonitor().endpointNotFound(e);
-	}
-
-	virtual void receive(ArenaObjectReader& reader) {
 		Endpoint e;
 		reader.deserialize(e);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
@@ -182,11 +177,7 @@ struct PingReceiver : NetworkMessageReceiver {
 		endpoints.insert(this, e, TaskPriority::ReadSocket);
 		ASSERT( e == WLTOKEN_PING_PACKET );
 	}
-	virtual void receive( ArenaReader& reader ) {
-		ReplyPromise<Void> reply; reader >> reply;
-		reply.send(Void());
-	}
-	virtual void receive(ArenaObjectReader& reader) {
+	virtual void receive(ArenaObjectReader& reader) override {
 		ReplyPromise<Void> reply;
 		reader.deserialize(reply);
 		reply.send(Void());
@@ -1448,7 +1439,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	SendBuffer *checkbuf = pb;
 	while (checkbuf) {
 		int size = checkbuf->bytes_written;
-		const uint8_t* data = checkbuf->data;
+		const uint8_t* data = checkbuf->data();
 		VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
 		checkbuf = checkbuf -> next;
 	}

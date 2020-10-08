@@ -31,6 +31,7 @@
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
 #include <algorithm>
+#include <deque>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
 // memcpy over a defined serialize() method on a POD struct.  As not all of our structs are packed,
@@ -72,7 +73,7 @@ struct scalar_traits<ProtocolVersion> : std::true_type {
 
 template <class Archive, class Item>
 inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
-	save(ar, const_cast<Item&>(item));
+	save(ar, item);
 	return ar;
 }
 
@@ -148,20 +149,6 @@ public:
 	}
 };
 
-template <class F, class S, bool = HasFileIdentifier<F>::value&& HasFileIdentifier<S>::value>
-struct PairFileIdentifier;
-
-template <class F, class S>
-struct PairFileIdentifier<F, S, false> {};
-
-template <class F, class S>
-struct PairFileIdentifier<F, S, true> {
-	constexpr static FileIdentifier value = FileIdentifierFor<F>::value ^ FileIdentifierFor<S>::value;
-};
-
-template <class F, class S>
-struct FileIdentifierFor<std::pair<F, S>> : PairFileIdentifier<F, S> {};
-
 template <class Archive, class T1, class T2>
 class Serializer< Archive, std::pair<T1,T2>, void > {
 public:
@@ -171,7 +158,11 @@ public:
 };
 
 template <class T, class Allocator>
-struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 0x10> {};
+struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal<T, 5> {};
+
+template <class T, class Allocator>
+struct CompositionDepthFor<std::vector<T, Allocator>> : std::integral_constant<int, CompositionDepthFor<T>::value + 1> {
+};
 
 template <class Archive, class T>
 inline void save( Archive& ar, const std::vector<T>& value ) {
@@ -182,6 +173,26 @@ inline void save( Archive& ar, const std::vector<T>& value ) {
 }
 template <class Archive, class T>
 inline void load( Archive& ar, std::vector<T>& value ) {
+	int s;
+	ar >> s;
+	value.clear();
+	value.reserve(s);
+	for (int i = 0; i < s; i++) {
+		value.push_back(T());
+		ar >> value[i];
+	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void save(Archive& ar, const std::deque<T>& value) {
+	ar << (int)value.size();
+	for (auto it = value.begin(); it != value.end(); ++it) ar << *it;
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void load(Archive& ar, std::deque<T>& value) {
 	int s;
 	ar >> s;
 	value.clear();
@@ -337,7 +348,7 @@ public:
 	int getLength() { return size; }
 	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
 	template <class VersionOptions>
-	explicit BinaryWriter( VersionOptions vo ) : data(NULL), size(0), allocated(0) { vo.write(*this); }
+	explicit BinaryWriter( VersionOptions vo ) : data(nullptr), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
@@ -525,7 +536,7 @@ public:
 	static constexpr bool isSerializing = false;
 	using READER = Impl;
 
-	const void *peekBytes(int bytes) {
+	const void *peekBytes(int bytes) const {
 		ASSERT(begin + bytes <= end);
 		return begin;
 	}
@@ -582,6 +593,11 @@ public:
 		return (const uint8_t*)readBytes(bytes);
 	}
 
+	const void* peekBytes(int bytes) const {
+		ASSERT( begin + bytes <= end );
+		return begin;
+	}
+
 	StringRef arenaReadAll() const {
 		return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin);
 	}
@@ -633,7 +649,12 @@ public:
 		return t;
 	}
 
-	void assertEnd() { ASSERT(begin == end); }
+	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
+	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
+
+	void assertEnd() const { ASSERT(begin == end); }
+
+	bool empty() const { return begin == end; }
 
 	template <class VersionOptions>
 	BinaryReader(const void* data, int length, VersionOptions vo)
@@ -673,8 +694,13 @@ private:
 	}
 };
 
-struct SendBuffer {
-	uint8_t const* data;
+class SendBuffer {
+protected:
+	uint8_t* _data;
+
+public:
+	inline uint8_t const* data() const { return _data; }
+	inline uint8_t* data() { return _data; }
 	SendBuffer* next;
 	int bytes_written, bytes_sent;
 	int bytes_unsent() const {
@@ -690,14 +716,13 @@ private:
 	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
 
 public:
-	uint8_t* data() { return const_cast<uint8_t*>(static_cast<SendBuffer*>(this)->data); }
-	size_t size() { return size_; }
+	size_t size() const { return size_; }
 
 private:
 	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
-		next = 0;
+		next = nullptr;
 		bytes_written = bytes_sent = 0;
-		((SendBuffer*)this)->data = reinterpret_cast<uint8_t*>(this + 1);
+		_data = reinterpret_cast<uint8_t*>(this + 1);
 		static_assert(sizeof(PacketBuffer) == PACKET_BUFFER_OVERHEAD);
 	}
 
@@ -710,7 +735,7 @@ public:
 		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
 		return new (mem) PacketBuffer{ size };
 	}
-	PacketBuffer* nextPacketBuffer() { return (PacketBuffer*)next; }
+	PacketBuffer* nextPacketBuffer() { return static_cast<PacketBuffer*>(next); }
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
@@ -730,11 +755,11 @@ struct PacketWriter {
 	typedef PacketWriter WRITER;
 
 	PacketBuffer* buffer;
-	struct ReliablePacket *reliable;  // NULL if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
+	struct ReliablePacket *reliable;  // nullptr if this is unreliable; otherwise the last entry in the ReliablePacket::cont chain
 	int length;
 	ProtocolVersion m_protocolVersion;
 
-	// reliable is NULL if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
+	// reliable is nullptr if this is an unreliable packet, or points to a ReliablePacket.  PacketWriter is responsible
 	//   for filling in reliable->buffer, ->cont, ->begin, and ->end, but not ->prev or ->next.
 	template <class VersionOptions>
 	PacketWriter(PacketBuffer* buf, ReliablePacket* reliable, VersionOptions vo) { init(buf, reliable); vo.read(*this); }
@@ -751,7 +776,7 @@ struct PacketWriter {
 	void writeAhead( int bytes, struct SplitBuffer* );
 	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	PacketBuffer* finish();
-	int size() { return length; }
+	int size() const { return length; }
 
 	void serializeBytes( StringRef bytes ) {
 		serializeBytes(bytes.begin(), bytes.size());

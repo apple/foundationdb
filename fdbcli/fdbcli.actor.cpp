@@ -103,7 +103,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 
 	do {
 		iter++;
@@ -113,7 +113,7 @@ void printAtCol(const char* text, int col) {
 			printf("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' ' || *start == '\n') start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 }
@@ -121,7 +121,7 @@ void printAtCol(const char* text, int col) {
 std::string lineWrap(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
-	const char* space = NULL;
+	const char* space = nullptr;
 	std::string out = "";
 	do {
 		iter++;
@@ -131,7 +131,7 @@ std::string lineWrap(const char* text, int col) {
 			out += format("%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' '/* || *start == '\n'*/) start++;
-			space = NULL;
+			space = nullptr;
 		}
 	} while (*iter);
 	return out;
@@ -470,9 +470,29 @@ void initHelp() {
 		"clear a range of keys from the database",
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
-		"change the database configuration",
-		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	    "configure [new] "
+	    "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
+	    "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+	    "change the database configuration",
+	    "The `new' option, if present, initializes a new database with the given configuration rather than changing "
+	    "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
+	    "specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies "
+	    "of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - "
+	    "See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage "
+	    "engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small "
+	    "datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. The proxy role is being "
+		"deprecated and split into GRV proxy and Commit proxy, now prefer configure 'grv_proxies' and 'commit_proxies' "
+		"separately. Generally we should follow that 'commit_proxies' is three times of 'grv_proxies' and 'grv_proxies' "
+		"should be not more than 4. If 'proxies' is specified, it will be converted to 'grv_proxies' and 'commit_proxies'. "
+		"Must be at least 2 (1 GRV proxy, 1 Commit proxy), or set to -1 which restores the number of proxies to the "
+		"default value.\n\ncommit_proxies=<COMMIT_PROXIES>: Sets the desired number of commit proxies in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of commit proxies to the default "
+	    "value.\n\ngrv_proxies=<GRV_PROXIES>: Sets the desired number of GRV proxies in the cluster. Must be at least "
+	    "1, or set to -1 which restores the number of GRV proxies to the default value.\n\nlogs=<LOGS>: Sets the "
+	    "desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of "
+	    "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
+	    "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the "
+	    "FoundationDB Administration Guide for more information.");
 	helpMap["fileconfigure"] = CommandHelp(
 		"fileconfigure [new] <FILENAME>",
 		"change the database configuration from a file",
@@ -581,6 +601,11 @@ void initHelp() {
 		"throttle <on|off|enable auto|disable auto|list> [ARGS]",
 		"view and control throttled tags",
 		"Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n"
+	);
+	helpMap["cache_range"] = CommandHelp(
+		"cache_range <set|clear> <BEGINKEY> <ENDKEY>",
+		"Mark a key range to add to or remove from storage caches.",
+		"Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing heavy load, and clear them when they are no longer necessary."
 	);
 	helpMap["lock"] = CommandHelp(
 		"lock",
@@ -853,7 +878,13 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description += format("\nNeed at least %d log servers across unique zones, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
+								description +=
+								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
+								           "%d GRV proxies and %d resolvers.",
+								           recoveryState["required_logs"].get_int(),
+								           recoveryState["required_commit_proxies"].get_int(),
+								           recoveryState["required_grv_proxies"].get_int(),
+								           recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones = getNumOfNonExcludedProcessAndZones(statusObjCluster);
 									description += format("\nHave %d non-excluded processes on %d machines across %d zones.", numOfNonExcludedProcessesAndZones.first, getNumofNonExcludedMachines(statusObjCluster), numOfNonExcludedProcessesAndZones.second);
@@ -877,9 +908,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						}
 					}
 				}
+			} catch (std::runtime_error&) {
 			}
-			catch (std::runtime_error& ){ }
-
 
 			// Check if cluster controllable is reachable
 			try {
@@ -1004,8 +1034,11 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)", excludedServersArr.size());
 				}
 
-				if (statusObjConfig.get("proxies", intVal))
-					outputString += format("\n  Desired Proxies        - %d", intVal);
+				if (statusObjConfig.get("commit_proxies", intVal))
+					outputString += format("\n  Desired Commit Proxies - %d", intVal);
+
+				if (statusObjConfig.get("grv_proxies", intVal))
+					outputString += format("\n  Desired GRV Proxies    - %d", intVal);
 
 				if (statusObjConfig.get("resolvers", intVal))
 					outputString += format("\n  Desired Resolvers      - %d", intVal);
@@ -1779,7 +1812,7 @@ ACTOR Future<Void> commitTransaction( Reference<ReadYourWritesTransaction> tr ) 
 }
 
 ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Reference<ClusterConnectionFile> ccf, LineNoise* linenoise, Future<Void> warn ) {
-	state ConfigurationResult::Type result;
+	state ConfigurationResult result;
 	state int startToken = 1;
 	state bool force = false;
 	if (tokens.size() < 2)
@@ -1804,16 +1837,17 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
-				conf.get().old_logs == conf.get().auto_logs &&
-				conf.get().old_proxies == conf.get().auto_proxies &&
-				conf.get().old_resolvers == conf.get().auto_resolvers &&
-				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
-				conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
+			                 conf.get().old_logs == conf.get().auto_logs &&
+			                 conf.get().old_commit_proxies == conf.get().auto_commit_proxies &&
+			                 conf.get().old_grv_proxies == conf.get().auto_grv_proxies &&
+			                 conf.get().old_resolvers == conf.get().auto_resolvers &&
+			                 conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
+			                 conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
-			bool noDesiredChanges = noChanges &&
-				conf.get().old_logs == conf.get().desired_logs &&
-				conf.get().old_proxies == conf.get().desired_proxies &&
-				conf.get().old_resolvers == conf.get().desired_resolvers;
+			bool noDesiredChanges = noChanges && conf.get().old_logs == conf.get().desired_logs &&
+			                        conf.get().old_commit_proxies == conf.get().desired_commit_proxies &&
+			                        conf.get().old_grv_proxies == conf.get().desired_grv_proxies &&
+			                        conf.get().old_resolvers == conf.get().desired_resolvers;
 
 			std::string outputString;
 
@@ -1830,8 +1864,16 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += format("| replication                 | %16s | %16s |\n", conf.get().old_replication.c_str(), conf.get().auto_replication.c_str());
 			outputString += format("| logs                        | %16d | %16d |", conf.get().old_logs, conf.get().auto_logs);
 			outputString += conf.get().auto_logs != conf.get().desired_logs ? format(" (manually set; would be %d)\n", conf.get().desired_logs) : "\n";
-			outputString += format("| proxies                     | %16d | %16d |", conf.get().old_proxies, conf.get().auto_proxies);
-			outputString += conf.get().auto_proxies != conf.get().desired_proxies ? format(" (manually set; would be %d)\n", conf.get().desired_proxies) : "\n";
+			outputString += format("| commit_proxies              | %16d | %16d |", conf.get().old_commit_proxies,
+			                       conf.get().auto_commit_proxies);
+			outputString += conf.get().auto_commit_proxies != conf.get().desired_commit_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_commit_proxies)
+			                    : "\n";
+			outputString += format("| grv_proxies                 | %16d | %16d |", conf.get().old_grv_proxies,
+			                       conf.get().auto_grv_proxies);
+			outputString += conf.get().auto_grv_proxies != conf.get().desired_grv_proxies
+			                    ? format(" (manually set; would be %d)\n", conf.get().desired_grv_proxies)
+			                    : "\n";
 			outputString += format("| resolvers                   | %16d | %16d |", conf.get().old_resolvers, conf.get().auto_resolvers);
 			outputString += conf.get().auto_resolvers != conf.get().desired_resolvers ? format(" (manually set; would be %d)\n", conf.get().desired_resolvers) : "\n";
 			outputString += format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction, conf.get().auto_processes_with_transaction);
@@ -1851,7 +1893,8 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			}
 		}
 
-		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+startToken,tokens.end()), conf, force) ) );
+		ConfigurationResult r = wait(makeInterruptable(
+		    changeConfig(db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force)));
 		result = r;
 	}
 
@@ -1977,7 +2020,7 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 			return true;
 		}
 	}
-	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString, force) ) );
+	ConfigurationResult result = wait(makeInterruptable(changeConfig(db, configString, force)));
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret;
@@ -2108,7 +2151,7 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 	}
 	if(setName.size()) change = nameQuorumChange( setName.toString(), change );
 
-	CoordinatorsResult::Type r = wait( makeInterruptable( changeQuorum( db, change ) ) );
+	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change)));
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
@@ -2227,6 +2270,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					bool _safe = wait(makeInterruptable(checkSafeExclusions(db, exclusionVector)));
 					safe = _safe;
 				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) throw;
 					TraceEvent("CheckSafeExclusionsError").error(e);
 					safe = false;
 				}
@@ -2480,7 +2524,7 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
-	const char* helpExtra[] = {"escaping", "options", NULL};
+	const char* helpExtra[] = {"escaping", "options", nullptr};
 
 	const char** he = helpExtra;
 
@@ -2539,7 +2583,24 @@ void onOffGenerator(const char* text, const char *line, std::vector<std::string>
 }
 
 void configureGenerator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta", "proxies=", "logs=", "resolvers=", nullptr};
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 
@@ -2575,6 +2636,16 @@ void throttleGenerator(const char* text, const char *line, std::vector<std::stri
 	else if(tokens.size() == 2 && (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable"))) {
 		const char* opts[] = { "auto", nullptr };
 		arrayGenerator(text, line, opts, lc);
+	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			const char* opts[] = { "throttled", "recommended", "all", nullptr };
+			arrayGenerator(text, line, opts, lc);
+		}
+		else if(tokens.size() == 3) {
+			const char* opts[] = {"LIMITS", nullptr};
+			arrayGenerator(text, line, opts, lc);
+		}
 	}
 }
 
@@ -2695,6 +2766,14 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 	}
 	else if((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
 		return { "auto" };
+	}
+	else if(tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
+		if(tokens.size() == 2) {
+			return { "[throttled|recommended|all]", "[LIMITS]" };
+		}
+		else if(tokens.size() == 3 && (tokencmp(tokens[2], "throttled") || tokencmp(tokens[2], "recommended") || tokencmp(tokens[2], "all"))){
+			return {"[LIMITS]"};
+		}
 	}
 	else if(tokens.size() == 2 && inArgument) {
 		return { "[ARGS]" };
@@ -2959,7 +3038,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.detail("SourceVersion", getSourceVersion())
 			.detail("Version", FDB_VT_VERSION)
 			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 			.detail("ClusterFile", ccf->getFilename().c_str())
 			.detail("ConnectionString", ccf->getConnectionString().toString())
 			.setMaxFieldLength(10000)
@@ -3414,7 +3493,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
+							if (db->apiVersionAtLeast(700))
+								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								    .reboot.send(RebootRequest());
+							else
+								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
@@ -3432,7 +3515,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]].first);
+								if (db->apiVersionAtLeast(700))
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest());
+								else
+									tr->set(LiteralStringRef("\xff\xff/reboot_worker"),
+									        address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
@@ -3443,7 +3532,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "suspend")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3484,7 +3577,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								int64_t timeout_ms = seconds*1000;
 								tr->setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t *)&timeout_ms, sizeof(int64_t)));
 								for(int i = 2; i < tokens.size(); i++) {
-									tr->set(LiteralStringRef("\xff\xff/suspend_worker"), address_interface[tokens[i]].first);
+									if (db->apiVersionAtLeast(700))
+										BinaryReader::fromStringRef<ClientWorkerInterface>(
+										    address_interface[tokens[i]].first, IncludeVersion())
+										    .reboot.send(RebootRequest(false, false, seconds));
+									else
+										tr->set(LiteralStringRef("\xff\xff/suspend_worker"),
+										        address_interface[tokens[i]].first);
 								}
 								printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
 							}
@@ -3736,13 +3835,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 						getTransaction(db, tr, options, intrans);
-						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
-								tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
-																					LiteralStringRef("\xff\xff\xff")),
-															1)));
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						std::map<Key, ClientWorkerInterface> interfaces;
 						for (const auto& pair : kvs) {
-							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							auto ip_port = (pair.key.endsWith(LiteralStringRef(":tls"))
+							                    ? pair.key.removeSuffix(LiteralStringRef(":tls"))
+							                    : pair.key)
+							                   .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 							interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 						}
 						state Key ip_port = tokens[2];
@@ -3767,7 +3870,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
-						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
+						Standalone<RangeResultRef> kvs = wait(
+						    makeInterruptable(tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
+						                                   CLIENT_KNOBS->TOO_MANY)));
+						ASSERT(!kvs.more);
 						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
@@ -3789,7 +3896,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("\n");
 					} else if (tokencmp(tokens[1], "all")) {
 						for( auto it : address_interface ) {
-							tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
+							if (db->apiVersionAtLeast(700))
+								BinaryReader::fromStringRef<ClientWorkerInterface>(it.second.first, IncludeVersion())
+								    .reboot.send(RebootRequest(false, true));
+							else
+								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), it.second.first);
 						}
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
@@ -3807,7 +3918,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if(!is_error) {
 							for(int i = 1; i < tokens.size(); i++) {
-								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]].first);
+								if (db->apiVersionAtLeast(700))
+									BinaryReader::fromStringRef<ClientWorkerInterface>(
+									    address_interface[tokens[i]].first, IncludeVersion())
+									    .reboot.send(RebootRequest(false, true));
+								else
+									tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"),
+									        address_interface[tokens[i]].first);
 							}
 							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
@@ -4074,8 +4191,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						continue;
 					}
 					else if(tokencmp(tokens[1], "list")) {
-						if(tokens.size() > 3) {
-							printf("Usage: throttle list [LIMIT]\n");
+						if(tokens.size() > 4) {
+							printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
 							printf("\n");
 							printf("Lists tags that are currently throttled.\n");
 							printf("The default LIMIT is 100 tags.\n");
@@ -4083,36 +4200,72 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							continue;
 						}
 
-						state int throttleListLimit = 100;
+						state bool reportThrottled = true;
+						state bool reportRecommended = false;
 						if(tokens.size() >= 3) {
-							char *end;
-							throttleListLimit = std::strtol((const char*)tokens[2].begin(), &end, 10);
-							if ((tokens.size() > 3 && !std::isspace(*end)) || (tokens.size() == 3 && *end != '\0')) {
-								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[2]).c_str());
+							if(tokencmp(tokens[2], "recommended")) {
+								reportThrottled = false; reportRecommended = true;
+							}
+							else if(tokencmp(tokens[2], "all")){
+								reportThrottled = true; reportRecommended = true;
+							}
+							else if(!tokencmp(tokens[2], "throttled")){
+								printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
 								is_error = true;
 								continue;
 							}
 						}
 
-						std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(db, throttleListLimit));
+						state int throttleListLimit = 100;
+						if(tokens.size() >= 4) {
+							char *end;
+							throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
+							if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
+								printf("ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
+								is_error = true;
+								continue;
+							}
+						}
+
+						state std::vector<TagThrottleInfo> tags;
+						if(reportThrottled && reportRecommended) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
+						}
+						else if(reportThrottled) {
+							wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
+						}
+						else if(reportRecommended) {
+							wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
+						}
 
 						bool anyLogged = false;
 						for(auto itr = tags.begin(); itr != tags.end(); ++itr) {
 							if(itr->expirationTime > now()) {
 								if(!anyLogged) {
 									printf("Throttled tags:\n\n");
-									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Tag\n");
-									printf(" --------------+----------------+-----------+--------+------------------\n");
+									printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag\n");
+									printf(" --------------+----------------+-----------+--------+------------+------\n");
 									
 									anyLogged = true;
 								}
 
-								printf("  %12d | %13ds | %9s | %6s | %s\n", 
-									(int)(itr->tpsRate), 
-									std::min((int)(itr->expirationTime-now()), (int)(itr->initialDuration)), 
-									transactionPriorityToString(itr->priority, false), 
-									itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual", 
-									itr->tag.toString().c_str());
+								std::string reasonStr = "unset";
+								if(itr->reason == TagThrottledReason::MANUAL){
+									reasonStr = "manual";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_WRITE) {
+									reasonStr = "busy write";
+								}
+								else if(itr->reason == TagThrottledReason::BUSY_READ) {
+									reasonStr = "busy read";
+								}
+
+								printf("  %12d | %13ds | %9s | %6s | %10s |%s\n", (int)(itr->tpsRate),
+								       std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
+								       transactionPriorityToString(itr->priority, false),
+								       itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
+								       reasonStr.c_str(),
+								       itr->tag.toString().c_str());
 							}
 						}
 
@@ -4121,7 +4274,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Usage: throttle list [LIMIT]\n");
 						}
 						if(!anyLogged) {
-							printf("There are no throttled tags\n");
+							printf("There are no %s tags\n", reportThrottled ? "throttled" : "recommended");
 						}
 					}
 					else if(tokencmp(tokens[1], "on")) {	
@@ -4318,6 +4471,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					continue;
 				}
+				if (tokencmp(tokens[0], "cache_range")) {
+					if (tokens.size() != 4) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					KeyRangeRef cacheRange(tokens[2], tokens[3]);
+					if (tokencmp(tokens[1], "set")) {
+						wait(makeInterruptable(addCachedRange(db, cacheRange)));
+					} else if (tokencmp(tokens[1], "clear")) {
+						wait(makeInterruptable(removeCachedRange(db, cacheRange)));
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					continue;
+				}
+
 
 				printf("ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 				is_error = true;
@@ -4442,7 +4613,7 @@ int main(int argc, char **argv) {
 	sigemptyset( &act.sa_mask );
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
-	sigaction(SIGINT, &act, NULL);
+	sigaction(SIGINT, &act, nullptr);
 #endif
 
 	CLIOptions opt(argc, argv);

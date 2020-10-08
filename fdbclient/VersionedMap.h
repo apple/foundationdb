@@ -538,7 +538,8 @@ namespace PTreeImpl {
 			return;
 		}
 		if (p->updated && p->lastUpdateVersion <= newOldestVersion) {
-			/* If the node has been updated, figure out which pointer was repalced. And delete that pointer */
+		/* If the node has been updated, figure out which pointer was replaced. And replace that pointer with the updated pointer.
+		   Then we can get rid of the updated child pointer and then make room in the node for future updates */
 			auto which = p->replacedPointer;
 			p->pointer[which] = p->pointer[2];
 			p->updated = false;
@@ -611,9 +612,9 @@ public:
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
 		roots.emplace_back(0, Tree());
 	}
-	VersionedMap( VersionedMap&& v ) BOOST_NOEXCEPT : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
-	}
-	void operator = (VersionedMap && v) BOOST_NOEXCEPT {
+	VersionedMap(VersionedMap&& v) noexcept
+	  : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {}
+	void operator=(VersionedMap&& v) noexcept {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
 		roots = std::move(v.roots);
@@ -801,7 +802,7 @@ public:
 
 		void validate() {
 			int count=0, height=0;
-			PTreeImpl::validate<MapPair<K,std::pair<T,Version>>>( root, at, NULL, NULL, count, height );
+			PTreeImpl::validate<MapPair<K,std::pair<T,Version>>>( root, at, nullptr, nullptr, count, height );
 			if ( height > 100 )
 				TraceEvent(SevWarnAlways, "DiabolicalPTreeSize").detail("Size", count).detail("Height", height);
 		}

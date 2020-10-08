@@ -90,7 +90,7 @@ std::string getHexString(StringRef input);
 bool debugFRMutation(const char* context, Version version, MutationRef const& mutation);
 
 struct RestoreCommonReply {
-	constexpr static FileIdentifier file_identifier = 56140435;
+	constexpr static FileIdentifier file_identifier = 5808787;
 	UID id; // unique ID of the server who sends the reply
 	bool isDuplicated;
 
@@ -110,7 +110,7 @@ struct RestoreCommonReply {
 };
 
 struct RestoreSimpleRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 83557801;
+	constexpr static FileIdentifier file_identifier = 16448937;
 
 	ReplyPromise<RestoreCommonReply> reply;
 

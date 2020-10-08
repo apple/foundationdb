@@ -24,13 +24,18 @@
 
 using FileIdentifier = uint32_t;
 
-struct Empty {};
-
 template <typename T, typename = int>
 struct HasFileIdentifierMember : std::false_type {};
 
 template <typename T>
 struct HasFileIdentifierMember<T, decltype((void)T::file_identifier, 0)> : std::true_type {};
+
+template <typename T, typename = int>
+struct CompositionDepthFor : std::integral_constant<int, 0> {};
+
+template <typename T>
+struct CompositionDepthFor<T, decltype((void)T::composition_depth, 0)>
+  : std::integral_constant<int, T::composition_depth> {};
 
 template <class T, bool>
 struct FileIdentifierForBase;
@@ -41,6 +46,8 @@ struct FileIdentifierForBase<T, false> {};
 template <class T>
 struct FileIdentifierForBase<T, true> {
 	static constexpr FileIdentifier value = T::file_identifier;
+	static_assert(CompositionDepthFor<T>::value > 0 || T::file_identifier < (1 << 24),
+	              "non-composed file identifiers must be less than 2^24");
 };
 
 template <class T>
@@ -52,16 +59,27 @@ struct HasFileIdentifier : std::false_type {};
 template <typename T>
 struct HasFileIdentifier<T, decltype((void)FileIdentifierFor<T>::value, 0)> : std::true_type {};
 
-template <class T, uint32_t B, bool = HasFileIdentifier<T>::value>
+template <class T, uint8_t B, bool = (HasFileIdentifier<T>::value && CompositionDepthFor<T>::value < 2)>
 struct ComposedIdentifier;
 
-template <class T, uint32_t B>
-struct ComposedIdentifier<T, B, true>
-{
-	static constexpr FileIdentifier file_identifier = (B << 24) | FileIdentifierFor<T>::value;
+// Manually specified file identifiers must be less than 2^24.
+// The first 8 bits are used to identify the wrapper classes:
+//   The 5th-8th bits represent the inner wrapper class
+//   The 1st-4th bits represent the outer wrapper class
+// Types with more than two level of composition do not get file identifiers.
+template <class T, uint8_t B>
+struct ComposedIdentifier<T, B, true> {
+	static_assert(CompositionDepthFor<T>::value < 2);
+	static constexpr int composed_identifier_offset = (CompositionDepthFor<T>::value == 1) ? 28 : 24;
+	static_assert(B > 0 && B < 16, "Up to 15 types of composed identifiers allowed");
+	static_assert(FileIdentifierFor<T>::value < (1 << composed_identifier_offset));
+
+public:
+	static constexpr int composition_depth = CompositionDepthFor<T>::value + 1;
+	static constexpr FileIdentifier file_identifier = (B << composed_identifier_offset) | FileIdentifierFor<T>::value;
 };
 
-template <class T, uint32_t B>
+template <class T, uint8_t B>
 struct ComposedIdentifier<T, B, false> {};
 
 template <class T, uint32_t B, bool = HasFileIdentifier<T>::value>

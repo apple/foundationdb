@@ -143,7 +143,7 @@ private:
 	std::map<IPAddress, double> clogSendUntil, clogRecvUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairUntil;
 	std::map<std::pair<IPAddress, IPAddress>, double> clogPairLatency;
-	double halfLatency() {
+	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
 		if (a <= pFast) {
@@ -245,7 +245,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		int leftToSend = toSend;
 		for(auto p = buffer; p && leftToSend>0; p=p->next) {
 			int ts = std::min(leftToSend, p->bytes_written - p->bytes_sent);
-			peer->recvBuf.insert( peer->recvBuf.end(), p->data + p->bytes_sent, p->data + p->bytes_sent + ts );
+			peer->recvBuf.insert(peer->recvBuf.end(), p->data() + p->bytes_sent, p->data() + p->bytes_sent + ts);
 			leftToSend -= ts;
 		}
 		ASSERT( leftToSend == 0 );
@@ -255,8 +255,8 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not
 	// be an address we can connect to!
-	virtual NetworkAddress getPeerAddress() { return peerEndpoint; }
-	virtual UID getDebugID() { return dbgid; }
+	virtual NetworkAddress getPeerAddress() const override { return peerEndpoint; }
+	virtual UID getDebugID() const override { return dbgid; }
 
 	bool opened, closedByCaller;
 
@@ -478,31 +478,21 @@ public:
 	virtual void addref() { ReferenceCounted<SimpleFile>::addref(); }
 	virtual void delref() { ReferenceCounted<SimpleFile>::delref(); }
 
-	virtual int64_t debugFD() { return (int64_t)h; }
+	int64_t debugFD() const override { return (int64_t)h; }
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
-		return read_impl( this, data, length, offset );
-	}
+	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl( this, StringRef((const uint8_t*)data, length), offset );
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl( this, size );
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
-	virtual Future<Void> sync() {
-		return sync_impl( this );
-	}
+	Future<Void> sync() override { return sync_impl(this); }
 
-	virtual Future<int64_t> size() {
-		return size_impl( this );
-	}
+	Future<int64_t> size() const override { return size_impl(this); }
 
-	virtual std::string getFilename() {
-		return actualFilename;
-	}
+	std::string getFilename() const override { return actualFilename; }
 
 	~SimpleFile() {
 		_close( h );
@@ -667,7 +657,7 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> size_impl( SimpleFile* self ) {
+	ACTOR static Future<int64_t> size_impl(SimpleFile const* self) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog, "SFS1 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
@@ -712,7 +702,7 @@ struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
 		return popOne( nextConnection.getFuture() );
 	}
 
-	virtual NetworkAddress getListenAddress() { return address; }
+	virtual NetworkAddress getListenAddress() const override { return address; }
 
 private:
 	ISimulator::ProcessInfo* process;
@@ -743,7 +733,7 @@ class Sim2 : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time
-	virtual double now() { return time; }
+	virtual double now() const override { return time; }
 
 	// timer() can be up to 0.1 seconds ahead of now()
 	virtual double timer() {
@@ -795,9 +785,7 @@ public:
 		}
 		return yielded = BUGGIFY_WITH_PROB(0.01);
 	}
-	virtual TaskPriority getCurrentTask() {
-		return currentTaskID;
-	}
+	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
 	virtual void setCurrentTask(TaskPriority taskID ) {
 		currentTaskID = taskID;
 	}
@@ -857,7 +845,7 @@ public:
 			}
 		}
 	}
-	virtual const TLSConfig& getTLSConfig() {
+	virtual const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
@@ -936,7 +924,7 @@ public:
 		if(free == 0)
 			TraceEvent(SevWarnAlways, "Sim2NoFreeSpace").detail("TotalSpace", diskSpace.totalSpace).detail("BaseFreeSpace", diskSpace.baseFreeSpace).detail("TotalFileSize", totalFileSize).detail("NumFiles", numFiles);
 	}
-	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) {
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
 
@@ -1074,7 +1062,7 @@ public:
 				}
 			}
 		}
-		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
+		return canKillProcesses(processesLeft, processesDead, KillInstantly, nullptr);
 	}
 
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const
@@ -1219,21 +1207,40 @@ public:
 			if (tooManyDead) {
 				newKt = Reboot;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("TLogPolicy", tLogPolicy->info()).detail("Reason", "tLogPolicy validates against dead processes.");
+				TraceEvent("KillChanged")
+				    .detail("KillType", kt)
+				    .detail("NewKillType", newKt)
+				    .detail("TLogPolicy", tLogPolicy->info())
+				    .detail("Reason", "Too many dead processes that cannot satisfy tLogPolicy.");
 			}
 			// Reboot and Delete if remaining machines do NOT fulfill policies
 			else if ((kt < RebootAndDelete) && notEnoughLeft) {
 				newKt = RebootAndDelete;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("TLogPolicy", tLogPolicy->info()).detail("Reason", "tLogPolicy does not validates against remaining processes.");
+				TraceEvent("KillChanged")
+				    .detail("KillType", kt)
+				    .detail("NewKillType", newKt)
+				    .detail("TLogPolicy", tLogPolicy->info())
+				    .detail("Reason", "Not enough tLog left to satisfy tLogPolicy.");
 			}
 			else if ((kt < RebootAndDelete) && (nQuorum > uniqueMachines.size())) {
 				newKt = RebootAndDelete;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("StoragePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
+				TraceEvent("KillChanged")
+				    .detail("KillType", kt)
+				    .detail("NewKillType", newKt)
+				    .detail("StoragePolicy", storagePolicy->info())
+				    .detail("Quorum", nQuorum)
+				    .detail("Machines", uniqueMachines.size())
+				    .detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
 			}
 			else {
-				TraceEvent("CanSurviveKills").detail("KillType", kt).detail("TLogPolicy", tLogPolicy->info()).detail("StoragePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size());
+				TraceEvent("CanSurviveKills")
+				    .detail("KillType", kt)
+				    .detail("TLogPolicy", tLogPolicy->info())
+				    .detail("StoragePolicy", storagePolicy->info())
+				    .detail("Quorum", nQuorum)
+				    .detail("Machines", uniqueMachines.size());
 			}
 		}
 		if (newKillType) *newKillType = newKt;
@@ -1615,7 +1622,7 @@ public:
 	}
 
 	Sim2() : time(0.0), timerTime(0.0), taskCount(0), yielded(false), yield_limit(0), currentTaskID(TaskPriority::Zero) {
-		// Not letting currentProcess be NULL eliminates some annoying special cases
+		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess = new ProcessInfo("NoMachine", LocalityData(Optional<Standalone<StringRef>>(), StringRef(), StringRef(), StringRef()), ProcessClass(), {NetworkAddress()}, this, "", "");
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback( Net2FileSystem::stop );
@@ -1632,10 +1639,18 @@ public:
 		Promise<Void> action;
 		Task( double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action ) : time(time), taskID(taskID), stable(stable), machine(machine), action(std::move(action)) {}
 		Task( double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future ) : time(time), taskID(taskID), stable(stable), machine(machine) { future = action.getFuture(); }
-		Task(Task&& rhs) BOOST_NOEXCEPT : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine), action(std::move(rhs.action)) {}
+		Task(Task&& rhs) noexcept
+		  : time(rhs.time), taskID(rhs.taskID), stable(rhs.stable), machine(rhs.machine),
+		    action(std::move(rhs.action)) {}
 		void operator= ( Task const& rhs ) { taskID = rhs.taskID; time = rhs.time; stable = rhs.stable; machine = rhs.machine; action = rhs.action; }
 		Task( Task const& rhs ) : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
-		void operator= (Task&& rhs) BOOST_NOEXCEPT { time = rhs.time; taskID = rhs.taskID; stable = rhs.stable; machine = rhs.machine; action = std::move(rhs.action); }
+		void operator=(Task&& rhs) noexcept {
+			time = rhs.time;
+			taskID = rhs.taskID;
+			stable = rhs.stable;
+			machine = rhs.machine;
+			action = std::move(rhs.action);
+		}
 
 		bool operator < (Task const& rhs) const {
 			// Ordering is reversed for priority_queue
@@ -1656,15 +1671,8 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
-				//auto before = getCPUTicks();
 				t.action.send(Void());
 				ASSERT( this->currentProcess == t.machine );
-				/*auto elapsed = getCPUTicks() - before;
-				currentProcess->cpuTicks += elapsed;
-				if (deterministicRandom()->random01() < 0.01){
-					TraceEvent("TaskDuration").detail("CpuTicks", currentProcess->cpuTicks);
-					currentProcess->cpuTicks = 0;
-				}*/
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
 				killProcess(t.machine, KillInstantly);
@@ -1805,12 +1813,12 @@ Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64
 
 int sf_open( const char* filename, int flags, int convFlags, int mode ) {
 	HANDLE wh = CreateFile( filename, GENERIC_READ | ((flags&IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
-		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL,
+		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
 		(flags&IAsyncFile::OPEN_EXCLUSIVE) ? CREATE_NEW :
 			(flags&IAsyncFile::OPEN_CREATE) ? OPEN_ALWAYS :
 			OPEN_EXISTING,
 		FILE_ATTRIBUTE_NORMAL,
-		NULL );
+		nullptr );
 	int h = -1;
 	if (wh != INVALID_HANDLE_VALUE) h = _open_osfhandle( (intptr_t)wh, convFlags );
 	else errno = GetLastError() == ERROR_FILE_NOT_FOUND ? ENOENT : EFAULT;
@@ -1842,7 +1850,8 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 					return f;
 				}
 			}
-			//Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.  This way, they can both keep up with the time to start the next operation
+			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
+			// This way, they can both keep up with the time to start the next operation
 			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
 			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
 		}

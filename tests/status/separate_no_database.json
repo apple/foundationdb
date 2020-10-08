@@ -154,7 +154,7 @@
                     },
                     {
                         "id" : "ae9fe51db979dfd1",
-                        "role" : "proxy"
+                        "role" : "commit_proxy"
                     }
                 ],
                 "version" : "3.0.0-PRERELEASE"

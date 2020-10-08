@@ -117,7 +117,7 @@ LineNoise::LineNoise(
             Hint h = onMainThread( [line]() -> Future<Hint> {
                 return hint_callback(line);
             }).getBlocking();
-            if (!h.valid) return NULL;
+            if (!h.valid) return nullptr;
             *color = h.color;
             *bold = h.bold;
             return strdup( h.text.c_str() );

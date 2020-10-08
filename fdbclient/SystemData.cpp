@@ -19,10 +19,12 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "flow/TDMetric.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-
+#include "fdbclient/StorageServerInterface.h"
+#include "flow/Arena.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/serialize.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -199,6 +201,29 @@ const KeyRangeRef readConflictRangeKeysRange =
 const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
+
+// "\xff/cacheServer/[[UID]] := StorageServerInterface"
+// This will be added by the cache server on initialization and removed by DD
+// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
+//                versions. For now caches simply cache everything so the ids
+//                are not yet meaningful.
+const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"),
+                                         LiteralStringRef("\xff/cacheServer0"));
+const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
+const KeyRef storageCacheServersEnd = storageCacheServerKeys.end;
+
+const Key storageCacheServerKey(UID id) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageCacheServersPrefix);
+	wr << id;
+	return wr.toValue();
+}
+
+const Value storageCacheServerValue(const StorageServerInterface& ssi) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ssi;
+	return wr.toValue();
+}
 
 const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
                                              LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
@@ -525,6 +550,7 @@ StorageServerInterface decodeServerListValue( ValueRef const& value ) {
 	reader >> s;
 	return s;
 }
+
 
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef processClassKeys(

@@ -243,7 +243,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return StringRef(format("DestroyDB%d", dbIndex));
 	}
 
-	static Future<ConfigurationResult::Type> IssueConfigurationChange( Database cx, const std::string& config, bool force ) {
+	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
 		return changeConfig(cx, config, force);
 	}
@@ -302,7 +302,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				config += generateRegions();
 
 				if (deterministicRandom()->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
-				if (deterministicRandom()->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
+
+				if (deterministicRandom()->random01() < 0.2) {
+					config += " proxies=" + format("%d", deterministicRandom()->randomInt(2, 5));
+				} else {
+					if (deterministicRandom()->random01() < 0.5)
+						config += " commit_proxies=" + format("%d", randomRoleNumber());
+					if (deterministicRandom()->random01() < 0.5)
+						config += " grv_proxies=" + format("%d", randomRoleNumber());
+				}
 				if (deterministicRandom()->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
 				wait(success( IssueConfigurationChange( cx, config, false ) ));

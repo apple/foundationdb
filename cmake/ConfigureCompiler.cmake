@@ -210,6 +210,41 @@ else()
   #   -mavx
   #   -msse4.2)
 
+  # Tentatively re-enabling vector instructions
+  set(USE_AVX512F OFF CACHE BOOL "Enable AVX 512F instructions")
+  if (USE_AVX512F)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx512f)
+    elseif(USE_VALGRIND)
+      message(STATUS "USE_VALGRIND=ON make USE_AVX OFF to satisfy valgrind analysis requirement")
+      set(USE_AVX512F OFF)
+    else()
+      message(STATUS "USE_AVX512F is supported on x86 or x86_64 only")
+      set(USE_AVX512F OFF)
+    endif()
+  endif()
+  set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
+  if (USE_AVX)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx)
+    elseif(USE_VALGRIND)
+      message(STATUS "USE_VALGRIND=ON make USE_AVX OFF to satisfy valgrind analysis requirement")
+      set(USE_AVX OFF)
+    else()
+      message(STATUS "USE_AVX is supported on x86 or x86_64 only")
+      set(USE_AVX OFF)
+    endif()
+  endif()
+
+  # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
+  # If the size is not known, then it falls back on the memcpy that's available at runtime (rte_memcpy, as of this
+  # writing; see flow.cpp).
+  #
+  # The downside of the builtin memcpy is that it's slower at large copies, so if we spend a lot of time on large
+  # copies of sizes that are known at compile time, this might not be a win.  See the output of performance/memcpy
+  # for more information.
+  #add_compile_options(-fno-builtin-memcpy)
+
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
   endif()
@@ -254,6 +289,7 @@ else()
       -Wno-tautological-pointer-compare
       -Wredundant-move
       -Wpessimizing-move
+      -Woverloaded-virtual
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
       -Wno-unused-function
@@ -273,7 +309,6 @@ else()
   endif()
   if (GCC)
     add_compile_options(-Wno-pragmas)
-
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
@@ -287,6 +322,9 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
+  endif()
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(
       -fno-builtin-malloc

@@ -85,7 +85,7 @@ public:
 	// Returns the usable size of pages returned by the pager (i.e. the size of the page that isn't pager overhead).
 	// For a given pager instance, separate calls to this function must return the same value.
 	// Only valid to call after recovery is complete.
-	virtual int getUsablePageSize() = 0;
+	virtual int getUsablePageSize() const = 0;
 
 	// Allocate a new page ID for a subsequent write.  The page will be considered in-use after the next commit
 	// regardless of whether or not it was written to.
@@ -135,7 +135,7 @@ public:
 	// Sets the next commit version
 	virtual void setCommitVersion(Version v) = 0;
 
-	virtual StorageBytes getStorageBytes() = 0;
+	virtual StorageBytes getStorageBytes() const = 0;
 
 	// Count of pages in use by the pager client (including retained old page versions)
 	virtual Future<int64_t> getUserPageCount() = 0;
@@ -146,10 +146,10 @@ public:
 	virtual Future<Void> init() = 0;
 
 	// Returns latest committed version
-	virtual Version getLatestVersion() = 0;
+	virtual Version getLatestVersion() const = 0;
 
 	// Returns the oldest readable version as of the most recent committed version
-	virtual Version getOldestVersion() = 0;
+	virtual Version getOldestVersion() const = 0;
 
 	// Sets the oldest readable version to be put into affect at the next commit.
 	// The pager can reuse pages that were freed at a version less than v.

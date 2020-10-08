@@ -55,7 +55,6 @@ struct ServerDBInfo {
 	LogSystemConfig logSystemConfig;
 	std::vector<UID> priorCommittedLogServers;   // If !fullyRecovered and logSystemConfig refers to a new log system which may not have been committed to the coordinated state yet, then priorCommittedLogServers are the previous, fully committed generation which need to stay alive in case this recovery fails
 	Optional<LatencyBandConfig> latencyBandConfig;
-	std::vector<std::pair<uint16_t,StorageServerInterface>> storageCaches;
 	int64_t infoGeneration;
 
 	ServerDBInfo() : recoveryCount(0), recoveryState(RecoveryState::UNINITIALIZED), logSystemConfig(0), infoGeneration(0) {}
@@ -65,7 +64,7 @@ struct ServerDBInfo {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, storageCaches, infoGeneration);
+		serializer(ar, id, clusterInterface, client, distributor, master, ratekeeper, resolvers, recoveryCount, recoveryState, masterLifetime, logSystemConfig, priorCommittedLogServers, latencyBandConfig, infoGeneration);
 	}
 };
 

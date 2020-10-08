@@ -46,7 +46,8 @@ struct WorkerInterface {
 	LocalityData locality;
 	RequestStream< struct InitializeTLogRequest > tLog;
 	RequestStream< struct RecruitMasterRequest > master;
-	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
+	RequestStream<struct InitializeCommitProxyRequest> commitProxy;
+	RequestStream< struct InitializeGrvProxyRequest > grvProxy;
 	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
 	RequestStream< struct InitializeRatekeeperRequest > ratekeeper;
 	RequestStream< struct InitializeResolverRequest > resolver;
@@ -80,7 +81,8 @@ struct WorkerInterface {
 		clientInterface.initEndpoints();
 		tLog.getEndpoint( TaskPriority::Worker );
 		master.getEndpoint( TaskPriority::Worker );
-		masterProxy.getEndpoint( TaskPriority::Worker );
+		commitProxy.getEndpoint(TaskPriority::Worker);
+		grvProxy.getEndpoint( TaskPriority::Worker );
 		resolver.getEndpoint( TaskPriority::Worker );
 		logRouter.getEndpoint( TaskPriority::Worker );
 		debugPing.getEndpoint( TaskPriority::Worker );
@@ -91,7 +93,10 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
+		serializer(ar, clientInterface, locality, tLog, master, commitProxy, grvProxy, dataDistributor, ratekeeper,
+		           resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate,
+		           eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq,
+		           backup, updateServerDBInfo);
 	}
 };
 
@@ -163,14 +168,13 @@ struct RegisterWorkerReply {
 	constexpr static FileIdentifier file_identifier = 16475696;
 	ProcessClass processClass;
 	ClusterControllerPriorityInfo priorityInfo;
-	Optional<uint16_t> storageCache;
 
 	RegisterWorkerReply() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
-	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Optional<uint16_t> storageCache) : processClass(processClass), priorityInfo(priorityInfo), storageCache(storageCache) {}
+	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo) : processClass(processClass), priorityInfo(priorityInfo) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, processClass, priorityInfo, storageCache);
+		serializer(ar, processClass, priorityInfo);
 	}
 };
 
@@ -179,7 +183,8 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	std::vector<MasterProxyInterface> proxies;
+	std::vector<CommitProxyInterface> commitProxies;
+	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
@@ -197,8 +202,8 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, proxies, resolvers, recoveryCount, registrationCount, configuration,
-		           priorCommittedLogServers, recoveryState, recoveryStalled, reply);
+		serializer(ar, id, mi, logSystemConfig, commitProxies, grvProxies, resolvers, recoveryCount, registrationCount,
+		           configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
 
@@ -207,7 +212,8 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> backupWorkers;
 	std::vector<WorkerInterface> tLogs;
 	std::vector<WorkerInterface> satelliteTLogs;
-	std::vector<WorkerInterface> proxies;
+	std::vector<WorkerInterface> commitProxies;
+	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
 	std::vector<WorkerInterface> oldLogRouters;
@@ -218,7 +224,7 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, satelliteTLogs, proxies, resolvers, storageServers, oldLogRouters, dcId,
+		serializer(ar, tLogs, satelliteTLogs, commitProxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
 		           satelliteFallback, backupWorkers);
 	}
 };
@@ -302,19 +308,18 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
 
 	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, Optional<std::pair<uint16_t,StorageServerInterface>> storageCacheInterf, bool degraded) :
-	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), storageCacheInterf(storageCacheInterf), degraded(degraded) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation, Optional<DataDistributorInterface> ddInterf, Optional<RatekeeperInterface> rkInterf, bool degraded) :
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), degraded(degraded) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, storageCacheInterf, issues, incompatiblePeers, reply, degraded);
+		serializer(ar, wi, initialClass, processClass, priorityInfo, generation, distributorInterf, ratekeeperInterf, issues, incompatiblePeers, reply, degraded);
 	}
 };
 
@@ -380,7 +385,7 @@ struct InitializeLogRouterRequest {
 };
 
 struct InitializeBackupReply {
-	constexpr static FileIdentifier file_identifier = 63843557;
+	constexpr static FileIdentifier file_identifier = 13511909;
 	struct BackupInterface interf;
 	LogEpoch backupEpoch;
 
@@ -394,7 +399,7 @@ struct InitializeBackupReply {
 };
 
 struct InitializeBackupRequest {
-	constexpr static FileIdentifier file_identifier = 68354279;
+	constexpr static FileIdentifier file_identifier = 1245415;
 	UID reqId;
 	LogEpoch recruitedEpoch; // The epoch the worker is recruited.
 	LogEpoch backupEpoch; // The epoch the worker should work on. If different from the recruitedEpoch, then it refers
@@ -431,17 +436,29 @@ struct RecruitMasterRequest {
 	}
 };
 
-struct InitializeMasterProxyRequest {
+struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
 	bool firstProxy;
-	ReplyPromise<MasterProxyInterface> reply;
+	ReplyPromise<CommitProxyInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, master, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+	}
+};
+
+struct InitializeGrvProxyRequest {
+	constexpr static FileIdentifier file_identifier = 8265613;
+	MasterInterface master;
+	uint64_t recoveryCount;
+	ReplyPromise<GrvProxyInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, master, recoveryCount, reply);
 	}
 };
 
@@ -474,13 +491,13 @@ struct InitializeRatekeeperRequest {
 struct InitializeResolverRequest {
 	constexpr static FileIdentifier file_identifier = 7413317;
 	uint64_t recoveryCount;
-	int proxyCount;
+	int commitProxyCount;
 	int resolverCount;
 	ReplyPromise<ResolverInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, proxyCount, resolverCount, reply);
+		serializer(ar, recoveryCount, commitProxyCount, resolverCount, reply);
 	}
 };
 
@@ -626,12 +643,13 @@ struct DebugEntryRef {
 	Version version;
 	MutationRef mutation;
 	DebugEntryRef() {}
-	DebugEntryRef( const char* c, Version v, MutationRef const& m ) : context((const uint8_t*)c,strlen(c)), version(v), mutation(m), time(now()), address( g_network->getLocalAddress() ) {}
-	DebugEntryRef( Arena& a, DebugEntryRef const& d ) : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
+	DebugEntryRef(const char* c, Version v, MutationRef const& m)
+	  : context((const uint8_t*)c, strlen(c)), version(v), mutation(m), time(now()),
+	    address(g_network->getLocalAddress()) {}
+	DebugEntryRef(Arena& a, DebugEntryRef const& d)
+	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
 
-	size_t expectedSize() const {
-		return context.expectedSize() + mutation.expectedSize();
-	}
+	size_t expectedSize() const { return context.expectedSize() + mutation.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -657,7 +675,8 @@ struct Role {
 	static const Role STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
-	static const Role MASTER_PROXY;
+	static const Role COMMIT_PROXY;
+	static const Role GRV_PROXY;
 	static const Role MASTER;
 	static const Role RESOLVER;
 	static const Role CLUSTER_CONTROLLER;
@@ -719,20 +738,21 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
                                  Reference<ClusterConnectionFile> connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
-ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
+ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy, InitializeCommitProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
+ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy, InitializeGrvProxyRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality,
                         PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, UID workerID, 
                         bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered, std::string folder,
                         Reference<AsyncVar<bool>> degraded, Reference<AsyncVar<UID>> activeSharedTLog);
-ACTOR Future<Void> resolver(ResolverInterface proxy, InitializeResolverRequest initReq,
+ACTOR Future<Void> resolver(ResolverInterface resolver, InitializeResolverRequest initReq,
                             Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> logRouter(TLogInterface interf, InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo>> db);
-ACTOR Future<Void> storageCache(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> storageCacheServer(StorageServerInterface interf, uint16_t id, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 
 void registerThreadForProfiling();

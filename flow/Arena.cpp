@@ -20,6 +20,8 @@
 
 #include "Arena.h"
 
+#include "flow/UnitTest.h"
+
 // See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
 // of valgrind client requests
 #ifdef VALGRIND_ARENA
@@ -56,7 +58,7 @@ void disallow_access(ArenaBlock* b) {
 }
 } // namespace
 
-Arena::Arena() : impl(NULL) {}
+Arena::Arena() : impl(nullptr) {}
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	if (reservedSize) {
@@ -387,4 +389,159 @@ void ArenaBlock::destroyLeaf() {
 			delete[](uint8_t*) this;
 		}
 	}
+}
+
+namespace {
+template <template <class> class VectorRefLike>
+void testRangeBasedForLoop() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+	int i = 0;
+	for (const auto& x : xs) {
+		ASSERT(x == StringRef(std::to_string(i++)));
+	}
+	ASSERT(i == size);
+}
+
+template <template <class> class VectorRefLike>
+void testIteratorIncrement() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter != xs.end();) {
+			ASSERT(*iter++ == StringRef(std::to_string(i++)));
+		}
+		ASSERT(i == size);
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter != xs.end() && i < xs.size() - 1;) {
+			ASSERT(*++iter == StringRef(std::to_string(++i)));
+		}
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter < xs.end();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter += 1;
+			i += 1;
+		}
+	}
+	if (size > 0) {
+		int i = xs.size() - 1;
+		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter -= 1;
+			i -= 1;
+		}
+	}
+	{
+		int i = 0;
+		for (auto iter = xs.begin(); iter < xs.end();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter = iter + 1;
+			i += 1;
+		}
+	}
+	if (size > 0) {
+		int i = xs.size() - 1;
+		for (auto iter = xs.end() - 1; iter >= xs.begin();) {
+			ASSERT(*iter == StringRef(std::to_string(i)));
+			iter = iter - 1;
+			i -= 1;
+		}
+	}
+}
+
+template <template <class> class VectorRefLike>
+void testReverseIterator() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	ASSERT(xs.size() == size);
+
+	int i = xs.size() - 1;
+	for (auto iter = xs.rbegin(); iter != xs.rend();) {
+		ASSERT(*iter++ == StringRef(std::to_string(i--)));
+	}
+	ASSERT(i == -1);
+}
+
+template <template <class> class VectorRefLike>
+void testAppend() {
+	VectorRefLike<StringRef> xs;
+	Arena a;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(a, StringRef(std::to_string(i)));
+	}
+	VectorRefLike<StringRef> ys;
+	ys.append(a, xs.begin(), xs.size());
+	ASSERT(xs.size() == ys.size());
+	ASSERT(std::equal(xs.begin(), xs.end(), ys.begin()));
+}
+
+template <template <class> class VectorRefLike>
+void testCopy() {
+	Standalone<VectorRefLike<StringRef>> xs;
+	int size = deterministicRandom()->randomInt(0, 100);
+	for (int i = 0; i < size; ++i) {
+		xs.push_back_deep(xs.arena(), StringRef(std::to_string(i)));
+	}
+	Arena a;
+	VectorRefLike<StringRef> ys(a, xs);
+	xs = Standalone<VectorRefLike<StringRef>>();
+	int i = 0;
+	for (const auto& y : ys) {
+		ASSERT(y == StringRef(std::to_string(i++)));
+	}
+	ASSERT(i == size);
+}
+
+template <template <class> class VectorRefLike>
+void testVectorLike() {
+	testRangeBasedForLoop<VectorRefLike>();
+	testIteratorIncrement<VectorRefLike>();
+	testReverseIterator<VectorRefLike>();
+	testAppend<VectorRefLike>();
+	testCopy<VectorRefLike>();
+}
+} // namespace
+
+// Fix number of template parameters
+template <class T>
+using VectorRefProxy = VectorRef<T>;
+TEST_CASE("/flow/Arena/VectorRef") {
+	testVectorLike<VectorRefProxy>();
+	return Void();
+}
+
+// Fix number of template parameters
+template <class T>
+using SmallVectorRefProxy = SmallVectorRef<T>;
+TEST_CASE("/flow/Arena/SmallVectorRef") {
+	testVectorLike<SmallVectorRefProxy>();
+	return Void();
+}
+
+// Fix number of template parameters
+template <class T>
+using SmallVectorRef10Proxy = SmallVectorRef<T, 10>;
+TEST_CASE("/flow/Arena/SmallVectorRef10") {
+	testVectorLike<SmallVectorRef10Proxy>();
+	return Void();
 }

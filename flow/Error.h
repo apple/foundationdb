@@ -58,9 +58,12 @@ public:
 	explicit Error(int error_code);
 
 	static void init();
-	static std::map<int, int>& errorCounts();
 	static ErrorCodeTable& errorCodeTable();
-	static Error fromCode(int error_code) { Error e; e.error_code = error_code; return e; }  // Doesn't change errorCounts
+	static Error fromCode(int error_code) {
+		Error e;
+		e.error_code = error_code;
+		return e;
+	}
 	static Error fromUnvalidatedCode(int error_code);  // Converts codes that are outside the legal range (but not necessarily individually unknown error codes) to unknown_error()
 
 	Error asInjectedFault() const;  // Returns an error with the same code() as this but isInjectedFault() is true

@@ -37,6 +37,7 @@ struct RYWMutation {
 	bool operator == (const RYWMutation& r) const {
 		return value == r.value && type == r.type;
 	}
+	bool operator!=(const RYWMutation& r) const { return !(*this == r); }
 };
 
 class OperationStack {
@@ -145,8 +146,17 @@ public:
 		PTreeImpl::insert( writes, ver, WriteMapEntry( afterAllKeys, OperationStack(), false, false, false, false, false ) );
 	}
 
-	WriteMap(WriteMap&& r) BOOST_NOEXCEPT : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver), scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
-	WriteMap& operator=(WriteMap&& r) BOOST_NOEXCEPT { writeMapEmpty = r.writeMapEmpty; writes = std::move(r.writes); ver = r.ver; scratch_iterator = std::move(r.scratch_iterator); arena = r.arena; return *this; }
+	WriteMap(WriteMap&& r) noexcept
+	  : writeMapEmpty(r.writeMapEmpty), writes(std::move(r.writes)), ver(r.ver),
+	    scratch_iterator(std::move(r.scratch_iterator)), arena(r.arena) {}
+	WriteMap& operator=(WriteMap&& r) noexcept {
+		writeMapEmpty = r.writeMapEmpty;
+		writes = std::move(r.writes);
+		ver = r.ver;
+		scratch_iterator = std::move(r.scratch_iterator);
+		arena = r.arena;
+		return *this;
+	}
 
 	//a write with addConflict false on top of an existing write with a conflict range will not remove the conflict
 	void mutate( KeyRef key, MutationRef::Type operation, ValueRef param, bool addConflict ) {
@@ -324,25 +334,31 @@ public:
 
 		enum SEGMENT_TYPE { UNMODIFIED_RANGE, CLEARED_RANGE, INDEPENDENT_WRITE, DEPENDENT_WRITE };
 
-		SEGMENT_TYPE type() {
+		SEGMENT_TYPE type() const {
 			if (offset) 
 				return entry().following_keys_cleared ? CLEARED_RANGE : UNMODIFIED_RANGE;
 			else
 				return entry().stack.isDependent() ? DEPENDENT_WRITE : INDEPENDENT_WRITE;
 		}
-		bool is_cleared_range() { return offset && entry().following_keys_cleared; }
-		bool is_unmodified_range() { return offset && !entry().following_keys_cleared; }
-		bool is_operation() { return !offset; }
-		bool is_conflict_range() { return offset ? entry().following_keys_conflict : entry().is_conflict; }
-		bool is_unreadable() { return offset ? entry().following_keys_unreadable : entry().is_unreadable; }
+		bool is_cleared_range() const { return offset && entry().following_keys_cleared; }
+		bool is_unmodified_range() const { return offset && !entry().following_keys_cleared; }
+		bool is_operation() const { return !offset; }
+		bool is_conflict_range() const { return offset ? entry().following_keys_conflict : entry().is_conflict; }
+		bool is_unreadable() const { return offset ? entry().following_keys_unreadable : entry().is_unreadable; }
 
-		bool is_independent() { return entry().following_keys_cleared || !entry().stack.isDependent(); }  // Defined if is_operation()
+		bool is_independent() const {
+			ASSERT(is_operation());
+			return entry().following_keys_cleared || !entry().stack.isDependent();
+		}
 
-		ExtStringRef beginKey() { return ExtStringRef( entry().key, offset && entry().stack.size() ); }
-		ExtStringRef endKey() { return offset ? nextEntry().key : ExtStringRef( entry().key, 1 ); }
+		ExtStringRef beginKey() const { return ExtStringRef(entry().key, offset && entry().stack.size()); }
+		ExtStringRef endKey() const { return offset ? nextEntry().key : ExtStringRef(entry().key, 1); }
 
-		OperationStack const& op() { return entry().stack; }  // Only if is_operation()
-		
+		OperationStack const& op() const {
+			ASSERT(is_operation());
+			return entry().stack;
+		}
+
 		iterator& operator++() {
 			if (!offset && !equalsKeyAfter( entry().key, nextEntry().key )) {
 				offset = true;
@@ -383,8 +399,8 @@ public:
 		friend class WriteMap;
 		void reset( Tree const& tree, Version ver ) { this->tree = tree; this->at = ver; this->finger.clear(); beginLen=endLen=0; offset = false; }
 
-		WriteMapEntry const& entry() { return finger[beginLen-1]->data; }
-		WriteMapEntry const& nextEntry() { return finger[endLen-1]->data; }
+		WriteMapEntry const& entry() const { return finger[beginLen - 1]->data; }
+		WriteMapEntry const& nextEntry() const { return finger[endLen - 1]->data; }
 
 		bool keyAtBegin() { return !offset || !entry().stack.size(); }
 

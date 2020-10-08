@@ -153,9 +153,11 @@ struct DatabaseConfiguration {
 		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 	}
 
-	// MasterProxy Servers
-	int32_t masterProxyCount;
-	int32_t autoMasterProxyCount;
+	// CommitProxy Servers
+	int32_t commitProxyCount;
+	int32_t autoCommitProxyCount;
+	int32_t grvProxyCount;
+	int32_t autoGrvProxyCount;
 
 	// Resolvers
 	int32_t resolverCount;
@@ -194,7 +196,14 @@ struct DatabaseConfiguration {
 	bool isExcludedServer( NetworkAddressList ) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 
-	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
+	int32_t getDesiredCommitProxies() const {
+		if (commitProxyCount == -1) return autoCommitProxyCount;
+		return commitProxyCount;
+	}
+	int32_t getDesiredGrvProxies() const {
+		if (grvProxyCount == -1) return autoGrvProxyCount;
+		return grvProxyCount;
+	}
 	int32_t getDesiredResolvers() const { if(resolverCount == -1) return autoResolverCount; return resolverCount; }
 	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
 	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return getDesiredLogs(); return remoteDesiredTLogCount;  }
@@ -210,6 +219,7 @@ struct DatabaseConfiguration {
 		const_cast<DatabaseConfiguration*>(&rhs)->makeConfigurationImmutable();
 		return rawConfiguration == rhs.rawConfiguration;
 	}
+	bool operator!=(DatabaseConfiguration const& rhs) const { return !(*this == rhs); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

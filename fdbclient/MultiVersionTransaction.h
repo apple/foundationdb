@@ -286,7 +286,7 @@ struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 	bool failed;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
-	ClientInfo() : protocolVersion(0), api(NULL), external(false), failed(true) {}
+	ClientInfo() : protocolVersion(0), api(nullptr), external(false), failed(true) {}
 	ClientInfo(IClientApi *api) : protocolVersion(0), api(api), libPath("internal"), external(false), failed(false) {}
 	ClientInfo(IClientApi *api, std::string libPath) : protocolVersion(0), api(api), libPath(libPath), external(true), failed(false) {}
 
