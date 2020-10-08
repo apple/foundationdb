@@ -1036,6 +1036,11 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			} else {
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("Priority", rd.priority)
+				    .detail("KeyBegin", rd.keys.begin)
+				    .detail("KeyEnd", rd.keys.end)
+				    .detail("StorageMetrics", metrics.toString())
+				    .detail("SourceServers", describe(rd.src))
 				    .detail("DestinationTeam", describe(destIds))
 				    .detail("ExtraIds", describe(extraIds));
 			}
