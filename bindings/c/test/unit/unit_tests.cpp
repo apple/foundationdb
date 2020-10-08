@@ -36,8 +36,6 @@
 #include <vector>
 
 #define DOCTEST_CONFIG_IMPLEMENT
-#define DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
-#define DOCTEST_CONFIG_NO_POSIX_SIGNALS
 #include "doctest.h"
 
 #include "fdb_api.hpp"
@@ -1520,7 +1518,10 @@ TEST_CASE("fdb_transaction_cancel") {
   fdb_check(wait_future(f2));
 }
 
-TEST_CASE("block_from_callback") {
+// Feature not live yet, re-enable when checking if a blocking call is made
+// from the network thread is live.
+TEST_CASE("block_from_callback"
+		  * doctest::skip(true)) {
   fdb::Transaction tr(db);
   fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
   struct Context {
