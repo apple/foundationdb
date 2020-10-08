@@ -186,7 +186,7 @@ struct StorageServerDisk {
 private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
-	bool _canPipelineCommits;
+	const bool _canPipelineCommits;
 
 	ACTOR static Future<Key> readFirstKey( IKeyValueStore* storage, KeyRangeRef range ) {
 		Standalone<RangeResultRef> r = wait( storage->readRange( range, 1 ) );
