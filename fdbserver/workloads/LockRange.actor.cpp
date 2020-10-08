@@ -73,27 +73,6 @@ struct LockRangeWorkload : TestWorkload {
 		return result;
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> lockAndSave(Database cx, LockRangeWorkload* self) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				// Even with LOCK_AWARE flag, still can't access the locked range.
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Standalone<RangeResultRef> data = wait(tr.getRange(self->range, 50000));
-				ASSERT(!data.more);
-				wait(tr.commit());
-				return data;
-			} catch (Error& e) {
-				if (e.code() == error_code_range_locks_access_denied) {
-					TraceEvent("LockRangeWorkloadLocked", self->uid);
-					return Standalone<RangeResultRef>();
-				} else {
-					wait(tr.onError(e));
-				}
-			}
-		}
-	}
-
 	// Writes to the locked range should be blocked.
 	ACTOR static Future<Void> checkLocked(Database cx, LockRangeWorkload* self) {
 		loop {
