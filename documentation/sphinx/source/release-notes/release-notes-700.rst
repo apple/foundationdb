@@ -9,7 +9,10 @@ Release Notes
 
 Features
 --------
+
 * Added a new API in all bindings that can be used to get a list of split points that will split the given range into (roughly) equally sized chunks. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
+
+* Added cooperative range locks so that client transactions check if access is allowed before commit. `(PR 3856) <https://github.com/apple/foundationdb/pull/3856>`_
 
 
 Performance

@@ -1129,7 +1129,6 @@ struct LockRequest {
 
 	KeyRangeRef range;
 	LockMode mode;
-	Version version = invalidVersion; // to be filled by applyMetadataMutation
 
 	template <class Ar>
 	void serialize(Ar& ar) {
