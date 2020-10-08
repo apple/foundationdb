@@ -1424,13 +1424,49 @@ TEST_CASE("fdb_transaction_watch max watches") {
                                     (const uint8_t *)&max_watches, 8));
 
   fdb::Transaction tr(db);
-  fdb::EmptyFuture f1 = tr.watch(KEY("a"), KEYSIZE("a"));
-  fdb::EmptyFuture f2 = tr.watch(KEY("b"), KEYSIZE("b"));
-  fdb::EmptyFuture f3 = tr.watch(KEY("c"), KEYSIZE("c"));
-  fdb::EmptyFuture f4 = tr.watch(KEY("d"), KEYSIZE("d"));
-  fdb::EmptyFuture f5 = tr.commit();
+  while (1) {
+    fdb::EmptyFuture f1 = tr.watch(KEY("a"), KEYSIZE("a"));
+    fdb::EmptyFuture f2 = tr.watch(KEY("b"), KEYSIZE("b"));
+    fdb::EmptyFuture f3 = tr.watch(KEY("c"), KEYSIZE("c"));
+    fdb::EmptyFuture f4 = tr.watch(KEY("d"), KEYSIZE("d"));
+    fdb::EmptyFuture f5 = tr.commit();
 
-  CHECK(wait_future(f1) == 1032); // too_many_watches
+    fdb_error_t err = wait_future(f5);
+    if (err) {
+      fdb::EmptyFuture f6 = tr.on_error(err);
+      fdb_check(wait_future(f6));
+      continue;
+    }
+
+	// Error can occur on any future.
+    fdb_error_t err1 = wait_future(f1);
+    if (err1) {
+      CHECK(err1 == 1032); // too_many_watches
+      break;
+    }
+
+    fdb_error_t err2 = wait_future(f2);
+    if (err2) {
+      CHECK(err2 == 1032); // too_many_watches
+      break;
+    }
+
+    fdb_error_t err3 = wait_future(f3);
+    if (err3) {
+      CHECK(err3 == 1032); // too_many_watches
+      break;
+    }
+
+    fdb_error_t err4 = wait_future(f4);
+    if (err4) {
+      CHECK(err4 == 1032); // too_many_watches
+      break;
+    }
+
+    // One of the watches should have triggered a too_many_watches failure.
+    CHECK(false);
+    break;
+  }
 
   // Reset available number of watches.
   max_watches = 10000;
