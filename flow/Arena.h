@@ -572,15 +572,6 @@ public:
 		return tokens;
 	}
 
-	std::vector<StringRef> splitAny(StringRef sep) const {
-		StringRef r = *this;
-		std::vector<StringRef> tokens;
-		while (r.size()) {
-			tokens.push_back(r.eatAny(sep, nullptr));
-		}
-		return tokens;
-	}
-
 private:
 	// Unimplemented; blocks conversion through std::string
 	StringRef( char* );
