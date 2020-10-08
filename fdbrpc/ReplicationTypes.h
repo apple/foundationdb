@@ -102,8 +102,8 @@ struct KeyValueMap : public ReferenceCounted<KeyValueMap> {
 		return ((lower != _keyvaluearray.end()) && (lower->first == indexKey) && (lower->second == indexValue));
 	}
 
-	virtual void addref() { ReferenceCounted<KeyValueMap>::addref(); }
-	virtual void delref() { ReferenceCounted<KeyValueMap>::delref(); }
+	void addref() override { ReferenceCounted<KeyValueMap>::addref(); }
+	void delref() override { ReferenceCounted<KeyValueMap>::delref(); }
 
 	static bool compareKeyValue(const AttribRecord& lhs, const AttribRecord& rhs)
 	{ return (lhs.first < rhs.first) || (!(rhs.first < lhs.first) && (lhs.second < rhs.second)); }
@@ -114,20 +114,19 @@ struct KeyValueMap : public ReferenceCounted<KeyValueMap> {
 
 
 // This class stores the information for each entry within the locality map
-struct LocalityRecord : public ReferenceCounted<LocalityRecord> {
+struct LocalityRecord final : public ReferenceCounted<LocalityRecord> {
 	Reference<KeyValueMap>	_dataMap;
 	LocalityEntry						_entryIndex;
 	LocalityRecord(Reference<KeyValueMap> const& dataMap, int arrayIndex): _dataMap(dataMap), _entryIndex(arrayIndex) {}
 	LocalityRecord(LocalityRecord const& entry) : _dataMap(entry._dataMap), _entryIndex(entry._entryIndex) {}
-	virtual ~LocalityRecord(){}
 	LocalityRecord& operator=(LocalityRecord const& source) {
 		_dataMap = source._dataMap;
 		_entryIndex = source._entryIndex;
 		return *this;
 	}
 
-	virtual void addref() { ReferenceCounted<LocalityRecord>::addref(); }
-	virtual void delref() { ReferenceCounted<LocalityRecord>::delref(); }
+	void addref() override { ReferenceCounted<LocalityRecord>::addref(); }
+	void delref() override { ReferenceCounted<LocalityRecord>::delref(); }
 
 	Optional<AttribValue>	getValue(AttribKey indexKey) const {
 		return _dataMap->getValue(indexKey);
@@ -155,12 +154,11 @@ struct LocalityRecord : public ReferenceCounted<LocalityRecord> {
 };
 
 // This class stores the information for string to integer map for keys and values
-struct StringToIntMap : public ReferenceCounted<StringToIntMap> {
+struct StringToIntMap final : public ReferenceCounted<StringToIntMap> {
 	std::map<std::string, int>		_hashmap;
 	std::vector<std::string>			_lookuparray;
 	StringToIntMap() {}
 	StringToIntMap(StringToIntMap const& source):_hashmap(source._hashmap), _lookuparray(source._lookuparray){}
-	virtual ~StringToIntMap(){}
 	StringToIntMap& operator=(StringToIntMap const& source) {
 		_hashmap = source._hashmap;
 		_lookuparray = source._lookuparray;
@@ -206,8 +204,8 @@ struct StringToIntMap : public ReferenceCounted<StringToIntMap> {
 		}
 		return memSize;
 	}
-	virtual void addref() { ReferenceCounted<StringToIntMap>::addref(); }
-	virtual void delref() { ReferenceCounted<StringToIntMap>::delref(); }
+	void addref() override { ReferenceCounted<StringToIntMap>::addref(); }
+	void delref() override { ReferenceCounted<StringToIntMap>::delref(); }
 };
 
 extern const std::vector<LocalityEntry>		emptyEntryArray;
