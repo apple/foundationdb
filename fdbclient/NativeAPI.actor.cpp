@@ -4101,7 +4101,11 @@ ACTOR static Future<Void> getRangeLockSnapshot(DatabaseContext* cx, Version vers
 			cx->rangeLockCache.setSnapshot(reply.get().version, reply.get().snapshot);
 			return Void();
 		}
-		when(wait(clientTimeout)) { throw timed_out(); }
+		when(wait(clientTimeout)) {
+			// Didn't get the locks in time, pretend the access is denied
+			// so that the client may retry with onError().
+			throw range_locks_access_denied();
+		}
 	}
 }
 
