@@ -320,6 +320,9 @@ class Tester
         when "GET_ESTIMATED_RANGE_SIZE"
           inst.tr.get_estimated_range_size_bytes(inst.wait_and_pop, inst.wait_and_pop).to_i
           inst.push("GOT_ESTIMATED_RANGE_SIZE")
+        when "GET_RANGE_SPLIT_POINTS"
+          inst.tr.get_range_split_points(inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop).length()
+          inst.push("GOT_RANGE_SPLIT_POINTS")
         when "GET_KEY"
           selector = FDB::KeySelector.new(inst.wait_and_pop, inst.wait_and_pop, inst.wait_and_pop)
           prefix = inst.wait_and_pop

@@ -706,6 +706,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
 		DUMPTOKEN(recruited.getReadHotRanges);
+		DUMPTOKEN(recruited.getRangeSplitPoints);
 		DUMPTOKEN(recruited.getStorageMetrics);
 		DUMPTOKEN(recruited.waitFailure);
 		DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1036,6 +1037,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
 				DUMPTOKEN(recruited.getReadHotRanges);
+				DUMPTOKEN(recruited.getRangeSplitPoints);
 				DUMPTOKEN(recruited.getStorageMetrics);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1347,6 +1349,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
 					DUMPTOKEN(recruited.getReadHotRanges);
+					DUMPTOKEN(recruited.getRangeSplitPoints);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);

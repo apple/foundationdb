@@ -1822,6 +1822,7 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 	}
 }
 
+// Returns a vector of <ShardRange, storage server location info> pairs.
 template <class F>
 Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database const& cx, KeyRange const& keys, int limit, bool reverse, F StorageServerInterface::*member, TransactionInfo const& info ) {
 	ASSERT (!keys.empty());
@@ -4346,8 +4347,11 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// 	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
+			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
-				ReadHotSubRangeRequest req(locations[i].first);
+				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+				ReadHotSubRangeRequest req(KeyRangeRef(partBegin, partEnd));
 				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getReadHotRanges, req,
 				                          TaskPriority::DataDistribution);
 			}
@@ -4473,6 +4477,58 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 
 Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> Transaction::getReadHotRanges(KeyRange const& keys) {
 	return ::getReadHotRanges(cx, keys);
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize) {
+	state Span span("NAPI:GetRangeSplitPoints"_loc);
+	loop {
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+		    wait(getKeyRangeLocations(cx, keys, 100, false, &StorageServerInterface::getRangeSplitPoints,
+		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
+		try {
+			state int nLocs = locations.size();
+			state vector<Future<SplitRangeReply>> fReplies(nLocs);
+			KeyRef partBegin, partEnd;
+			for (int i = 0; i < nLocs; i++) {
+				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
+				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getRangeSplitPoints, req,
+				                          TaskPriority::DataDistribution);
+			}
+
+			wait(waitForAll(fReplies));
+			Standalone<VectorRef<KeyRef>> results;
+
+			results.push_back_deep(results.arena(), keys.begin);
+			for (int i = 0; i < nLocs; i++) {
+				if (i > 0) {
+					results.push_back_deep(results.arena(), locations[i].first.begin); // Need this shard boundary
+				}
+				if (fReplies[i].get().splitPoints.size() > 0) {
+					results.append(results.arena(), fReplies[i].get().splitPoints.begin(),
+										fReplies[i].get().splitPoints.size());
+					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
+				}
+			}
+			if (results.back() != keys.end) {
+				results.push_back_deep(results.arena(), keys.end);
+			}
+
+			return results;
+		} catch (Error& e) {
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
+				throw;
+			}
+			cx->invalidateCache(keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
+}
+
+Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
+	return ::getRangeSplitPoints(cx, keys, chunkSize);
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )

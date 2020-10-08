@@ -80,6 +80,16 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 			return FDBTransaction.this.getEstimatedRangeSizeBytes(range);
 		}
 
+		@Override
+		public CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize) {
+			return FDBTransaction.this.getRangeSplitPoints(begin, end, chunkSize);
+		}
+
+		@Override
+		public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize) {
+			return FDBTransaction.this.getRangeSplitPoints(range, chunkSize);
+		}
+
 		///////////////////
 		//  getRange -> KeySelectors
 		///////////////////
@@ -280,6 +290,21 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	@Override
 	public CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range) {
 		return this.getEstimatedRangeSizeBytes(range.begin, range.end);
+	}
+
+	@Override
+	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKeyArray(Transaction_getRangeSplitPoints(getPtr(), begin, end, chunkSize), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize) {
+		return this.getRangeSplitPoints(range.begin, range.end, chunkSize);
 	}
 
 	///////////////////
@@ -686,4 +711,5 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private native void Transaction_cancel(long cPtr);
 	private native long Transaction_getKeyLocations(long cPtr, byte[] key);
 	private native long Transaction_getEstimatedRangeSizeBytes(long cPtr, byte[] keyBegin, byte[] keyEnd);
+	private native long Transaction_getRangeSplitPoints(long cPtr, byte[] keyBegin, byte[] keyEnd, long chunkSize);
 }

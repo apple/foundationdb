@@ -306,6 +306,57 @@ func (f *futureKeyValueArray) Get() ([]KeyValue, bool, error) {
 	return ret, (more != 0), nil
 }
 
+// FutureKeyArray represents the asynchronous result of a function
+// that returns an array of keys. FutureKeyArray is a lightweight object
+// that may be efficiently copied, and is safe for concurrent use by multiple goroutines.
+type FutureKeyArray interface {
+
+	// Get returns an array of keys or an error if the asynchronous operation
+	// associated with this future did not successfully complete. The current
+	// goroutine will be blocked until the future is ready.
+	Get() ([]Key, error)
+
+	// MustGet returns an array of keys, or panics if the asynchronous operations
+	// associated with this future did not successfully complete. The current goroutine
+	// will be blocked until the future is ready.
+	MustGet() []Key
+}
+
+type futureKeyArray struct {
+	*future
+}
+
+func (f *futureKeyArray) Get() ([]Key, error) {
+	defer runtime.KeepAlive(f.future)
+
+	f.BlockUntilReady()
+
+	var ks *C.FDBKey
+	var count C.int
+
+	if err := C.fdb_future_get_key_array(f.ptr, &ks, &count); err != 0 {
+		return nil, Error{int(err)}
+	}
+
+	ret := make([]Key, int(count))
+
+	for i := 0; i < int(count); i++ {
+		kptr := unsafe.Pointer(uintptr(unsafe.Pointer(ks)) + uintptr(i*12))
+
+		ret[i] = stringRefToSlice(kptr)
+	}
+
+	return ret, nil
+}
+
+func (f *futureKeyArray) MustGet() []Key {
+	val, err := f.Get()
+	if err != nil {
+		panic(err)
+	}
+	return val
+}
+
 // FutureInt64 represents the asynchronous result of a function that returns a
 // database version. FutureInt64 is a lightweight object that may be efficiently
 // copied, and is safe for concurrent use by multiple goroutines.
