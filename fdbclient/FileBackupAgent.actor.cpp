@@ -943,14 +943,14 @@ namespace fileBackup {
 	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) final override {
 		    return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
 	    }
-	    virtual std::string toString(Reference<Task> task) const override { return ""; }
+	    virtual std::string toString(Reference<Task> task) const { return ""; }
     };
 
 	struct BackupTaskFuncBase : TaskFuncBase {
 	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) final override {
 		    return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
 	    }
-	    virtual std::string toString(Reference<Task> task) const override { return ""; }
+	    virtual std::string toString(Reference<Task> task) const { return ""; }
     };
 
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {

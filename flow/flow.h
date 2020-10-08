@@ -339,6 +339,7 @@ struct Callback {
 	Callback<T> *prev, *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T&&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -534,8 +535,8 @@ public:
 	int getFutureReferenceCount() const { return futures; }
 	int getPromiseReferenceCount() const { return promises; }
 
-	virtual void destroy() override { delete this; }
-	virtual void cancel() override {}
+	virtual void destroy() { delete this; }
+	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
 		// We are always *logically* dropping one future reference from this, but if we are adding a first callback

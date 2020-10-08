@@ -374,7 +374,7 @@ public:
 
 	void delref() override { ThreadSafeReferenceCounted<ThreadSingleAssignmentVar<T>>::delref(); }
 
-	void send(const T& value) override {
+	void send(const T& value) {
 		if (TRACE_SAMPLE()) TraceEvent(SevSample, "Promise_send");
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {

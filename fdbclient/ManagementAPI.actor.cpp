@@ -1125,7 +1125,7 @@ struct NameQuorumChange final : IQuorumChange {
 	                                                      CoordinatorsResult& t) override {
 		return otherChange->getDesiredCoordinators(tr, oldCoordinators, cf, t);
 	}
-	std::string getDesiredClusterKeyName() const override { return newName; }
+	std::string getDesiredClusterKeyName() const { return newName; }
 };
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other) {
 	return Reference<IQuorumChange>(new NameQuorumChange( name, other ));

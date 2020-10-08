@@ -69,7 +69,7 @@ typedef std::pair<AttribKey, AttribValue>	AttribRecord;
 
 
 // This structure represents the LocalityData class as an integer map
-struct KeyValueMap : public ReferenceCounted<KeyValueMap> {
+struct KeyValueMap final : public ReferenceCounted<KeyValueMap> {
 	std::vector<AttribRecord>		_keyvaluearray;
 
 	KeyValueMap() {}
@@ -102,16 +102,12 @@ struct KeyValueMap : public ReferenceCounted<KeyValueMap> {
 		return ((lower != _keyvaluearray.end()) && (lower->first == indexKey) && (lower->second == indexValue));
 	}
 
-	void addref() override { ReferenceCounted<KeyValueMap>::addref(); }
-	void delref() override { ReferenceCounted<KeyValueMap>::delref(); }
-
 	static bool compareKeyValue(const AttribRecord& lhs, const AttribRecord& rhs)
 	{ return (lhs.first < rhs.first) || (!(rhs.first < lhs.first) && (lhs.second < rhs.second)); }
 
 	static bool compareKey(const AttribRecord& lhs, const AttribRecord& rhs)
 	{ return (lhs.first < rhs.first); }
 };
-
 
 // This class stores the information for each entry within the locality map
 struct LocalityRecord final : public ReferenceCounted<LocalityRecord> {
@@ -124,9 +120,6 @@ struct LocalityRecord final : public ReferenceCounted<LocalityRecord> {
 		_entryIndex = source._entryIndex;
 		return *this;
 	}
-
-	void addref() override { ReferenceCounted<LocalityRecord>::addref(); }
-	void delref() override { ReferenceCounted<LocalityRecord>::delref(); }
 
 	Optional<AttribValue>	getValue(AttribKey indexKey) const {
 		return _dataMap->getValue(indexKey);
@@ -204,8 +197,6 @@ struct StringToIntMap final : public ReferenceCounted<StringToIntMap> {
 		}
 		return memSize;
 	}
-	void addref() override { ReferenceCounted<StringToIntMap>::addref(); }
-	void delref() override { ReferenceCounted<StringToIntMap>::delref(); }
 };
 
 extern const std::vector<LocalityEntry>		emptyEntryArray;

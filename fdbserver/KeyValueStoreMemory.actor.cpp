@@ -65,7 +65,7 @@ public:
 
 	std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
 
-	int64_t getAvailableSize() const override {
+	int64_t getAvailableSize() const {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
 		                       transactionSize;
 
