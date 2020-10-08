@@ -36,15 +36,15 @@
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-struct LineNoiseReader : IThreadPoolReceiver {
-    virtual void init() {}
+struct LineNoiseReader final : IThreadPoolReceiver {
+	void init() override {}
 
-    struct Read : TypedAction<LineNoiseReader, Read> {
+	struct Read : TypedAction<LineNoiseReader, Read> {
         std::string prompt;
         ThreadReturnPromise<Optional<std::string>> result;
 
-        virtual double getTimeEstimate() { return 0.0; }
-        explicit Read(std::string const& prompt) : prompt(prompt) {}
+		double getTimeEstimate() const override { return 0.0; }
+		explicit Read(std::string const& prompt) : prompt(prompt) {}
     };
 
     void action(Read& r) {

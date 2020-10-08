@@ -50,7 +50,7 @@ public:
 struct ThreadAction { 
 	virtual void operator()(IThreadPoolReceiver*) = 0;		// self-destructs
 	virtual void cancel() = 0;
-	virtual double getTimeEstimate() = 0;                   // for simulation
+	virtual double getTimeEstimate() const = 0; // for simulation
 };
 typedef ThreadAction* PThreadAction;
 

@@ -132,7 +132,7 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 		Worker( Pool* pool,  IThreadPoolReceiver* userData ) : pool(pool), userData(userData), stop(false) {
 		}
 
-		virtual void run() {
+		void run() override {
 			try {
 				if(!stop)
 					userData->init();

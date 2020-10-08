@@ -298,10 +298,10 @@ public:
 	void setHealthy(bool h) override { healthy = h; }
 	int getPriority() const override { return priority; }
 	void setPriority(int p) override { priority = p; }
-	virtual void addref() { ReferenceCounted<TCTeamInfo>::addref(); }
-	virtual void delref() { ReferenceCounted<TCTeamInfo>::delref(); }
+	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
+	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
 
-	virtual void addServers(const vector<UID> & servers) {
+	void addServers(const vector<UID>& servers) override {
 		serverIDs.reserve(servers.size());
 		for (int i = 0; i < servers.size(); i++) {
 			serverIDs.push_back(servers[i]);

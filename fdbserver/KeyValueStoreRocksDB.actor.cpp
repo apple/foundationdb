@@ -72,9 +72,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			ThreadReturnPromise<Void> done;
 
-			double getTimeEstimate() {
-				return SERVER_KNOBS->COMMIT_TIME_ESTIMATE;
-			}
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
@@ -92,7 +90,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		struct CommitAction : TypedAction<Writer, CommitAction> {
 			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
-			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
 			rocksdb::WriteOptions options;
@@ -111,7 +109,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			bool deleteOnClose;
 			CloseAction(std::string path, bool deleteOnClose) : path(path), deleteOnClose(deleteOnClose) {}
-			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
 			auto s = db->Close();
@@ -141,7 +139,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ReadValueAction(KeyRef key, Optional<UID> debugID)
 				: key(key), debugID(debugID)
 			{}
-			double getTimeEstimate() override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
 			Optional<TraceBatch> traceBatch;
@@ -171,7 +169,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID) : key(key), maxLength(maxLength), debugID(debugID) {};
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
 			rocksdb::PinnableSlice value;
@@ -201,7 +199,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<Standalone<RangeResultRef>> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
 			Standalone<RangeResultRef> result;

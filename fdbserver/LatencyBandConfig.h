@@ -49,7 +49,7 @@ struct LatencyBandConfig {
 		Optional<int> maxReadBytes;
 		Optional<int> maxKeySelectorOffset;
 
-		virtual void fromJson(JSONDoc json);
+		void fromJson(JSONDoc json) override;
 
 		template <class Ar>
 		void serialize(Ar& ar) {
@@ -57,13 +57,13 @@ struct LatencyBandConfig {
 		}
 
 	protected:
-		virtual bool isEqual(RequestConfig const& r) const;
+		bool isEqual(RequestConfig const& r) const override;
 	};
 
 	struct CommitConfig : RequestConfig {
 		Optional<int> maxCommitBytes;
 
-		virtual void fromJson(JSONDoc json);
+		void fromJson(JSONDoc json) override;
 
 		template <class Ar>
 		void serialize(Ar& ar) {
@@ -71,7 +71,7 @@ struct LatencyBandConfig {
 		}
 
 	protected:
-		virtual bool isEqual(RequestConfig const& r) const;
+		bool isEqual(RequestConfig const& r) const override;
 	};
 
 	GrvConfig grvConfig;

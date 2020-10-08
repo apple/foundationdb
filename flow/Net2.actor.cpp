@@ -540,7 +540,7 @@ struct SSLHandshakerThread : IThreadPoolReceiver {
 	struct Handshake : TypedAction<SSLHandshakerThread,Handshake> {
 		Handshake(ssl_socket &socket, ssl_socket::handshake_type type) : socket(socket), type(type) {
 		}
-		virtual double getTimeEstimate() { return 0.001; }
+		double getTimeEstimate() const override { return 0.001; }
 
 		ThreadReturnPromise<Void> done;
 		ssl_socket &socket;

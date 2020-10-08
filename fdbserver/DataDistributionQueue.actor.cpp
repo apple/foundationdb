@@ -183,7 +183,7 @@ public:
 		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
 	}
 
-	virtual Future<Void> updateStorageMetrics() {
+	Future<Void> updateStorageMetrics() override {
 		vector<Future<Void>> futures;
 
 		for (auto& team : teams) {
@@ -228,8 +228,8 @@ public:
 			(*it)->setPriority(p);
 		}
 	}
-	virtual void addref() { ReferenceCounted<ParallelTCInfo>::addref(); }
-	virtual void delref() { ReferenceCounted<ParallelTCInfo>::delref(); }
+	void addref() override { ReferenceCounted<ParallelTCInfo>::addref(); }
+	void delref() override { ReferenceCounted<ParallelTCInfo>::delref(); }
 
 	void addServers(const std::vector<UID>& servers) override {
 		ASSERT(!teams.empty());
