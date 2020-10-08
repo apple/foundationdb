@@ -9,7 +9,7 @@ PIDFile=/var/run/fdbmonitor.pid
 ExecStart=/usr/lib/foundationdb/fdbmonitor --conffile /etc/foundationdb/foundationdb.conf --lockfile /var/run/fdbmonitor.pid --daemonize
 KillMode=mixed
 Restart=on-failure
-RestartSec=5s
+RestartSec=60s
 
 [Install]
 WantedBy=multi-user.target
