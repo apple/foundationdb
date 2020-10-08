@@ -212,7 +212,7 @@ void clear_data(FDBDatabase *db) {
   insert_data(db, {});
 }
 
-struct Event {
+struct FdbEvent {
   void wait() {
     std::unique_lock<std::mutex> l(mutex);
     cv.wait(l, [this]() { return this->complete; });
@@ -233,7 +233,7 @@ TEST_CASE("fdb_future_set_callback") {
   fdb::Transaction tr(db);
   fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
   struct Context {
-    Event event;
+    FdbEvent event;
   };
   Context context;
   fdb_check(f1.set_callback(+[](FDBFuture *f1, void *param) {
@@ -1478,7 +1478,7 @@ TEST_CASE("fdb_transaction_watch") {
   fdb::Transaction tr(db);
 
   struct Context {
-    Event event;
+    FdbEvent event;
   };
   Context context;
 
@@ -1524,7 +1524,7 @@ TEST_CASE("block_from_callback") {
   fdb::Transaction tr(db);
   fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
   struct Context {
-    Event event;
+    FdbEvent event;
     fdb::Transaction *tr;
   };
   Context context;
