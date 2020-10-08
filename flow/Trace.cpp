@@ -201,7 +201,7 @@ public:
 
 	Reference<BarrierList> barriers;
 
-	struct WriterThread : IThreadPoolReceiver {
+	struct WriterThread final : IThreadPoolReceiver {
 		WriterThread( Reference<BarrierList> barriers, Reference<ITraceLogWriter> logWriter, Reference<ITraceLogFormatter> formatter )
 			: barriers(barriers), logWriter(logWriter), formatter(formatter) {}
 
@@ -211,7 +211,7 @@ public:
 		Reference<ITraceLogFormatter> formatter;
 		Reference<BarrierList> barriers;
 
-		struct Open : TypedAction<WriterThread,Open> {
+		struct Open final : TypedAction<WriterThread, Open> {
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Open& o ) {
@@ -219,7 +219,7 @@ public:
 			logWriter->write(formatter->getHeader());
 		}
 
-		struct Close : TypedAction<WriterThread,Close> {
+		struct Close final : TypedAction<WriterThread, Close> {
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Close& c ) {
@@ -227,7 +227,7 @@ public:
 			logWriter->close();
 		}
 
-		struct Roll : TypedAction<WriterThread,Roll> {
+		struct Roll final : TypedAction<WriterThread, Roll> {
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Roll& c ) {
@@ -236,14 +236,14 @@ public:
 			logWriter->write(formatter->getHeader());
 		}
 
-		struct Barrier : TypedAction<WriterThread, Barrier> {
+		struct Barrier final : TypedAction<WriterThread, Barrier> {
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Barrier& a ) {
 			barriers->pop();
 		}
 
-		struct WriteBuffer : TypedAction<WriterThread, WriteBuffer> {
+		struct WriteBuffer final : TypedAction<WriterThread, WriteBuffer> {
 			std::vector<TraceEventFields> events;
 
 			WriteBuffer(std::vector<TraceEventFields> events) : events(events) {}
@@ -260,7 +260,7 @@ public:
 			}
 		}
 
-		struct Ping : TypedAction<WriterThread, Ping> {
+		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
 			explicit Ping(){};

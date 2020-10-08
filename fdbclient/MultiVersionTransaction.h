@@ -296,7 +296,7 @@ struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
-class MultiVersionDatabase : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
+class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
 	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
 	~MultiVersionDatabase();

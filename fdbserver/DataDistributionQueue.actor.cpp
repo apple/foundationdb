@@ -82,7 +82,7 @@ struct RelocateData {
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
 
-class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
+class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
 	vector<Reference<IDataDistributionTeam>> teams;
 
 	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {

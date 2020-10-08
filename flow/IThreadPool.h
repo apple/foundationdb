@@ -109,7 +109,7 @@ private:
 
 Reference<IThreadPool>	createGenericThreadPool(int stackSize = 0);
 
-class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
+class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
 	DummyThreadPool() : thread(nullptr) {}
@@ -141,7 +141,5 @@ private:
 	IThreadPoolReceiver* thread;
 	Promise<Void> errors;
 };
-
-
 
 #endif

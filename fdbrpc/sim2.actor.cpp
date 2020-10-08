@@ -687,7 +687,7 @@ struct SimDiskSpace {
 
 void doReboot( ISimulator::ProcessInfo* const& p, ISimulator::KillType const& kt );
 
-struct Sim2Listener : IListener, ReferenceCounted<Sim2Listener> {
+struct Sim2Listener final : IListener, ReferenceCounted<Sim2Listener> {
 	explicit Sim2Listener( ISimulator::ProcessInfo* process, const NetworkAddress& listenAddr )
 		: process(process),
 	      address(listenAddr) {}
@@ -728,7 +728,7 @@ private:
 
 #define g_sim2 ((Sim2&)g_simulator)
 
-class Sim2 : public ISimulator, public INetworkConnections {
+class Sim2 final : public ISimulator, public INetworkConnections {
 public:
 	// Implement INetwork interface
 	// Everything actually network related is delegated to the Sim2Net class; Sim2 is only concerned with simulating machines and time

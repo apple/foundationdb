@@ -24,8 +24,8 @@
 
 #include "flow/ThreadHelper.actor.h"
 
-template<class T>
-class AbortableSingleAssignmentVar : public ThreadSingleAssignmentVar<T>, public ThreadCallback {
+template <class T>
+class AbortableSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, public ThreadCallback {
 public:
 	AbortableSingleAssignmentVar(ThreadFuture<T> future, ThreadFuture<Void> abortSignal) : future(future), abortSignal(abortSignal), hasBeenSet(false), callbacksCleared(false) {
 		int userParam;
@@ -124,8 +124,8 @@ ThreadFuture<T> abortableFuture(ThreadFuture<T> f, ThreadFuture<Void> abortSigna
 	return ThreadFuture<T>(new AbortableSingleAssignmentVar<T>(f, abortSignal));
 }
 
-template<class T>
-class DLThreadSingleAssignmentVar : public ThreadSingleAssignmentVar<T> {
+template <class T>
+class DLThreadSingleAssignmentVar final : public ThreadSingleAssignmentVar<T> {
 public:
 	DLThreadSingleAssignmentVar(Reference<FdbCApi> api, FdbCApi::FDBFuture *f, std::function<T(FdbCApi::FDBFuture*, FdbCApi*)> extractValue) : api(api), f(f), extractValue(extractValue), futureRefCount(1) { 
 		ThreadSingleAssignmentVar<T>::addref();
@@ -223,8 +223,8 @@ ThreadFuture<T> toThreadFuture(Reference<FdbCApi> api, FdbCApi::FDBFuture *f, st
 	return ThreadFuture<T>(new DLThreadSingleAssignmentVar<T>(api, f, extractValue));
 }
 
-template<class S, class T>
-class MapSingleAssignmentVar : public ThreadSingleAssignmentVar<T>, ThreadCallback {
+template <class S, class T>
+class MapSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, ThreadCallback {
 public:
 	MapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<T>(ErrorOr<S>)> mapValue) : source(source), mapValue(mapValue) { 
 		ThreadSingleAssignmentVar<T>::addref();
@@ -275,8 +275,8 @@ ThreadFuture<T> mapThreadFuture(ThreadFuture<S> source, std::function<ErrorOr<T>
 	return ThreadFuture<T>(new MapSingleAssignmentVar<S, T>(source, mapValue));
 }
 
-template<class S, class T>
-class FlatMapSingleAssignmentVar : public ThreadSingleAssignmentVar<T>, ThreadCallback {
+template <class S, class T>
+class FlatMapSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, ThreadCallback {
 public:
 	FlatMapSingleAssignmentVar(ThreadFuture<S> source, std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue) : source(source), mapValue(mapValue), cancelled(false), released(false) { 
 		ThreadSingleAssignmentVar<T>::addref();

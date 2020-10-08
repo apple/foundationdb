@@ -1096,7 +1096,7 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 	}
 }
 
-struct SpecifiedQuorumChange : IQuorumChange {
+struct SpecifiedQuorumChange final : IQuorumChange {
 	vector<NetworkAddress> desired;
 	explicit SpecifiedQuorumChange( vector<NetworkAddress> const& desired ) : desired(desired) {}
 	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr, vector<NetworkAddress> oldCoordinators,
@@ -1107,7 +1107,7 @@ struct SpecifiedQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> specifiedQuorumChange(vector<NetworkAddress> const& addresses) { return Reference<IQuorumChange>(new SpecifiedQuorumChange(addresses)); }
 
-struct NoQuorumChange : IQuorumChange {
+struct NoQuorumChange final : IQuorumChange {
 	Future<vector<NetworkAddress>> getDesiredCoordinators(Transaction* tr, vector<NetworkAddress> oldCoordinators,
 	                                                      Reference<ClusterConnectionFile>,
 	                                                      CoordinatorsResult&) override {
@@ -1116,7 +1116,7 @@ struct NoQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> noQuorumChange() { return Reference<IQuorumChange>(new NoQuorumChange); }
 
-struct NameQuorumChange : IQuorumChange {
+struct NameQuorumChange final : IQuorumChange {
 	std::string newName;
 	Reference<IQuorumChange> otherChange;
 	explicit NameQuorumChange( std::string const& newName, Reference<IQuorumChange> const& otherChange ) : newName(newName), otherChange(otherChange) {}
@@ -1131,7 +1131,7 @@ Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQu
 	return Reference<IQuorumChange>(new NameQuorumChange( name, other ));
 }
 
-struct AutoQuorumChange : IQuorumChange {
+struct AutoQuorumChange final : IQuorumChange {
 	int desired;
 	explicit AutoQuorumChange( int desired ) : desired(desired) {}
 

@@ -2974,7 +2974,7 @@ struct InPlaceArray {
 };
 #pragma pack(pop)
 
-class VersionedBTree : public IVersionedStore {
+class VersionedBTree final : public IVersionedStore {
 public:
 	// The first possible internal record possible in the tree
 	static RedwoodRecordRef dbBegin;

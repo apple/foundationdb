@@ -1837,7 +1837,7 @@ private:
 	std::string m_path;
 };
 
-class BackupContainerBlobStore : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
+class BackupContainerBlobStore final : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
 private:
 	// Backup files to under a single folder prefix with subfolders for each named backup
 	static const std::string DATAFOLDER;
@@ -1877,14 +1877,12 @@ public:
 		}
 	}
 
-	void addref() final { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
-	void delref() final { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
+	void addref() override { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
+	void delref() override { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
 
 	static std::string getURLFormat() {
 		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
 	}
-
-	~BackupContainerBlobStore() = default;
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) final {
 		return Reference<IAsyncFile>(

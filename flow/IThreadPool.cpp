@@ -27,8 +27,7 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 
-
-class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
+class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {
 		ThreadPool *pool;
 		IThreadPoolReceiver* userObject;
@@ -102,7 +101,6 @@ public:
 	}
 	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
 };
-
 
 Reference<IThreadPool>	createGenericThreadPool(int stackSize)
 {

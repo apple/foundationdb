@@ -94,7 +94,7 @@ private:
 };
 
 template <class Threadlike, class Mutex, bool IS_CORO>
-class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike,Mutex,IS_CORO>> {
+class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike, Mutex, IS_CORO>> {
 	struct Worker;
 
 	// Pool can survive the destruction of WorkPool while it waits for workers to terminate

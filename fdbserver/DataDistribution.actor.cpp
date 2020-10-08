@@ -158,7 +158,7 @@ public:
 };
 
 // TeamCollection's server team info.
-class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
+class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
 	bool healthy;

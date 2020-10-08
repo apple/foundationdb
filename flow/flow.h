@@ -534,8 +534,8 @@ public:
 	int getFutureReferenceCount() const { return futures; }
 	int getPromiseReferenceCount() const { return promises; }
 
-	void destroy() override { delete this; }
-	void cancel() override {}
+	virtual void destroy() override { delete this; }
+	virtual void cancel() override {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
 		// We are always *logically* dropping one future reference from this, but if we are adding a first callback

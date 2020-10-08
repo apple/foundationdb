@@ -1436,7 +1436,7 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
 	return Void();
 }
 
-class ValidateFuture : public ThreadCallback {
+class ValidateFuture final : public ThreadCallback {
 public:
 	ValidateFuture(ThreadFuture<int> f, ErrorOr<int> expectedValue, std::set<int> legalErrors) : f(f), expectedValue(expectedValue), legalErrors(legalErrors) { }
 
@@ -1693,7 +1693,7 @@ TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	return Void();
 }
 
-class CAPICallback : public ThreadCallback {
+class CAPICallback final : public ThreadCallback {
 public:
 	CAPICallback(void (*callbackf)(FdbCApi::FDBFuture*, void*), FdbCApi::FDBFuture* f, void* userdata)
 		: callbackf(callbackf), f(f), userdata(userdata) {}
