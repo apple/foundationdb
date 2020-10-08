@@ -4,6 +4,14 @@
 Release Notes
 #############
 
+6.2.27
+======
+
+Fixes
+-----
+
+* For clusters with a large number of shards, avoid slow tasks in the data distributor by adding yields to the shard map destruction. `(PR #3834) <https://github.com/apple/foundationdb/pull/3834>`_
+
 6.2.26
 ======
 * Attempt to detect when calling :func:`fdb_future_block_until_ready` would cause a deadlock, and throw ``blocked_from_network_thread`` if it would definitely cause a deadlock.
