@@ -257,6 +257,7 @@ struct Traceable<std::set<T>> : std::true_type {
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
 std::string printable( const KeyRangeRef& range );
+std::string printable(const VectorRef<KeyRangeRef>& val);
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
@@ -289,6 +290,14 @@ struct KeyRangeRef {
 	bool contains( const KeyRef& key ) const { return begin <= key && key < end; }
 	bool contains( const KeyRangeRef& keys ) const { return begin <= keys.begin && keys.end <= end; }
 	bool intersects( const KeyRangeRef& keys ) const { return begin < keys.end && keys.begin < end; }
+	bool intersects(const VectorRef<KeyRangeRef>& keysVec) const {
+		for (const auto& keys : keysVec) {
+			if (intersects(keys)) {
+				return true;
+			}
+		}
+		return false;
+	}
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 

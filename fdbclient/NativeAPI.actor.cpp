@@ -189,6 +189,12 @@ std::string printable( const KeyRangeRef& range ) {
 	return printable(range.begin) + " - " + printable(range.end);
 }
 
+std::string printable(const VectorRef<KeyRangeRef>& val) {
+	std::string s;
+	for (int i = 0; i < val.size(); i++) s = s + printable(val[i]) + " ";
+	return s;
+}
+
 int unhex( char c ) {
 	if (c >= '0' && c <= '9')
 		return c-'0';
@@ -3896,12 +3902,14 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
                                                            TransactionPriority priority, uint32_t flags,
                                                            TransactionTagMap<uint32_t> tags, Optional<UID> debugID) {
 	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
-	try {
-		++cx->transactionReadVersionBatches;
-		if( debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
-		loop {
+
+	++cx->transactionReadVersionBatches;
+	if( debugID.present() )
+		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
+	loop {
+		try {
 			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
+
 			choose {
 				when ( wait( cx->onProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
@@ -3930,12 +3938,17 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
 					return v;
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
+				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
+			if(e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
+				wait(delayJittered(5.0));
+			} else {
+				throw;
+			}
 		}
-	} catch (Error& e) {
-		if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
-			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-		throw;
 	}
+
 }
 
 ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<DatabaseContext::VersionRequest> versionStream, TransactionPriority priority, uint32_t flags ) {
