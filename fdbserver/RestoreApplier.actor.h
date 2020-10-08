@@ -54,7 +54,7 @@ struct StagingKey {
 	LogMessageVersion version; // largest version of set or clear for the key
 	std::map<LogMessageVersion, Standalone<MutationRef>> pendingMutations; // mutations not set or clear type
 
-	explicit StagingKey() : version(0), type(MutationRef::MAX_ATOMIC_OP) {}
+	explicit StagingKey(Key key) : key(key), version(0), type(MutationRef::MAX_ATOMIC_OP) {}
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
@@ -151,7 +151,7 @@ struct StagingKey {
 		}
 		for (; lb != pendingMutations.end(); lb++) {
 			MutationRef mutation = lb->second;
-			if (type == MutationRef::CompareAndClear) { // Special atomicOp
+			if (mutation.type == MutationRef::CompareAndClear) { // Special atomicOp
 				Arena arena;
 				Optional<StringRef> inputVal;
 				if (hasBaseValue()) {
@@ -170,14 +170,14 @@ struct StagingKey {
 				val = applyAtomicOp(inputVal, mutation.param2, (MutationRef::Type)mutation.type);
 				type = MutationRef::SetValue; // Precomputed result should be set to DB.
 			} else if (mutation.type == MutationRef::SetValue || mutation.type == MutationRef::ClearRange) {
-				type = MutationRef::SetValue; // Precomputed result should be set to DB.
+				type = MutationRef::SetValue;
 				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultUnexpectedSet", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
 				    .detail("Version", lb->first.toString());
 			} else {
-				TraceEvent(SevWarnAlways, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
+				TraceEvent(SevError, "FastRestoreApplierPrecomputeResultSkipUnexpectedBackupMutation", applierID)
 				    .detail("BatchIndex", batchIndex)
 				    .detail("Context", context)
 				    .detail("MutationType", getTypeString(mutation.type))
@@ -202,7 +202,7 @@ struct StagingKey {
 		return pendingMutations.empty() || version >= pendingMutations.rbegin()->first;
 	}
 
-	int expectedMutationSize() { return key.size() + val.size(); }
+	int totalSize() { return MutationRef::OVERHEAD_BYTES + key.size() + val.size(); }
 };
 
 // The range mutation received on applier.
@@ -247,7 +247,6 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	VersionedMutationsMap kvOps; // Mutations at each version
 	std::map<Key, StagingKey> stagingKeys;
 	std::set<StagingKeyRange> stagingKeyRanges;
-	FlowLock applyStagingKeysBatchLock;
 
 	Future<Void> pollMetrics;
 
@@ -256,8 +255,13 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	long receiveMutationReqs;
 
 	// Stats
-	long receivedBytes;
-	long appliedBytes;
+	double receivedBytes; // received mutation size
+	double appliedBytes; // after coalesce, how many bytes to write to DB
+	double targetWriteRateMB; // target amount of data outstanding for DB;
+	double totalBytesToWrite; // total amount of data in bytes to write
+	double applyingDataBytes; // amount of data in flight of committing
+	AsyncTrigger releaseTxnTrigger; // trigger to release more txns
+	Future<Void> rateTracer; // trace transaction rate control info
 
 	// Status counters
 	struct Counters {
@@ -283,18 +287,22 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	void delref() { return ReferenceCounted<ApplierBatchData>::delref(); }
 
 	explicit ApplierBatchData(UID nodeID, int batchIndex)
-	  : counters(this, nodeID, batchIndex), applyStagingKeysBatchLock(SERVER_KNOBS->FASTRESTORE_APPLYING_PARALLELISM),
-	    vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
+	  : counters(this, nodeID, batchIndex),
+	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
+	    totalBytesToWrite(-1), applyingDataBytes(0), vbState(ApplierVersionBatchState::NOT_INIT),
+	    receiveMutationReqs(0), receivedBytes(0), appliedBytes(0) {
 		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex), nodeID,
 		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY, &counters.cc,
 		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
-	~ApplierBatchData() = default;
+	~ApplierBatchData() {
+		rateTracer = Void(); // cancel actor
+	}
 
 	void addMutation(MutationRef m, LogMessageVersion ver) {
 		if (!isRangeMutation(m)) {
-			auto item = stagingKeys.emplace(m.param1, StagingKey());
+			auto item = stagingKeys.emplace(m.param1, StagingKey(m.param1));
 			item.first->second.add(m, ver);
 		} else {
 			stagingKeyRanges.insert(StagingKeyRange(m, ver));

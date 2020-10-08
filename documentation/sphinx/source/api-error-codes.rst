@@ -114,7 +114,11 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_read_only                         | 2023| Attempted to commit a transaction specified as read-only                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| invalid_cache_eviction_policy                 | 2024| Invalid cache eviction policy, only random and lru are supported               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | network_cannot_be_restarted                   | 2025| Network can only be started once                                               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| blocked_from_network_thread                   | 2026| Detected a deadlock in a callback called from the network thread               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | incompatible_protocol_version                 | 2100| Incompatible protocol version                                                  |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

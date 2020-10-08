@@ -1,4 +1,4 @@
-FROM foundationdb/foundationdb-build:0.1.16
+FROM foundationdb/foundationdb-build:0.1.17
 
 USER root
 
