@@ -1,6 +1,9 @@
 set(SRCS
   fdb/__init__.py
   fdb/directory_impl.py
+  fdb/fdb_client_interface.py
+  fdb/fdb_grpc_interface.py
+  fdb/fdb_native_interface.py
   fdb/impl.py
   fdb/locality.py
   fdb/six.py

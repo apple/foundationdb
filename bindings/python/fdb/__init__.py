@@ -23,6 +23,10 @@
 """Documentation for this API can be found at
 https://apple.github.io/foundationdb/api-python.html"""
 
+from enum import Enum
+from fdb.fdb_grpc_interface import FdbGrpcClient
+from fdb.fdb_native_interface import FdbNativeClient
+
 
 def open(*args, **kwargs):
     raise RuntimeError('You must call api_version() before using any fdb methods')
@@ -51,6 +55,19 @@ def get_api_version():
         raise RuntimeError('API version is not set')
 
 
+def set_native_client():
+    if '_version' in globals():
+        raise RuntimeError('Cannot change client mode after version has been set')
+
+    globals()['_client_mode'] = 'native'
+
+def set_grpc_client(connection_string):
+    if '_version' in globals():
+        raise RuntimeError('Cannot change client mode after version has been set')
+
+    globals()['_client_mode'] = 'grpc'
+    globals()['_client_mode.grpc_connection_string'] = connection_string
+
 def api_version(ver):
     header_version = 700
 
@@ -67,9 +84,17 @@ def api_version(ver):
 
     import fdb.impl
 
-    err = fdb.impl._capi.fdb_select_api_version_impl(ver, header_version)
+    client_mode = globals().get('_client_mode', 'native')
+    if client_mode == 'native':
+        fdb_client_interface = FdbNativeClient()
+    elif client_mode == 'grpc':
+        fdb_client_interface = FdbGrpcClient(globals()['_client_mode.grpc_connection_string'])
+    else:
+        raise RuntimeError('Unexpected client mode %s' % globals()['_client_mode'])
+
+    err = fdb_client_interface.select_api_version(ver, header_version)
     if err == 2203:  # api_version_not_supported, but that's not helpful to the user
-        max_supported_ver = fdb.impl._capi.fdb_get_max_api_version()
+        max_supported_ver = fdb_client_interface.get_max_api_version()
         if header_version > max_supported_ver:
             raise RuntimeError("This version of the FoundationDB Python binding is not supported by the installed "
                                "FoundationDB C library. The binding requires a library that supports API version "
@@ -81,7 +106,10 @@ def api_version(ver):
     elif err != 0:
         raise RuntimeError('FoundationDB API error')
 
-    fdb.impl.init_c_api()
+    if client_mode == 'native':
+        FdbNativeClient.init_c_api()
+
+    fdb.impl._fdb_client_interface = fdb_client_interface
 
     list = (
         'FDBError',

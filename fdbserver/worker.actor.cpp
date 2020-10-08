@@ -1134,6 +1134,10 @@ ACTOR Future<Void> workerServer(
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
+		if(initialClass == ProcessClass::RpcProxyClass) { // TODO: don't fake the request
+			interf.rpcProxy.send(InitializeRpcProxyRequest());
+		}
+
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
 				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
@@ -1448,6 +1452,17 @@ ACTOR Future<Void> workerServer(
 
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
+				req.reply.send(recruited);
+			}
+			when( InitializeRpcProxyRequest req = waitNext(interf.rpcProxy.getFuture()) ) {
+				RpcProxyInterface recruited(locality);
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole( Role::RPC_PROXY, recruited.id(), interf.id(), details );
+				
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::RPC_PROXY, recruited.id(), 
+						rpcProxy( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( CoordinationPingMessage m = waitNext( interf.coordinationPing.getFuture() ) ) {
@@ -1870,3 +1885,4 @@ const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::RPC_PROXY("RpcProxy", "RP");

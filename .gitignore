@@ -95,3 +95,9 @@ flow/coveragetool/obj
 .DS_Store
 temp/
 /versions.target
+
+# gRPC/protobuf generated files
+*.pb.cc
+*.pb.h
+*_pb2.py
+*_pb2_grpc.py
