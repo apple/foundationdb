@@ -174,7 +174,7 @@ public:
 	static std::string hmac_sha1(Credentials const &creds, std::string const &msg);
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
-	void setAuthHeaders(Credentials const &creds, std::string const &verb, std::string const &resource, HTTP::Headers &headers);
+	void setAuthHeaders(std::string const &verb, std::string const &resource, HTTP::Headers &headers);
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
 	static PacketBuffer * writeRequestHeader(std::string const &request, HTTP::Headers const &headers, PacketBuffer *dest);

@@ -616,9 +616,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
 			// when a new connection is established and setAuthHeaders() would need the updated secret.
-			if (bstore->credentials.present()) {
-				bstore->setAuthHeaders(bstore->credentials.get(), verb, resource, headers);
-			}
+			bstore->setAuthHeaders(verb, resource, headers);
+
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), requestTimeout));
@@ -988,7 +987,12 @@ std::string BlobStoreEndpoint::hmac_sha1(Credentials const &creds, std::string c
 	return SHA1::from_string(kopad);
 }
 
-void BlobStoreEndpoint::setAuthHeaders(Credentials const &creds, std::string const &verb, std::string const &resource, HTTP::Headers& headers) {
+void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string const &resource, HTTP::Headers& headers) {
+	if (!credentials.present()) {
+		return;
+	}
+	Credentials creds = credentials.get();
+
 	std::string &date = headers["Date"];
 
 	char dateBuf[20];
