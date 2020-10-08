@@ -45,7 +45,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "exclude", KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0"))
 	                 .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "failed", KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
-	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "lock", singleKeyRange(LiteralStringRef("dbLocked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -1078,19 +1079,19 @@ Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransa
 	return processClassCommitActor(ryw, getKeyRange());
 }
 
-void throwNotAllowedError(ReadYourWritesTransaction* ryw) {
-	auto msg = ManagementAPIError::toJsonString(false, "setclass",
-	                                            "Clear operation is meaningless thus forbidden for setclass");
+void throwSpecialKeyApiFailure(ReadYourWritesTransaction* ryw, std::string command, std::string message) {
+	auto msg = ManagementAPIError::toJsonString(false, command, message);
 	ryw->setSpecialKeySpaceErrorMsg(msg);
 	throw special_keys_api_failure();
 }
 
 void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	return throwNotAllowedError(ryw);
+	return throwSpecialKeyApiFailure(ryw, "setclass", "Clear operation is meaningless thus forbidden for setclass");
 }
 
 void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	return throwNotAllowedError(ryw);
+	return throwSpecialKeyApiFailure(ryw, "setclass",
+	                                 "Clear range operation is meaningless thus forbidden for setclass");
 }
 
 ACTOR Future<Standalone<RangeResultRef>> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix,
@@ -1120,4 +1121,78 @@ ProcessClassSourceRangeImpl::ProcessClassSourceRangeImpl(KeyRangeRef kr) : Speci
 Future<Standalone<RangeResultRef>> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                          KeyRangeRef kr) const {
 	return getProcessClassSourceActor(ryw, getKeyRange().begin, kr);
+}
+
+ACTOR Future<Standalone<RangeResultRef>> getLockedKeyActor(ReadYourWritesTransaction* ryw,
+                                                           KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	Standalone<RangeResultRef> result;
+	if (val.present()) {
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, val.get()));
+	}
+	return result;
+}
+
+LockDatabaseImpl::LockDatabaseImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	// sigle key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	auto lockEntry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")];
+	if (!ryw->readYourWritesDisabled() && lockEntry.first) {
+		// ryw enabled and we have written to the special key
+		Standalone<RangeResultRef> result;
+		if (lockEntry.second.present()) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, lockEntry.second.get()));
+		}
+		return result;
+	} else {
+		return getLockedKeyActor(ryw, kr);
+	}
+}
+
+void LockDatabaseImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	return throwSpecialKeyApiFailure(ryw, "unlock", "Please call clear on the special key to unlock the database");
+}
+
+ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+	state Optional<std::string> msg;
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	UID uid = deterministicRandom()->randomUniqueID();
+
+	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
+		// check database not locked
+		// if locked already, throw error
+		msg = ManagementAPIError::toJsonString(false, "lock", "Database has already been locked");
+	} else if (!val.present()) {
+		// lock database
+		ryw->getTransaction().atomicOp(databaseLockedKey,
+		                               BinaryWriter::toValue(uid, Unversioned())
+		                                   .withPrefix(LiteralStringRef("0123456789"))
+		                                   .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+		                               MutationRef::SetVersionstampedValue);
+		ryw->getTransaction().addWriteConflictRange(normalKeys);
+	}
+
+	return msg;
+}
+
+ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	if (val.present()) {
+		ryw->getTransaction().clear(singleKeyRange(databaseLockedKey));
+	}
+	return Optional<std::string>();
+}
+
+Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto lockId = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")].second;
+	if (lockId.present()) {
+		return lockDatabaseCommitActor(ryw);
+	} else {
+		return unlockDatabaseCommitActor(ryw);
+	}
 }
