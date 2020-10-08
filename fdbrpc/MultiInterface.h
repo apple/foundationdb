@@ -89,7 +89,7 @@ public:
 	//If balanceOnRequests is true, the client will load balance based on the number of GRVs released by each proxy
 	//If balanceOnRequests is false, the client will load balance based on the CPU usage of each proxy
 	//Only requests which take from the GRV budget on the proxy should set balanceOnRequests to true
-	ModelInterface( const vector<T>& v, bool balanceOnRequests ) : balanceOnRequests(balanceOnRequests) {
+	ModelInterface( const vector<T>& v, bool balanceOnRequests = false ) : balanceOnRequests(balanceOnRequests) {
 		for(int i = 0; i < v.size(); i++) {
 			alternatives.push_back(AlternativeInfo(v[i], 1.0/v.size(), (i+1.0)/v.size()));
 		}
