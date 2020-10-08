@@ -171,7 +171,7 @@ public:
 	Future<Void> updateSecret();
 
 	// Calculates the authentication string from the secret key
-	std::string hmac_sha1(Credentials const &creds, std::string const &msg);
+	static std::string hmac_sha1(Credentials const &creds, std::string const &msg);
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(Credentials const &creds, std::string const &verb, std::string const &resource, HTTP::Headers &headers);
