@@ -6,10 +6,6 @@ Release Notes
 
 6.2.27
 ======
-
-Fixes
------
-
 * For clusters with a large number of shards, avoid slow tasks in the data distributor by adding yields to the shard map destruction. `(PR #3834) <https://github.com/apple/foundationdb/pull/3834>`_
 
 6.2.26
