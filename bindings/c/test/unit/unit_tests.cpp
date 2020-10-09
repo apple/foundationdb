@@ -228,59 +228,102 @@ struct FdbEvent {
 
 TEST_CASE("fdb_future_set_callback") {
   fdb::Transaction tr(db);
-  fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
-  struct Context {
-    FdbEvent event;
-  };
-  Context context;
-  fdb_check(f1.set_callback(+[](FDBFuture *f1, void *param) {
-                              auto *context =
-                                  static_cast<Context *>(param);
-                              context->event.set();
-                            },
-                            &context));
-  fdb_check(f1.block_until_ready());
-  context.event.wait();
+  while (1) {
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, /*snapshot*/ true);
+
+    struct Context {
+      FdbEvent event;
+    };
+    Context context;
+    fdb_check(f1.set_callback(+[](FDBFuture *f1, void *param) {
+                                auto *context =
+                                    static_cast<Context *>(param);
+                                context->event.set();
+                              },
+                              &context));
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    context.event.wait();
+    break;
+  }
 }
 
 TEST_CASE("fdb_future_cancel after future completion") {
   fdb::Transaction tr(db);
+  while (1) {
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, false);
 
-  fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, false);
-  fdb_check(f1.block_until_ready());
-  // Should have no effect
-  f1.cancel();
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
 
-  int out_present;
-  char *val;
-  int vallen;
-  fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    // Should have no effect
+    f1.cancel();
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    break;
+  }
 }
 
 TEST_CASE("fdb_future_is_ready") {
   fdb::Transaction tr(db);
-  fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, false);
+  while (1) {
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, false);
+    CHECK(!f1.is_ready());
 
-  CHECK(!f1.is_ready());
-  fdb_check(f1.block_until_ready());
-  CHECK(f1.is_ready());
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    CHECK(f1.is_ready());
+    break;
+  }
 }
 
 TEST_CASE("fdb_future_release_memory") {
   fdb::Transaction tr(db);
+  while (1) {
+    fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, false);
 
-  fdb::ValueFuture f1 = tr.get((const uint8_t *)"foo", 3, false);
-  fdb_check(f1.block_until_ready());
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
 
-  int out_present;
-  char *val;
-  int vallen;
-  fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    // "After [fdb_future_release_memory] has been called the same number of
+    // times as fdb_future_get_*(), further calls to fdb_future_get_*() will
+    // return a future_released error".
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
 
-  f1.release_memory();
-  fdb_error_t err = f1.get(&out_present,
-                                 (const uint8_t **)&val, &vallen);
-  CHECK(err == 1102); // future_released
+    f1.release_memory();
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    f1.release_memory();
+    f1.release_memory();
+    err = f1.get(&out_present, (const uint8_t **)&val, &vallen);
+    CHECK(err == 1102); // future_released
+    break;
+  }
 }
 
 TEST_CASE("fdb_future_get_int64") {
