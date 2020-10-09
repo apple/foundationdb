@@ -1276,22 +1276,28 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	return Void();
 }
 
+static constexpr int playIgnoredPopsBatchSize = 100;
+
 ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogData> logData ) {
 	// timeout check for ignorePopRequest
 	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
 
 		TraceEvent("EnableTLogPlayAllIgnoredPops");
 		// use toBePopped and issue all the pops
-		std::map<Tag, Version>::iterator it;
-		vector<Future<Void>> ignoredPops;
+		state std::map<Tag, Version>::iterator it;
+		state vector<Future<Void>> ignoredPops;
 		self->ignorePopRequest = false;
 		self->ignorePopUid = "";
 		self->ignorePopDeadline = 0.0;
+		state int ignoredPopsPlayed = 0;
 		for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
 			TraceEvent("PlayIgnoredPop")
 				.detail("Tag", it->first.toString())
 				.detail("Version", it->second);
 			ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
+			if (++ignoredPopsPlayed % playIgnoredPopsBatchSize == 0) {
+				wait(yield());
+			}
 		}
 		self->toBePopped.clear();
 		wait(waitForAll(ignoredPops));
@@ -2099,16 +2105,20 @@ tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<Lo
 	}
 	TraceEvent("EnableTLogPlayAllIgnoredPops2");
 	// use toBePopped and issue all the pops
-	std::map<Tag, Version>::iterator it;
+	state std::map<Tag, Version>::iterator it;
 	state vector<Future<Void>> ignoredPops;
 	self->ignorePopRequest = false;
 	self->ignorePopDeadline = 0.0;
 	self->ignorePopUid = "";
+	state int ignoredPopsPlayed = 0;
 	for (it = self->toBePopped.begin(); it != self->toBePopped.end(); it++) {
 		TraceEvent("PlayIgnoredPop")
 			.detail("Tag", it->first.toString())
 			.detail("Version", it->second);
 		ignoredPops.push_back(tLogPopCore(self, it->first, it->second, logData));
+		if (++ignoredPopsPlayed % playIgnoredPopsBatchSize == 0) {
+			wait(yield());
+		}
 	}
 	TraceEvent("TLogExecCmdPopEnable")
 		.detail("UidStr", enablePopReq.snapUID.toString())
