@@ -104,8 +104,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Future<Void> f;
 		{
 			ReadYourWritesTransaction ryw{ cx->clone() };
-			if(!ryw.getDatabase()->apiVersionAtLeast(630)) {
-				//This test is not valid for API versions smaller than 630
+			if (!ryw.getDatabase()->apiVersionAtLeast(630)) {
+				// This test is not valid for API versions smaller than 630
 				return;
 			}
 			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
@@ -744,6 +744,32 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
 			}
+		}
+		// test lock and unlock
+		{
+			try {
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// lock the database
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
+				// commit
+				wait(tx->commit());
+				// if success, read should get database_locked error
+				tx->reset();
+				Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+				ASSERT(false);
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				ASSERT(e.code() == error_code_database_locked);
+				tx->reset();
+			}
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			// unlock the database
+			tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
+			wait(tx->commit());
+			tx->reset();
+			// read should be successful
+			Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+			tx->reset();
 		}
 		return Void();
 	}
