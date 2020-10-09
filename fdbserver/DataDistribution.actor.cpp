@@ -175,8 +175,11 @@ public:
 	}
 
 	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
-		vector<StorageServerInterface> v(servers.size());
-		for (const auto& server : servers) v.push_back(server->lastKnownInterface);
+		vector<StorageServerInterface> v;
+		v.reserve(servers.size());
+		for (const auto& server : servers) {
+			v.push_back(server->lastKnownInterface);
+		}
 		return v;
 	}
 	int size() const override {
