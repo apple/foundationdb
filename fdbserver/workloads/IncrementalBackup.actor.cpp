@@ -61,36 +61,39 @@ struct IncrementalBackupWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId || !waitForBackup) {
+		if (clientId) {
 			return true;
 		}
 		return _check(cx, this);
 	}
 
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
-		state Reference<IBackupContainer> backupContainer;
-		state UID backupUID;
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state Version v = wait(tr->getReadVersion());
-		// Wait for backup container to be created and avoid race condition
-		TraceEvent("IBackupWaitContainer");
-		loop {
-			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			state bool e = wait(backupContainer->exists());
-			if (e) break;
-			wait(delay(5.0));
-		}
-		loop {
-			BackupDescription desc = wait(backupContainer->describeBackup(true));
-			TraceEvent("IBackupVersionGate")
-			    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
-			    .detail("ContiguousLogEndVersion",
-			            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
-			    .detail("TargetVersion", v);
-			if (!desc.contiguousLogEnd.present()) continue;
-			if (desc.contiguousLogEnd.get() >= v) break;
-			// Avoid spamming requests with a delay
-			wait(delay(5.0));
+		if (self->waitForBackup) {
+			state Reference<IBackupContainer> backupContainer;
+			state UID backupUID;
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			state Version v = wait(tr->getReadVersion());
+			// Wait for backup container to be created and avoid race condition
+			TraceEvent("IBackupWaitContainer");
+			loop {
+				wait(success(
+				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				state bool e = wait(backupContainer->exists());
+				if (e) break;
+				wait(delay(5.0));
+			}
+			loop {
+				BackupDescription desc = wait(backupContainer->describeBackup(true));
+				TraceEvent("IBackupVersionGate")
+				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
+				    .detail("ContiguousLogEndVersion",
+				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
+				    .detail("TargetVersion", v);
+				if (!desc.contiguousLogEnd.present()) continue;
+				if (desc.contiguousLogEnd.get() >= v) break;
+				// Avoid spamming requests with a delay
+				wait(delay(5.0));
+			}
 		}
 		if (self->stopBackup) {
 			wait(self->backupAgent.discontinueBackup(cx, self->tag));
@@ -154,6 +157,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
 			                                      true, invalidVersion, true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
+			// SOMEDAY: Remove after backup agents can exist quiescently
+			if (g_simulator.backupAgents == ISimulator::BackupToFile) {
+				g_simulator.backupAgents = ISimulator::NoBackupAgents;
+			}
 		}
 		return Void();
 	}

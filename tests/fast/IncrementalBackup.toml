@@ -1,6 +1,7 @@
 [[test]] 
 testTitle = 'SubmitBackup'
 simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'IncrementalBackup'
@@ -11,6 +12,7 @@ simBackupAgents = 'BackupToFile'
 testTitle = 'CycleTest'
 clearAfterTest = true
 simBackupAgents = 'BackupToFile'
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'Cycle'
