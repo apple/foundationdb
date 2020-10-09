@@ -416,9 +416,10 @@ struct StorageServerMetrics {
 	// Given a read hot shard, this function will divide the shard into chunks and find those chunks whose
 	// readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 	// `StorageMetricsSampleTests.txt` after change made.
-	std::vector<KeyRangeRef> getReadHotRanges(KeyRangeRef shard, double readDensityRatio, int64_t baseChunkSize,
-	                                          int64_t minShardReadBandwidthPerKSeconds) {
-		std::vector<KeyRangeRef> toReturn;
+	std::vector<ReadHotRangeWithMetrics> getReadHotRanges(KeyRangeRef shard, double readDensityRatio,
+	                                                      int64_t baseChunkSize,
+	                                                      int64_t minShardReadBandwidthPerKSeconds) {
+		std::vector<ReadHotRangeWithMetrics> toReturn;
 		double shardSize = (double)byteSample.getEstimate(shard);
 		int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
 		if (shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS <=
@@ -428,7 +429,9 @@ struct StorageServerMetrics {
 		if (shardSize <= baseChunkSize) {
 			// Shard is small, use it as is
 			if (bytesReadSample.getEstimate(shard) > (readDensityRatio * shardSize)) {
-				toReturn.push_back(shard);
+				toReturn.emplace_back(shard, bytesReadSample.getEstimate(shard) / shardSize,
+				                      bytesReadSample.getEstimate(shard) /
+				                          SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 			}
 			return toReturn;
 		}
@@ -450,14 +453,15 @@ struct StorageServerMetrics {
 			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) >
 			    (readDensityRatio * std::max(baseChunkSize, byteSample.getEstimate(KeyRangeRef(beginKey, *endKey))))) {
 				auto range = KeyRangeRef(beginKey, *endKey);
-				if (!toReturn.empty() && toReturn.back().end == range.begin) {
+				if (!toReturn.empty() && toReturn.back().keys.end == range.begin) {
 					// in case two consecutive chunks both are over the ratio, merge them.
-					auto updatedTail = KeyRangeRef(toReturn.back().begin, *endKey);
+					range = KeyRangeRef(toReturn.back().keys.begin, *endKey);
 					toReturn.pop_back();
-					toReturn.push_back(updatedTail);
-				} else {
-					toReturn.push_back(range);
 				}
+				toReturn.emplace_back(
+				    range,
+				    (double)bytesReadSample.getEstimate(range) / std::max(baseChunkSize, byteSample.getEstimate(range)),
+				    bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 			}
 			beginKey = *endKey;
 			endKey = byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) +
@@ -468,10 +472,10 @@ struct StorageServerMetrics {
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) {
 		ReadHotSubRangeReply reply;
-		std::vector<KeyRangeRef> v = getReadHotRanges(req.keys, SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
-		                                              SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
-		                                              SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
-		reply.readHotRanges = VectorRef<KeyRangeRef>(v.data(), v.size());
+		auto _ranges = getReadHotRanges(req.keys, SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
+		                                SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
+		                                SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS);
+		reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 		req.reply.send(reply);
 	}
 
@@ -515,11 +519,11 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/simple") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	vector<KeyRangeRef> t =
+	std::vector<ReadHotRangeWithMetrics> t =
 	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2.0, 200 * sampleUnit, 0);
 
-	ASSERT(t.size() == 1 && (*t.begin()).begin == LiteralStringRef("Bah") &&
-	       (*t.begin()).end == LiteralStringRef("Bob"));
+	ASSERT(t.size() == 1 && (*t.begin()).keys.begin == LiteralStringRef("Bah") &&
+	       (*t.begin()).keys.end == LiteralStringRef("Bob"));
 
 	return Void();
 }
@@ -546,12 +550,12 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/moreThanOneRange") {
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Dah"), 300 * sampleUnit);
 
-	vector<KeyRangeRef> t =
+	std::vector<ReadHotRangeWithMetrics> t =
 	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 2.0, 200 * sampleUnit, 0);
 
-	ASSERT(t.size() == 2 && (*t.begin()).begin == LiteralStringRef("Bah") &&
-	       (*t.begin()).end == LiteralStringRef("Bob"));
-	ASSERT(t.at(1).begin == LiteralStringRef("Cat") && t.at(1).end == LiteralStringRef("Dah"));
+	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == LiteralStringRef("Bah") &&
+	       (*t.begin()).keys.end == LiteralStringRef("Bob"));
+	ASSERT(t.at(1).keys.begin == LiteralStringRef("Cat") && t.at(1).keys.end == LiteralStringRef("Dah"));
 
 	return Void();
 }
@@ -579,12 +583,12 @@ TEST_CASE("/fdbserver/StorageMetricSample/readHotDetect/consecutiveRanges") {
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Dah"), 300 * sampleUnit);
 
-	vector<KeyRangeRef> t =
+	std::vector<ReadHotRangeWithMetrics> t =
 	    ssm.getReadHotRanges(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("D")), 2.0, 200 * sampleUnit, 0);
 
-	ASSERT(t.size() == 2 && (*t.begin()).begin == LiteralStringRef("Bah") &&
-	       (*t.begin()).end == LiteralStringRef("But"));
-	ASSERT(t.at(1).begin == LiteralStringRef("Cat") && t.at(1).end == LiteralStringRef("Dah"));
+	ASSERT(t.size() == 2 && (*t.begin()).keys.begin == LiteralStringRef("Bah") &&
+	       (*t.begin()).keys.end == LiteralStringRef("But"));
+	ASSERT(t.at(1).keys.begin == LiteralStringRef("Cat") && t.at(1).keys.end == LiteralStringRef("Dah"));
 
 	return Void();
 }

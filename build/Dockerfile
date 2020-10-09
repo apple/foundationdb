@@ -45,20 +45,24 @@ RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip -
     cd .. && rm -rf ninja-1.9.0 ninja.zip
 
 # install openssl
-RUN cd /tmp && curl -L https://www.openssl.org/source/openssl-1.1.1d.tar.gz -o openssl.tar.gz &&\
-    echo "1e3a91bc1f9dfce01af26026f856e064eab4c8ee0a8f457b5ae30b40b8b711f2  openssl.tar.gz" > openssl-sha.txt &&\
+RUN cd /tmp && curl -L https://www.openssl.org/source/openssl-1.1.1h.tar.gz -o openssl.tar.gz &&\
+    echo "5c9ca8774bd7b03e5784f26ae9e9e6d749c9da2438545077e6b3d755a06595d9  openssl.tar.gz" > openssl-sha.txt &&\
     sha256sum -c openssl-sha.txt && tar -xzf openssl.tar.gz &&\
-    cd openssl-1.1.1d && scl enable devtoolset-8 -- ./config CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
+    cd openssl-1.1.1h && scl enable devtoolset-8 -- ./config CFLAGS="-fPIC -O3" --prefix=/usr/local &&\
     scl enable devtoolset-8 -- make -j`nproc` && scl enable devtoolset-8 -- make -j1 install &&\
     ln -sv /usr/local/lib64/lib*.so.1.1 /usr/lib64/ &&\
-    cd /tmp/ && rm -rf /tmp/openssl-1.1.1d /tmp/openssl.tar.gz
+    cd /tmp/ && rm -rf /tmp/openssl-1.1.1h /tmp/openssl.tar.gz
 
 RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz -o rocksdb.tar.gz &&\
     echo "d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee  rocksdb.tar.gz" > rocksdb-sha.txt &&\
     sha256sum -c rocksdb-sha.txt && tar xf rocksdb.tar.gz && rm -rf rocksdb.tar.gz rocksdb-sha.txt
 
-LABEL version=0.1.14
-ENV DOCKER_IMAGEVER=0.1.14
+# Localize time zone
+ARG TIMEZONEINFO=America/Los_Angeles
+RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
+
+LABEL version=0.1.17
+ENV DOCKER_IMAGEVER=0.1.17
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++

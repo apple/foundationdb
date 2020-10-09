@@ -139,8 +139,8 @@ public:
 
 	bool sampleReadTags();
 
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
+	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies, bool useGrvProxies = false);
+	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies, bool useGrvProxies = false);
 	Future<Void> onMasterProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
@@ -193,6 +193,7 @@ public:
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	Reference<ProxyInfo> grvProxies;
 	bool provisional;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;

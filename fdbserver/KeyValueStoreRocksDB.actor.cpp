@@ -239,7 +239,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
 					cursor->Prev();
 				}
-
 				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin) {
 					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
 					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
@@ -252,6 +251,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 				s = cursor->status();
 			}
+
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
 			}

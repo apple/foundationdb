@@ -7,7 +7,7 @@ SCRIPTID="${$}"
 SAVEONERROR="${SAVEONERROR:-1}"
 PYTHONDIR="${BINDIR}/tests/python"
 testScript="${BINDIR}/tests/bindingtester/run_binding_tester.sh"
-VERSION="1.6"
+VERSION="1.9"
 
 source ${SCRIPTDIR}/localClusterStart.sh
 
@@ -23,18 +23,21 @@ cycles="${1}"
 
 if [ "${DEBUGLEVEL}" -gt 0 ]
 then
-	echo "Work dir:    ${WORKDIR}"
-	echo "Bin dir:     ${BINDIR}"
-	echo "Log dir:     ${LOGDIR}"
-	echo "Python path: ${PYTHONDIR}"
-	echo "Lib dir:     ${LIBDIR}"
-	echo "Server port: ${FDBSERVERPORT}"
-	echo "Script Id:   ${SCRIPTID}"
-	echo "Version:     ${VERSION}"
+	echo "Work dir:       ${WORKDIR}"
+	echo "Bin dir:        ${BINDIR}"
+	echo "Log dir:        ${LOGDIR}"
+	echo "Python path:    ${PYTHONDIR}"
+	echo "Lib dir:        ${LIBDIR}"
+	echo "Cluster String: ${FDBCLUSTERTEXT}"
+	echo "Script Id:      ${SCRIPTID}"
+	echo "Version:        ${VERSION}"
 fi
 
 # Begin the cluster using the logic in localClusterStart.sh.
 startCluster
+
+# Stop the cluster on exit
+trap "stopCluster" EXIT
 
 # Display user message
 if [ "${status}" -ne 0 ]; then
@@ -58,8 +61,8 @@ fi
 # Display directory and log information, if an error occurred
 if [ "${status}" -ne 0 ]
 then
-	ls "${WORKDIR}" > "${LOGDIR}/dir.log"
-	ps -eafw > "${LOGDIR}/process-preclean.log"
+	ls "${WORKDIR}" &> "${LOGDIR}/dir.log"
+	ps -eafwH &> "${LOGDIR}/process-preclean.log"
 	if [ -f "${FDBCONF}" ]; then
 		cp -f "${FDBCONF}" "${LOGDIR}/"
 	fi
@@ -71,10 +74,15 @@ fi
 
 # Save debug information files, environment, and log information, if an error occurred
 if [ "${status}" -ne 0 ] && [ "${SAVEONERROR}" -gt 0 ]; then
-	ps -eafw > "${LOGDIR}/process-exit.log"
-	netstat -na > "${LOGDIR}/netstat.log"
-	df -h > "${LOGDIR}/disk.log"
-	env > "${LOGDIR}/env.log"
+	ps -eafwH &> "${LOGDIR}/process-exit.log"
+	netstat -na &> "${LOGDIR}/netstat.log"
+	df -h &> "${LOGDIR}/disk.log"
+	env &> "${LOGDIR}/env.log"
+fi
+
+# Stop the cluster
+if stopCluster; then
+	unset FDBSERVERID
 fi
 
 exit "${status}"

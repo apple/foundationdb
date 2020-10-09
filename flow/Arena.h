@@ -562,6 +562,15 @@ public:
 		memcpy(dst, data, length);
 		return dst + length;
 	}
+	
+	std::vector<StringRef> splitAny(StringRef sep) const {
+		StringRef r = *this;
+		std::vector<StringRef> tokens;
+		while (r.size()) {
+			tokens.push_back(r.eatAny(sep, nullptr));
+		}
+		return tokens;
+	}
 
 private:
 	// Unimplemented; blocks conversion through std::string
@@ -670,7 +679,7 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	if (lhs.size() == 0 && rhs.size() == 0) {
 		return true;
 	}
-	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
+	return lhs.size() == rhs.size() && memcmp(lhs.begin(), rhs.begin(), lhs.size()) == 0;
 }
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {

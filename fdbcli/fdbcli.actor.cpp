@@ -20,6 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1029,10 +1030,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (statusObjConfig.has("regions")) {
 					outputString += "\n  Regions: ";
 					regions = statusObjConfig["regions"].get_array();
-					bool isPrimary = false;
-					std::vector<std::string> regionSatelliteDCs;
-					std::string regionDC;
 					for (StatusObjectReader region : regions) {
+						bool isPrimary = false;
+						std::vector<std::string> regionSatelliteDCs;
+						std::string regionDC;
 						for (StatusObjectReader dc : region["datacenters"].get_array()) {
 							if (!dc.has("satellite")) {
 								regionDC = dc["id"].get_str();
@@ -1207,13 +1208,53 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 						int minLoss = std::min(availLoss, dataLoss);
 						const char *faultDomain = machinesAreZones ? "machine" : "zone";
-						if (minLoss == 1)
-							outputString += format("1 %s", faultDomain);
-						else
-							outputString += format("%d %ss", minLoss, faultDomain);
+						outputString += format("%d %ss", minLoss, faultDomain);
 
 						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
+						}
+
+						if (dataLoss == -1) {
+							ASSERT_WE_THINK(availLoss == -1);
+							outputString += format(
+							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
+							    "following tlog interfaces, otherwise storage servers may never be able to catch "
+							    "up.\n");
+							StatusObjectReader logs;
+							if (statusObjCluster.has("logs")) {
+								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
+									bool possiblyLosingData;
+									if (logEpoch.get("possibly_losing_data", possiblyLosingData) &&
+									    !possiblyLosingData) {
+										continue;
+									}
+									// Current epoch doesn't have an end version.
+									int64_t epoch, beginVersion, endVersion = invalidVersion;
+									bool current;
+									logEpoch.get("epoch", epoch);
+									logEpoch.get("begin_version", beginVersion);
+									logEpoch.get("end_version", endVersion);
+									logEpoch.get("current", current);
+									std::string missing_log_interfaces;
+									if (logEpoch.has("log_interfaces")) {
+										for (StatusObjectReader logInterface : logEpoch.last().get_array()) {
+											bool healthy;
+											std::string address, id;
+											if (logInterface.get("healthy", healthy) && !healthy) {
+												logInterface.get("id", id);
+												logInterface.get("address", address);
+												missing_log_interfaces += format("%s,%s ", id.c_str(), address.c_str());
+											}
+										}
+									}
+									outputString += format(
+									    "  %s log epoch: %ld begin: %ld end: %s, missing "
+									    "log interfaces(id,address): %s\n",
+									    current ? "Current" : "Old", epoch, beginVersion,
+									    endVersion == invalidVersion ? "(unknown)" : format("%ld", endVersion).c_str(),
+									    missing_log_interfaces.c_str());
+								}
+							}
 						}
 					}
 				}

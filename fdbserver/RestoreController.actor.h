@@ -149,6 +149,10 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 
 	std::map<UID, double> rolesHeartBeatTime; // Key: role id; Value: most recent time controller receives heart beat
 
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the RestoreController is created
+	PromiseStream<Future<Void>> addActor;
+
 	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 
@@ -173,7 +177,8 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		versionBatches.clear();
 		batch.clear();
 		batchStatus.clear();
-		finishedBatch = NotifiedVersion();
+		finishedBatch = NotifiedVersion(0);
+		versionBatchId = NotifiedVersion(0);
 		ASSERT(runningVersionBatches.get() == 0);
 	}
 
@@ -217,6 +222,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		}
 
 		TraceEvent("FastRestoreVersionBatchesSummary")
+		    .detail("VersionBatches", versionBatches.size())
 		    .detail("LogFiles", logFiles)
 		    .detail("RangeFiles", rangeFiles)
 		    .detail("LogBytes", logSize)
@@ -310,6 +316,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 						}
 					}
 				} else {
+					// TODO: Check why this may happen?!
 					TraceEvent(SevError, "FastRestoreBuildVersionBatch")
 					    .detail("RangeIndex", rangeIdx)
 					    .detail("RangeFiles", rangeFiles.size())

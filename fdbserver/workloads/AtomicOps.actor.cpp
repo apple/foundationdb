@@ -55,8 +55,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		ubsum = 0;
 
 		int64_t randNum = sharedRandomNumber / 10;
-		if(opType == -1)
-			opType = randNum % 8;
+		if (opType == -1) opType = randNum % 10;
 
 		switch(opType) {
 		case 0:
@@ -91,6 +90,18 @@ struct AtomicOpsWorkload : TestWorkload {
 			TEST(true); //Testing atomic ByteMax
 			opType = MutationRef::ByteMax;
 			break;
+		case 8:
+			TEST(true); // Testing atomic MinV2
+			opType = MutationRef::MinV2;
+			break;
+		case 9:
+			TEST(true); // Testing atomic AndV2
+			opType = MutationRef::AndV2;
+			break;
+		// case 10:
+		// 	TEST(true); // Testing atomic CompareAndClear Not supported yet
+		// 	opType = MutationRef::CompareAndClear
+		//  break;
 		default:
 			ASSERT(false);
 		}

@@ -152,8 +152,6 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			@Override
 			public void accept(RangeResultInfo data, Throwable error) {
 				try {
-					final RangeResultSummary summary;
-
 					if(error != null) {
 						promise.completeExceptionally(error);
 						if(error instanceof Error) {
@@ -163,7 +161,8 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 						return;
 					}
 
-					summary = data.getSummary();
+					final RangeResult rangeResult = data.get();
+					final RangeResultSummary summary = rangeResult.getSummary();
 					if(summary.lastKey == null) {
 						promise.complete(Boolean.FALSE);
 						return;
@@ -186,11 +185,11 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 						// If this is the first fetch or the main chunk is exhausted
 						if(chunk == null || index == chunk.values.size()) {
 							nextChunk = null;
-							chunk = data.get();
+							chunk = rangeResult;
 							index = 0;
 						}
 						else {
-							nextChunk = data.get();
+							nextChunk = rangeResult;
 						}
 					}
 
