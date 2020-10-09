@@ -782,7 +782,6 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
-			// TODO(anoyes): Report incompatibility somehow
 			return;
 		}
 		try {
@@ -1061,7 +1060,6 @@ ACTOR static Future<Void> connectionReader(
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
 							}
-							// TODO: try to get or open peer here
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
 							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
@@ -1157,8 +1155,6 @@ Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) {
 }
 
 Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper ) {
-	// std::cout << "Get or open peer " << address.toString() << std::endl;
-	// TraceEvent("Get Or open peer");
 	auto peer = getPeer(address);
 	if(!peer) {
 		peer = Reference<Peer>( new Peer(this, address) );

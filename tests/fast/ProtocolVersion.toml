@@ -1,4 +1,4 @@
-protocolVersion = 0x0FDB00B070010000
+startIncompatibleProcess = true
 
 [[test]]
 testTitle = 'ProtocolVersionTest'

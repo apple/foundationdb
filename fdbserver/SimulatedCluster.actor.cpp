@@ -345,7 +345,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
 				const int listenPort = i*listenPerProcess + 1;
 				AgentMode agentMode = runBackupAgents == AgentOnly ? ( i == ips.size()-1 ? AgentOnly : AgentNone ) : runBackupAgents;
-				if(g_simulator.hasDiffProtocol && !g_simulator.setDiffProtocol && agentMode == AgentNone) {
+				if(g_simulator.hasDiffProtocolProcess && !g_simulator.setDiffProtocol && agentMode == AgentNone) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, listenPort, listenPerProcess, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, agentMode, whitelistBinPaths, protocolVersion));
 					g_simulator.setDiffProtocol = true;
 				}
@@ -1348,7 +1348,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 }
 
 void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, int& minimumRegions,
-                   int& configureLocked, ProtocolVersion& protocolVersion) {
+                   int& configureLocked, bool& startIncompatibleProcess) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -1385,10 +1385,8 @@ void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, 
 			sscanf( value.c_str(), "%d", &configureLocked );
 		}
 
-		if (attrib == "protocolVersion") {
-			uint64_t protocolVersionInt = 0;
-			sscanf(value.c_str(), "%" SCNx64, &protocolVersionInt);
-			protocolVersion = ProtocolVersion(protocolVersionInt);
+		if (attrib == "startIncompatibleProcess") {
+			startIncompatibleProcess = strcmp(value.c_str(), "true") == 0;
 		}
 	}
 
@@ -1404,10 +1402,11 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int minimumReplication = 0;
 	state int minimumRegions = 0;
 	state int configureLocked = 0;
-	state ProtocolVersion protocolVersion = currentProtocolVersion;
-	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked, protocolVersion);
-	g_simulator.hasDiffProtocol = protocolVersion != currentProtocolVersion;
+	state bool startIncompatibleProcess = false;
+	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked, startIncompatibleProcess);
+	g_simulator.hasDiffProtocolProcess = startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
+	state ProtocolVersion protocolVersion = startIncompatibleProcess ? ProtocolVersion(currentProtocolVersion.version()+1) : currentProtocolVersion;
 
 	// TODO (IPv6) Use IPv6?
 	wait(g_simulator.onProcess(

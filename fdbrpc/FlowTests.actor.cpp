@@ -269,7 +269,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
-	virtual ProtocolVersion protocolVersion() override {
+	ProtocolVersion protocolVersion() override {
 		return baseNetwork->protocolVersion();
 	}
 };

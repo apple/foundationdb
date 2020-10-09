@@ -1794,11 +1794,8 @@ ACTOR Future<Void> serveProtocolInfo() {
 	state RequestStream<ProtocolInfoRequest> protocolInfo(
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
-	std::cout << "SETUP PROTOCOL INFO ENDPOINT ON: " << g_network->getLocalAddress().toString() << " ON VERSION " << g_network->protocolVersion().version() << std::endl;
 	loop {
 		ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
-		std::cout << "SENDING BACK PROTOCOL: " << g_network->protocolVersion().version() << " TO: " << req.reply.getEndpoint().addresses.toString() << std::endl;
-		TraceEvent("SENDING PROTOCOL INFO TO CLIENT");
 		req.reply.send(ProtocolInfoReply{ g_network->protocolVersion() });
 	}
 }
