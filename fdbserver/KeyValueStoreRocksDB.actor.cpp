@@ -379,16 +379,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() override {
+		uint64_t live = 0;
+		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kEstimateLiveDataSize, &live));
+
 		int64_t free;
 		int64_t total;
-
-		uint64_t sstBytes = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize, &sstBytes));
-		uint64_t memtableBytes = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kSizeAllMemTables, &memtableBytes));
 		g_network->getDiskBytes(path, free, total);
 
-		return StorageBytes(free, total, sstBytes + memtableBytes, free);
+		return StorageBytes(free, total, live, free);
 	}
 };
 
