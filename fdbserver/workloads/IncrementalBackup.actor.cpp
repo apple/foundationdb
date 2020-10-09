@@ -78,7 +78,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
 			state bool e = wait(backupContainer->exists());
 			if (e) break;
-			delay(5.0);
+			wait(delay(5.0));
 		}
 		loop {
 			BackupDescription desc = wait(backupContainer->describeBackup(true));
