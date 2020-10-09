@@ -64,8 +64,8 @@ void Future::cancel() {
 // ValueFuture
 
 [[nodiscard]] fdb_error_t ValueFuture::get(fdb_bool_t* out_present,
-                                                 const uint8_t** out_value,
-                                                 int* out_value_length) {
+                                           const uint8_t** out_value,
+                                           int* out_value_length) {
   return fdb_future_get_value(future_, out_present, out_value,
                               out_value_length);
 }
@@ -73,7 +73,7 @@ void Future::cancel() {
 // KeyFuture
 
 [[nodiscard]] fdb_error_t KeyFuture::get(const uint8_t** out_key,
-                                             int* out_key_length) {
+                                         int* out_key_length) {
   return fdb_future_get_key(future_, out_key, out_key_length);
 }
 
@@ -131,6 +131,10 @@ Int64Future Transaction::get_approximate_size() {
   return Int64Future(fdb_transaction_get_approximate_size(tr_));
 }
 
+KeyFuture Transaction::get_versionstamp() {
+  return KeyFuture(fdb_transaction_get_versionstamp(tr_));
+}
+
 ValueFuture Transaction::get(const uint8_t* key_name, int key_name_length,
                              fdb_bool_t snapshot) {
   return ValueFuture(fdb_transaction_get(tr_, key_name, key_name_length,
@@ -138,8 +142,8 @@ ValueFuture Transaction::get(const uint8_t* key_name, int key_name_length,
 }
 
 KeyFuture Transaction::get_key(const uint8_t* key_name, int key_name_length,
-                                fdb_bool_t or_equal, int offset,
-                                fdb_bool_t snapshot) {
+                               fdb_bool_t or_equal, int offset,
+                               fdb_bool_t snapshot) {
   return KeyFuture(fdb_transaction_get_key(tr_, key_name, key_name_length,
                                            or_equal, offset, snapshot));
 }
@@ -193,9 +197,9 @@ void Transaction::clear(const uint8_t* key_name, int key_name_length) {
 }
 
 void Transaction::clear_range(const uint8_t* begin_key_name,
-                             int begin_key_name_length,
-                             const uint8_t* end_key_name,
-                             int end_key_name_length) {
+                              int begin_key_name_length,
+                              const uint8_t* end_key_name,
+                              int end_key_name_length) {
   fdb_transaction_clear_range(tr_, begin_key_name, begin_key_name_length,
                               end_key_name, end_key_name_length);
 }

@@ -176,6 +176,10 @@ class Transaction final {
   // Returns a future which will be set to the approximate transaction size so far.
   Int64Future get_approximate_size();
 
+  // Returns a future which will be set to the versionstamp which was used by
+  // any versionstamp operations in the transaction.
+  KeyFuture get_versionstamp();
+
   // Returns a future which will be set to the value of `key_name` in the
   // database.
   ValueFuture get(const uint8_t* key_name, int key_name_length,

@@ -879,7 +879,6 @@ TEST_CASE("fdb_transaction_clear") {
   fdb::Transaction tr(db);
   while (1) {
     tr.clear(KEY("foo"), KEYSIZE("foo"));
-
     fdb::EmptyFuture f1 = tr.commit();
 
     fdb_error_t err = wait_future(f1);
@@ -1335,6 +1334,96 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MIN") {
   value = get_value(KEY("baz"), KEYSIZE("baz"), /* snapshot */ false, {});
   REQUIRE(value.has_value());
   CHECK(value->compare("abc") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY") {
+  int offset = prefix.size() + 3;
+  const char *p = reinterpret_cast<const char *>(&offset);
+  char keybuf[] = {'f', 'o', 'o', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', p[0], p[1], p[2], p[3]};
+  std::string key = prefix + std::string(keybuf, 17);
+  std::string versionstamp("");
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op((const uint8_t *)key.c_str(), key.size(), (const uint8_t *)"bar", 3,
+                 FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
+    fdb::KeyFuture f1 = tr.get_versionstamp();
+    fdb::EmptyFuture f2 = tr.commit();
+
+    fdb_error_t err = wait_future(f2);
+    if (err) {
+      fdb::EmptyFuture f3 = tr.on_error(err);
+      fdb_check(wait_future(f3));
+      continue;
+    }
+
+    fdb_check(wait_future(f1));
+
+    const uint8_t *key;
+    int keylen;
+    fdb_check(f1.get(&key, &keylen));
+
+    versionstamp = std::string((const char *)key, keylen);
+    break;
+  }
+
+  REQUIRE(versionstamp.size() > 0);
+  std::string dbKey(prefix + "foo" + versionstamp);
+  auto value = get_value((const uint8_t *)dbKey.c_str(), dbKey.size(),
+                         /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("bar") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE") {
+  // Don't care about prefixing value like we did the key.
+  char valbuf[] = {'b', 'a', 'r', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', 3, 0, 0, 0};
+  std::string versionstamp("");
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op(KEY("foo"), KEYSIZE("foo"), (const uint8_t *)valbuf, 17,
+                 FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+    fdb::KeyFuture f1 = tr.get_versionstamp();
+    fdb::EmptyFuture f2 = tr.commit();
+
+    fdb_error_t err = wait_future(f2);
+    if (err) {
+      fdb::EmptyFuture f3 = tr.on_error(err);
+      fdb_check(wait_future(f3));
+      continue;
+    }
+
+    fdb_check(wait_future(f1));
+
+    const uint8_t *key;
+    int keylen;
+    fdb_check(f1.get(&key, &keylen));
+
+    versionstamp = std::string((const char *)key, keylen);
+    break;
+  }
+
+  REQUIRE(versionstamp.size() > 0);
+  auto value = get_value(KEY("foo"), KEYSIZE("foo"), /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  CHECK(value->compare("bar" + versionstamp) == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY invalid index") {
+  // Only 9 bytes available starting at index 4 (ten bytes needed), should
+  // return an error.
+  char keybuf[] = {'f', 'o', 'o', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', 4, 0, 0, 0};
+
+  fdb::Transaction tr(db);
+  while (1) {
+    tr.atomic_op((const uint8_t *)keybuf, 17, (const uint8_t *)"bar", 3,
+                 FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
+    fdb::EmptyFuture f1 = tr.commit();
+
+    CHECK(wait_future(f1) != 0); // type of error not specified
+    break;
+  }
 }
 
 TEST_CASE("fdb_transaction_get_committed_version read_only") {
