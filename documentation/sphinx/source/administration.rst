@@ -28,6 +28,8 @@ Starting and stopping
 
 After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.
 
+These commands start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+
 Linux
 -----
 
@@ -55,13 +57,6 @@ On macOS, FoundationDB is started and stopped using ``launchctl`` as follows::
 It can be stopped and prevented from starting at boot as follows::
 
     host:~ user$ sudo launchctl unload -w /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
-
-Start, stop and restart behaviour
-=================================
-
-These commands above start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
-After any of child processes has terminated by any reason, ``fdbmonitor`` tries to restart it. See :ref:`restarting parameters <configuration-restarting>`
-When ``fdbmonitor`` itself is killed unexpectedly (for example, by the ``out-of-memory killer``), all the child processes are also terminated. Then the operating system is responsible for restarting it. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>`
 
 .. _foundationdb-cluster-file:
 
