@@ -40,6 +40,7 @@ type ReadTransaction interface {
 	GetDatabase() Database
 	Snapshot() Snapshot
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
+	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
 
 	ReadTransactor
 }
@@ -331,6 +332,30 @@ func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	return t.getEstimatedRangeSizeBytes(
 		beginKey.FDBKey(),
 		endKey.FDBKey(),
+	)
+}
+
+func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize int64) FutureKeyArray {
+	return &futureKeyArray{
+		future: newFuture(C.fdb_transaction_get_range_split_points(
+			t.ptr,
+			byteSliceToPtr(beginKey),
+			C.int(len(beginKey)),
+			byteSliceToPtr(endKey),
+			C.int(len(endKey)),
+			C.int64_t(chunkSize),
+		)),
+	}
+}
+
+// GetRangeSplitPoints will return a list of keys that can divide the given range into
+// chunks based on the chunk size provided.
+func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
+	beginKey, endKey := r.FDBRangeKeys()
+	return t.getRangeSplitPoints(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+		chunkSize,
 	)
 }
 

@@ -268,6 +268,9 @@ public:
 	Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( KeyRange const& keys, StorageMetrics const& limit, StorageMetrics const& estimated );
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
+	// Try to split the given range into equally sized chunks based on estimated size.
+	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set( const KeyRef& key, const ValueRef& value, bool addConflictRange = true );
 	void atomicOp( const KeyRef& key, const ValueRef& value, MutationRef::Type operationType, bool addConflictRange = true );
