@@ -904,8 +904,8 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 			// else { } It is enable by default for tester
 			TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
 		}},
-	{"protocolVersion", [](const std::string& value) {
-			TraceEvent("TestParserTest").detail("ParsedProtocolVersion", value);
+	{"startIncompatibleProcess", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value);
 		}}
 };
 

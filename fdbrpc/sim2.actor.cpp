@@ -1030,7 +1030,6 @@ public:
 		ProcessInfo* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
 			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
-			TraceEvent("SETTING UP SIM2LIstenr");
 			m->listenerMap[address] = Reference<IListener>( new Sim2Listener(m, address) );
 			addressMap[address] = m;
 		}
@@ -1039,7 +1038,6 @@ public:
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
-		processProtocolVersion[m] = protocol;
 		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
@@ -1707,9 +1705,8 @@ public:
 		return delay( 0, taskID, process->machine->machineProcess );
 	}
 	
-	virtual ProtocolVersion protocolVersion() override {
-		ASSERT(processProtocolVersion.find(getCurrentProcess()) != processProtocolVersion.end());
-		return processProtocolVersion.at(getCurrentProcess());
+	ProtocolVersion protocolVersion() override {
+		return getCurrentProcess()->protocolVersion;
 	}
 
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
@@ -1735,8 +1732,6 @@ public:
 
 	//Map from machine IP -> machine disk space info
 	std::map<IPAddress, SimDiskSpace> diskSpaceMap;
-
-	std::map<ProcessInfo*, ProtocolVersion> processProtocolVersion;
 
 	//Whether or not yield has returned true during the current iteration of the run loop
 	bool yielded;

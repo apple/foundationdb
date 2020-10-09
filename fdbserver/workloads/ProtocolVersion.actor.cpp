@@ -45,53 +45,34 @@ struct ProtocolVersionWorkload : TestWorkload {
         
     }
 
-	virtual std::string description() {
+	std::string description() override {
 		return "ProtocolVersionWorkload";
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
        return _start(this, cx);
 	}
 
     ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
-        state ISimulator::ProcessInfo* oldProcess = g_pSimulator->getCurrentProcess();
-
         state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
         state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess = find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p){
             return p->protocolVersion != currentProtocolVersion;
         });
         
         ASSERT(diffVersionProcess != allProcesses.end());
-        wait(g_pSimulator->onProcess(*diffVersionProcess, TaskPriority::DefaultYield));
 
-        // getting coord protocols from current protocol version
-        state vector<Future<ProtocolInfoReply>> coordProtocols;
-        vector<NetworkAddress> coordAddresses = cx->getConnectionFile()->getConnectionString().coordinators();
-        for(int i = 0; i<coordAddresses.size(); i++) {
-            RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { coordAddresses[i] }, WLTOKEN_PROTOCOL_INFO } };
-            coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-        }
-
-        wait(waitForAll(coordProtocols));
-
-        std::vector<bool> protocolMatches;
-        protocolMatches.reserve(coordProtocols.size());
-        for(int i = 0; i<coordProtocols.size(); i++){
-            protocolMatches.push_back(g_network->protocolVersion() == coordProtocols[i].get().version);
-        }
-
-        ASSERT(count(protocolMatches.begin(), protocolMatches.end(), false) >= 1);
-
-        // go back to orig process for consistency check
-        wait(g_pSimulator->onProcess(oldProcess, TaskPriority::DefaultYield));
+        RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { (*diffVersionProcess)->addresses }, WLTOKEN_PROTOCOL_INFO } };
+        ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+        
+        ASSERT(reply.version != g_network->protocolVersion());
 		return Void();
 	}
 
-    virtual Future<bool> check(Database const& cx) {
+    Future<bool> check(Database const& cx) override {
 		return true;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 	}
 };
 
