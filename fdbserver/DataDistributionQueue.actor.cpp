@@ -1044,14 +1044,11 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				    .detail("DestinationTeam", describe(destIds))
 				    .detail("ExtraIds", describe(extraIds))
 				    .detail("HealthyDestinationsTeams", healthyDestinations.teams.size())
-				    .detail("HealthyDestinationsHasHealthyAvailableSpace",
-				            healthyDestinations.hasHealthyAvailableSpace(self->medianAvailableSpace))
 				    .detail("HealthyDestinationsLoadBytes", healthyDestinations.getLoadBytes())
 				    .detail("HealthyDestinationsDataInFlight", healthyDestinations.getDataInFlightToTeam())
 				    .detail("HealthyDestinationsMinAvailableSpace", healthyDestinations.getMinAvailableSpace())
 				    .detail("HealthyDestinationsMinAvailableSpaceRatio",
-				            healthyDestinations.getMinAvailableSpaceRatio())
-				    .detail("DDMedianAvailableSpace", self->medianAvailableSpace);
+				            healthyDestinations.getMinAvailableSpaceRatio());
 			}
 
 			state Error error = success();

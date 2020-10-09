@@ -765,7 +765,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				} else {
 					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 				}
-				TraceEvent("DDMedianAvailableSpace", self->distributorId).detail("Primary", self->medianAvailableSpace);
+				TraceEvent("DDMedianAvailableSpace", self->distributorId)
+				    .detail("Primary", self->medianAvailableSpace)
+				    .detail("HealthyServerTeams", teamAvailableSpace.size())
+				    .detail("ServerTeams", self->teams.size());
 			}
 
 			bool foundSrc = false;
