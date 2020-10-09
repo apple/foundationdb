@@ -19,12 +19,14 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/serialize.h"
 
 struct IncrementalBackupWorkload : TestWorkload {
 
@@ -34,6 +36,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool submitOnly;
 	bool restoreOnly;
 	bool waitForBackup;
+	bool stopBackup;
+	bool checkBeginVersion;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
@@ -41,6 +45,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
 		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
+		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
+		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
 
 	virtual std::string description() { return "IncrementalBackup"; }
@@ -64,11 +70,16 @@ struct IncrementalBackupWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
 		state Reference<IBackupContainer> backupContainer;
 		state UID backupUID;
-		EBackupState waitResult =
-		    wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID));
-		TraceEvent("IBackupCheckWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Version v = wait(tr->getReadVersion());
+		// Wait for backup container to be created and avoid race condition
+		TraceEvent("IBackupWaitContainer");
+		loop {
+			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+			state bool e = wait(backupContainer->exists());
+			if (e) break;
+			wait(delay(5.0));
+		}
 		loop {
 			BackupDescription desc = wait(backupContainer->describeBackup(true));
 			TraceEvent("IBackupVersionGate")
@@ -81,6 +92,9 @@ struct IncrementalBackupWorkload : TestWorkload {
 			// Avoid spamming requests with a delay
 			wait(delay(5.0));
 		}
+		if (self->stopBackup) {
+			wait(self->backupAgent.discontinueBackup(cx, self->tag));
+		}
 		return true;
 	}
 
@@ -92,10 +106,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 			try {
 				wait(self->backupAgent.submitBackup(cx, self->backupDir, 1e8, self->tag.toString(), backupRanges, false,
 				                                    false, true));
-				// Wait for backup container to be created and avoid race condition
-				wait(delay(60.0));
-				EBackupState waitResult = wait(self->backupAgent.waitBackup(cx, self->tag.toString(), false));
-				TraceEvent("IBackupSubmitWaitResult").detail("Result", BackupAgentBase::getStateText(waitResult));
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -107,10 +117,42 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (self->restoreOnly) {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
-			TraceEvent("IBackupRestoreAttempt");
+			state Version beginVersion = invalidVersion;
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
-			                                       true, -1, true, normalKeys, Key(), Key(), true, true)));
+			if (self->checkBeginVersion) {
+				TraceEvent("IBackupReadSystemKeys");
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				loop {
+					try {
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+						state Optional<Value> writeFlag = wait(tr->get(writeRecoveryKey));
+						state Optional<Value> versionValue = wait(tr->get(snapshotEndVersionKey));
+						TraceEvent("IBackupCheckSpecialKeys")
+							.detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
+							.detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
+						if (!versionValue.present()) {
+							TraceEvent("IBackupCheckSpecialKeysFailure");
+							// Snapshot failed to write to special keys, possibly due to snapshot itself failing
+							throw key_not_found();
+						}
+						beginVersion = BinaryReader::fromStringRef<Version>(versionValue.get(), Unversioned());
+						TraceEvent("IBackupCheckBeginVersion").detail("Version", beginVersion);
+						break;
+					} catch (Error& e) {
+						TraceEvent("IBackupReadSystemKeysError").error(e);
+						if (e.code() == error_code_key_not_found) {
+							throw;
+						}
+						wait(tr->onError(e));
+					}
+				}
+			}
+			TraceEvent("IBackupRestoreAttempt")
+				.detail("BeginVersion", beginVersion);
+			wait(
+			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
+			                                      true, invalidVersion, true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}
 		return Void();
