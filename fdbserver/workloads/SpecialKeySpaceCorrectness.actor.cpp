@@ -746,30 +746,41 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 		}
 		// test lock and unlock
-		{
-			try {
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// lock the database
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
-				// commit
-				wait(tx->commit());
-				// if success, read should get database_locked error
-				tx->reset();
-				Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
-				ASSERT(false);
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
-				ASSERT(e.code() == error_code_database_locked);
-				tx->reset();
-			}
+		try {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			// unlock the database
-			tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
+			// lock the database
+			tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
+			// commit
 			wait(tx->commit());
+			// if success, read should get database_locked error
 			tx->reset();
-			// read should be successful
 			Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
-			tx->reset();
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_database_locked);
+		}
+		TraceEvent(SevDebug, "DatabaseLocked");
+		// make sure we unlock the database
+		loop {
+			try {
+				tx->reset();
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// unlock the database
+				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
+				wait(tx->commit());
+				TraceEvent(SevDebug, "DatabaseUnlocked");
+				tx->reset();
+				// read should be successful
+				Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
+				ASSERT(e.code() != error_code_database_locked);
+				if (e.code() == error_code_actor_cancelled) throw;
+				wait(tx->onError(e));
+			}
 		}
 		return Void();
 	}
