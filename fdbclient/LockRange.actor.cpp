@@ -73,6 +73,10 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 	}
 
 	RangeLockCache::Reason reason = cache->tryAdd(tr, request);
+	if (reason == RangeLockCache::ALREADY_UNLOCKED && isUnlocking(request.mode)) {
+		// When getting unknown_result and retrying, short-circuit unlock request.
+		return Void();
+	}
 	if (reason != RangeLockCache::OK) {
 		throw range_locks_access_denied();
 	}
@@ -91,11 +95,14 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 
 ACTOR Future<Void> lockRange(Database cx, LockRequest request) {
 	state Transaction tr(cx);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
+			TraceEvent(SevDebug, "LockRangeRequest")
+			    .detail("Range", request.range)
+			    .detail("Mode", lockModeToString(request.mode));
 			wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, request, true));
 
 			// Make concurrent lockRange() calls conflict.
@@ -103,8 +110,16 @@ ACTOR Future<Void> lockRange(Database cx, LockRequest request) {
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked) throw e;
-			wait(tr.onError(e));
+			if (e.code() == error_code_database_locked) throw;
+			TraceEvent(SevDebug, "LockRangeRequestError")
+			    .detail("Range", request.range)
+			    .detail("Mode", lockModeToString(request.mode))
+			    .error(e, true);
+			if (e.code() == error_code_transaction_too_old || e.code() == error_code_commit_unknown_result) {
+				tr.fullReset();
+			} else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
