@@ -1152,10 +1152,6 @@ Future<Standalone<RangeResultRef>> LockDatabaseImpl::getRange(ReadYourWritesTran
 	}
 }
 
-void LockDatabaseImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	return throwSpecialKeyApiFailure(ryw, "unlock", "Please call clear on the special key to unlock the database");
-}
-
 ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
