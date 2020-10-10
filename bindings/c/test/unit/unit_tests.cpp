@@ -1688,6 +1688,48 @@ TEST_CASE("fdb_transaction_cancel") {
   fdb_check(wait_future(f2));
 }
 
+TEST_CASE("fdb_error_predicate") {
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1038)); // database_locked
+
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1036)); // accessed_unreadable
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2000)); // client_invalid_operation
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2004)); // key_outside_legal_range
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2005)); // inverted_range
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2006)); // invalid_option_value
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2007)); // invalid_option
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2011)); // version_invalid
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2020)); // transaction_invalid_version
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2023)); // transaction_read_only
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2100)); // incompatible_protocol_version
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2101)); // transaction_too_large
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2102)); // key_too_large
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2103)); // value_too_large
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2108)); // unsupported_operation
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2200)); // api_version_unset
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 4000)); // unknown_error
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 4001)); // internal_error
+
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1021)); // commit_unknown_result
+
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1000)); // operation_failed
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1004)); // timed_out
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1025)); // transaction_cancelled
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1038)); // database_locked
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1101)); // operation_cancelled
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 2002)); // commit_read_incomplete
+
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1007)); // transaction_too_old
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1020)); // not_committed
+  CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1038)); // database_locked
+
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1021)); // commit_unknown_result
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1025)); // transaction_cancelled
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1031)); // transaction_timed_out
+  CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1040)); // proxy_memory_limit_exceeded
+}
+
 // Feature not live yet, re-enable when checking if a blocking call is made
 // from the network thread is live.
 TEST_CASE("block_from_callback"
