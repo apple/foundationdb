@@ -46,7 +46,7 @@ static void bench_check_metadata1(benchmark::State& state) {
 static void bench_check_metadata2(benchmark::State& state) {
 	const auto& m = mutations[state.range(0)];
 	while (state.KeepRunning()) {
-		benchmark::DoNotOptimize(m.param2.size() && m.param2[0] == systemKeys.begin[0]); // && m.param2.size() > 1);
+		benchmark::DoNotOptimize(m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0]); // && m.param2.size() > 1);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
