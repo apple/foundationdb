@@ -1570,10 +1570,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_MAX_WATCHES,
                                     (const uint8_t *)&max_watches, 8));
 
-  struct Context {
-    FdbEvent event;
-  };
-  Context context;
+  auto event = std::make_shared<FdbEvent>();
 
   fdb::Transaction tr(db);
   while (1) {
@@ -1592,46 +1589,50 @@ TEST_CASE("fdb_transaction_watch max watches") {
 
     // Callbacks will be triggered with operation_cancelled errors once the
     // too_many_watches error fires, as the other futures will go out of scope
-    // and be cleaned up. The future too_many_watches occurs on is
-    // nondeterministic.
+    // and be cleaned up. The future which too_many_watches occurs on is
+    // nondeterministic, so each future is checked.
     fdb_check(f1.set_callback(
         +[](FDBFuture *f, void *param) {
           fdb_error_t err = fdb_future_get_error(f);
           if (err != 1101) { // operation_cancelled
             CHECK(err == 1032); // too_many_watches
           }
-          auto *context = static_cast<Context *>(param);
-          context->event.set();
-        }, &context));
+          auto *event = static_cast<std::shared_ptr<FdbEvent> *>(param);
+          (*event)->set();
+          delete event;
+        }, new std::shared_ptr<FdbEvent>(event)));
     fdb_check(f2.set_callback(
         +[](FDBFuture *f, void *param) {
           fdb_error_t err = fdb_future_get_error(f);
           if (err != 1101) { // operation_cancelled
             CHECK(err == 1032); // too_many_watches
           }
-          auto *context = static_cast<Context *>(param);
-          context->event.set();
-        }, &context));
+          auto *event = static_cast<std::shared_ptr<FdbEvent> *>(param);
+          (*event)->set();
+          delete event;
+        }, new std::shared_ptr<FdbEvent>(event)));
     fdb_check(f3.set_callback(
         +[](FDBFuture *f, void *param) {
           fdb_error_t err = fdb_future_get_error(f);
           if (err != 1101) { // operation_cancelled
             CHECK(err == 1032); // too_many_watches
           }
-          auto *context = static_cast<Context *>(param);
-          context->event.set();
-        }, &context));
+          auto *event = static_cast<std::shared_ptr<FdbEvent> *>(param);
+          (*event)->set();
+          delete event;
+        }, new std::shared_ptr<FdbEvent>(event)));
     fdb_check(f4.set_callback(
         +[](FDBFuture *f, void *param) {
           fdb_error_t err = fdb_future_get_error(f);
           if (err != 1101) { // operation_cancelled
             CHECK(err == 1032); // too_many_watches
           }
-          auto *context = static_cast<Context *>(param);
-          context->event.set();
-        }, &context));
+          auto *event = static_cast<std::shared_ptr<FdbEvent> *>(param);
+          (*event)->set();
+          delete event;
+        }, new std::shared_ptr<FdbEvent>(event)));
 
-    context.event.wait();
+    event->wait();
     break;
   }
 
