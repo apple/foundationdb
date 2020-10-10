@@ -43,6 +43,7 @@
 #include <foundationdb/fdb_c.h>
 
 #include <string>
+#include <string_view>
 
 namespace fdb {
 
@@ -180,10 +181,8 @@ class Transaction final {
   // any versionstamp operations in the transaction.
   KeyFuture get_versionstamp();
 
-  // Returns a future which will be set to the value of `key_name` in the
-  // database.
-  ValueFuture get(const uint8_t* key_name, int key_name_length,
-                  fdb_bool_t snapshot);
+  // Returns a future which will be set to the value of `key` in the database.
+  ValueFuture get(std::string_view key, fdb_bool_t snapshot);
 
   // Returns a future which will be set to the key in the database matching the
   // passed key selector.
@@ -191,8 +190,7 @@ class Transaction final {
                     fdb_bool_t or_equal, int offset, fdb_bool_t snapshot);
 
   // Returns a future which will be set to an array of strings.
-  StringArrayFuture get_addresses_for_key(const uint8_t* key_name,
-                                          int key_name_length);
+  StringArrayFuture get_addresses_for_key(std::string_view key);
 
   // Returns a future which will be set to an FDBKeyValue array.
   KeyValueArrayFuture get_range(const uint8_t* begin_key_name,
@@ -207,7 +205,7 @@ class Transaction final {
 
   // Wrapper around fdb_transaction_watch. Returns a future representing an
   // empty value.
-  EmptyFuture watch(const uint8_t* key_name, int key_name_length);
+  EmptyFuture watch(std::string_view key);
 
   // Wrapper around fdb_transaction_commit. Returns a future representing an
   // empty value.
@@ -218,19 +216,16 @@ class Transaction final {
   EmptyFuture on_error(fdb_error_t err);
 
   // Wrapper around fdb_transaction_clear.
-  void clear(const uint8_t* key_name, int key_name_length);
+  void clear(std::string_view key);
 
   // Wrapper around fdb_transaction_clear_range.
-  void clear_range(const uint8_t* begin_key_name, int begin_key_name_length,
-                   const uint8_t* end_key_name, int end_key_name_length);
+  void clear_range(std::string_view begin_key, std::string_view end_key);
 
   // Wrapper around fdb_transaction_set.
-  void set(const uint8_t* key_name, int key_name_length, const uint8_t* value,
-           int value_length);
+  void set(std::string_view key, std::string_view value);
 
   // Wrapper around fdb_transaction_atomic_op.
-  void atomic_op(const uint8_t* key_name, int key_name_length,
-                 const uint8_t* param, int param_length,
+  void atomic_op(std::string_view key, const uint8_t* param, int param_length,
                  FDBMutationType operationType);
 
   // Wrapper around fdb_transaction_get_committed_version.

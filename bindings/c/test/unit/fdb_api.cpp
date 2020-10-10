@@ -135,10 +135,9 @@ KeyFuture Transaction::get_versionstamp() {
   return KeyFuture(fdb_transaction_get_versionstamp(tr_));
 }
 
-ValueFuture Transaction::get(const uint8_t* key_name, int key_name_length,
-                             fdb_bool_t snapshot) {
-  return ValueFuture(fdb_transaction_get(tr_, key_name, key_name_length,
-                                         snapshot));
+ValueFuture Transaction::get(std::string_view key, fdb_bool_t snapshot) {
+  return ValueFuture(fdb_transaction_get(tr_, (const uint8_t*)key.data(),
+                                         key.size(), snapshot));
 }
 
 KeyFuture Transaction::get_key(const uint8_t* key_name, int key_name_length,
@@ -148,10 +147,9 @@ KeyFuture Transaction::get_key(const uint8_t* key_name, int key_name_length,
                                            or_equal, offset, snapshot));
 }
 
-StringArrayFuture Transaction::get_addresses_for_key(const uint8_t* key_name,
-                                                     int key_name_length) {
-  return StringArrayFuture(fdb_transaction_get_addresses_for_key(tr_, key_name,
-                           key_name_length));
+StringArrayFuture Transaction::get_addresses_for_key(std::string_view key) {
+  return StringArrayFuture(fdb_transaction_get_addresses_for_key(tr_,
+                           (const uint8_t*)key.data(), key.size()));
 }
 
 KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
@@ -161,11 +159,10 @@ KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
                                            const uint8_t* end_key_name,
                                            int end_key_name_length,
                                            fdb_bool_t end_or_equal,
-                                           int end_offset,
-                                           int limit, int target_bytes,
+                                           int end_offset, int limit,
+                                           int target_bytes,
                                            FDBStreamingMode mode,
-                                           int iteration,
-                                           fdb_bool_t snapshot,
+                                           int iteration, fdb_bool_t snapshot,
                                            fdb_bool_t reverse) {
   return KeyValueArrayFuture(fdb_transaction_get_range(tr_, begin_key_name,
                                                        begin_key_name_length,
@@ -180,8 +177,8 @@ KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
                                                        snapshot, reverse));
 }
 
-EmptyFuture Transaction::watch(const uint8_t* key_name, int key_name_length) {
-  return EmptyFuture(fdb_transaction_watch(tr_, key_name, key_name_length));
+EmptyFuture Transaction::watch(std::string_view key) {
+  return EmptyFuture(fdb_transaction_watch(tr_, (const uint8_t*)key.data(), key.size()));
 }
 
 EmptyFuture Transaction::commit() {
@@ -192,28 +189,26 @@ EmptyFuture Transaction::on_error(fdb_error_t err) {
   return EmptyFuture(fdb_transaction_on_error(tr_, err));
 }
 
-void Transaction::clear(const uint8_t* key_name, int key_name_length) {
-  return fdb_transaction_clear(tr_, key_name, key_name_length);
+void Transaction::clear(std::string_view key) {
+  return fdb_transaction_clear(tr_, (const uint8_t*)key.data(), key.size());
 }
 
-void Transaction::clear_range(const uint8_t* begin_key_name,
-                              int begin_key_name_length,
-                              const uint8_t* end_key_name,
-                              int end_key_name_length) {
-  fdb_transaction_clear_range(tr_, begin_key_name, begin_key_name_length,
-                              end_key_name, end_key_name_length);
+void Transaction::clear_range(std::string_view begin_key,
+                              std::string_view end_key) {
+  fdb_transaction_clear_range(tr_, (const uint8_t*)begin_key.data(),
+                              begin_key.size(), (const uint8_t*)end_key.data(),
+                              end_key.size());
 }
 
-void Transaction::set(const uint8_t* key_name, int key_name_length,
-                      const uint8_t* value, int value_length) {
-  fdb_transaction_set(tr_, key_name, key_name_length, value, value_length);
+void Transaction::set(std::string_view key, std::string_view value) {
+  fdb_transaction_set(tr_, (const uint8_t*)key.data(), key.size(),
+                      (const uint8_t*)value.data(), value.size());
 }
 
-void Transaction::atomic_op(const uint8_t* key_name, int key_name_length,
-                            const uint8_t* param, int param_length,
-                            FDBMutationType operationType) {
-  return fdb_transaction_atomic_op(tr_, key_name, key_name_length, param,
-                                   param_length, operationType);
+void Transaction::atomic_op(std::string_view key, const uint8_t* param,
+                            int param_length, FDBMutationType operationType) {
+  return fdb_transaction_atomic_op(tr_, (const uint8_t*)key.data(), key.size(),
+                                   param, param_length, operationType);
 }
 
 [[nodiscard]] fdb_error_t Transaction::get_committed_version(int64_t* out_version) {
