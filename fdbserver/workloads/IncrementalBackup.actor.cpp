@@ -25,8 +25,8 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct IncrementalBackupWorkload : TestWorkload {
 
@@ -119,6 +119,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+			state Key backupURL = LiteralStringRef("N/A");
 			if (self->checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys");
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -147,13 +148,28 @@ struct IncrementalBackupWorkload : TestWorkload {
 						wait(tr->onError(e));
 					}
 				}
+				TraceEvent("IBackupStartListContainersAttempt");
+				state std::vector<std::string> containers =
+				    wait(IBackupContainer::listContainers(self->backupDir.toString()));
+				TraceEvent("IBackupStartListContainersSuccess")
+				    .detail("Size", containers.size())
+				    .detail("First", containers.front());
+				backupURL = Key(containers.front());
+			}
+			if (backupURL == LiteralStringRef("N/A")) {
+				wait(success(
+				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				backupURL = Key(backupContainer->getURL());
 			}
 			TraceEvent("IBackupRestoreAttempt")
 				.detail("BeginVersion", beginVersion);
-			wait(
-			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
-			                                      true, invalidVersion, true, normalKeys, Key(), Key(), true, true, beginVersion)));
+			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), backupURL, true, invalidVersion,
+			                                       true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
+			// SOMEDAY: Remove after backup agents can exist quiescently
+			if (g_simulator.backupAgents == ISimulator::BackupToFile) {
+				g_simulator.backupAgents = ISimulator::NoBackupAgents;
+			}
 		}
 		return Void();
 	}

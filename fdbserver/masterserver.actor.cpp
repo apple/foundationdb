@@ -1580,6 +1580,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
 			tr.clear(recoveryCommitRequest.arena, singleKeyRange(writeRecoveryKey));
+			tr.clear(recoveryCommitRequest.arena, fileBackupPrefixRange);
 		}
 		if(self->forceRecovery) {
 			BinaryWriter bw(Unversioned());
