@@ -1572,6 +1572,11 @@ TEST_CASE("fdb_transaction_watch max watches") {
   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_MAX_WATCHES,
                                     (const uint8_t *)&max_watches, 8));
 
+  struct Context {
+    FdbEvent event;
+  };
+  Context context;
+
   fdb::Transaction tr(db);
   while (1) {
     fdb::EmptyFuture f1 = tr.watch(KEY("a"), KEYSIZE("a"));
@@ -1587,33 +1592,44 @@ TEST_CASE("fdb_transaction_watch max watches") {
       continue;
     }
 
-	// Error can occur on any future.
-    fdb_error_t err1 = wait_future(f1);
-    if (err1) {
-      CHECK(err1 == 1032); // too_many_watches
-      break;
-    }
+    // Callbacks will be triggered with operation_cancelled errors once the
+    // too_many_watches error fires, as the other futures will go out of scope
+    // and be cleaned up. The future too_many_watches occurs on is
+    // nondeterministic.
+    fdb_check(f1.set_callback(+[](FDBFuture *f, void *param) {
+            fdb_error_t err = fdb_future_get_error(f);
+            if (err != 1101) { // operation_cancelled
+              CHECK(err == 1032); // too_many_watches
+            }
+            auto *context = static_cast<Context *>(param);
+            context->event.set();
+          }, &context));
+    fdb_check(f2.set_callback(+[](FDBFuture *f, void *param) {
+            fdb_error_t err = fdb_future_get_error(f);
+            if (err != 1101) { // operation_cancelled
+              CHECK(err == 1032); // too_many_watches
+            }
+            auto *context = static_cast<Context *>(param);
+            context->event.set();
+          }, &context));
+    fdb_check(f3.set_callback(+[](FDBFuture *f, void *param) {
+            fdb_error_t err = fdb_future_get_error(f);
+            if (err != 1101) { // operation_cancelled
+              CHECK(err == 1032); // too_many_watches
+            }
+            auto *context = static_cast<Context *>(param);
+            context->event.set();
+          }, &context));
+    fdb_check(f4.set_callback(+[](FDBFuture *f, void *param) {
+            fdb_error_t err = fdb_future_get_error(f);
+            if (err != 1101) { // operation_cancelled
+              CHECK(err == 1032); // too_many_watches
+            }
+            auto *context = static_cast<Context *>(param);
+            context->event.set();
+          }, &context));
 
-    fdb_error_t err2 = wait_future(f2);
-    if (err2) {
-      CHECK(err2 == 1032); // too_many_watches
-      break;
-    }
-
-    fdb_error_t err3 = wait_future(f3);
-    if (err3) {
-      CHECK(err3 == 1032); // too_many_watches
-      break;
-    }
-
-    fdb_error_t err4 = wait_future(f4);
-    if (err4) {
-      CHECK(err4 == 1032); // too_many_watches
-      break;
-    }
-
-    // One of the watches should have triggered a too_many_watches failure.
-    CHECK(false);
+    context.event.wait();
     break;
   }
 
