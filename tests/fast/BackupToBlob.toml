@@ -1,0 +1,40 @@
+[[test]]
+testTitle = 'Cycle'
+clearAfterTest = 'false'
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    testDuration = 10.0
+    expectedRate = 0
+
+[[test]]
+testTitle = 'Backup'
+
+    [[test.workload]]
+    testName = 'BackupToBlob'
+    backupAfter = 0.0
+    backupTag = 'default'
+    backupURL = 'http://0.0.0.0:10000'
+
+[[test]]
+testTitle = 'Restore'
+clearAfterTest = 'false'
+
+    [[test.workload]]
+    testName = 'RestoreFromBlob'
+    restoreAfter = 0.0
+    backupTag = 'default'
+    backupURL = 'http://0.0.0.0:10000'
+
+
+[[test]]
+testTitle = 'CycleCheck'
+checkOnly = 'true'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    testDuration = 10.0
+    expectedRate = 0

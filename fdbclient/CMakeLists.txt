@@ -3,6 +3,7 @@ set(FDBCLIENT_SRCS
   AsyncFileBlobStore.actor.h
   Atomic.h
   AutoPublicAddress.cpp
+  AsyncTaskThread.h
   BackupAgent.actor.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
@@ -93,6 +94,35 @@ set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
+configure_file(azurestorage.cmake azurestorage-download/CMakeLists.txt)
+
+execute_process(
+  COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+  RESULT_VARIABLE results
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
+)
+
+if(results)
+  message(FATAL_ERROR "Configuration step for AzureStorage has Failed. ${results}")
+endif()
+
+execute_process(
+  COMMAND ${CMAKE_COMMAND} --build . --config Release
+  RESULT_VARIABLE results
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
+)
+
+if(results)
+  message(FATAL_ERROR "Build step for AzureStorage has Failed. ${results}")
+endif()
+
+add_subdirectory(
+  ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-src
+  ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-build
+  #EXCLUDE_FROM_ALL
+)
+
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
-target_link_libraries(fdbclient PUBLIC fdbrpc)
+#target_include_directories(fdbclient PRIVATE /home/tclinkenbeard/Azure/azure-storage-cpplite/include)
+target_link_libraries(fdbclient PUBLIC fdbrpc curl uuid azure-storage-lite)

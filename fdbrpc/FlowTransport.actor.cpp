@@ -292,7 +292,7 @@ TransportData::TransportData(uint64_t transportId)
 
 #pragma pack( push, 1 )
 struct ConnectPacket {
-	// The value does not inclueds the size of `connectPacketLength` itself,
+	// The value does not include the size of `connectPacketLength` itself,
 	// but only the other fields of this structure.
 	uint32_t connectPacketLength;
 	ProtocolVersion protocolVersion;      // Expect currentProtocolVersion
