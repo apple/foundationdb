@@ -733,10 +733,10 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		if (!message.isBackupMessage(&m)) continue;
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
-			    .detail("Version", message.version.toString())
-			    .detail("Mutation", m)
-			    .detail("KCV", self->minKnownCommittedVersion)
-			    .detail("SavedVersion", self->savedVersion);
+		    .detail("MutationVersion", message.version.toString())
+		    .detail("Mutation", m)
+		    .detail("KCV", self->minKnownCommittedVersion)
+		    .detail("SavedVersion", self->savedVersion);
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
