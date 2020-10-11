@@ -29,11 +29,11 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-// TODO: use LockRequest as parameters for lockRange(s) and unlockRange(s)
-
 // (Un)Locks a range in the normal key space. If the database is already locked,
 // then a database_locked error is thrown. If (part of) the range is already
-// locked, then a range_locked error is thrown during commit.
+// locked, then a range_locks_access_denied error is thrown during commit.
+// The range in the request must be within normal key ranges, or the
+// range_locks_access_denied is thrown.
 ACTOR Future<Void> lockRange(Database cx, LockRequest request);
 ACTOR Future<Void> lockRanges(Database cx, std::vector<LockRequest> requests);
 

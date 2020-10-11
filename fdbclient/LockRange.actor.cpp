@@ -72,6 +72,10 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 		}
 	}
 
+	if (systemKeys.intersects(request.range)) {
+		throw range_locks_access_denied();
+	}
+
 	RangeLockCache::Reason reason = cache->tryAdd(tr, request);
 	if (reason == RangeLockCache::ALREADY_UNLOCKED && isUnlocking(request.mode)) {
 		// When getting unknown_result and retrying, short-circuit unlock request.

@@ -136,6 +136,7 @@ struct LockRangeWorkload : TestWorkload {
 
 		const LockMode mode = self->writeLocked ? LockMode::LOCK_EXCLUSIVE : LockMode::LOCK_READ_SHARED;
 		wait(lockRange(cx, LockRequest(self->range, mode)));
+		std::cout << "Range " << self->range.toString() << " locked.\n";
 		TraceEvent("LockRangeWorkload", self->uid).detail("LockedRange", self->range.toString());
 
 		state Future<Void> checker = checkLocked(cx, self);
@@ -144,6 +145,7 @@ struct LockRangeWorkload : TestWorkload {
 
 		const LockMode unlockMode = self->writeLocked ? LockMode::UNLOCK_EXCLUSIVE : LockMode::UNLOCK_READ_SHARED;
 		wait(lockRange(cx, LockRequest(self->range, unlockMode)));
+		std::cout << "Range " << self->range.toString() << " unlocked.\n";
 		TraceEvent("LockRangeWorkload", self->uid).detail("UnlockedRange", self->range.toString());
 
 		return Void();
