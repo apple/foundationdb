@@ -3277,6 +3277,9 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 				if (durable.isError()) {
 					throw durable.getError();
 				}
+				if (durableMinDelay.isError()) {
+					throw durableMinDelay.getError();
+				}
 				break;
 			}
 		} else {
