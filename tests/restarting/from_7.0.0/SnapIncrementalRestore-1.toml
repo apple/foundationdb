@@ -4,11 +4,13 @@ logAntiQuorum = 0
 testTitle = 'SubmitBackup'
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'IncrementalBackup'
     tag = 'default'
     submitOnly = true
+    waitForBackup = true
 
 [[test]]
 testTitle = 'PreSnapWorkloads'

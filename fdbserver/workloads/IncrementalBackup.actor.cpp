@@ -169,10 +169,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), backupURL, true, invalidVersion,
 			                                       true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
-			// SOMEDAY: Remove after backup agents can exist quiescently
-			if (g_simulator.backupAgents == ISimulator::BackupToFile) {
-				g_simulator.backupAgents = ISimulator::NoBackupAgents;
-			}
 		}
 		return Void();
 	}
