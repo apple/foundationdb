@@ -3274,11 +3274,8 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			}
 			if (stopEarly.isReady()) {
 				// Previous commit is done.
-				if (durable.isError()) {
-					throw durable.getError();
-				}
-				if (durableMinDelay.isError()) {
-					throw durableMinDelay.getError();
+				if (stopEarly.isError()) {
+					throw stopEarly.getError();
 				}
 				break;
 			}
