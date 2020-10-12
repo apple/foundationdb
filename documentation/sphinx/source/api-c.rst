@@ -301,6 +301,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
+.. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
+
+   Extracts an array of :type:`FDBKey` from an :type:`FDBFuture*` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
 .. function:: fdb_error_t fdb_future_get_key(FDBFuture* future, uint8_t const** out_key, int* out_key_length)
 
    Extracts a key from an :type:`FDBFuture` into caller-provided variables of type ``uint8_t*`` (a pointer to the beginning of the key) and ``int`` (the length of the key). |future-warning|
@@ -479,6 +485,12 @@ Applications must provide error handling and an appropriate retry loop around th
    .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
 
    |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
+.. function:: FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size)
+   Returns a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``.
+   .. note:: The returned split points contain the start key and end key of the given range
+
+   |future-return0| the list of split points. |future-return1| call :func:`fdb_future_get_key_array()` to extract the array, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
