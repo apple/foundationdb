@@ -215,4 +215,15 @@ void Transaction::atomic_op(std::string_view key, const uint8_t* param,
   return fdb_transaction_get_committed_version(tr_, out_version);
 }
 
+fdb_error_t Transaction::add_conflict_range(std::string_view begin_key,
+                                            std::string_view end_key,
+                                            FDBConflictRangeType type) {
+  return fdb_transaction_add_conflict_range(tr_,
+                                            (const uint8_t*)begin_key.data(),
+                                            begin_key.size(),
+                                            (const uint8_t*)end_key.data(),
+                                            end_key.size(),
+                                            type);
+}
+
 }  // namespace fdb

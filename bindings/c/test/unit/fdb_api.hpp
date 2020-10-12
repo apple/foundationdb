@@ -231,6 +231,11 @@ class Transaction final {
   // Wrapper around fdb_transaction_get_committed_version.
   fdb_error_t get_committed_version(int64_t* out_version);
 
+  // Wrapper around fdb_transaction_add_conflict_range.
+  fdb_error_t add_conflict_range(std::string_view begin_key,
+                                 std::string_view end_key,
+                                 FDBConflictRangeType type);
+
  private:
   FDBTransaction* tr_;
 };

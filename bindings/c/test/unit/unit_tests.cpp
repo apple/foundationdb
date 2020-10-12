@@ -1688,6 +1688,59 @@ TEST_CASE("fdb_transaction_cancel") {
   fdb_check(wait_future(f2));
 }
 
+TEST_CASE("fdb_transaction_add_conflict_range") {
+  bool success = false;
+
+  bool retry = true;
+  while (retry) {
+    fdb::Transaction tr(db);
+    fdb::Int64Future f1 = tr.get_read_version();
+
+    fdb::Transaction tr2(db);
+    while (1) {
+      fdb_check(tr2.add_conflict_range(KEY("a"), strinc(KEY("a")),
+                                       FDB_CONFLICT_RANGE_TYPE_WRITE));
+      fdb::EmptyFuture f1 = tr2.commit();
+
+      fdb_error_t err = wait_future(f1);
+      if (err) {
+        fdb::EmptyFuture f2 = tr2.on_error(err);
+        fdb_check(wait_future(f2));
+        continue;
+      }
+      break;
+    }
+
+    while (1) {
+      fdb_check(tr.add_conflict_range(KEY("a"), strinc(KEY("a")),
+                                       FDB_CONFLICT_RANGE_TYPE_READ));
+      fdb_check(tr.add_conflict_range(KEY("a"), strinc(KEY("a")),
+                                       FDB_CONFLICT_RANGE_TYPE_WRITE));
+      fdb::EmptyFuture f1 = tr.commit();
+
+      fdb_error_t err = wait_future(f1);
+      if (err == 1020) { // not_committed
+        // Test should pass if transactions conflict.
+        success = true;
+        retry = false;
+      } else if (err) {
+        fdb::EmptyFuture f2 = tr.on_error(err);
+        fdb_check(wait_future(f2));
+        retry = true;
+      } else {
+        // If the transaction succeeded, something went wrong.
+        CHECK(false);
+        retry = false;
+      }
+      break;
+    }
+  }
+
+  // Double check that failure was achieved and the loop wasn't just broken out
+  // of.
+  CHECK(success);
+}
+
 TEST_CASE("fdb_error_predicate") {
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed
