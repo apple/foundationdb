@@ -229,9 +229,11 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				  .detail("MedianLatency", peer->pingLatencies.median())
 				  .detail("P90Latency", peer->pingLatencies.percentile(0.90))
 				  .detail("Count", peer->pingLatencies.getPopulationSize())
-				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived);
+				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived)
+				  .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent);
 				peer->pingLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
+				peer->lastLoggedBytesSent = peer->bytesSent;
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 			} else if(it == self->orderedAddresses.begin()) {
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
@@ -427,6 +429,7 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 
 			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 			if (sent) {
+				self->bytesSent += sent;
 				self->transport->bytesSent += sent;
 				self->unsent.sent(sent);
 			}
