@@ -7,6 +7,7 @@ runConsistencyCheck = false
     testName = 'IncrementalBackup'
     tag = 'default'
     submitOnly = true
+    waitForBackup = true
 
 [[test]]
 testTitle = 'CycleTest'
@@ -24,6 +25,7 @@ simBackupAgents = 'BackupToFile'
     testName = 'IncrementalBackup'
     tag = 'default'
     waitForBackup = true
+    stopBackup = true
 
 [[test]]
 testTitle = 'SubmitRestore'
