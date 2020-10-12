@@ -804,7 +804,7 @@ Transaction misc functions
 
 .. method:: Transaction.get_range_split_points(self, begin_key, end_key, chunk_size)
 
-    Gets a list of keys that can split the given range into (roughly)equally sized chunks based on chunkSize. Returns a :class:`FutureKeyArray`.
+    Gets a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``. Returns a :class:`FutureKeyArray`.
     .. note:: The returned split points contain the start key and end key of the given range
 
 

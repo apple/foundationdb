@@ -456,7 +456,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
 
 	/**
-	 * Gets a list of keys that can split the given range into (roughly)equally sized chunks based on chunkSize.
+	 * Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>.
 	 * Note: the returned split points contain the start key and end key of the given range.
 	 *
 	 * @param begin the beginning of the range (inclusive)
@@ -467,7 +467,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize);
 
 	/**
-	 * Gets a list of keys that can split the given range into (roughly)equally sized chunks based on chunkSize
+	 * Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>
 	 * Note: the returned split points contain the start key and end key of the given range.
 	 *
 	 * @param range the range of the keys
