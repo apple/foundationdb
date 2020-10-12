@@ -486,8 +486,8 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
 
-.. function:: FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunkSize)
-   Returns a list of keys that can split the given range into (roughly) equally sized chunks based on chunkSize.
+.. function:: FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size)
+   Returns a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``.
    .. note:: The returned split points contain the start key and end key of the given range
 
    |future-return0| the list of split points. |future-return1| call :func:`fdb_future_get_key_array()` to extract the array, |future-return2|
