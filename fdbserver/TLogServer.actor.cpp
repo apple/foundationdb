@@ -1998,8 +1998,11 @@ ACTOR Future<Void> tLogCommit(
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		if (self->mergedTagMessages.size() != 0) {
+		if (!self->mergedTagMessages.empty()) {
 			commitMessages(self, logData, req.version, self->mergedTagMessages);
+			// Have to clear messages here so that next batch won't accidently
+			// commit these messages again.
+			self->mergedTagMessages.clear();
 		} else {
 			commitMessages(self, logData, req.version, req.arena, req.messages);
 		}
@@ -2057,6 +2060,8 @@ ACTOR Future<Void> tLogCommitSplitTransactions(TLogData* self, TLogCommitRequest
 	const int partIndex = splitTransaction.partIndex;
 	const int totalParts = splitTransaction.totalParts;
 
+	//TraceEvent("TLogSplitTransaction", self->dbgid).detail("SplitID", req.splitTransaction.get().id).detail("Mutations", req.splitTransaction.get().numMutations).detail("PartIndex", partIndex).detail("TotalParts", totalParts).detail("Version", req.version);
+
 	self->splitTransactionMerger.add(splitID, req, partIndex, totalParts);
 
 	if (self->splitTransactionMerger.exists(splitID) && self->splitTransactionMerger.get(splitID).ready()) {
@@ -2064,13 +2069,13 @@ ACTOR Future<Void> tLogCommitSplitTransactions(TLogData* self, TLogCommitRequest
 
 		// NOTE this invalidates the messages in self->splitTransactionMerger.get(splitID)! Yet the data is used only
 		// once here.
-		std::vector<TagsAndMessage>tagsAndMessages(self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs());
+		std::vector<TagsAndMessage> tagsAndMessages(self->splitTransactionMerger.get(splitID).getOrderedTagsAndMsgs());
 		self->mergedTagMessages.swap(tagsAndMessages);
 
+		// self->mergedTagMessages must be cleared within tLogCommit().
 		wait(tLogCommit(self, merged, logData, warningCollectorInput));
 
 		self->splitTransactionMerger.erase(splitID);
-		self->mergedTagMessages.clear();
 	}
 
 	try {
