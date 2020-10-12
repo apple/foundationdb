@@ -3099,7 +3099,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			data->durableInProgress = durableInProgress.getFuture();
 			durable = data->storage.commit(); // Commit data up to(inclusive) version pendingCommitVersion
 			durableMinDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
-			debug_advanceMaxCommittedVersion(data->thisServerID, pendingCommitVersion);
 			if (finalCommit) {
 				wait(durable && durableMinDelay);
 				done = true;
@@ -3301,6 +3300,7 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 		// Set the new durable version as part of the outstanding change set, before commit
 		data->storage.makeVersionDurable( newOldestVersion );
 	}
+	debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 
 	wait(forgetter.signal());
 	return finalCommit;
