@@ -258,6 +258,8 @@ struct ProxyCommitData {
 	NotifiedDouble lastCommitTime;
 
 	vector<double> commitComputePerOperation;
+	double lastMasterReset;
+	double lastResolverReset;
 
 	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
 	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
@@ -314,7 +316,9 @@ struct ProxyCommitData {
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
 			firstProxy(firstProxy), cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true)), db(db),
-			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0), lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0)
+			singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), commitBatchesMemBytesCount(0),
+			lastTxsPop(0), lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
+			lastCommitTime(0), lastMasterReset(now()), lastResolverReset(now())
 	{
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS,0.0);
 	}
@@ -562,6 +566,12 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
 
+	if(localBatchNumber-self->latestLocalCommitBatchResolving.get()>SERVER_KNOBS->RESET_MASTER_BATCHES && now()-self->lastMasterReset>SERVER_KNOBS->RESET_MASTER_DELAY) {
+		TraceEvent(SevWarnAlways, "ResetMasterNetwork").detail("CurrentBatch", localBatchNumber).detail("InProcessBatch", self->latestLocalCommitBatchResolving.get());
+		FlowTransport::transport().resetConnection(self->master.address());
+		self->lastMasterReset=now();
+	}
+
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
@@ -617,6 +627,14 @@ ACTOR Future<Void> commitBatch(
 
 	state vector<vector<int>> transactionResolverMap = std::move( requests.transactionResolverMap );
 	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
+
+	if(localBatchNumber-self->latestLocalCommitBatchLogging.get()>SERVER_KNOBS->RESET_RESOLVER_BATCHES && now()-self->lastResolverReset>SERVER_KNOBS->RESET_RESOLVER_DELAY) {
+		TraceEvent(SevWarnAlways, "ResetResolverNetwork").detail("CurrentBatch", localBatchNumber).detail("InProcessBatch", self->latestLocalCommitBatchLogging.get());
+		for (int r = 0; r<self->resolvers.size(); r++) {
+			FlowTransport::transport().resetConnection(self->resolvers[r].address());
+		}
+		self->lastResolverReset=now();
+	}
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	state vector<ResolveTransactionBatchReply> resolution = wait( getAll(replies) );
