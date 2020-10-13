@@ -354,10 +354,6 @@ TEST_CASE("fdb_future_get_key") {
           key("a").size()
         ), /* snapshot */ false);
 
-    const uint8_t *key;
-    int keylen;
-    CHECK(f1.get(&key, &keylen));
-
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
@@ -365,6 +361,8 @@ TEST_CASE("fdb_future_get_key") {
       continue;
     }
 
+    const uint8_t *key;
+    int keylen;
     fdb_check(f1.get(&key, &keylen));
 
     std::string dbKey((const char *)key, keylen);
@@ -380,11 +378,6 @@ TEST_CASE("fdb_future_get_value") {
   while (1) {
     fdb::ValueFuture f1 = tr.get(key("foo"), /* snapshot */ false);
 
-    int out_present;
-    char *val;
-    int vallen;
-    CHECK(f1.get(&out_present, (const uint8_t **)&val, &vallen));
-
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
@@ -392,6 +385,9 @@ TEST_CASE("fdb_future_get_value") {
       continue;
     }
 
+    int out_present;
+    char *val;
+    int vallen;
     fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
 
     CHECK(out_present);
@@ -408,10 +404,6 @@ TEST_CASE("fdb_future_get_string_array") {
   while (1) {
     fdb::StringArrayFuture f1 = tr.get_addresses_for_key(key("foo"));
 
-    const char **strings;
-    int count;
-    CHECK(f1.get(&strings, &count));
-
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
@@ -419,6 +411,8 @@ TEST_CASE("fdb_future_get_string_array") {
       continue;
     }
 
+    const char **strings;
+    int count;
     fdb_check(f1.get(&strings, &count));
 
     CHECK(count > 0);
@@ -448,11 +442,6 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
         /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL, /* iteration */ 0,
         /* snapshot */ false, /* reverse */ 0);
 
-    FDBKeyValue const *out_kv;
-    int out_count;
-    int out_more;
-    CHECK(f1.get(&out_kv, &out_count, &out_more));
-
     fdb_error_t err = wait_future(f1);
     if (err) {
       fdb::EmptyFuture f2 = tr.on_error(err);
@@ -460,6 +449,9 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
       continue;
     }
 
+    FDBKeyValue const *out_kv;
+    int out_count;
+    int out_more;
     fdb_check(f1.get(&out_kv, &out_count, &out_more));
 
     CHECK(out_count > 0);
