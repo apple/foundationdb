@@ -1634,13 +1634,14 @@ TEST_CASE("fdb_transaction_watch max watches") {
 }
 
 TEST_CASE("fdb_transaction_watch") {
-  fdb::Transaction tr(db);
+  insert_data(db, create_data({ { "foo", "foo" } }));
 
   struct Context {
     FdbEvent event;
   };
   Context context;
 
+  fdb::Transaction tr(db);
   while (1) {
     fdb::EmptyFuture f1 = tr.watch(key("foo"));
     fdb::EmptyFuture f2 = tr.commit();
@@ -1658,12 +1659,12 @@ TEST_CASE("fdb_transaction_watch") {
           context->event.set();
         },
         &context));
+
+    // Update value for key "foo" to trigger the watch.
+    insert_data(db, create_data({ { "foo", "bar" } }));
+    context.event.wait();
     break;
   }
-
-  // Insert data for key "foo" to trigger the watch.
-  insert_data(db, create_data({ { "foo", "bar" } }));
-  context.event.wait();
 }
 
 TEST_CASE("fdb_transaction_cancel") {
