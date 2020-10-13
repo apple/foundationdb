@@ -60,10 +60,6 @@ std::string key(const std::string& key) {
   return prefix + key;
 }
 
-std::size_t key_size(const std::string& key) {
-  return (prefix + key).size();
-}
-
 // Blocks until the given future is ready, returning an error code if there was
 // an issue.
 fdb_error_t wait_future(fdb::Future &f) {
@@ -355,7 +351,7 @@ TEST_CASE("fdb_future_get_key") {
     fdb::KeyFuture f1 = tr.get_key(
         FDB_KEYSEL_FIRST_GREATER_THAN(
           (const uint8_t *)key("a").c_str(),
-          key_size("a")
+          key("a").size()
         ), /* snapshot */ false);
 
     const uint8_t *key;
@@ -443,11 +439,11 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
     fdb::KeyValueArrayFuture f1 = tr.get_range(
         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(
           (const uint8_t *)key("a").c_str(),
-          key_size("a")
+          key("a").size()
         ),
         FDB_KEYSEL_LAST_LESS_OR_EQUAL(
           (const uint8_t *)key("c").c_str(),
-          key_size("c")
+          key("c").size()
         ) + 1, /* limit */ 0, /* target_bytes */ 0,
         /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL, /* iteration */ 0,
         /* snapshot */ false, /* reverse */ 0);
@@ -834,11 +830,11 @@ TEST_CASE("fdb_transaction_get_range reverse") {
     auto result = get_range(
         tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(
           (const uint8_t*)key("a").c_str(),
-          key_size("a")
+          key("a").size()
         ),
         FDB_KEYSEL_LAST_LESS_OR_EQUAL(
           (const uint8_t*)key("d").c_str(),
-          key_size("d")
+          key("d").size()
         ) + 1, /* limit */ 0, /* target_bytes */ 0,
         /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL, /* iteration */ 0,
         /* snapshot */ false, /* reverse */ 1);
@@ -880,11 +876,11 @@ TEST_CASE("fdb_transaction_get_range limit") {
     auto result = get_range(
         tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(
           (const uint8_t*)key("a").c_str(),
-          key_size("a")
+          key("a").size()
         ),
         FDB_KEYSEL_LAST_LESS_OR_EQUAL(
           (const uint8_t*)key("d").c_str(),
-          key_size("d")
+          key("d").size()
         ) + 1, /* limit */ 2, /* target_bytes */ 0,
         /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL, /* iteration */ 0,
         /* snapshot */ false, /* reverse */ 0);
@@ -918,11 +914,11 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
     auto result = get_range(
         tr, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(
           (const uint8_t*)key("a").c_str(),
-          key_size("a")
+          key("a").size()
         ),
         FDB_KEYSEL_LAST_LESS_OR_EQUAL(
           (const uint8_t*)key("d").c_str(),
-          key_size("d")
+          key("d").size()
         ) + 1, /* limit */ 3, /* target_bytes */ 0,
         /* FDBStreamingMode */ FDB_STREAMING_MODE_EXACT, /* iteration */ 0,
         /* snapshot */ false, /* reverse */ 0);
