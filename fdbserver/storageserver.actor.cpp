@@ -3273,6 +3273,9 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			}
 			if (stopEarly.isReady()) {
 				// Previous commit is done.
+				if (stopEarly.isError()) {
+					throw stopEarly.getError();
+				}
 				break;
 			}
 		} else {
@@ -3297,7 +3300,8 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 		// Set the new durable version as part of the outstanding change set, before commit
 		data->storage.makeVersionDurable( newOldestVersion );
 	}
-	debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
+	debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
+
 	wait(forgetter.signal());
 	return finalCommit;
 }

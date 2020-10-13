@@ -96,7 +96,13 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 		}
 		if (self->stopBackup) {
-			wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			try {
+				wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_unneeded) {
+					throw;
+				}
+			}
 		}
 		return true;
 	}
