@@ -850,15 +850,13 @@ TEST_CASE("fdb_transaction_get_range reverse") {
       CHECK(result.more);
     }
 
-    // Read data in reverse order, keeping in mind that out_count might be
-    // smaller than requested.
+    // Read data in reverse order.
     auto it = data.rbegin();
-    std::advance(it, data.size() - result.kvs.size());
-    for (auto results_it = result.kvs.begin(); it != data.rend(); ++it) {
+    for (auto results_it = result.kvs.begin(); results_it != result.kvs.end(); ++results_it, ++it) {
       std::string data_key = it->first;
       std::string data_value = it->second;
 
-      auto [key, value] = *results_it++;
+      auto [key, value] = *results_it;
 
       CHECK(data_key.compare(key) == 0);
       CHECK(data[data_key].compare(value) == 0);
