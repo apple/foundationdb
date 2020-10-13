@@ -104,8 +104,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		Future<Void> f;
 		{
 			ReadYourWritesTransaction ryw{ cx->clone() };
-			if(!ryw.getDatabase()->apiVersionAtLeast(630)) {
-				//This test is not valid for API versions smaller than 630
+			if (!ryw.getDatabase()->apiVersionAtLeast(630)) {
+				// This test is not valid for API versions smaller than 630
 				return;
 			}
 			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
@@ -741,6 +741,68 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				wait(tx->onError(e));
+			}
+		}
+		// test lock and unlock
+		// maske sure we lock the database
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// lock the database
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("lock"), LiteralStringRef(""));
+				// commit
+				wait(tx->commit());
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "DatabaseLockFailure").error(e);
+				if (e.code() == error_code_actor_cancelled) throw;
+				// In case commit_unknown_result is thrown by buggify, we may try to lock more than once
+				// The second lock commit will throw special_keys_api_failure error
+				if (e.code() == error_code_special_keys_api_failure) {
+					Optional<Value> errorMsg =
+					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+					ASSERT(errorMsg.present());
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+					// special_key_space_management_api_error_msg schema validation
+					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+					ASSERT(valueObj["command"].get_str() == "lock" && !valueObj["retriable"].get_bool());
+					break;
+				} else {
+					wait(tx->onError(e));
+				}
+			}
+		}
+		TraceEvent(SevDebug, "DatabaseLocked");
+		// if database locked, fdb read should get database_locked error
+		try {
+			tx->reset();
+			Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_database_locked);
+		}
+		// make sure we unlock the database
+		// unlock is idempotent, thus we can commit many times until successful
+		loop {
+			try {
+				tx->reset();
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// unlock the database
+				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
+				wait(tx->commit());
+				TraceEvent(SevDebug, "DatabaseUnlocked");
+				tx->reset();
+				// read should be successful
+				Standalone<RangeResultRef> res = wait(tx->getRange(normalKeys, 1));
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
+				ASSERT(e.code() != error_code_database_locked);
 				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
 			}
