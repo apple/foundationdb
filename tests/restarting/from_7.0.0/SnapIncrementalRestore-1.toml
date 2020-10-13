@@ -10,7 +10,6 @@ runConsistencyCheck = false
     testName = 'IncrementalBackup'
     tag = 'default'
     submitOnly = true
-    waitForBackup = true
 
 [[test]]
 testTitle = 'PreSnapWorkloads'
@@ -22,6 +21,7 @@ clearAfterTest = false
 [[test]]
 testTitle = 'TakeSnap'
 clearAfterTest = false
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'SnapTest'

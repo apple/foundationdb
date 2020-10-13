@@ -73,11 +73,22 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state UID backupUID;
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			state Version v = wait(tr->getReadVersion());
-			// Wait for backup container to be created and avoid race condition
-			TraceEvent("IBackupWaitContainer");
 			loop {
+				// Wait for backup container to be created and avoid race condition
+				TraceEvent("IBackupWaitContainer");
 				wait(success(
 				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				if (!backupContainer.isValid()) {
+					TraceEvent("IBackupCheckListContainersAttempt");
+					state std::vector<std::string> containers =
+						wait(IBackupContainer::listContainers(self->backupDir.toString()));
+					TraceEvent("IBackupCheckListContainersSuccess")
+						.detail("Size", containers.size())
+						.detail("First", containers.front());
+					if (containers.size()) {
+						backupContainer = IBackupContainer::openContainer(containers.front());
+					}
+				}
 				state bool e = wait(backupContainer->exists());
 				if (e) break;
 				wait(delay(5.0));
@@ -97,8 +108,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 		}
 		if (self->stopBackup) {
 			try {
+				TraceEvent("IBackupDiscontinueBackup");
 				wait(self->backupAgent.discontinueBackup(cx, self->tag));
 			} catch (Error& e) {
+				TraceEvent("IBackupDiscontinueBackupException").error(e);
 				if (e.code() != error_code_backup_unneeded) {
 					throw;
 				}
