@@ -1718,7 +1718,7 @@ public:
 				secondType = RemappedPage::NONE;
 			} else {
 				secondType = RemappedPage::getTypeOf(nextEntry->second);
-				secondAfterOldestRetainedVersion = nextEntry->first >= oldestRetainedVersion;
+				secondAfterOldestRetainedVersion = nextEntry->first > oldestRetainedVersion;
 			}
 		} else {
 			ASSERT(iVersionPagePair->second == invalidLogicalPageID);
