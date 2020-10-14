@@ -26,7 +26,7 @@
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-struct LockRangeWorkload : TestWorkload {
+struct LockRangeWorkload final : TestWorkload {
 	double lockAfter, unlockAfter;
 	Key keyPrefix;
 	KeyRange range;
@@ -48,20 +48,18 @@ struct LockRangeWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return "LockRange"; }
+	std::string description() override { return "LockRange"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) return _start(cx, this);
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return ok;
-	}
+	Future<bool> check(Database const& cx) override { return ok; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	static Key endOfRange(Key startOfRange) {
 		int n = startOfRange.size();
