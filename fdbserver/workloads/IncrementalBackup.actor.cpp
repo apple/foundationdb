@@ -74,8 +74,16 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (self->waitForBackup) {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
-			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-			state Version v = wait(tr->getReadVersion());
+			state Version v;
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(store(v, tr.getReadVersion()));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
 			loop {
 				// Wait for backup container to be created and avoid race condition
 				TraceEvent("IBackupWaitContainer");
