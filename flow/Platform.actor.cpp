@@ -3010,7 +3010,7 @@ ImageInfo getImageInfo(const void *symbol) {
 	ImageInfo imageInfo;
 
 #ifdef __linux__
-	link_map *linkMap;
+	link_map* linkMap = nullptr;
 	int res = dladdr1(symbol, &info, (void**)&linkMap, RTLD_DL_LINKMAP);
 #else
 	int res = dladdr(symbol, &info);
