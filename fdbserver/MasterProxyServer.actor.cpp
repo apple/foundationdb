@@ -642,14 +642,15 @@ ACTOR Future<Void> commitBatch(
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterResolution");
 
+	self->stats.txnCommitResolved += trs.size();
+
 	////// Phase 3: Post-resolution processing (CPU bound except for very rare situations; ordered; currently atomic but doesn't need to be)
 	TEST(self->latestLocalCommitBatchLogging.get() < localBatchNumber-1); // Queuing post-resolution commit processing 
 	wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber-1));
 	wait(yield(TaskPriority::ProxyCommitYield1));
 
 	state double computeStart = g_network->timer();
-	state double computeDuration = 0; 
-	self->stats.txnCommitResolved += trs.size();
+	state double computeDuration = 0;
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.ProcessingMutations");
