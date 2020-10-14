@@ -57,11 +57,11 @@ struct VersionStampWorkload : TestWorkload {
 		soleOwnerOfMetadataVersionKey = getOption(options, LiteralStringRef("soleOwnerOfMetadataVersionKey"), false);
 	}
 
-	virtual std::string description() { return "VersionStamp"; }
+	std::string description() const override { return "VersionStamp"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		// Versionstamp behavior changed starting with API version 520, so
 		// choose a version to check compatibility.
 		double choice = deterministicRandom()->random01();
@@ -131,7 +131,7 @@ struct VersionStampWorkload : TestWorkload {
 		return result;
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (clientId == 0)
 			return _check(cx, this);
 		return true;
@@ -283,7 +283,7 @@ struct VersionStampWorkload : TestWorkload {
 		return true;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
 		state double startTime = now();

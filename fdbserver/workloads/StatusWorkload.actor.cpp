@@ -57,25 +57,23 @@ struct StatusWorkload : TestWorkload {
 		noUnseed = true;
 	}
 
-	virtual std::string description() { return "StatusWorkload"; }
-	virtual Future<Void> setup(Database const& cx) {
+	std::string description() const override { return "StatusWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		if(enableLatencyBands) {
 			latencyBandActor = configureLatencyBands(this, cx);
 		}
 
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 
 		return success(timeout(fetcher(cx, this), testDuration));
 	}
-	virtual Future<bool> check(Database const& cx) {
-		return errors.getValue() == 0;
-	}
+	Future<bool> check(Database const& cx) override { return errors.getValue() == 0; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		if (clientId != 0)
 			return;
 

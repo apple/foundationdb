@@ -146,7 +146,7 @@ struct MakoWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() override {
+	std::string description() const override {
 		// Mako is a simple workload to measure the performance of FDB.
 		// The primary purpose of this benchmark is to generate consistent performance results
 		return "Mako";
@@ -171,7 +171,7 @@ struct MakoWorkload : TestWorkload {
 	}
 
 	// disable the default timeout setting
-	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
+	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		// metrics of population process

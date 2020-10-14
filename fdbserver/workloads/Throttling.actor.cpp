@@ -192,13 +192,11 @@ struct ThrottlingWorkload : KVWorkload {
 		return Void();
 	}
 
-	virtual std::string description() { return ThrottlingWorkload::NAME; }
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) {
-		return correctSpecialKeys;
-	}
+	std::string description() const override { return ThrottlingWorkload::NAME; }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<bool> check(Database const& cx) override { return correctSpecialKeys; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("TransactionsCommitted", transactionsCommitted, false));
 	}
 };

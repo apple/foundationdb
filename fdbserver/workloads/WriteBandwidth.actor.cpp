@@ -49,14 +49,14 @@ struct WriteBandwidthWorkload : KVWorkload {
 		warmingDelay = getOption( options, LiteralStringRef("warmingDelay"), 0.0 );
 		maxInsertRate = getOption( options, LiteralStringRef("maxInsertRate"), 1e12 );
 	}
-		
-	virtual std::string description() { return "WriteBandwidth"; }
-	virtual Future<Void> setup( Database const& cx ) { return _setup( cx, this ); }
-	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	std::string description() const override { return "WriteBandwidth"; }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual void getMetrics( std::vector<PerfMetric>& m ) {
+	Future<bool> check(Database const& cx) override { return true; }
+
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		int writes = transactions.getValue() * keysPerTransaction;
 		m.emplace_back("Measured Duration", duration, true);

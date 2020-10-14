@@ -49,13 +49,11 @@ public:
 		opType = getOption(options, LiteralStringRef("opType"), -1);
 	}
 
-	virtual std::string description() { return "AtomicOpsApiCorrectness"; }
+	std::string description() const override { return "AtomicOpsApiCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (opType == -1)
 			opType = sharedRandomNumber % 9;
 
@@ -94,12 +92,9 @@ public:
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return !testFailed;
-	}
+	Future<bool> check(Database const& cx) override { return !testFailed; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	virtual void getMetrics(vector<PerfMetric>& m) override {}
 
 	// Test Atomic ops on non existing keys that results in a set
 	ACTOR Future<Void> testAtomicOpSetOnNonExistingKey(Database cx, AtomicOpsApiCorrectnessWorkload* self, uint32_t opType, Key key) {

@@ -52,14 +52,14 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		ASSERT(conflictRangeSizeFactor >= 1);
 	}
 
-	virtual std::string description() { return "SpecialKeySpaceCorrectness"; }
-	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) { return wrongResults.getValue() == 0; }
-	virtual void getMetrics(std::vector<PerfMetric>& m) {}
+	std::string description() const override { return "SpecialKeySpaceCorrectness"; }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	// disable the default timeout setting
-	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
+	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
