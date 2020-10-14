@@ -269,7 +269,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -281,7 +280,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
 		writeThread->addThread(new Writer(db, id));
-		for (unsigned i = 0; i < nReaders; ++i) {
+		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db));
 		}
 	}
