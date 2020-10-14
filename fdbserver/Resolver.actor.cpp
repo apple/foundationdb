@@ -20,6 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/ConflictSet.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -27,9 +28,9 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Orderer.actor.h"
-#include "fdbserver/ConflictSet.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbclient/SystemData.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace {
