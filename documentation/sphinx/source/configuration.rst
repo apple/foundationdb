@@ -229,12 +229,16 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
 * ``kill_on_configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
 * ``disable_lifecycle_logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 
+.. _configuration-restarting:
+
 The ``[general]`` section also contains some parameters to control how processes are restarted when they die. ``fdbmonitor`` uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. ``fdbmonitor`` tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.
 
 * ``restart_delay``: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.
 * ``initial_restart_delay``: The number of seconds ``fdbmonitor`` waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately). 
 * ``restart_backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
 * ``restart_delay_reset_interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
+
+ These ``restart_`` parameters are not applicable to the ``fdbmonitor`` process itself. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>` for details.
 
 As an example, let's say the following parameters have been set:
 
@@ -322,6 +326,24 @@ Backup agent sections
 
 These sections run and configure the backup agent process used for :doc:`point-in-time backups <backups>` of FoundationDB. These don't usually need to be modified. The structure and functionality is similar to the ``[fdbserver]`` and ``[fdbserver.<ID>]`` sections.
 
+.. _configuration-restart-fdbmonitor:
+
+Configuring autorestart of fdbmonitor
+=====================================
+
+Configuring the restart parameters for ``fdbmonitor`` is operating system-specific.
+
+Linux (RHEL/CentOS)
+-------------------
+
+ ``systemd`` controls the ``foundationdb`` service. When ``fdbmonitor`` is killed unexpectedly, by default, systemd restarts it in 60 seconds. To adjust this value you have to create a file ``/etc/systemd/system/foundationdb.service.d/override.conf`` with the overriding values. For example:
+
+.. code-block:: ini
+
+    [Service]
+    RestartSec=20s
+
+To disable auto-restart of ``fdbmonitor``, put ``Restart=no`` in the same section.
 
 .. _configuration-choosing-redundancy-mode:
 
