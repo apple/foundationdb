@@ -238,7 +238,7 @@ The ``[general]`` section also contains some parameters to control how processes
 * ``restart_backoff``: Controls how quickly ``fdbmonitor`` backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by ``restart_backoff`` to get the next delay, maxing out at the value of ``restart_delay``. Defaults to the value of ``restart_delay``, meaning that the second and subsequent failures will all delay ``restart_delay`` between restarts.
 * ``restart_delay_reset_interval``: The number of seconds a process must be running before resetting the backoff back to the value of ``initial_restart_delay``. Defaults to the value of ``restart_delay``.
 
- These ``restart_`` parameters are not applicable to the ``fdbmonitor`` process itself. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>` for details
+ These ``restart_`` parameters are not applicable to the ``fdbmonitor`` process itself. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>` for details.
 
 As an example, let's say the following parameters have been set:
 
@@ -333,16 +333,16 @@ Configuring autorestart of fdbmonitor
 
 Configuring the restart parameters for ``fdbmonitor`` is operating system-specific.
 
-In Linux
---------
+Linux (RHEL/CentOS)
+-------------------
 
- ``systemd`` controls the ``foundationdb`` service. When ``fdbmonitor`` is killed unexpectedly, by default, systemd restarts it in 60 seconds. For addusting this value you have to create file ``/etc/systemd/system/foundationdb.service.d/override.conf`` with the overriding values. For example:
+ ``systemd`` controls the ``foundationdb`` service. When ``fdbmonitor`` is killed unexpectedly, by default, systemd restarts it in 60 seconds. To adjust this value you have to create a file ``/etc/systemd/system/foundationdb.service.d/override.conf`` with the overriding values. For example:
 
 .. code-block:: ini
     [Service]
     RestartSec=20s
 
-For disabling auto-restart of ``fdbmonitor`` you have to put ``Restart=no`` to the same section.
+To disable auto-restart of ``fdbmonitor``, put ``Restart=no`` in the same section.
 
 .. _configuration-choosing-redundancy-mode:
 
