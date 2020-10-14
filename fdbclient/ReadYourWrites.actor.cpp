@@ -1401,6 +1401,20 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
 }
 
+Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(const KeyRange& range,
+                                                                                     int64_t chunkSize) {
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+	if (resetPromise.isSet()) return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if(range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
+}
+
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {
 	if(checkUsedDuringCommit()) {
 		throw used_during_commit();

@@ -889,6 +889,9 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{"minimumRegions", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
 		}},
+	{"logAntiQuorum", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedLogAntiQuorum", "");
+		}},
 	{"buggify", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		}},

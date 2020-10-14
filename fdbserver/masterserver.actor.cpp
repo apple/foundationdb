@@ -1570,6 +1570,17 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	CommitTransactionRef &tr = recoveryCommitRequest.transaction;
 	int mmApplied = 0;  // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {
+		Optional<Value> snapRecoveryFlag = self->txnStateStore->readValue(writeRecoveryKey).get();
+		TraceEvent("MasterRecoverySnap")
+		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A")
+		    .detail("LastEpochEnd", self->lastEpochEnd);
+		if (snapRecoveryFlag.present()) {
+			TEST(true); // Recovering from snapshot, writing to snapShotEndVersionKey
+			BinaryWriter bw(Unversioned());
+			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
+			// Clear the key so multiple recoveries will not overwrite the first version recorded
+			tr.clear(recoveryCommitRequest.arena, singleKeyRange(writeRecoveryKey));
+		}
 		if(self->forceRecovery) {
 			BinaryWriter bw(Unversioned());
 			tr.set(recoveryCommitRequest.arena, killStorageKey, (bw << self->safeLocality).toValue());

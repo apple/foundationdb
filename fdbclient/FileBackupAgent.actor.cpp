@@ -4506,7 +4506,7 @@ public:
 	                                     Version beginVersion, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
-		state BackupDescription desc = wait(bc->describeBackup());
+		state BackupDescription desc = wait(bc->describeBackup(true));
 		if(cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}
@@ -4525,6 +4525,7 @@ public:
 		if(!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 				.detail("BackupContainer", bc->getURL())
+				.detail("BeginVersion", beginVersion)
 				.detail("TargetVersion", targetVersion);
 			fprintf(stderr, "ERROR: Restore version %" PRId64 " is not possible from %s\n", targetVersion, bc->getURL().c_str());
 			throw restore_invalid_version();

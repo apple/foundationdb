@@ -281,6 +281,17 @@ fdb_error_t fdb_future_get_string_array(
 	);
 }
 
+extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_key_array(
+	FDBFuture* f, FDBKey const** out_key_array, int* out_count)
+{
+	CATCH_AND_RETURN(
+		Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
+		*out_key_array = (FDBKey*) na.begin();
+		*out_count = na.size();
+	);
+}
+
 FDBFuture* fdb_create_cluster_v609( const char* cluster_file_path ) {
 	char *path;
 	if(cluster_file_path) {
@@ -626,11 +637,18 @@ fdb_error_t fdb_transaction_add_conflict_range( FDBTransaction*tr, uint8_t const
 
 }
 
-extern "C" DLLEXPORT 
+extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
         int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length ) {
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
+}
+
+extern "C" DLLEXPORT
+FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"
