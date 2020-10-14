@@ -171,12 +171,12 @@ public:
 				 void* userdata)
 		: callbackf(callbackf), f(f), userdata(userdata) {}
 
-	virtual bool canFire(int notMadeActive) { return true; }
-	virtual void fire(const Void& unused, int& userParam) {
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	virtual void error(const Error&, int& userParam) {
+	void error(const Error&, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}

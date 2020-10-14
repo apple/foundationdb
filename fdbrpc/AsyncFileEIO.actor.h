@@ -112,8 +112,8 @@ public:
 		return statdata.st_mtime;
 	}
 
-	virtual void addref() { ReferenceCounted<AsyncFileEIO>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileEIO>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileEIO>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileEIO>::delref(); }
 
 	int64_t debugFD() const override { return fd; }
 

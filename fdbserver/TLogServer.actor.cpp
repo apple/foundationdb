@@ -103,7 +103,7 @@ typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 struct LogData;
 struct TLogData;
 
-struct TLogQueue : public IClosable {
+struct TLogQueue final : public IClosable {
 public:
 	TLogQueue( IDiskQueue* queue, UID dbgid ) : queue(queue), dbgid(dbgid) {}
 
@@ -135,10 +135,16 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	virtual Future<Void> getError() { return queue->getError(); }
-	virtual Future<Void> onClosed() { return queue->onClosed(); }
-	virtual void dispose() { queue->dispose(); delete this; }
-	virtual void close() { queue->close(); delete this; }
+	Future<Void> getError() override { return queue->getError(); }
+	Future<Void> onClosed() override { return queue->onClosed(); }
+	void dispose() override {
+		queue->dispose();
+		delete this;
+	}
+	void close() override {
+		queue->close();
+		delete this;
+	}
 
 private:
 	IDiskQueue* queue;

@@ -35,18 +35,18 @@ public:
 };
 
 // An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds seconds
-class SpeedLimit : public IRateControl, ReferenceCounted<SpeedLimit> {
+class SpeedLimit final : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
 	SpeedLimit(int windowLimit, int windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
 		m_budget_max = m_limit * m_seconds;
 		m_last_update = timer();
 	}
-	virtual ~SpeedLimit() {}
+	~SpeedLimit() = default;
 
-	virtual void addref() { ReferenceCounted<SpeedLimit>::addref(); }
-	virtual void delref() { ReferenceCounted<SpeedLimit>::delref(); }
+	void addref() override { ReferenceCounted<SpeedLimit>::addref(); }
+	void delref() override { ReferenceCounted<SpeedLimit>::delref(); }
 
-	virtual Future<Void> getAllowance(unsigned int n) {
+	Future<Void> getAllowance(unsigned int n) override {
 		// Replenish budget based on time since last update
 		double ts = timer();
 		// returnUnused happens to do exactly what we want here
@@ -60,7 +60,7 @@ public:
 		return delay(m_seconds * -m_budget / m_limit);
 	}
 
-	virtual void returnUnused(int n) {
+	void returnUnused(int n) override {
 		if(n < 0)
 			return;
 		m_budget = std::min<int64_t>(m_budget + n, m_budget_max);
@@ -75,13 +75,13 @@ private:
 };
 
 // An IRateControl implemenation that enforces no limit
-class Unlimited : public IRateControl, ReferenceCounted<Unlimited> {
+class Unlimited final : public IRateControl, ReferenceCounted<Unlimited> {
 public:
 	Unlimited() {}
-	virtual ~Unlimited() {}
-	virtual void addref() { ReferenceCounted<Unlimited>::addref(); }
-	virtual void delref() { ReferenceCounted<Unlimited>::delref(); }
+	~Unlimited() = default;
+	void addref() override { ReferenceCounted<Unlimited>::addref(); }
+	void delref() override { ReferenceCounted<Unlimited>::delref(); }
 
-	virtual Future<Void> getAllowance(unsigned int n) { return Void(); }
-	virtual void returnUnused(int n) {}
+	Future<Void> getAllowance(unsigned int n) override { return Void(); }
+	void returnUnused(int n) override {}
 };
