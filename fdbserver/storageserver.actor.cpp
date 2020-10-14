@@ -250,7 +250,18 @@ const int VERSION_OVERHEAD =
          sizeof(Reference<VersionedMap<KeyRef, ValueOrClearToRef>::PTreeT>)); // versioned map [ x2 for
                                                                               // createNewVersion(version+1) ], 64b
                                                                               // overhead for map
-static int mvccStorageBytes( MutationRef const& m ) { return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 + (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2; }
+
+bool isUserDataSet(const MutationRef& m) {
+	return m.type == MutationRef::SetValue && m.param1.size() > 0 && m.param1[0] != 0xFF;
+}
+
+static int mvccStorageBytes(MutationRef const& m) {
+	if (isUserDataSet(m)) {
+		return 0;
+	}
+	return VersionedMap<KeyRef, ValueOrClearToRef>::overheadPerItem * 2 +
+	       (MutationRef::OVERHEAD_BYTES + m.param1.size() + m.param2.size()) * 2;
+}
 
 struct FetchInjectionInfo {
 	Arena arena;
@@ -516,7 +527,7 @@ public:
 			double rate;
 			double fractionalBusyness;
 
-			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness) 
+			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
 			  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
 		};
 
@@ -565,7 +576,7 @@ public:
 					.detail("TotalSampledCost", intervalTotalSampledCount)
 					.detail("Reported", previousBusiestTag.present())
 					.trackLatest(id.toString() + "/BusiestReadTag");
-			} 
+			}
 
 			intervalCounts.clear();
 			intervalTotalSampledCount = 0;
@@ -924,7 +935,7 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version) 
 		}
 	}
 }
- 
+
 Future<Version> waitForVersion(StorageServer* data, Version version) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
@@ -1100,7 +1111,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 				if(BUGGIFY) {
 					throw transaction_too_old();
 				}
-				
+
 				debugMutation("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
 				if( req.debugID.present() )
@@ -1546,7 +1557,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	} else {
 		wait( delay(0, TaskPriority::DefaultEndpoint) );
 	}
-	
+
 	try {
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
@@ -1966,22 +1977,28 @@ void applyMutation( StorageServer *self, MutationRef const& m, Arena& arena, Sto
 	self->metrics.notify(m.param1, metrics);
 
 	if (m.type == MutationRef::SetValue) {
-		auto prev = data.atLatest().lastLessOrEqual(m.param1);
-		if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
-			ASSERT( prev.key() <= m.param1 );
-			KeyRef end = prev->getEndKey();
-			// the insert version of the previous clear is preserved for the "left half", because in changeDurableVersion() the previous clear is still responsible for removing it
-			// insert() invalidates prev, so prev.key() is not safe to pass to it by reference
-			data.insert( KeyRef(prev.key()), ValueOrClearToRef::clearTo( m.param1 ), prev.insertVersion() );  // overwritten by below insert if empty
-			KeyRef nextKey = keyAfter(m.param1, arena);
-			if ( end != nextKey ) {
-				ASSERT( end > nextKey );
-				// the insert version of the "right half" is not preserved, because in changeDurableVersion() this set is responsible for removing it
-				// FIXME: This copy is technically an asymptotic problem, definitely a waste of memory (copy of keyAfter is a waste, but not asymptotic)
-				data.insert( nextKey, ValueOrClearToRef::clearTo( KeyRef(arena, end) ) );
+		if (!isUserDataSet(m)) {
+			auto prev = data.atLatest().lastLessOrEqual(m.param1);
+			if (prev && prev->isClearTo() && prev->getEndKey() > m.param1) {
+				ASSERT(prev.key() <= m.param1);
+				KeyRef end = prev->getEndKey();
+				// the insert version of the previous clear is preserved for the "left half", because in
+				// changeDurableVersion() the previous clear is still responsible for removing it insert() invalidates
+				// prev, so prev.key() is not safe to pass to it by reference
+				data.insert(KeyRef(prev.key()), ValueOrClearToRef::clearTo(m.param1),
+				            prev.insertVersion()); // overwritten by below insert if empty
+				KeyRef nextKey = keyAfter(m.param1, arena);
+				if (end != nextKey) {
+					ASSERT(end > nextKey);
+					// the insert version of the "right half" is not preserved, because in changeDurableVersion() this
+					// set is responsible for removing it
+					// FIXME: This copy is technically an asymptotic problem, definitely a waste of memory (copy of
+					// keyAfter is a waste, but not asymptotic)
+					data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));
+				}
 			}
+			data.insert(m.param1, ValueOrClearToRef::value(m.param2));
 		}
-		data.insert( m.param1, ValueOrClearToRef::value(m.param2) );
 		self->watches.trigger( m.param1 );
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase( m.param1, m.param2 );
@@ -3063,7 +3080,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} 
+		}
 		ver = cloneCursor2->version().version - 1;
 
 		if(injectedChanges) data->lastVersionWithData = ver;
@@ -4279,4 +4296,3 @@ void versionedMapTest() {
 	printf("Memory used: %f MB\n",
 		 (after - before)/ 1e6);
 }
-
