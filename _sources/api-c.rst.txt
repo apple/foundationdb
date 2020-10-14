@@ -265,9 +265,9 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
 .. function:: fdb_error_t fdb_future_block_until_ready(FDBFuture* future)
 
-   Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error -- you must call :func:`fdb_future_get_error()` to determine that. :func:`fdb_future_block_until_ready()` will return an error only in exceptional conditions (e.g. out of memory or other operating system resources).
+   Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error -- you must call :func:`fdb_future_get_error()` to determine that. :func:`fdb_future_block_until_ready()` will return an error only in exceptional conditions (e.g. deadlock detected, out of memory or other operating system resources).
 
-   .. warning:: Never call this function from a callback passed to :func:`fdb_future_set_callback()`. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock.
+   .. warning:: Never call this function from a callback passed to :func:`fdb_future_set_callback()`. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock. In some cases the client can detect the deadlock and throw a ``blocked_from_network_thread`` error.
 
 .. function:: fdb_bool_t fdb_future_is_ready(FDBFuture* future)
 
