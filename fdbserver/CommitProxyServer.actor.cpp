@@ -593,7 +593,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		self->commitVersion,
 		self->prevVersion,
 		pProxyCommitData->version,
-        span
+		span
 	);
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
