@@ -56,6 +56,7 @@ private:
 	std::vector<std::pair<StringRef, StringRef>> combinedWriteConflictRanges;
 	std::vector<struct ReadConflictRange> combinedReadConflictRanges;
 	bool* transactionConflictStatus;
+	// Stores the map: a transaction -> conflicted transactions' indices
 	std::map<int, VectorRef<int>>* conflictingKeyRangeMap;
 	Arena* resolveBatchReplyArena;
 
