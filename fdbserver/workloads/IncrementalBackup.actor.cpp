@@ -25,6 +25,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Arena.h"
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -36,6 +37,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool submitOnly;
 	bool restoreOnly;
 	bool waitForBackup;
+	int waitRetries;
 	bool stopBackup;
 	bool checkBeginVersion;
 
@@ -45,6 +47,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
 		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
+		waitRetries = getOption(options, LiteralStringRef("waitRetries"), 20);
 		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
@@ -93,7 +96,9 @@ struct IncrementalBackupWorkload : TestWorkload {
 				if (e) break;
 				wait(delay(5.0));
 			}
+			state int tries = 0;
 			loop {
+				tries++;
 				BackupDescription desc = wait(backupContainer->describeBackup(true));
 				TraceEvent("IBackupVersionGate")
 				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
@@ -101,7 +106,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
 				if (!desc.contiguousLogEnd.present()) continue;
-				if (desc.contiguousLogEnd.get() >= v) break;
+				if (desc.contiguousLogEnd.get() >= v || tries > self->waitRetries) break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));
 			}
