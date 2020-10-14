@@ -229,7 +229,7 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
 * ``kill_on_configuration_change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
 * ``disable_lifecycle_logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 
-.. _configuration-restarting
+.. _configuration-restarting:
 
 The ``[general]`` section also contains some parameters to control how processes are restarted when they die. ``fdbmonitor`` uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. ``fdbmonitor`` tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.
 
@@ -326,7 +326,7 @@ Backup agent sections
 
 These sections run and configure the backup agent process used for :doc:`point-in-time backups <backups>` of FoundationDB. These don't usually need to be modified. The structure and functionality is similar to the ``[fdbserver]`` and ``[fdbserver.<ID>]`` sections.
 
-.. _configuration-restart-fdbmonitor
+.. _configuration-restart-fdbmonitor:
 
 Configuring autorestart of fdbmonitor
 =====================================
