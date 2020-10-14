@@ -380,14 +380,15 @@ void applyMetadataMutations(UID const& dbgid, Arena& arena, Version mutationVers
 			else if (m.param1.startsWith(lockedKeyRanges.begin)) {
 				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 
-				uint8_t status = BinaryReader::fromStringRef<uint8_t>(m.param2, Unversioned());
+				const auto [status, lockOwner] = RangeLockCache::decodeLockValue(m.param2);
 				StringRef key = m.param1.removePrefix(lockedKeyRanges.begin);
 				TraceEvent("LockRangeSet", dbgid)
 				    .detail("Version", mutationVersion)
-				    .detail("Status", status)
+				    .detail("Status", lockStatusToString(status))
+				    .detail("Owner", lockOwner)
 				    .detail("Key", key);
 				if (locks != nullptr) {
-					locks->add(key, static_cast<LockStatus>(status), mutationVersion);
+					locks->add(key, status, mutationVersion);
 				}
 			}
 		} else if (m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {

@@ -63,7 +63,7 @@ const std::string lockStatusToString(LockStatus s) {
 	throw internal_error();
 }
 
-ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest request, bool checkDBLock) {
+ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest request, UID owner, bool checkDBLock) {
 	if (checkDBLock) {
 		Optional<Value> val = wait(tr->get(databaseLockedKey));
 
@@ -76,10 +76,22 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 		throw range_locks_access_denied();
 	}
 
-	RangeLockCache::Reason reason = cache->tryAdd(tr, request);
+	state RangeLockCache::Reason reason = cache->tryAdd(tr, request, owner);
 	if (reason == RangeLockCache::ALREADY_UNLOCKED && isUnlocking(request.mode)) {
 		// When getting unknown_result and retrying, short-circuit unlock request.
 		return Void();
+	}
+	if (reason == RangeLockCache::ALREADY_LOCKED) {
+		// Check if lock owner is the same, which means transaction already
+		// succeeded and we retry due to unknown result.
+		std::string key = lockedKeyRanges.begin.toString() + request.range.begin.toString();
+		Optional<Value> value = wait(tr->get(StringRef(key)));
+		if (value.present()) {
+			const auto [_, lockOwner] = RangeLockCache::decodeLockValue(value.get());
+			if (owner == lockOwner) {
+				return Void(); // Txn already succeeded
+			}
+		}
 	}
 	if (reason != RangeLockCache::OK) {
 		throw range_locks_access_denied();
@@ -99,6 +111,7 @@ ACTOR Future<Void> lockRange(Transaction* tr, RangeLockCache* cache, LockRequest
 
 ACTOR Future<Void> lockRange(Database cx, LockRequest request) {
 	state Transaction tr(cx);
+	state UID owner = deterministicRandom()->randomUniqueID();
 
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -107,7 +120,7 @@ ACTOR Future<Void> lockRange(Database cx, LockRequest request) {
 			TraceEvent(SevDebug, "LockRangeRequest")
 			    .detail("Range", request.range)
 			    .detail("Mode", lockModeToString(request.mode));
-			wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, request, true));
+			wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, request, owner, true));
 
 			// Make concurrent lockRange() calls conflict.
 			tr.addReadConflictRange(KeyRangeRef(rangeLockVersionKey, keyAfter(rangeLockVersionKey)));
@@ -130,26 +143,32 @@ ACTOR Future<Void> lockRange(Database cx, LockRequest request) {
 
 ACTOR Future<Void> lockRanges(Database cx, std::vector<LockRequest> requests) {
 	state Transaction tr(cx);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+	state UID owner = deterministicRandom()->randomUniqueID();
 
 	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			state bool checkDBLock = true;
 			for (const auto& r : requests) {
-				wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, r, checkDBLock));
+				wait(lockRange(&tr, &cx.getPtr()->rangeLockCache, r, owner, checkDBLock));
 				checkDBLock = false;
 			}
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_database_locked) throw e;
-			wait(tr.onError(e));
+			TraceEvent(SevDebug, "LockRangeRequestError").error(e, true);
+			if (e.code() == error_code_transaction_too_old || e.code() == error_code_commit_unknown_result) {
+				tr.fullReset();
+			} else {
+				wait(tr.onError(e));
+			}
 		}
 	}
 }
 
-RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest& request) {
+RangeLockCache::Reason RangeLockCache::tryAdd(Transaction* tr, const LockRequest& request, UID owner) {
 	LockStatus oldValue = locks[request.range.end];
 	auto ranges = locks.intersectingRanges(request.range);
 
@@ -161,9 +180,8 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 
 		LockStatus newValue =
 		    request.mode == LockMode::LOCK_EXCLUSIVE ? LockStatus::EXCLUSIVE_LOCKED : LockStatus::READ_LOCKED;
-		krmSetPreviouslyEmptyRange(tr, lockedKeyRanges.begin, request.range,
-		                           StringRef(reinterpret_cast<uint8_t*>(&newValue), sizeof(uint8_t)),
-		                           StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
+		krmSetPreviouslyEmptyRange(tr, lockedKeyRanges.begin, request.range, encodeLockValue(newValue, owner),
+		                           encodeLockValue(oldValue, owner));
 		return OK;
 	}
 
@@ -183,11 +201,25 @@ RangeLockCache::Reason RangeLockCache::tryAdd(Transaction*tr, const LockRequest&
 	                                  lockedKeyRanges.begin.toString() + request.range.end.toString());
 	tr->clear(withPrefix);
 	LockStatus newValue = LockStatus::UNLOCKED;
-	tr->set(withPrefix.begin, StringRef(reinterpret_cast<uint8_t*>(&newValue), sizeof(uint8_t)));
+	tr->set(withPrefix.begin, encodeLockValue(newValue, owner));
 	if (newValue != oldValue) {
-		tr->set(withPrefix.end, StringRef(reinterpret_cast<uint8_t*>(&oldValue), sizeof(uint8_t)));
+		tr->set(withPrefix.end, encodeLockValue(oldValue, owner));
 	}
 	return OK;
+}
+
+Value RangeLockCache::encodeLockValue(LockStatus status, UID lockOwner) {
+	BinaryWriter wr(Unversioned());
+	wr << static_cast<uint8_t>(status) << lockOwner;
+	return wr.toValue();
+}
+
+std::pair<LockStatus, UID> RangeLockCache::decodeLockValue(StringRef value) {
+	uint8_t status;
+	UID owner;
+	BinaryReader rd(value, Unversioned());
+	rd >> status >> owner;
+	return { static_cast<LockStatus>(status), owner };
 }
 
 RangeLockCache::Reason RangeLockCache::check(KeyRef key, bool write) const {
