@@ -47,7 +47,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
 		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
-		waitRetries = getOption(options, LiteralStringRef("waitRetries"), 20);
+		waitRetries = getOption(options, LiteralStringRef("waitRetries"), -1);
 		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
@@ -106,7 +106,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
 				    .detail("TargetVersion", v);
 				if (!desc.contiguousLogEnd.present()) continue;
-				if (desc.contiguousLogEnd.get() >= v || tries > self->waitRetries) break;
+				if (desc.contiguousLogEnd.get() >= v) break;
+				if (self->waitRetries != -1 && tries > self->waitRetries) break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));
 			}
