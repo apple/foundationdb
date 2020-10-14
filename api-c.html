@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.24',
+        VERSION:     '6.2.27',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -355,10 +355,10 @@ void <code class="descname">fdb_future_destroy</code><span class="sig-paren">(</
 <dl class="function">
 <dt id="c.fdb_future_block_until_ready">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_block_until_ready</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em><span class="sig-paren">)</span></dt>
-<dd><p>Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error &#8211; you must call <a class="reference internal" href="#c.fdb_future_get_error" title="fdb_future_get_error"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_error()</span></code></a> to determine that. <a class="reference internal" href="#c.fdb_future_block_until_ready" title="fdb_future_block_until_ready"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_block_until_ready()</span></code></a> will return an error only in exceptional conditions (e.g. out of memory or other operating system resources).</p>
+<dd><p>Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error &#8211; you must call <a class="reference internal" href="#c.fdb_future_get_error" title="fdb_future_get_error"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_error()</span></code></a> to determine that. <a class="reference internal" href="#c.fdb_future_block_until_ready" title="fdb_future_block_until_ready"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_block_until_ready()</span></code></a> will return an error only in exceptional conditions (e.g. deadlock detected, out of memory or other operating system resources).</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">Never call this function from a callback passed to <a class="reference internal" href="#c.fdb_future_set_callback" title="fdb_future_set_callback"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_set_callback()</span></code></a>. This may block the thread on which <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_run_network()</span></code></a> was invoked, resulting in a deadlock.</p>
+<p class="last">Never call this function from a callback passed to <a class="reference internal" href="#c.fdb_future_set_callback" title="fdb_future_set_callback"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_set_callback()</span></code></a>. This may block the thread on which <a class="reference internal" href="#c.fdb_run_network" title="fdb_run_network"><code class="xref c c-func docutils literal"><span class="pre">fdb_run_network()</span></code></a> was invoked, resulting in a deadlock. In some cases the client can detect the deadlock and throw a <code class="docutils literal"><span class="pre">blocked_from_network_thread</span></code> error.</p>
 </div>
 </dd></dl>
 
@@ -997,7 +997,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Aug 25, 2020.<br/>
+      Last updated on Oct 14, 2020.<br/>
     </p>
   </div>
 </footer>

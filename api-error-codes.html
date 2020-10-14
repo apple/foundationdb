@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.24',
+        VERSION:     '6.2.27',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -350,6 +350,14 @@
 <td>2023</td>
 <td>Attempted to commit a transaction specified as read-only</td>
 </tr>
+<tr class="row-odd"><td>invalid_cache_eviction_policy</td>
+<td>2024</td>
+<td>Invalid cache eviction policy, only random and lru are supported</td>
+</tr>
+<tr class="row-even"><td>blocked_from_network_thread</td>
+<td>2026</td>
+<td>Detected a deadlock in a callback called from the network thread</td>
+</tr>
 <tr class="row-odd"><td>incompatible_protocol_version</td>
 <td>2100</td>
 <td>Incompatible protocol version</td>
@@ -438,7 +446,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Aug 25, 2020.<br/>
+      Last updated on Oct 14, 2020.<br/>
     </p>
   </div>
 </footer>
