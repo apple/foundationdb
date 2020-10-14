@@ -339,6 +339,7 @@ Linux (RHEL/CentOS)
  ``systemd`` controls the ``foundationdb`` service. When ``fdbmonitor`` is killed unexpectedly, by default, systemd restarts it in 60 seconds. To adjust this value you have to create a file ``/etc/systemd/system/foundationdb.service.d/override.conf`` with the overriding values. For example:
 
 .. code-block:: ini
+
     [Service]
     RestartSec=20s
 
