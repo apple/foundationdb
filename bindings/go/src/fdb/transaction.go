@@ -319,7 +319,7 @@ func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) Futur
 	}
 }
 
-// GetEstimatedRangeSizeBytes will get an estimate for the number of bytes
+// GetEstimatedRangeSizeBytes returns an estimate for the number of bytes
 // stored in the given range.
 // Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
 // algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
@@ -348,8 +348,9 @@ func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize in
 	}
 }
 
-// GetRangeSplitPoints will return a list of keys that can divide the given range into
-// chunks based on the chunk size provided.
+// GetRangeSplitPoints returns a list of keys that can split the given range
+// into (roughly) equally sized chunks based on chunkSize.
+// Note: the returned split points contain the start key and end key of the given range.
 func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
 	beginKey, endKey := r.FDBRangeKeys()
 	return t.getRangeSplitPoints(

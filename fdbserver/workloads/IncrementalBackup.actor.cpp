@@ -61,47 +61,56 @@ struct IncrementalBackupWorkload : TestWorkload {
 	}
 
 	virtual Future<bool> check(Database const& cx) {
-		if (clientId || !waitForBackup) {
+		if (clientId) {
 			return true;
 		}
 		return _check(cx, this);
 	}
 
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
-		state Reference<IBackupContainer> backupContainer;
-		state UID backupUID;
-		state Version v;
-		state Transaction tr(cx);
-		loop {
-			try {
-				wait(store(v, tr.getReadVersion()));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+		if (self->waitForBackup) {
+			state Reference<IBackupContainer> backupContainer;
+			state UID backupUID;
+			state Version v;
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(store(v, tr.getReadVersion()));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+			// Wait for backup container to be created and avoid race condition
+			TraceEvent("IBackupWaitContainer");
+			loop {
+				wait(success(
+				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				state bool e = wait(backupContainer->exists());
+				if (e) break;
+				wait(delay(5.0));
+			}
+			loop {
+				BackupDescription desc = wait(backupContainer->describeBackup(true));
+				TraceEvent("IBackupVersionGate")
+				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
+				    .detail("ContiguousLogEndVersion",
+				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
+				    .detail("TargetVersion", v);
+				if (!desc.contiguousLogEnd.present()) continue;
+				if (desc.contiguousLogEnd.get() >= v) break;
+				// Avoid spamming requests with a delay
+				wait(delay(5.0));
 			}
 		}
-		// Wait for backup container to be created and avoid race condition
-		TraceEvent("IBackupWaitContainer");
-		loop {
-			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			state bool e = wait(backupContainer->exists());
-			if (e) break;
-			wait(delay(5.0));
-		}
-		loop {
-			BackupDescription desc = wait(backupContainer->describeBackup(true));
-			TraceEvent("IBackupVersionGate")
-			    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
-			    .detail("ContiguousLogEndVersion",
-			            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
-			    .detail("TargetVersion", v);
-			if (!desc.contiguousLogEnd.present()) continue;
-			if (desc.contiguousLogEnd.get() >= v) break;
-			// Avoid spamming requests with a delay
-			wait(delay(5.0));
-		}
 		if (self->stopBackup) {
-			wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			try {
+				wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_unneeded) {
+					throw;
+				}
+			}
 		}
 		return true;
 	}
