@@ -1309,7 +1309,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool reverse )
 {
 	if (getDatabase()->apiVersionAtLeast(630)) {
-		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
+		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
+		    end.getKey() <= specialKeys.end) {
 			TEST(true); // Special key space get range
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
