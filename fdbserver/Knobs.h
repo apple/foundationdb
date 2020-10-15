@@ -182,6 +182,8 @@ public:
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
 	bool DD_ENABLE_VERBOSE_TRACING;
+	int DD_TEAMS_INFO_PRINT_INTERVAL;
+	int DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor

@@ -630,6 +630,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
 
+	AsyncTrigger printDetailedTeamsInfo;
+	double lastTeamsInfoSnapshotTime;
+
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
 		LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*) storageServerSet.getPtr();
@@ -764,6 +767,12 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					self->medianAvailableSpace = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO, std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
 				} else {
 					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+				}
+				if (self->medianAvailableSpace < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall")
+					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace);
+					// Trigger teams info print
+					self->printDetailedTeamsInfo.trigger();
 				}
 			}
 
@@ -2569,6 +2578,186 @@ ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 
 	}
 }
 
+// This function is very expensive to call. Use with caution.
+ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std::string tcIdString) {
+	state DatabaseConfiguration configuration;
+	state std::map<UID, Reference<TCServerInfo>> server_info;
+	state ServerStatusMap server_status;
+	state vector<Reference<TCTeamInfo>> teams;
+	state std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
+	state std::vector<Reference<TCMachineTeamInfo>> machineTeams;
+	state std::vector<std::string> internedLocalityRecordKeyNameStrings;
+	state int machineLocalityMapEntryArraySize;
+	state std::vector<Reference<LocalityRecord>> machineLocalityMapRecordArray;
+	state int traceEventsPrinted = 0;
+	state std::vector<const UID*> uids;
+	loop {
+		wait(self->printDetailedTeamsInfo.onTrigger() || delay(SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL));
+
+		traceEventsPrinted = 0;
+		if (now() - self->lastTeamsInfoSnapshotTime >= SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
+			// Refresh state snapshot
+			self->lastTeamsInfoSnapshotTime = now();
+
+			configuration = self->configuration;
+			server_info = self->server_info;
+			teams = self->teams;
+			machine_info = self->machine_info;
+			machineTeams = self->machineTeams;
+			internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
+			machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
+			machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
+			std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
+			uids = _uids;
+
+			auto const& keys = self->server_status.getKeys();
+			for (auto const& key : keys) {
+				server_status.set(key, self->server_status.get(key));
+			}
+		}
+
+		// Print to TraceEvents
+		TraceEvent("DDConfig")
+		    .detail("StorageTeamSize", configuration.storageTeamSize)
+		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+		    .detail("TeamCollectionID", tcIdString);
+
+		TraceEvent("ServerInfo").detail("Size", server_info.size()).detail("TeamCollectionID", tcIdString);
+		state int i = 0;
+		state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
+		for (; i < server_info.size(); i++) {
+			TraceEvent("ServerInfo")
+			    .detail("ServerInfoIndex", i)
+			    .detail("ServerID", server->first.toString())
+			    .detail("ServerTeamOwned", server->second->teams.size())
+			    .detail("MachineID", server->second->machine->machineID.contents().toString())
+			    .detail("TeamCollectionID", tcIdString);
+			server++;
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+
+		i = 0;
+		server = server_info.begin();
+		for (; i < server_info.size(); i++) {
+			const UID& uid = server->first;
+			TraceEvent("ServerStatus", uid)
+			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
+			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
+			    .detail("MachineTeamSize",
+			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
+			    .detail("TeamCollectionID", tcIdString);
+			server++;
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+
+		i = 0;
+		TraceEvent("ServerTeamInfo").detail("Size", teams.size()).detail("TeamCollectionID", tcIdString);
+		for (; i < teams.size(); i++) {
+			const auto& team = teams[i];
+			TraceEvent("ServerTeamInfo")
+			    .detail("TeamIndex", i)
+			    .detail("Healthy", team->isHealthy())
+			    .detail("TeamSize", team->size())
+			    .detail("MemberIDs", team->getServerIDsStr())
+			    .detail("TeamCollectionID", tcIdString);
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+
+		i = 0;
+		TraceEvent("MachineInfo").detail("Size", machine_info.size()).detail("TeamCollectionID", tcIdString);
+		state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
+		state bool isMachineHealthy = false;
+		for (; i < machine_info.size(); i++) {
+			Reference<TCMachineInfo> _machine = machine->second;
+			if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
+			    _machine->serversOnMachine.empty()) {
+				isMachineHealthy = false;
+			}
+
+			// Healthy machine has at least one healthy server
+			for (auto& server : _machine->serversOnMachine) {
+				if (!server_status.get(server->id).isUnhealthy()) {
+					isMachineHealthy = true;
+				}
+			}
+
+			isMachineHealthy = false;
+			TraceEvent("MachineInfo")
+			    .detail("MachineInfoIndex", i)
+			    .detail("Healthy", isMachineHealthy)
+			    .detail("MachineID", machine->first.contents().toString())
+			    .detail("MachineTeamOwned", machine->second->machineTeams.size())
+			    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
+			    .detail("ServersID", machine->second->getServersIDStr())
+			    .detail("TeamCollectionID", tcIdString);
+			machine++;
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+
+		i = 0;
+		TraceEvent("MachineTeamInfo").detail("Size", machineTeams.size()).detail("TeamCollectionID", tcIdString);
+		for (; i < machineTeams.size(); i++) {
+			const auto& team = machineTeams[i];
+			TraceEvent("MachineTeamInfo")
+			    .detail("TeamIndex", i)
+			    .detail("MachineIDs", team->getMachineIDsStr())
+			    .detail("ServerTeams", team->serverTeams.size())
+			    .detail("TeamCollectionID", tcIdString);
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+
+		i = 0;
+		TraceEvent("LocalityRecordKeyName")
+		    .detail("Size", internedLocalityRecordKeyNameStrings.size())
+		    .detail("TeamCollectionID", tcIdString);
+		for (; i < internedLocalityRecordKeyNameStrings.size(); i++) {
+			TraceEvent("LocalityRecordKeyIndexName")
+			    .detail("KeyIndex", i)
+			    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
+			    .detail("TeamCollectionID", tcIdString);
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+
+		i = 0;
+		TraceEvent("MachineLocalityMap")
+		    .detail("Size", machineLocalityMapEntryArraySize)
+		    .detail("TeamCollectionID", tcIdString);
+		for (; i < uids.size(); i++) {
+			const auto& uid = uids[i];
+			Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
+			if (record.isValid()) {
+				TraceEvent("MachineLocalityMap")
+				    .detail("LocalityIndex", i)
+				    .detail("UID", uid->toString())
+				    .detail("LocalityRecord", record->toString())
+				    .detail("TeamCollectionID", tcIdString);
+			} else {
+				TraceEvent("MachineLocalityMap")
+				    .detail("LocalityIndex", i)
+				    .detail("UID", uid->toString())
+				    .detail("LocalityRecord", "[NotFound]")
+				    .detail("TeamCollectionID", tcIdString);
+			}
+			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+				wait(yield());
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> removeBadTeams(DDTeamCollection* self) {
 	wait(self->initialFailureReactionDelay);
 	wait(waitUntilHealthy(self));
@@ -4329,9 +4518,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
+				actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection, "DDTeamCollectionSecondary"));
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection, "DDTeamCollectionPrimary"));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			wait( waitForAll( actors ) );
