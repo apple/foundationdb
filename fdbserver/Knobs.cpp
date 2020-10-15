@@ -219,8 +219,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( DD_VALIDATE_LOCALITY,                                 true ); if( randomize && BUGGIFY ) DD_VALIDATE_LOCALITY = false;
 	init( DD_CHECK_INVALID_LOCALITY_DELAY,                       60  ); if( randomize && BUGGIFY ) DD_CHECK_INVALID_LOCALITY_DELAY = 1 + deterministicRandom()->random01() * 600;
 	init( DD_ENABLE_VERBOSE_TRACING,                           false ); if( randomize && BUGGIFY ) DD_ENABLE_VERBOSE_TRACING = true;
-	init( DD_TEAMS_INFO_PRINT_INTERVAL,                         1800); // Print detailed DD team status every 30 mins
-	init( DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL,               300); // Refresh snapshot of the detailed teams info every 5 mins
+	init( DD_TEAMS_INFO_PRINT_INTERVAL,                         1800 ); if( randomize && BUGGIFY ) DD_TEAMS_INFO_PRINT_INTERVAL = 30; // Print detailed DD team status every 30 mins
+	init( DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL,               300 ); // Refresh snapshot of the detailed teams info every 5 mins
+	init( DD_TEAMS_INFO_PRINT_YIELD_COUNT,                       100 );
 
 	// TeamRemover
 	init( TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER,                false ); if( randomize && BUGGIFY ) TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER = deterministicRandom()->random01() < 0.1 ? true : false; // false by default. disable the consistency check when it's true

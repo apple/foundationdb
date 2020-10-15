@@ -631,7 +631,8 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int highestUtilizationTeam;
 
 	AsyncTrigger printDetailedTeamsInfo;
-	double lastTeamsInfoSnapshotTime;
+	double lastTeamCollectionInfoSnapshotTime;
+	double lastTeamCollectionInfoLoggingTriggeredTime;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -770,9 +771,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				}
 				if (self->medianAvailableSpace < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
 					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall")
-					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace);
-					// Trigger teams info print
-					self->printDetailedTeamsInfo.trigger();
+					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace)
+					    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+					if (now() - self->lastTeamCollectionInfoLoggingTriggeredTime >
+					    // It's meaningless to trigger the logging again if the snapshot is stale
+					    SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
+						// Trigger teams info print
+						self->printDetailedTeamsInfo.trigger();
+						self->lastTeamCollectionInfoLoggingTriggeredTime = now();
+					}
 				}
 			}
 
@@ -2578,41 +2585,42 @@ ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 
 	}
 }
 
-// This function is very expensive to call. Use with caution.
+// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
+// task on the run loop. This function is very expensive to call due to the data it needs to copy. Use with caution.
 ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std::string tcIdString) {
 	state DatabaseConfiguration configuration;
 	state std::map<UID, Reference<TCServerInfo>> server_info;
-	state ServerStatusMap server_status;
+	state std::map<UID, ServerStatus> server_status;
 	state vector<Reference<TCTeamInfo>> teams;
 	state std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	state std::vector<Reference<TCMachineTeamInfo>> machineTeams;
-	state std::vector<std::string> internedLocalityRecordKeyNameStrings;
-	state int machineLocalityMapEntryArraySize;
-	state std::vector<Reference<LocalityRecord>> machineLocalityMapRecordArray;
+	// state std::vector<std::string> internedLocalityRecordKeyNameStrings;
+	// state int machineLocalityMapEntryArraySize;
+	// state std::vector<Reference<LocalityRecord>> machineLocalityMapRecordArray;
 	state int traceEventsPrinted = 0;
-	state std::vector<const UID*> uids;
+	state std::vector<const UID*> serverIDs;
 	loop {
 		wait(self->printDetailedTeamsInfo.onTrigger() || delay(SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL));
 
 		traceEventsPrinted = 0;
-		if (now() - self->lastTeamsInfoSnapshotTime >= SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
+		if (now() - self->lastTeamCollectionInfoSnapshotTime >= SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
 			// Refresh state snapshot
-			self->lastTeamsInfoSnapshotTime = now();
+			self->lastTeamCollectionInfoSnapshotTime = now();
 
 			configuration = self->configuration;
 			server_info = self->server_info;
 			teams = self->teams;
 			machine_info = self->machine_info;
 			machineTeams = self->machineTeams;
-			internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
-			machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
-			machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
+			// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
+			// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
+			// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
 			std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
-			uids = _uids;
+			serverIDs = _uids;
 
 			auto const& keys = self->server_status.getKeys();
 			for (auto const& key : keys) {
-				server_status.set(key, self->server_status.get(key));
+				server_status.emplace(key, self->server_status.get(key));
 			}
 		}
 
@@ -2634,7 +2642,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 			    .detail("MachineID", server->second->machine->machineID.contents().toString())
 			    .detail("TeamCollectionID", tcIdString);
 			server++;
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
@@ -2644,13 +2652,13 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 		for (; i < server_info.size(); i++) {
 			const UID& uid = server->first;
 			TraceEvent("ServerStatus", uid)
-			    .detail("Healthy", !server_status.get(uid).isUnhealthy())
+			    .detail("Healthy", !server_status.at(uid).isUnhealthy())
 			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 			    .detail("MachineTeamSize",
 			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
 			    .detail("TeamCollectionID", tcIdString);
 			server++;
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
@@ -2665,7 +2673,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr())
 			    .detail("TeamCollectionID", tcIdString);
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
@@ -2683,7 +2691,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 
 			// Healthy machine has at least one healthy server
 			for (auto& server : _machine->serversOnMachine) {
-				if (!server_status.get(server->id).isUnhealthy()) {
+				if (!server_status.at(server->id).isUnhealthy()) {
 					isMachineHealthy = true;
 				}
 			}
@@ -2698,7 +2706,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 			    .detail("ServersID", machine->second->getServersIDStr())
 			    .detail("TeamCollectionID", tcIdString);
 			machine++;
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
@@ -2712,49 +2720,50 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 			    .detail("MachineIDs", team->getMachineIDsStr())
 			    .detail("ServerTeams", team->serverTeams.size())
 			    .detail("TeamCollectionID", tcIdString);
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
+			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
 
-		i = 0;
-		TraceEvent("LocalityRecordKeyName")
-		    .detail("Size", internedLocalityRecordKeyNameStrings.size())
-		    .detail("TeamCollectionID", tcIdString);
-		for (; i < internedLocalityRecordKeyNameStrings.size(); i++) {
-			TraceEvent("LocalityRecordKeyIndexName")
-			    .detail("KeyIndex", i)
-			    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
-			    .detail("TeamCollectionID", tcIdString);
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
-				wait(yield());
-			}
-		}
+		// TODO: re-enable the following logging or remove them.
+		// i = 0;
+		// TraceEvent("LocalityRecordKeyName")
+		//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
+		//     .detail("TeamCollectionID", tcIdString);
+		// for (; i < internedLocalityRecordKeyNameStrings.size(); i++) {
+		// 	TraceEvent("LocalityRecordKeyIndexName")
+		// 	    .detail("KeyIndex", i)
+		// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
+		// 	    .detail("TeamCollectionID", tcIdString);
+		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+		// 		wait(yield());
+		// 	}
+		// }
 
-		i = 0;
-		TraceEvent("MachineLocalityMap")
-		    .detail("Size", machineLocalityMapEntryArraySize)
-		    .detail("TeamCollectionID", tcIdString);
-		for (; i < uids.size(); i++) {
-			const auto& uid = uids[i];
-			Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
-			if (record.isValid()) {
-				TraceEvent("MachineLocalityMap")
-				    .detail("LocalityIndex", i)
-				    .detail("UID", uid->toString())
-				    .detail("LocalityRecord", record->toString())
-				    .detail("TeamCollectionID", tcIdString);
-			} else {
-				TraceEvent("MachineLocalityMap")
-				    .detail("LocalityIndex", i)
-				    .detail("UID", uid->toString())
-				    .detail("LocalityRecord", "[NotFound]")
-				    .detail("TeamCollectionID", tcIdString);
-			}
-			if (++traceEventsPrinted % 100 == 0) { // TODO: Knob-ify this number?
-				wait(yield());
-			}
-		}
+		// i = 0;
+		// TraceEvent("MachineLocalityMap")
+		//     .detail("Size", machineLocalityMapEntryArraySize)
+		//     .detail("TeamCollectionID", tcIdString);
+		// for (; i < serverIDs.size(); i++) {
+		// 	const auto& serverID = serverIDs[i];
+		// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
+		// 	if (record.isValid()) {
+		// 		TraceEvent("MachineLocalityMap")
+		// 		    .detail("LocalityIndex", i)
+		// 		    .detail("UID", serverID->toString())
+		// 		    .detail("LocalityRecord", record->toString())
+		// 		    .detail("TeamCollectionID", tcIdString);
+		// 	} else {
+		// 		TraceEvent("MachineLocalityMap")
+		// 		    .detail("LocalityIndex", i)
+		// 		    .detail("UID", serverID->toString())
+		// 		    .detail("LocalityRecord", "[NotFound]")
+		// 		    .detail("TeamCollectionID", tcIdString);
+		// 	}
+		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+		// 		wait(yield());
+		// 	}
+		// }
 	}
 }
 

@@ -184,6 +184,7 @@ public:
 	bool DD_ENABLE_VERBOSE_TRACING;
 	int DD_TEAMS_INFO_PRINT_INTERVAL;
 	int DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL;
+	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
