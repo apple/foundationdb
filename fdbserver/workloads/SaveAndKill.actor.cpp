@@ -44,14 +44,12 @@ struct SaveAndKillWorkload : TestWorkload {
 		isRestoring = getOption( options, LiteralStringRef("isRestoring"),  0 );
 	}
 
-	virtual std::string description() { return "SaveAndKillWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
+	std::string description() const override { return "SaveAndKillWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		g_simulator.disableSwapsToAll();
 		return Void();
 	}
-	virtual Future<Void> start( Database const& cx ) {
-		return _start(this);
-	}
+	Future<Void> start(Database const& cx) override { return _start(this); }
 
 	ACTOR Future<Void> _start( SaveAndKillWorkload* self) {
 		state int i;
@@ -131,11 +129,8 @@ struct SaveAndKillWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
-	virtual void getMetrics( std::vector<PerfMetric>& ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(std::vector<PerfMetric>&) override {}
 };
 
 WorkloadFactory<SaveAndKillWorkload> SaveAndKillWorkloadFactory("SaveAndKill");

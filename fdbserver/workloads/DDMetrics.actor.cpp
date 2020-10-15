@@ -35,7 +35,7 @@ struct DDMetricsWorkload : TestWorkload {
 		startDelay = getOption( options, LiteralStringRef("beginPoll"), 10.0 );
 	}
 
-	virtual std::string description() { return "Data Distribution Metrics"; }
+	std::string description() const override { return "Data Distribution Metrics"; }
 
 	ACTOR Future<int> getHighPriorityRelocationsInFlight( Database cx, DDMetricsWorkload *self ) {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
@@ -69,18 +69,11 @@ struct DDMetricsWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		return clientId == 0 ? work( cx, this ) : Void();
-	}
+	Future<Void> start(Database const& cx) override { return clientId == 0 ? work(cx, this) : Void(); }
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		m.push_back( PerfMetric( "DDDuration", ddDone, false ) );
-	}
-
+	void getMetrics(vector<PerfMetric>& m) override { m.push_back(PerfMetric("DDDuration", ddDone, false)); }
 };
 
 WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory("DDMetrics");

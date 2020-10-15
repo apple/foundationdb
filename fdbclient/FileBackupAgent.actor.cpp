@@ -793,13 +793,13 @@ namespace fileBackup {
 			return Void();
 		}
 
-		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
+	    StringRef getName() const override {
+		    TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
-		}
+	    }
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveZeroBackupTask::name = LiteralStringRef("abort_legacy_backup");
@@ -863,13 +863,13 @@ namespace fileBackup {
 			return Void();
 		}
 
-		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
+	    StringRef getName() const override {
+		    TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
-		}
+	    }
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveOneBackupTask::name = LiteralStringRef("abort_legacy_backup_5.2");
@@ -940,24 +940,18 @@ namespace fileBackup {
 	// Backup and Restore taskFunc definitions will inherit from one of the following classes which
 	// servers to catch and log to the appropriate config any error that execute/finish didn't catch and log.
 	struct RestoreTaskFuncBase : TaskFuncBase {
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
-		}
-		virtual std::string toString(Reference<Task> task)
-		{
-			return "";
-		}
-	};
+	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) final override {
+		    return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
+	    }
+	    virtual std::string toString(Reference<Task> task) const { return ""; }
+    };
 
 	struct BackupTaskFuncBase : TaskFuncBase {
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
-		}
-		virtual std::string toString(Reference<Task> task)
-		{
-			return "";
-		}
-	};
+	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) final override {
+		    return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
+	    }
+	    virtual std::string toString(Reference<Task> task) const { return ""; }
+    };
 
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
 
@@ -990,15 +984,15 @@ namespace fileBackup {
 			}
 		} Params;
 
-		std::string toString(Reference<Task> task) {
-			return format("beginKey '%s' endKey '%s' addTasks %d",
+	    std::string toString(Reference<Task> task) const override {
+		    return format("beginKey '%s' endKey '%s' addTasks %d",
 				Params.beginKey().get(task).printable().c_str(),
 				Params.endKey().get(task).printable().c_str(),
 				Params.addBackupRangeTasks().get(task)
 			);
-		}
+	    }
 
-		StringRef getName() const { return name; };
+	    StringRef getName() const { return name; };
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
@@ -2595,13 +2589,13 @@ namespace fileBackup {
 			static TaskParam<int64_t> readLen() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
-		std::string toString(Reference<Task> task) {
-			return format("fileName '%s' readLen %lld readOffset %lld",
+	    std::string toString(Reference<Task> task) const override {
+		    return format("fileName '%s' readLen %lld readOffset %lld",
 				Params.inputFile().get(task).fileName.c_str(),
 				Params.readLen().get(task),
 				Params.readOffset().get(task));
-		}
-	};
+	    }
+    };
 
 	struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		static struct : InputParams {
@@ -2622,14 +2616,14 @@ namespace fileBackup {
 			}
 		} Params;
 
-		std::string toString(Reference<Task> task) {
-			std::string returnStr = RestoreFileTaskFuncBase::toString(task);
+	    std::string toString(Reference<Task> task) const override {
+		    std::string returnStr = RestoreFileTaskFuncBase::toString(task);
 			for(auto &range : Params.getOriginalFileRanges(task))
 				returnStr += format("  originalFileRange '%s'", printable(range).c_str());
 			return returnStr;
-		}
+	    }
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state RestoreConfig restore(task);
 
 			state RestoreFile rangeFile = Params.inputFile().get(task);
@@ -4506,7 +4500,7 @@ public:
 	                                     Version beginVersion, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
-		state BackupDescription desc = wait(bc->describeBackup());
+		state BackupDescription desc = wait(bc->describeBackup(true));
 		if(cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}
@@ -4525,6 +4519,7 @@ public:
 		if(!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 				.detail("BackupContainer", bc->getURL())
+				.detail("BeginVersion", beginVersion)
 				.detail("TargetVersion", targetVersion);
 			fprintf(stderr, "ERROR: Restore version %" PRId64 " is not possible from %s\n", targetVersion, bc->getURL().c_str());
 			throw restore_invalid_version();

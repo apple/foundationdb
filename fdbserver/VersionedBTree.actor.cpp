@@ -2974,7 +2974,7 @@ struct InPlaceArray {
 };
 #pragma pack(pop)
 
-class VersionedBTree : public IVersionedStore {
+class VersionedBTree final : public IVersionedStore {
 public:
 	// The first possible internal record possible in the tree
 	static RedwoodRecordRef dbBegin;
@@ -3863,19 +3863,19 @@ private:
 
 		virtual ~SuperPage() { delete[] m_data; }
 
-		virtual Reference<IPage> clone() const {
+		Reference<IPage> clone() const override {
 			return Reference<IPage>(new SuperPage({ Reference<const IPage>::addRef(this) }));
 		}
 
-		void addref() const { ReferenceCounted<SuperPage>::addref(); }
+		void addref() const override { ReferenceCounted<SuperPage>::addref(); }
 
-		void delref() const { ReferenceCounted<SuperPage>::delref(); }
+		void delref() const override { ReferenceCounted<SuperPage>::delref(); }
 
-		int size() const { return m_size; }
+		int size() const override { return m_size; }
 
-		uint8_t const* begin() const { return m_data; }
+		uint8_t const* begin() const override { return m_data; }
 
-		uint8_t* mutate() { return m_data; }
+		uint8_t* mutate() override { return m_data; }
 
 	private:
 		uint8_t* m_data;
@@ -5737,6 +5737,8 @@ public:
 	}
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType::SSD_REDWOOD_V1; }
+
+	bool canPipelineCommits() const override { return true; }
 
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 

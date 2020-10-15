@@ -39,6 +39,7 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
+import com.apple.foundationdb.KeyArrayResult;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
@@ -210,6 +211,11 @@ public class StackTester {
 				List<Object> params = inst.popParams(2).join();
 				Long size = inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).join();
 				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}
+			else if (op == StackOperation.GET_RANGE_SPLIT_POINTS) {
+				List<Object> params = inst.popParams(3).join();
+				KeyArrayResult splitPoints = inst.readTr.getRangeSplitPoints((byte[])params.get(0), (byte[])params.get(1), (long)params.get(2)).join();
+				inst.push("GOT_RANGE_SPLIT_POINTS".getBytes());
 			}
 			else if(op == StackOperation.GET_RANGE) {
 				List<Object> params = inst.popParams(5).join();

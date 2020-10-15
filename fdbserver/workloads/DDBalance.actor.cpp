@@ -53,15 +53,11 @@ struct DDBalanceWorkload : TestWorkload {
 		currentbin = deterministicRandom()->randomInt(0,binCount);
 	}
 
-	virtual std::string description() { return "DDBalance"; }
+	std::string description() const override { return "DDBalance"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return ddbalanceSetup( cx, this );
-	}
+	Future<Void> setup(Database const& cx) override { return ddbalanceSetup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR Future<Void> _start( Database cx, DDBalanceWorkload *self ) {
 		for(int c=0; c<self->moversPerClient; c++)
@@ -72,7 +68,7 @@ struct DDBalanceWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		bool ok = true;
 		for( int i = 0; i < clients.size(); i++ )
 			if( clients[i].isError() )
@@ -81,7 +77,7 @@ struct DDBalanceWorkload : TestWorkload {
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
 		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
 		m.push_back( operations.getMetric() );

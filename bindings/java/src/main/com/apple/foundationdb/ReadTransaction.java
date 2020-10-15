@@ -456,6 +456,28 @@ public interface ReadTransaction extends ReadTransactionContext {
 	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
 
 	/**
+	 * Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>.
+	 * Note: the returned split points contain the start key and end key of the given range.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<KeyArrayResult> getRangeSplitPoints(byte[] begin, byte[] end, long chunkSize);
+
+	/**
+	 * Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>
+	 * Note: the returned split points contain the start key and end key of the given range.
+	 *
+	 * @param range the range of the keys
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize);
+
+	
+	/**
 	 * Returns a set of options that can be set on a {@code Transaction}
 	 *
 	 * @return a set of transaction-specific options affecting this {@code Transaction}

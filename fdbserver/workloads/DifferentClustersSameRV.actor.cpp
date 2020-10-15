@@ -45,7 +45,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		keyToWatch = getOption(options, LiteralStringRef("keyToWatch"), LiteralStringRef("anotherKey"));
 	}
 
-	std::string description() override { return "DifferentClustersSameRV"; }
+	std::string description() const override { return "DifferentClustersSameRV"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
