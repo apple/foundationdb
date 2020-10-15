@@ -418,7 +418,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			for (size_t j = 0; j < key_size; ++j)
 				skey.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
-			return Key(skey);
+			// 15% (= 20% * 75%) of the time generating keys after \xff\xff to test special keys code
+			if (deterministicRandom()->random01() < 0.2)
+				return Key(skey).withPrefix(specialKeys.begin);
+			else
+				return Key(skey);
 		}
 
 		static Value makeValue() {
@@ -667,7 +671,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.begin <= keysel2.getKey() &&
+			                         keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0)),
@@ -705,7 +710,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			keysel2 = makeKeySel();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.begin <= keysel2.getKey() &&
+			                         keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_range_limits_invalid,
@@ -755,7 +761,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -795,7 +801,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key2 = makeKey();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
