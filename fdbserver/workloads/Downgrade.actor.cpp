@@ -150,7 +150,7 @@ struct DowngradeWorkload : TestWorkload {
 		return Void();
 	}
 
-	std::string description() override { return NAME; }
+	std::string description() const override { return NAME; }
 
 	Future<Void> setup(Database const& cx) override {
 		return clientId ? Void() : (writeOld(cx, numObjects, oldKey) && writeNew(cx, numObjects, newKey));

@@ -52,18 +52,18 @@ struct IncrementalBackupWorkload : TestWorkload {
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
 
-	virtual std::string description() { return "IncrementalBackup"; }
+	std::string description() const override { return "IncrementalBackup"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId) {
 			return Void();
 		}
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	 Future<bool> check(Database const& cx) override {
 		if (clientId) {
 			return true;
 		}
@@ -206,7 +206,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<IncrementalBackupWorkload> IncrementalBackupWorkloadFactory("IncrementalBackup");

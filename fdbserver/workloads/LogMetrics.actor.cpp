@@ -43,9 +43,9 @@ struct LogMetricsWorkload : TestWorkload {
 		dataFolder = getOption( options, LiteralStringRef("dataFolder"), LiteralStringRef("") ).toString();
 	}
 
-	virtual std::string description() { return "LogMetricsWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "LogMetricsWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if(clientId)
 			return Void();
 		return _start( cx, this );
@@ -92,9 +92,8 @@ struct LogMetricsWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<LogMetricsWorkload> LogMetricsWorkloadFactory("LogMetrics");

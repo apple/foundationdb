@@ -1443,26 +1443,26 @@ struct ThreadSafeCounter {
 	operator int64_t() const { return counter; }
 };
 
-class KeyValueStoreSQLite : public IKeyValueStore {
+class KeyValueStoreSQLite final : public IKeyValueStore {
 public:
-	virtual void dispose() override { doClose(this, true); }
-	virtual void close() override { doClose(this, false); }
+	void dispose() override { doClose(this, true); }
+	void close() override { doClose(this, false); }
 
-	virtual Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
-	virtual Future<Void> onClosed() override { return stopped.getFuture(); }
+	Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
+	Future<Void> onClosed() override { return stopped.getFuture(); }
 
-	virtual KeyValueStoreType getType() const override { return type; }
-	virtual StorageBytes getStorageBytes() const override;
-	virtual bool canPipelineCommits() const override { return false; }
+	KeyValueStoreType getType() const override { return type; }
+	StorageBytes getStorageBytes() const override;
+	bool canPipelineCommits() const override { return false; }
 
-	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
-	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
-	virtual Future<Void> commit(bool sequential = false) override;
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
+	Future<Void> commit(bool sequential = false) override;
 
-	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override;
-	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override;
-	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
-	                                                     int byteLimit = 1 << 30) override;
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override;
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override;
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                             int byteLimit = 1 << 30) override;
 
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
 	~KeyValueStoreSQLite();
@@ -1506,9 +1506,7 @@ private:
 			ppReadCursor->clear();
 		}
 
-		virtual void init() {
-			conn.open(false);
-		}
+		void init() override { conn.open(false); }
 
 		Reference<ReadCursor> getCursor() {
 			Reference<ReadCursor> cursor = *ppReadCursor;
@@ -1524,7 +1522,7 @@ private:
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID) {};
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action( ReadValueAction& rv ) {
 			//double t = timer();
@@ -1538,13 +1536,14 @@ private:
 			//if (t >= 1.0) TraceEvent("ReadValueActionSlow",dbgid).detail("Elapsed", t);
 		}
 
-		struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction>, FastAllocated<ReadValuePrefixAction> {
+		struct ReadValuePrefixAction final : TypedAction<Reader, ReadValuePrefixAction>,
+		                                     FastAllocated<ReadValuePrefixAction> {
 			Key key;
 			int maxLength;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID) : key(key), maxLength(maxLength), debugID(debugID) {};
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action( ReadValuePrefixAction& rv ) {
 			//double t = timer();
@@ -1563,7 +1562,7 @@ private:
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<Standalone<RangeResultRef>> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action( ReadRangeAction& rr ) {
 			rr.result.send( getCursor()->get().getRange(rr.keys, rr.rowLimit, rr.byteLimit) );
@@ -1606,7 +1605,7 @@ private:
 			delete cursor;
 			TraceEvent("KVWriterDestroyed", dbgid);
 		}
-		virtual void init() {
+		void init() override {
 			if(checkAllChecksumsOnOpen) {
 				if(conn.checkAllPageChecksums() != 0) {
 					// It's not strictly necessary to discard the file immediately if a page checksum error is found
@@ -1639,7 +1638,7 @@ private:
 
 		struct InitAction : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
 			ThreadReturnPromise<Void> result;
-			virtual double getTimeEstimate() { return 0; }
+			double getTimeEstimate() const override { return 0; }
 		};
 		void action(InitAction& a) {
 			// init() has already been called
@@ -1649,7 +1648,7 @@ private:
 		struct SetAction : TypedAction<Writer, SetAction>, FastAllocated<SetAction> {
 			KeyValue kv;
 			SetAction( KeyValue kv ) : kv(kv) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
 		};
 		void action(SetAction& a) {
 			double s = now();
@@ -1664,7 +1663,7 @@ private:
 		struct ClearAction : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
 			KeyRange range;
 			ClearAction( KeyRange range ) : range(range) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
 		};
 		void action(ClearAction& a) {
 			double s = now();
@@ -1679,7 +1678,7 @@ private:
 			double issuedTime;
 			ThreadReturnPromise<Void> result;
 			CommitAction() : issuedTime(now()) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
 			double t1 = now();
@@ -1746,7 +1745,7 @@ private:
 
 		struct SpringCleaningAction : TypedAction<Writer, SpringCleaningAction>, FastAllocated<SpringCleaningAction> {
 			ThreadReturnPromise<SpringCleaningWorkPerformed> result;
-			virtual double getTimeEstimate() { 
+			double getTimeEstimate() const override {
 				return std::max(SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_TIME_ESTIMATE, SERVER_KNOBS->SPRING_CLEANING_VACUUM_TIME_ESTIMATE);
 			}
 		};

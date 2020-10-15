@@ -102,7 +102,7 @@ public: // ctor & dtor
 	}
 
 public: // workload functions
-	std::string description() override { return "SnapTest"; }
+	std::string description() const override { return "SnapTest"; }
 	Future<Void> setup(Database const& cx) override {
 		TraceEvent("SnapTestWorkloadSetup");
 		return Void();

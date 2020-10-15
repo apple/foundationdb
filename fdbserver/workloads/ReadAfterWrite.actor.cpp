@@ -56,9 +56,9 @@ struct ReadAfterWriteWorkload : KVWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 	}
 
-	virtual std::string description() { return "ReadAfterWriteWorkload"; }
+	std::string description() const override { return "ReadAfterWriteWorkload"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	ACTOR static Future<Void> benchmark(Database cx, ReadAfterWriteWorkload* self) {
 		loop {
@@ -104,16 +104,16 @@ struct ReadAfterWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR Future<Void> _start(Database cx, ReadAfterWriteWorkload* self) {
 		state Future<Void> lifetime = benchmark(cx, self);
 		wait(delay(self->testDuration));
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) override { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(std::vector<PerfMetric>& m) {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Mean Latency (ms)", 1000 * propagationLatency.mean(), true);
 		m.emplace_back("Median Latency (ms, averaged)", 1000 * propagationLatency.median(), true);
 		m.emplace_back("90% Latency (ms, averaged)", 1000 * propagationLatency.percentile(0.90), true);

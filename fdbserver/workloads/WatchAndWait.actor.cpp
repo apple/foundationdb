@@ -57,15 +57,13 @@ struct WatchAndWaitWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return "WatchAndWait"; }
+	std::string description() const override { return "WatchAndWait"; }
 
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	Key keyForIndex( uint64_t index ) {
+	Key keyForIndex(uint64_t index) const {
 		Key result = makeString( keyBytes );
 		uint8_t* data = mutateString( result );
 		memset(data, '.', keyBytes);
@@ -82,11 +80,9 @@ struct WatchAndWaitWorkload : TestWorkload {
 		return result;
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.push_back( PerfMetric( "Triggers/sec", triggers.getValue() / duration, false ) );
 		m.push_back( triggers.getMetric() );

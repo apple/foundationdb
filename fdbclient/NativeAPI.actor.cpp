@@ -2699,7 +2699,7 @@ void debugAddTags(Transaction *tr) {
 Transaction::Transaction(Database const& cx)
   : cx(cx), info(cx->taskID, deterministicRandom()->randomUniqueID()), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
     committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
-    trLogInfo(createTrLogInfoProbabilistically(cx)), span(info.spanID, "Transaction"_loc) {
+    trLogInfo(createTrLogInfoProbabilistically(cx)), tr(info.spanID), span(info.spanID, "Transaction"_loc) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(this);
 	}

@@ -105,6 +105,7 @@ ACTOR Future<Void> resolveBatch(
 	ResolveTransactionBatchRequest req)
 {
 	state Optional<UID> debugID;
+	state Span span("R:resolveBatch"_loc, req.spanContext);
 
 	// The first request (prevVersion < 0) comes from the master
 	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();

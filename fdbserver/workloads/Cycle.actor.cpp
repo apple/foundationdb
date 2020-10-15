@@ -53,18 +53,16 @@ struct CycleWorkload : TestWorkload {
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
 
-	virtual std::string description() { return "CycleWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
-		return bulkSetup( cx, this, nodeCount, Promise<double>() );
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "CycleWorkload"; }
+	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
+	Future<Void> start(Database const& cx) override {
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				timeout(
 					cycleClient( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
 		return delay(testDuration);
 	}
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		int errors = 0;
 		for(int c=0; c<clients.size(); c++)
 			errors += clients[c].isError();
@@ -73,7 +71,7 @@ struct CycleWorkload : TestWorkload {
 		clients.clear();
 		return cycleCheck( cx->clone(), this, !errors );
 	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 		m.push_back( tooOldRetries.getMetric() );
