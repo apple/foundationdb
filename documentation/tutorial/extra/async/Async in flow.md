@@ -2,7 +2,7 @@
 
 ## Introduction
 
-FoundationDB is based on an asynchronous infrastructure named `flow`. `flow` introduced a few keywords to C++, including `ACTOR` and`state`, together with some support functions like `wait` and `delay`, to support coroutines. In this article, the usage of `flow` is demonstrated by examples. The reader is expected to have basic understanding of asynchronous programming.
+FoundationDB is based on an asynchronous infrastructure named `flow`. `flow` introduced a few keywords to C++, including `ACTOR` and`state`, together with some support functions like `wait` and `delay` for coroutines. In this article, the . The reader is expected to have basic understanding of asynchronous programming.
 
 ## Basics of `flow` `ACTOR` language
 
