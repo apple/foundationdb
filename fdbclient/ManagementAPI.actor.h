@@ -140,7 +140,7 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	                                                              vector<NetworkAddress> oldCoordinators,
 	                                                              Reference<ClusterConnectionFile>,
 	                                                              CoordinatorsResult&) = 0;
-	virtual std::string getDesiredClusterKeyName() { return std::string(); }
+	virtual std::string getDesiredClusterKeyName() const { return std::string(); }
 };
 
 // Change to use the given set of coordination servers
