@@ -240,6 +240,7 @@ struct TLogCommitReply {
 
 struct TLogCommitRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
+	SpanID spanContext;
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
@@ -249,11 +250,11 @@ struct TLogCommitRequest {
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	TLogCommitRequest( const SpanID& context, const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
+		: spanContext(context), arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID);
+		serializer(ar, prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, messages, reply, arena, debugID, spanContext);
 	}
 };
 

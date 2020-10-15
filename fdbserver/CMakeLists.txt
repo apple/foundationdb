@@ -87,6 +87,7 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
+  SpanContextMessage.h
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp

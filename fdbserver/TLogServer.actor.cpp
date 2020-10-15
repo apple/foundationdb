@@ -28,6 +28,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -1855,6 +1856,7 @@ ACTOR Future<Void> tLogCommit(
 		TLogCommitRequest req,
 		Reference<LogData> logData,
 		PromiseStream<Void> warningCollectorInput ) {
+	state Span span("TLog:tLogCommit"_loc, req.spanContext);
 	state Optional<UID> tlogDebugID;
 	if(req.debugID.present())
 	{
