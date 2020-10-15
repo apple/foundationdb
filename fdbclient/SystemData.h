@@ -400,6 +400,8 @@ extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 extern const KeyRef writeRecoveryKey;
 extern const ValueRef writeRecoveryKeyTrue;
 extern const KeyRef snapshotEndVersionKey;
+extern const KeyRef snapSourceClusterKey;
+extern const ValueRef snapSourceClusterKeyTrue;
 
 #pragma clang diagnostic pop
 

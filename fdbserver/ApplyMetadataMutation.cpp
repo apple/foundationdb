@@ -308,6 +308,10 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 				TraceEvent("WriteRecoveryKeySet", dbgid);
 				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+			} else if (m.param1 == snapSourceClusterKey) {
+				TraceEvent("SnapSourceClusterKeySet", dbgid);
+				if (!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
+				TEST(true); // Snapshot created, setting snapSourceKey in txnStateStore
 			}
 		} else if (m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] && m.type == MutationRef::ClearRange) {
 			KeyRangeRef range(m.param1, m.param2);
@@ -393,6 +397,9 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 			}
 			if (range.contains(writeRecoveryKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(writeRecoveryKey));
+			}
+			if (range.contains(snapSourceClusterKey)) {
+				if(!initialCommit) txnStateStore->clear(singleKeyRange(snapSourceClusterKey));
 			}
 			if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
 				if(!initialCommit) txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);

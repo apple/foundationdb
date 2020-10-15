@@ -1064,3 +1064,5 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(
 const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
 const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
 const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");
+const KeyRef snapSourceClusterKey = LiteralStringRef("\xff/snapSourceCluster");
+const ValueRef snapSourceClusterKeyTrue = LiteralStringRef("1");
