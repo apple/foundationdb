@@ -418,8 +418,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			for (size_t j = 0; j < key_size; ++j)
 				skey.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
-			// 10% of the time generating keys after \xff\xff to test special keys code
-			if (deterministicRandom()->random01() < 0.1)
+			// 15% (= 20% * 75%) of the time generating keys after \xff\xff to test special keys code
+			if (deterministicRandom()->random01() < 0.2)
 				return Key(skey).withPrefix(specialKeys.begin);
 			else
 				return Key(skey);
