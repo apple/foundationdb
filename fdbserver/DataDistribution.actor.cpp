@@ -4736,7 +4736,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			TraceEvent("SnapDataDistributor_WriteFlagAttempt")
 				.detail("SnapPayload", snapReq.snapPayload)
 				.detail("SnapUID", snapReq.snapUID);
-			tr.clear(singleKeyRange(snapSourceClusterKey));
 			tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
 			wait(tr.commit());
 			break;
@@ -4817,21 +4816,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
 			.detail("SnapPayload", snapReq.snapPayload)
 			.detail("SnapUID", snapReq.snapUID);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				TraceEvent("SnapDataDistributor_SourceClusterAttempt")
-				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID);
-				tr.set(snapSourceClusterKey, snapSourceClusterKeyTrue);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				TraceEvent("SnapDataDistributor_SourceClusterError").error(e);
-				wait(tr.onError(e));
-			}
-		}
 	} catch (Error& err) {
 		state Error e = err;
 		TraceEvent("SnapDataDistributor_SnapReqExit")
