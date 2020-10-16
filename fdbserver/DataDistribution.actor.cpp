@@ -3901,6 +3901,7 @@ ACTOR Future<Void> storageServerTracker(
 			}
 		}
 	} catch( Error &e ) {
+		state Error err = e;
 		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
 		    .suppressFor(1.0)
 		    .detail("Primary", self->primary)
