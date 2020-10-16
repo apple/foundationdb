@@ -1069,13 +1069,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	self->computeDuration += g_network->timer() - self->computeStart;
-	if(self->computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && self->batchOperations > 0) {
-		double computePerOperation = self->computeDuration / self->batchOperations;
+	if (self->batchOperations > 0) {
+		double computePerOperation = std::min( SERVER_KNOBS->MAX_COMPUTE_PER_OPERATION, self->computeDuration / self->batchOperations );
 		if(computePerOperation <= pProxyCommitData->commitComputePerOperation[self->latencyBucket]) {
 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = computePerOperation;
 		} else {
 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
 		}
+		pProxyCommitData->stats.maxComputeNS = std::max<int64_t>(pProxyCommitData->stats.maxComputeNS, 1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+ 		pProxyCommitData->stats.minComputeNS = std::min<int64_t>(pProxyCommitData->stats.minComputeNS, 1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
 	}
 
 	return Void();

@@ -65,9 +65,24 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
+	int64_t maxComputeNS;
+ 	int64_t minComputeNS;
+
+	int64_t getAndResetMaxCompute() {
+ 		int64_t r = maxComputeNS;
+ 		maxComputeNS = 0;
+ 		return r;
+ 	}
+
+ 	int64_t getAndResetMinCompute() {
+ 		int64_t r = minComputeNS;
+ 		minComputeNS = 1e12;
+ 		return r;
+ 	}
+
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()),
+	  : cc("ProxyStats", id.toString()), maxComputeNS(0), minComputeNS(1e12),
 	    txnCommitIn("TxnCommitIn", cc), txnCommitVersionAssigned("TxnCommitVersionAssigned", cc),
 	    txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc),
 	    txnCommitOut("TxnCommitOut", cc), txnCommitOutSuccess("TxnCommitOutSuccess", cc),
@@ -84,6 +99,8 @@ struct ProxyStats {
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount",
 		               [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
+		specialCounter(cc, "MaxCompute", [this](){ return this->getAndResetMaxCompute(); });
+ 		specialCounter(cc, "MinCompute", [this](){ return this->getAndResetMinCompute(); });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };

@@ -181,8 +181,11 @@ public:
 	}
 
 	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
-		vector<StorageServerInterface> v(servers.size());
-		for (const auto& server : servers) v.push_back(server->lastKnownInterface);
+		vector<StorageServerInterface> v;
+		v.reserve(servers.size());
+		for (const auto& server : servers) {
+			v.push_back(server->lastKnownInterface);
+		}
 		return v;
 	}
 	int size() const override {
@@ -4486,7 +4489,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo>> db,
 	loop {
 		wait( delay(SERVER_KNOBS->METRIC_UPDATE_RATE) );
 
-		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
+		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies, false));
 
 		choose {
 			when (wait(db->onChange())) {}

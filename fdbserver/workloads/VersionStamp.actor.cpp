@@ -162,7 +162,17 @@ struct VersionStampWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
-		state Version readVersion = wait(tr.getReadVersion());
+		state Version readVersion;
+		loop {
+			try {
+				Version _readVersion = wait(tr.getReadVersion());
+				readVersion = _readVersion;
+				break;
+			}
+			catch(Error &e) {
+				wait(tr.onError(e));
+			}
+		}
 
 		if(BUGGIFY) {
 			if(deterministicRandom()->random01() < 0.5) {
