@@ -3901,6 +3901,7 @@ ACTOR Future<Void> storageServerTracker(
 			}
 		}
 	} catch( Error &e ) {
+		state Error err = e;
 		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
 			errorOut.sendError(e);
 			wait(delay(0)); // Check for cancellation
@@ -3909,7 +3910,7 @@ ACTOR Future<Void> storageServerTracker(
 		    .suppressFor(1.0)
 		    .detail("Primary", self->primary)
 		    .detail("Server", server->id);
-		throw;
+		throw err;
 	}
 }
 
