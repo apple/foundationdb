@@ -3905,7 +3905,8 @@ ACTOR Future<Void> storageServerTracker(
 		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
 		    .suppressFor(1.0)
 		    .detail("Primary", self->primary)
-		    .detail("Server", server->id);
+		    .detail("Server", server->id)
+		    .detail("ErrorCode", e.code());
 		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
 			errorOut.sendError(e);
 			wait(delay(0)); // Check for cancellation, since errorOut.sendError(e) could delete self
