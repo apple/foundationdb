@@ -2600,7 +2600,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 	state int traceEventsPrinted = 0;
 	state std::vector<const UID*> serverIDs;
 	loop {
-		wait(self->printDetailedTeamsInfo.onTrigger() || delay(SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL));
+		wait(self->printDetailedTeamsInfo.onTrigger());
 
 		traceEventsPrinted = 0;
 		if (now() - self->lastTeamCollectionInfoSnapshotTime >= SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
