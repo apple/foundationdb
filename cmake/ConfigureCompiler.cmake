@@ -190,9 +190,7 @@ else()
 
   if(USE_GCOV)
     add_compile_options(--coverage -DUSE_GCOV)
-    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} --coverage")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
-    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    --coverage")
+    add_link_options(--coverage)
   endif()
 
   if(USE_UBSAN)
