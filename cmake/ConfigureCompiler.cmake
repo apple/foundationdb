@@ -209,7 +209,7 @@ else()
       -fsanitize=thread
       -DUSE_SANITIZER
       -DTHREAD_SANITIZER
-      -DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
+      -DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
       )
     add_link_options(-fsanitize=thread)
   endif()
@@ -388,4 +388,3 @@ else()
     endif()
   endif()
 endif()
-
