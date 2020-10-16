@@ -193,7 +193,7 @@ private:
 	// Writes the given vector to the request. Assumes each element in the
 	// vector is a SpanID, and serializes as two big-endian 64-bit integers.
 	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
-		int size = vec.size();
+		int size = vec.size() * 2;
 		if (size <= 15) {
 			request.write_byte((uint8_t) size | 0b10010000);
 		} else {
