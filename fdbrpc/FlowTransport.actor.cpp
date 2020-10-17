@@ -723,6 +723,15 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 	}
 }
 
+Peer::Peer(TransportData* transport, NetworkAddress const& destination)
+  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
+    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
+    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
+    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
+    bytesSent(0), lastLoggedBytesSent(0) {
+	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
+}
+
 void Peer::send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent) {
 	unsent.setWriteBuffer(pb);
 	if (rp) reliable.insert(rp);
