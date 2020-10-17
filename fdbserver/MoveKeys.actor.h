@@ -47,7 +47,7 @@ public:
 	bool isDDEnabled() const;
 
 	// transiently enable(true) or disable(false) the DD. If the process
-	// restarts the state will be forgotten.
+	// restarts, the state will be forgotten.
 	bool setDDEnabled(bool status, UID snapUID);
 };
 
