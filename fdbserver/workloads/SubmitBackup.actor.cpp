@@ -26,7 +26,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct SubmitBackupWorkload : TestWorkload {
+struct SubmitBackupWorkload final : TestWorkload {
 
 	FileBackupAgent backupAgent;
 
@@ -64,11 +64,11 @@ struct SubmitBackupWorkload : TestWorkload {
 		return Void();
 	}
 
-	std::string description() override { return DESCRIPTION; }
+	std::string description() const override { return DESCRIPTION; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<SubmitBackupWorkload> SubmitBackupWorkloadFactory(SubmitBackupWorkload::DESCRIPTION);
