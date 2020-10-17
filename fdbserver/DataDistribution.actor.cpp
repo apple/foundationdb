@@ -158,7 +158,7 @@ public:
 };
 
 // TeamCollection's server team info.
-class TCTeamInfo : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
+class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistributionTeam {
 	vector< Reference<TCServerInfo> > servers;
 	vector<UID> serverIDs;
 	bool healthy;
@@ -298,10 +298,10 @@ public:
 	void setHealthy(bool h) override { healthy = h; }
 	int getPriority() const override { return priority; }
 	void setPriority(int p) override { priority = p; }
-	virtual void addref() { ReferenceCounted<TCTeamInfo>::addref(); }
-	virtual void delref() { ReferenceCounted<TCTeamInfo>::delref(); }
+	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
+	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
 
-	virtual void addServers(const vector<UID> & servers) {
+	void addServers(const vector<UID>& servers) override {
 		serverIDs.reserve(servers.size());
 		for (int i = 0; i < servers.size(); i++) {
 			serverIDs.push_back(servers[i]);
@@ -4728,6 +4728,22 @@ static std::set<int> const& normalDataDistributorErrors() {
 
 ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<struct ServerDBInfo>> db ) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, true, true);
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			TraceEvent("SnapDataDistributor_WriteFlagAttempt")
+				.detail("SnapPayload", snapReq.snapPayload)
+				.detail("SnapUID", snapReq.snapUID);
+			tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			TraceEvent("SnapDataDistributor_WriteFlagError").error(e);
+			wait(tr.onError(e));
+		}
+	}
 	TraceEvent("SnapDataDistributor_SnapReqEnter")
 		.detail("SnapPayload", snapReq.snapPayload)
 		.detail("SnapUID", snapReq.snapUID);

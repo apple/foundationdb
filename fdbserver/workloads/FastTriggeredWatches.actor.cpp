@@ -42,9 +42,9 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
 	}
 
-	virtual std::string description() { return "Watches"; }
+	std::string description() const override { return "Watches"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		if( clientId == 0 )
 			return _setup( cx, this );
 		return Void();
@@ -67,7 +67,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
 			return _start( cx, this );
 		return Void();
@@ -146,7 +146,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		bool ok = true;
 		for( int i = 0; i < clients.size(); i++ )
 			if( clients[i].isError() )
@@ -155,14 +155,14 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.push_back( PerfMetric( "Operations/sec", operations.getValue() / duration, false ) );
 		m.push_back( operations.getMetric() );
 		m.push_back( retries.getMetric() );
 	}
 
-	Key keyForIndex( uint64_t index ) {
+	Key keyForIndex(uint64_t index) const {
 		Key result = makeString( keyBytes );
 		uint8_t* data = mutateString( result );
 		memset(data, '.', keyBytes);

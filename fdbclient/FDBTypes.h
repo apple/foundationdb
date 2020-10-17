@@ -754,14 +754,16 @@ struct TLogVersion {
 		// V3 was the introduction of spill by reference;
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
+		// V6 added span context to list of serialized mutations sent from proxy to tlogs
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
 		V5 = 5, // 6.3
+		V6 = 6, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V5,
-		MIN_RECRUITABLE = V4,
+		MAX_SUPPORTED = V6,
+		MIN_RECRUITABLE = V5,
 		DEFAULT = V5,
 	} version;
 
@@ -784,6 +786,7 @@ struct TLogVersion {
 		if (s == LiteralStringRef("3")) return V3;
 		if (s == LiteralStringRef("4")) return V4;
 		if (s == LiteralStringRef("5")) return V5;
+		if (s == LiteralStringRef("6")) return V6;
 		return default_error_or();
 	}
 };

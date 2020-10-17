@@ -87,6 +87,7 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
+  SpanContextMessage.h
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
@@ -190,6 +191,7 @@ set(FDBSERVER_SRCS
   workloads/SelectorCorrectness.actor.cpp
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
+  workloads/SimpleAtomicAdd.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp

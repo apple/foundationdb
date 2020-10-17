@@ -285,9 +285,9 @@ struct ApiWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> setup(Database const& cx);
-	Future<Void> start(Database const& cx);
-	Future<bool> check(Database const& cx);
+	Future<Void> setup(Database const& cx) override;
+	Future<Void> start(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
 
 	//Compares the contents of this client's key-space in the database with the in-memory key-value store
 	Future<bool> compareDatabaseToMemory();

@@ -305,5 +305,12 @@ public:
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
+class LockDatabaseImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit LockDatabaseImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif

@@ -47,9 +47,9 @@ struct InventoryTestWorkload : TestWorkload {
 		productsPerWrite = getOption( options, LiteralStringRef("productsPerWrite"), 2 );
 	}
 
-	virtual std::string description() { return "InventoryTest"; }
+	std::string description() const override { return "InventoryTest"; }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId) return Void();
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
@@ -61,7 +61,7 @@ struct InventoryTestWorkload : TestWorkload {
 		return waitForAll(clients);
 	}
 
-	int failures() {
+	int failures() const {
 		int failures = 0;
 		for(int c=0; c<clients.size(); c++)
 			if (clients[c].isReady() && clients[c].isError()) {
@@ -70,12 +70,12 @@ struct InventoryTestWorkload : TestWorkload {
 		return failures;
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		if (clientId) return true;
 		return inventoryTestCheck(cx->clone(), this);
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( PerfMetric("Client Failures", failures(), false) );
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
@@ -87,7 +87,7 @@ struct InventoryTestWorkload : TestWorkload {
 			transactions.getValue() * 2 * fractionWriteTransactions / testDuration, true ) );
 	}
 
-	Key chooseProduct() {
+	Key chooseProduct() const {
 		int p = deterministicRandom()->randomInt(0,nProducts);
 		return doubleToTestKey( (double)p / nProducts );
 		//std::string s = std::string(1,'a' + (p%26)) + format("%d",p/26);

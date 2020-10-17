@@ -164,6 +164,16 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes( const K
 		} );
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+                                                                                       int64_t chunkSize) {
+	KeyRange r = range;
+
+	ReadYourWritesTransaction* tr = this->tr;
+	return onMainThread([tr, r, chunkSize]() -> Future<Standalone<VectorRef<KeyRef>>> {
+		tr->checkDeferredError();
+		return tr->getRangeSplitPoints(r, chunkSize);
+	});
+}
 
 ThreadFuture< Standalone<RangeResultRef> > ThreadSafeTransaction::getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot, bool reverse ) {
 	KeySelector b = begin;

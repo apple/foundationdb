@@ -1051,9 +1051,13 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 
 void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFolder, int* pTesterCount,
                           Optional<ClusterConnectionString>* pConnString, Standalone<StringRef>* pStartingConfiguration,
-                          int extraDB, int minimumReplication, int minimumRegions, std::string whitelistBinPaths, bool configureLocked) {
+                          int extraDB, int minimumReplication, int minimumRegions, std::string whitelistBinPaths,
+                          bool configureLocked, int logAntiQuorum) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(extraDB, minimumReplication, minimumRegions);
+	if (logAntiQuorum != -1) {
+		simconfig.db.tLogWriteAntiQuorum = logAntiQuorum;
+	}
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
 	if (configureLocked) {
@@ -1332,7 +1336,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 }
 
 void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, int& minimumRegions,
-                   int& configureLocked) {
+                   int& configureLocked, int& logAntiQuorum) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -1368,6 +1372,9 @@ void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, 
 		if (attrib == "configureLocked") {
 			sscanf(value.c_str(), "%d", &configureLocked);
 		}
+		if (attrib == "logAntiQuorum") {
+			sscanf(value.c_str(), "%d", &logAntiQuorum);
+		}
 	}
 
 	ifs.close();
@@ -1382,7 +1389,8 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state int minimumReplication = 0;
 	state int minimumRegions = 0;
 	state int configureLocked = 0;
-	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked);
+	state int logAntiQuorum = -1;
+	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked, logAntiQuorum);
 
 	// TODO (IPv6) Use IPv6?
 	wait(g_simulator.onProcess(
@@ -1409,7 +1417,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB,
-			                     minimumReplication, minimumRegions, whitelistBinPaths, configureLocked);
+			                     minimumReplication, minimumRegions, whitelistBinPaths, configureLocked, logAntiQuorum);
 			wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, deterministicRandom()->randomUniqueID().toString() );

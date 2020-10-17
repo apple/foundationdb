@@ -39,36 +39,34 @@ struct DiskDurabilityTest : TestWorkload {
 		metrics = prefixRange( prefix );
 	}
 
-	virtual std::string description() { return "DiskDurabilityTest"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "DiskDurabilityTest"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled)
 			return durabilityTest(this, cx);
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
-	Value encodeValue( int64_t x ) {
+	static Value encodeValue(int64_t x) {
 		x = bigEndian64(x);
 		return StringRef( (const uint8_t*)&x, sizeof(x) );
 	}
-	Key encodeKey( int64_t x ) {
-		return encodeValue(x).withPrefix(range.begin);
-	}
+	Key encodeKey(int64_t x) const { return encodeValue(x).withPrefix(range.begin); }
 
-	int64_t decodeValue( ValueRef k ) {
+	static int64_t decodeValue(ValueRef k) {
 		ASSERT( k.size() == sizeof(int64_t) );
 		return bigEndian64( *(int64_t*)k.begin() );
 	}
-	int64_t decodeKey( KeyRef k ) { return decodeValue(k.removePrefix(range.begin)); }
+	int64_t decodeKey(KeyRef k) const { return decodeValue(k.removePrefix(range.begin)); }
 
-	void encodePage( uint8_t* page, int64_t value ) {
+	static void encodePage(uint8_t* page, int64_t value) {
 		int64_t *ipage = (int64_t*)page;
 		for(int i=0; i<4096/8; i++)
 			ipage[i] = value + i;
 	}
-	int64_t decodePage( uint8_t* page ) {
+	static int64_t decodePage(uint8_t* page) {
 		int64_t *ipage = (int64_t*)page;
 		for(int i=0; i<4096/8; i++)
 			if (ipage[i] != ipage[0] + i)

@@ -46,22 +46,18 @@ struct ConflictRangeWorkload : TestWorkload {
 		testReadYourWrites = getOption( options, LiteralStringRef("testReadYourWrites"), false );
 	}
 
-	virtual std::string description() { return "ConflictRange"; }
+	std::string description() const override { return "ConflictRange"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( withConflicts.getMetric() );
 		m.push_back( withoutConflicts.getMetric() );
 		m.push_back( retries.getMetric() );

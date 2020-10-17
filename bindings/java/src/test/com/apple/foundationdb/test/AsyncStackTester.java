@@ -38,6 +38,7 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
+import com.apple.foundationdb.KeyArrayResult;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
@@ -227,6 +228,12 @@ public class AsyncStackTester {
 			List<Object> params = inst.popParams(2).join();
 			return inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).thenAcceptAsync(size -> {
 				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
+		}
+		else if (op == StackOperation.GET_RANGE_SPLIT_POINTS) {
+			List<Object> params = inst.popParams(3).join();
+			return inst.readTr.getRangeSplitPoints((byte[])params.get(0), (byte[])params.get(1), (long)params.get(2)).thenAcceptAsync(splitPoints -> {
+				inst.push("GOT_RANGE_SPLIT_POINTS".getBytes());
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.GET_RANGE) {

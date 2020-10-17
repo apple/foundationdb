@@ -134,6 +134,7 @@ namespace FDB {
 													   FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
 		
 		Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
+		Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
 
 		void addReadConflictRange(KeyRangeRef const& keys) override;
 		void addReadConflictKey(KeyRef const& key) override;
@@ -353,6 +354,16 @@ namespace FDB {
 			int64_t bytes;
 			throw_on_error(fdb_future_get_int64(f->f, &bytes));
 			return bytes;
+		});
+	}
+
+	Future<FDBStandalone<VectorRef<KeyRef>>> TransactionImpl::getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) {
+		return backToFuture<FDBStandalone<VectorRef<KeyRef>>>(fdb_transaction_get_range_split_points(tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize), [](Reference<CFuture> f) {
+			FDBKey const* ks;
+			int count;
+			throw_on_error(fdb_future_get_key_array(f->f, &ks, &count));
+
+			return FDBStandalone<VectorRef<KeyRef>>(f, VectorRef<KeyRef>((KeyRef*)ks, count));
 		});
 	}
 

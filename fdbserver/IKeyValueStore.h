@@ -63,6 +63,8 @@ public:
 
 	virtual void enableSnapshot() {}
 
+	virtual bool canPipelineCommits() const = 0;
+
 	/*
 	Concurrency contract
 		Causal consistency:

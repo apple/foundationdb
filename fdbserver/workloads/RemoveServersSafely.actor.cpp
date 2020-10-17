@@ -59,8 +59,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return "RemoveServersSafelyWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
+	std::string description() const override { return "RemoveServersSafelyWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		if( !enabled )
 			return Void();
 
@@ -128,19 +128,17 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if (!enabled)  return Void();
 		double delay = deterministicRandom()->random01() * (maxDelay-minDelay) + minDelay;
 		return workloadMain( this, cx, delay, toKill1, toKill2 );
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& ) {
-	}
+	void getMetrics(vector<PerfMetric>&) override {}
 
-	virtual std::set<AddressExclusion> getNetworks(std::vector<ISimulator::ProcessInfo*> const& processes)
-	{
+	std::set<AddressExclusion> getNetworks(std::vector<ISimulator::ProcessInfo*> const& processes) {
 		std::set<AddressExclusion>	processAddrs;
 
 		for (auto& processInfo : processes) {
@@ -151,8 +149,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// Get the list of processes whose ip:port or ip matches netAddrs.
 	// Note: item in netAddrs may be ip (representing a machine) or ip:port (representing a process)
-	virtual std::vector<ISimulator::ProcessInfo*> getProcesses(std::set<AddressExclusion> const& netAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> getProcesses(std::set<AddressExclusion> const& netAddrs) {
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
 		UID functionId = nondeterministicRandom()->randomUniqueID();
@@ -202,8 +199,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return processes;
 	}
 
-	virtual std::vector<ISimulator::ProcessInfo*> excludeAddresses(std::set<AddressExclusion> const& procAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> excludeAddresses(std::set<AddressExclusion> const& procAddrs) {
 		// Get the updated list of processes which may have changed due to reboots, deletes, etc
 		std::vector<ISimulator::ProcessInfo*>	procArray = getProcesses(procAddrs);
 
@@ -219,8 +215,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return procArray;
 	}
 
-	virtual std::vector<ISimulator::ProcessInfo*> includeAddresses(std::set<AddressExclusion> const& procAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> includeAddresses(std::set<AddressExclusion> const& procAddrs) {
 		// Get the updated list of processes which may have changed due to reboots, deletes, etc
 		std::vector<ISimulator::ProcessInfo*>	procArray = getProcesses(procAddrs);
 
@@ -240,8 +235,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// Return processes that are intersection of killAddrs and allServers and that are safe to kill together;
 	// killAddrs does not guarantee the addresses are safe to kill simultaneously.
-	virtual std::vector<ISimulator::ProcessInfo*> protectServers(std::set<AddressExclusion> const& killAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> protectServers(std::set<AddressExclusion> const& killAddrs) {
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
 		std::vector<AddressExclusion> killableAddrs;
@@ -380,8 +374,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs) {
 		UID functionId = nondeterministicRandom()->randomUniqueID();
 		bool removeViaClear = !BUGGIFY;
 		std::vector<ISimulator::ProcessInfo*>	killProcArray;
