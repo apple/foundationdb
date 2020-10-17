@@ -3901,13 +3901,17 @@ ACTOR Future<Void> storageServerTracker(
 			}
 		}
 	} catch( Error &e ) {
-		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
-			errorOut.sendError(e);
+		state Error err = e;
 		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
 		    .suppressFor(1.0)
 		    .detail("Primary", self->primary)
-		    .detail("Server", server->id);
-		throw;
+		    .detail("Server", server->id)
+		    .error(e, /*includeCancelled*/ true);
+		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
+			errorOut.sendError(e);
+			wait(delay(0)); // Check for cancellation, since errorOut.sendError(e) could delete self
+		}
+		throw err;
 	}
 }
 
