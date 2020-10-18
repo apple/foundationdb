@@ -256,7 +256,7 @@ public:
 		return pauseKey;	
 	}
 
-	Subspace getAvailableSpace(int priority = 0) {
+	Subspace getAvailableSpace(int priority = 0) const {
 		if(priority == 0)
 			return available;
 		return available_prioritized.get(priority);
