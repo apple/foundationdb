@@ -1530,6 +1530,7 @@ namespace dbBackup {
 					wait(tr->commit());
 					break;
 				} catch (Error &e) {
+					TraceEvent("SetDestUidOrBeginVersionError").error(e, true);
 					wait(tr->onError(e));
 				}
 			}
@@ -2117,13 +2118,17 @@ public:
 				state Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
 				wait(success(statusFuture) && success(destUidFuture));
 
-				UID destUid = destUidFuture.get();
-				if (destUid.isValid()) {
-					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
-				}
 				int status = statusFuture.get();
 				if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 					throw backup_unneeded();
+				}
+				UID destUid = destUidFuture.get();
+				if (destUid.isValid()) {
+					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
+				} else {
+					// Give DR task a chance to update destUid to avoid the problem of
+					// leftover version key.
+					throw not_committed();
 				}
 
 				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)));
@@ -2144,6 +2149,7 @@ public:
 				break;
 			}
 			catch (Error &e) {
+				TraceEvent("DBA_AbortError").error(e, true);
 				wait(tr->onError(e));
 			}
 		}
