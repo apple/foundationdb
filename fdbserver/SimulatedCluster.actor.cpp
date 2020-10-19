@@ -1352,11 +1352,7 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 }
 
 void checkTestConf(const char* testFile, int& extraDB, int& minimumReplication, int& minimumRegions,
-<<<<<<< HEAD
                    int& configureLocked, int& logAntiQuorum, bool& startIncompatibleProcess) {
-=======
-                   int& configureLocked, bool& startIncompatibleProcess) {
->>>>>>> 8c96763ea96f39c55a881b391d95a717207a5683
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -1445,11 +1441,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB,
-<<<<<<< HEAD
 			                     minimumReplication, minimumRegions, whitelistBinPaths, configureLocked, logAntiQuorum, protocolVersion);
-=======
-			                     minimumReplication, minimumRegions, whitelistBinPaths, configureLocked, protocolVersion);
->>>>>>> 8c96763ea96f39c55a881b391d95a717207a5683
 			wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, deterministicRandom()->randomUniqueID().toString() );
