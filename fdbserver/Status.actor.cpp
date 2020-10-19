@@ -1047,18 +1047,37 @@ static JsonBuilderObject clientStatusFetcher(std::map<NetworkAddress, std::pair<
 	return clientStatus;
 }
 
-ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
+ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, WorkerDetails mWorker, int workerCount, std::set<std::string> *incomplete_reasons, int* statusCode) {
 	state JsonBuilderObject message;
-
+	state Transaction tr(cx);
 	try {
-		state Future<TraceEventFields> activeGens = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
-		TraceEventFields md = wait( timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
+		state Future<TraceEventFields> mdActiveGensF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryGenerations") ) ), 1.0);
+		state Future<TraceEventFields> mdF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0);
+		state Future<TraceEventFields> mDBAvailableF = timeoutError(mWorker.interf.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryAvailable") ) ), 1.0);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		state Future<ErrorOr<Version>> rvF = errorOr(timeoutError(tr.getReadVersion(), 1.0));
+
+		wait(success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
+
+		const TraceEventFields& md = mdF.get();
 		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
 
 		message = JsonString::makeMessage(RecoveryStatus::names[mStatusCode], RecoveryStatus::descriptions[mStatusCode]);
 		*statusCode = mStatusCode;
+
+		ErrorOr<Version> rv = rvF.get();
+		const TraceEventFields& dbAvailableMsg = mDBAvailableF.get();
+		if (dbAvailableMsg.size() > 0) {
+			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
+			if (!rv.isError()) {
+				double lastRecoveredSecondsAgo = std::max((int64_t)0, (int64_t)(rv.get() - availableAtVersion)) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+				message["seconds_since_last_recovered"] = lastRecoveredSecondsAgo;
+			}
+		} else {
+			message["seconds_since_last_recovered"] = -1;
+		}
 
 		// Add additional metadata for certain statuses
 		if (mStatusCode == RecoveryStatus::recruiting_transaction_servers) {
@@ -1079,7 +1098,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(WorkerDetails 
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
-		TraceEventFields mdActiveGens = wait(activeGens);
+		const TraceEventFields& mdActiveGens = mdActiveGensF.get();
 		if(mdActiveGens.size()) {
 			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
@@ -2473,7 +2492,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// construct status information for cluster subsections
 		state int statusCode = (int) RecoveryStatus::END;
-		state JsonBuilderObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
+		state JsonBuilderObject recoveryStateStatus = wait(recoveryStateStatusFetcher(cx, mWorker, workers.size(), &status_incomplete_reasons, &statusCode));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
