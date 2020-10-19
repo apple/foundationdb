@@ -61,6 +61,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
+	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
+
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
 	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 1.50 : 2.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
@@ -76,6 +78,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_RECONNECTION_TIME,                               0.5 );
 	init( RECONNECTION_TIME_GROWTH_RATE,                       1.2 );
 	init( RECONNECTION_RESET_TIME,                             5.0 );
+	init( ALWAYS_ACCEPT_DELAY,                                15.0 );
 	init( ACCEPT_BATCH_SIZE,                                    10 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
@@ -86,7 +89,12 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
-	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
+	init( TLS_SERVER_HANDSHAKE_THREADS,                       1000 );
+	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
+	init( TLS_MALLOC_ARENA_MAX,                                  6 );
+	init( TLS_HANDSHAKE_LIMIT,                                1000 );
 
 	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
 	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
@@ -140,13 +148,11 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
-	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( MAX_PACKET_SEND_BYTES,                        128 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
 	init( FLOW_TCP_NODELAY,                                      1 );
 	init( FLOW_TCP_QUICKACK,                                     0 );
-	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
-	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
@@ -207,10 +213,10 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
-	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                      2.0 );
-	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.05 );
+	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                     10.0 ); //should be longer than the rate we log network metrics
+	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.10 );
 	init( BASIC_LOAD_BALANCE_MAX_PROB,                         2.0 );
-	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 );
+	init( BASIC_LOAD_BALANCE_MIN_AMOUNT,                     50000 ); //Will not update probabilities if the average proxy busyness is less than 5%
 
 	// Health Monitor
 	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;

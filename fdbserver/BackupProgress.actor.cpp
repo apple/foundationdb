@@ -83,21 +83,24 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 
 		auto progressIt = progress.lower_bound(epoch);
 		if (progressIt != progress.end() && progressIt->first == epoch) {
-			if (progressIt != progress.begin()) {
+			std::set<Tag> toCheck = tags;
+			for (auto current = progressIt; current != progress.begin() && !toCheck.empty();) {
+				auto prev = std::prev(current);
 				// Previous epoch is gone, consolidate the progress.
-				auto prev = std::prev(progressIt);
 				for (auto [tag, version] : prev->second) {
-					if (tags.count(tag) > 0) {
+					if (toCheck.count(tag) > 0) {
 						progressIt->second[tag] = std::max(version, progressIt->second[tag]);
+						toCheck.erase(tag);
 					}
 				}
+				current = prev;
 			}
 			updateTagVersions(&tagVersions, &tags, progressIt->second, info.epochEnd, adjustedBeginVersion, epoch);
 		} else {
 			auto rit = std::find_if(
 			    progress.rbegin(), progress.rend(),
 			    [epoch = epoch](const std::pair<LogEpoch, std::map<Tag, Version>>& p) { return p.first < epoch; });
-			if (!(rit == progress.rend())) {
+			while (!(rit == progress.rend())) {
 				// A partial recovery can result in empty epoch that copies previous
 				// epoch's version range. In this case, we should check previous
 				// epoch's savedVersion.
@@ -112,7 +115,9 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 					// ASSERT(info.logRouterTags == epochTags[rit->first]);
 
 					updateTagVersions(&tagVersions, &tags, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
+					if (tags.empty()) break;
 				}
+				rit++;
 			}
 		}
 
@@ -133,7 +138,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 }
 
 // Save each tag's savedVersion for all epochs into "bStatus".
-ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus) {
+ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging) {
 	state Transaction tr(cx);
 
 	loop {
@@ -151,12 +156,14 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 				const UID workerID = decodeBackupProgressKey(it.key);
 				const WorkerBackupStatus status = decodeBackupProgressValue(it.value);
 				bStatus->addBackupStatus(status);
-				TraceEvent("GotBackupProgress", dbgid)
-				    .detail("BackupWorker", workerID)
-				    .detail("Epoch", status.epoch)
-				    .detail("Version", status.version)
-				    .detail("Tag", status.tag.toString())
-				    .detail("TotalTags", status.totalTags);
+				if (logging) {
+					TraceEvent("GotBackupProgress", dbgid)
+					    .detail("BackupWorker", workerID)
+					    .detail("Epoch", status.epoch)
+					    .detail("Version", status.version)
+					    .detail("Tag", status.tag.toString())
+					    .detail("TotalTags", status.totalTags);
+				}
 			}
 			return Void();
 		} catch (Error& e) {
@@ -177,7 +184,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
 
 	ASSERT(unfinished.size() == 1);
-	for (const auto [epochVersionCount, tagVersion] : unfinished) {
+	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
 		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
 		       std::get<2>(epochVersionCount) == 1);
 		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1);
@@ -188,7 +195,7 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	progress.addBackupStatus(status1);
 	unfinished = progress.getUnfinishedBackup();
 	ASSERT(unfinished.size() == 1);
-	for (const auto [epochVersionCount, tagVersion] : unfinished) {
+	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
 		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
 		       std::get<2>(epochVersionCount) == 1);
 		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == saved1 + 1);

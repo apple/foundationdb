@@ -31,9 +31,10 @@ static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1
 static const char* logTypes[] = {
 	"log_engine:=1", "log_engine:=2",
 	"log_spill:=1", "log_spill:=2",
-	"log_version:=2", "log_version:=3", "log_version:=4"
+	"log_version:=2", "log_version:=3", "log_version:=4", "log_version:=5", "log_version:=6"
 };
 static const char* redundancies[] = { "single", "double", "triple" };
+static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
 std::string generateRegions() {
 	std::string result;
@@ -215,22 +216,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		g_simulator.usableRegions = 1;
 	}
 
-	virtual std::string description() { return "DestroyDatabaseWorkload"; }
+	std::string description() const override { return "DestroyDatabaseWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return _setup( cx, this );
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( this, cx );
-	}
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		m.push_back( retries.getMetric() );
-	}
+	void getMetrics(vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
 	static inline uint64_t valueToUInt64( const StringRef& v ) {
 		long long unsigned int x = 0;
@@ -242,7 +235,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return StringRef(format("DestroyDB%d", dbIndex));
 	}
 
-	static Future<ConfigurationResult::Type> IssueConfigurationChange( Database cx, const std::string& config, bool force ) {
+	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
 		return changeConfig(cx, config, force);
 	}
@@ -271,7 +264,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if(g_simulator.speedUpSimulation) {
 				return Void();
 			}
-			state int randomChoice = deterministicRandom()->randomInt(0, 7);
+			state int randomChoice = deterministicRandom()->randomInt(0, 8);
 			if( randomChoice == 0 ) {
 				wait( success(
 						runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>>
@@ -301,7 +294,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				config += generateRegions();
 
 				if (deterministicRandom()->random01() < 0.5) config += " logs=" + format("%d", randomRoleNumber());
-				if (deterministicRandom()->random01() < 0.5) config += " proxies=" + format("%d", randomRoleNumber());
+
+				if (deterministicRandom()->random01() < 0.2) {
+					config += " proxies=" + format("%d", deterministicRandom()->randomInt(2, 5));
+				} else {
+					if (deterministicRandom()->random01() < 0.5)
+						config += " commit_proxies=" + format("%d", randomRoleNumber());
+					if (deterministicRandom()->random01() < 0.5)
+						config += " grv_proxies=" + format("%d", randomRoleNumber());
+				}
 				if (deterministicRandom()->random01() < 0.5) config += " resolvers=" + format("%d", randomRoleNumber());
 
 				wait(success( IssueConfigurationChange( cx, config, false ) ));
@@ -322,6 +323,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			else if ( randomChoice == 6 ) {
 				// Some configurations will be invalid, and that's fine.
 				wait(success( IssueConfigurationChange( cx, logTypes[deterministicRandom()->randomInt( 0, sizeof(logTypes)/sizeof(logTypes[0]))], false ) ));
+			} else if (randomChoice == 7) {
+				wait(success(IssueConfigurationChange(
+				    cx, backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
+				    false)));
 			} else {
 				ASSERT(false);
 			}

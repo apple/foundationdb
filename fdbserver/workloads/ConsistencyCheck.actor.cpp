@@ -21,6 +21,7 @@
 #include <math.h>
 
 #include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -104,15 +105,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 		bytesReadInPreviousRound = 0;
 	}
 
-	virtual std::string description()
-	{
-		return "ConsistencyCheck";
-	}
+	std::string description() const override { return "ConsistencyCheck"; }
 
-	virtual Future<Void> setup(Database const& cx)
-	{
-		return _setup(cx, this);
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, ConsistencyCheckWorkload *self)
 	{
@@ -138,21 +133,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx)
-	{
+	Future<Void> start(Database const& cx) override {
 		TraceEvent("ConsistencyCheck");
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx)
-	{
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics( vector<PerfMetric>& m )
-	{
-
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	void testFailure(std::string message, bool isError = false)
 	{
@@ -364,9 +352,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
-	//Get a list of storage servers from the master and compares them with the TLogs.
-	//If this is a quiescent check, then each master proxy needs to respond, otherwise only one needs to respond.
-	//Returns false if there is a failure (in this case, keyServersPromise will never be set)
+	// Get a list of storage servers from the master and compares them with the TLogs.
+	// If this is a quiescent check, then each commit proxy needs to respond, otherwise only one needs to respond.
+	// Returns false if there is a failure (in this case, keyServersPromise will never be set)
 	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
 	{
 		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
@@ -376,12 +364,17 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state Key begin = keyServersKeys.begin;
 		state Key end = keyServersKeys.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
+		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
-			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture(false));
+			state Reference<CommitProxyInfo> commitProxyInfo = wait(cx->getCommitProxiesFuture(false));
 			keyServerLocationFutures.clear();
-			for (int i = 0; i < proxyInfo->size(); i++)
-				keyServerLocationFutures.push_back(proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(begin, end, limitKeyServers, false, Arena()), 2, 0));
+			for (int i = 0; i < commitProxyInfo->size(); i++)
+				keyServerLocationFutures.push_back(
+				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
+				        .getReplyUnlessFailedFor(
+				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()), 2,
+				            0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -394,8 +387,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//If performing quiescent check, then all master proxies should be reachable.  Otherwise, only one needs to be reachable
 						if (self->performQuiescentChecks && !shards.present())
 						{
-							TraceEvent("ConsistencyCheck_MasterProxyUnavailable").detail("MasterProxyID", proxyInfo->getId(i));
-							self->testFailure("Master proxy unavailable");
+							TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
+							    .detail("CommitProxyID", commitProxyInfo->getId(i));
+							self->testFailure("Commit proxy unavailable");
 							return false;
 						}
 
@@ -412,7 +406,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						}
 					} // End of For
 				}
-				when(wait(cx->onMasterProxiesChanged())) { }
+				when(wait(cx->onProxiesChanged())) { }
 			} // End of choose
 
 			if (!keyServersInsertedForThisIteration) // Retry the entire workflow
@@ -708,6 +702,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			state vector<UID> storageServers = (isRelocating) ? destStorageServers : sourceStorageServers;
 			state vector<StorageServerInterface> storageServerInterfaces;
 
+			//TraceEvent("ConsistencyCheck_GetStorageInfo").detail("StorageServers", storageServers.size());
 			loop {
 				try {
 					vector< Future< Optional<Value> > > serverListEntries;
@@ -720,6 +715,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						else if (self->performQuiescentChecks)
 							self->testFailure("/FF/serverList changing in a quiescent database");
 					}
+
 					break;
 				}
 				catch(Error &e) {
@@ -917,7 +913,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							else if(!isRelocating)
 							{
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable").suppressFor(1.0).detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+									.detail("Address", storageServerInterfaces[j].address()).detail("UID", storageServerInterfaces[j].id()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)
@@ -1454,11 +1450,38 @@ struct ConsistencyCheckWorkload : TestWorkload
 			return false;
 		}
 
-		// Check proxy
-		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
-		for (auto masterProxy : db.client.proxies) {
-			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestMasterProxyFitness", bestMasterProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
+		// Check commit proxy
+		ProcessClass::Fitness bestCommitProxyFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::CommitProxy);
+		for (const auto& commitProxy : db.client.commitProxies) {
+			if (!nonExcludedWorkerProcessMap.count(commitProxy.address()) ||
+			    nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
+			        ProcessClass::CommitProxy) != bestCommitProxyFitness) {
+				TraceEvent("ConsistencyCheck_CommitProxyNotBest")
+				    .detail("BestCommitProxyFitness", bestCommitProxyFitness)
+				    .detail("ExistingCommitProxyFitness",
+				            nonExcludedWorkerProcessMap.count(commitProxy.address())
+				                ? nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
+				                      ProcessClass::CommitProxy)
+				                : -1);
+				return false;
+			}
+		}
+
+		// Check grv proxy
+		ProcessClass::Fitness bestGrvProxyFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::GrvProxy);
+		for (const auto& grvProxy : db.client.grvProxies) {
+			if (!nonExcludedWorkerProcessMap.count(grvProxy.address()) ||
+			    nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
+			        ProcessClass::GrvProxy) != bestGrvProxyFitness) {
+				TraceEvent("ConsistencyCheck_GrvProxyNotBest")
+				    .detail("BestGrvProxyFitness", bestGrvProxyFitness)
+				    .detail("ExistingGrvProxyFitness",
+				            nonExcludedWorkerProcessMap.count(grvProxy.address())
+				                ? nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
+				                      ProcessClass::GrvProxy)
+				                : -1);
 				return false;
 			}
 		}

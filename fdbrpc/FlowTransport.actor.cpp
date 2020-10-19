@@ -122,10 +122,11 @@ const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vec
 	}
 
 	UID base = deterministicRandom()->randomUniqueID();
-	for(int i=0; i<streams.size(); i++) {
+	for(uint64_t i=0; i<streams.size(); i++) {
 		int index = adjacentStart+i;
-		streams[i].first->setEndpoint( Endpoint( localAddresses, UID( base.first() | TOKEN_STREAM_FLAG, (base.second()&0xffffffff00000000LL) | index) ) );
-		data[index].token() = Endpoint::Token( base.first() | TOKEN_STREAM_FLAG, (base.second()&0xffffffff00000000LL) | static_cast<uint32_t>(streams[i].second) );
+		uint64_t first = (base.first()+(i<<32)) | TOKEN_STREAM_FLAG;
+		streams[i].first->setEndpoint( Endpoint( localAddresses, UID( first, (base.second()&0xffffffff00000000LL) | index) ) );
+		data[index].token() = Endpoint::Token( first, (base.second()&0xffffffff00000000LL) | static_cast<uint32_t>(streams[i].second) );
 		data[index].receiver = (NetworkMessageReceiver*) streams[i].first;
 	}
 
@@ -155,37 +156,28 @@ void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* 
 	}
 }
 
-struct EndpointNotFoundReceiver : NetworkMessageReceiver {
+struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		//endpoints[WLTOKEN_ENDPOINT_NOT_FOUND] = this;
 		Endpoint::Token e = WLTOKEN_ENDPOINT_NOT_FOUND;
 		endpoints.insert(this, e, TaskPriority::DefaultEndpoint);
 		ASSERT( e == WLTOKEN_ENDPOINT_NOT_FOUND );
 	}
-	virtual void receive( ArenaReader& reader ) {
+	void receive(ArenaObjectReader& reader) override {
 		// Remote machine tells us it doesn't have endpoint e
-		Endpoint e; reader >> e;
-		IFailureMonitor::failureMonitor().endpointNotFound(e);
-	}
-
-	virtual void receive(ArenaObjectReader& reader) {
 		Endpoint e;
 		reader.deserialize(e);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
 };
 
-struct PingReceiver : NetworkMessageReceiver {
+struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		Endpoint::Token e = WLTOKEN_PING_PACKET;
 		endpoints.insert(this, e, TaskPriority::ReadSocket);
 		ASSERT( e == WLTOKEN_PING_PACKET );
 	}
-	virtual void receive( ArenaReader& reader ) {
-		ReplyPromise<Void> reply; reader >> reply;
-		reply.send(Void());
-	}
-	virtual void receive(ArenaObjectReader& reader) {
+	void receive(ArenaObjectReader& reader) override {
 		ReplyPromise<Void> reply;
 		reader.deserialize(reply);
 		reply.send(Void());
@@ -417,12 +409,16 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
-			if (sent) {
+			int sent = conn->write(self->unsent.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+
+			if (sent != 0) {
 				self->transport->bytesSent += sent;
 				self->unsent.sent(sent);
 			}
-			if (self->unsent.empty()) break;
+
+			if (self->unsent.empty()) {
+				break;
+			}
 
 			TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull.
 			wait( conn->onWritable() );
@@ -555,6 +551,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				}
 			} else {
 				self->outgoingConnectionIdle = false;
+				self->lastConnectTime = now();
 			}
 
 			firstConnFailedTime.reset();
@@ -562,7 +559,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
 					delayedHealthUpdateF = delayedHealthUpdate(self->destination);
-				wait(connectionWriter(self, conn) || reader || connectionMonitor(self));
+				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) || self->resetConnection.onTrigger());
+				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
+				throw connection_failed();
 			} catch (Error& e) {
 				if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled ||
 						e.code() == error_code_connection_unreferenced ||
@@ -573,8 +572,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				throw e;
 			}
-
-			ASSERT( false );
 		} catch (Error& e) {
 			delayedHealthUpdateF.cancel();
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
@@ -728,7 +725,7 @@ void Peer::onIncomingConnection( Reference<Peer> self, Reference<IConnection> co
 		compatibleAddr = transport->localAddresses.secondaryAddress.get();
 	}
 
-	if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr ) {
+	if ( !destination.isPublic() || outgoingConnectionIdle || destination > compatibleAddr || (lastConnectTime > 1.0 && now() - lastConnectTime > FLOW_KNOBS->ALWAYS_ACCEPT_DELAY) ) {
 		// Keep the new connection
 		TraceEvent("IncomingConnection", conn->getDebugID())
 			.suppressFor(1.0)
@@ -1277,8 +1274,8 @@ void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* rec
 	self->endpoints.insert( receiver, endpoint.token, taskID );
 }
 
-const Endpoint& FlowTransport::addEndpoints( std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
-	return self->endpoints.insert( self->localAddresses, streams );
+void FlowTransport::addEndpoints( std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams ) {
+	self->endpoints.insert( self->localAddresses, streams );
 }
 
 void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
@@ -1390,7 +1387,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	SendBuffer *checkbuf = pb;
 	while (checkbuf) {
 		int size = checkbuf->bytes_written;
-		const uint8_t* data = checkbuf->data;
+		const uint8_t* data = checkbuf->data();
 		VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
 		checkbuf = checkbuf -> next;
 	}
@@ -1434,12 +1431,15 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 	return peer;
 }
 
-int FlowTransport::getEndpointCount() {
-	return -1;
-}
-
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
+}
+
+void FlowTransport::resetConnection( NetworkAddress address ) {
+	auto peer = self->getPeer(address);
+	if(peer) {
+		peer->resetConnection.trigger();
+	}
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {

@@ -40,11 +40,14 @@ struct MemoryLifetime : KVWorkload {
 		valueString = std::string( maxValueBytes, '.' );
 	}
 
-	virtual std::string description() { return "MemoryLifetime"; }
+	std::string description() const override { return "MemoryLifetime"; }
 
-	Value randomValue() { return StringRef( (uint8_t*)valueString.c_str(), deterministicRandom()->randomInt(minValueBytes, maxValueBytes+1) );	}
+	Value randomValue() const {
+		return StringRef((uint8_t*)valueString.c_str(),
+		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
+	}
 
-	KeySelector getRandomKeySelector() {
+	KeySelector getRandomKeySelector() const {
 		return KeySelectorRef( getRandomKey(), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-nodeCount, nodeCount) );
 	}
 
@@ -52,21 +55,13 @@ struct MemoryLifetime : KVWorkload {
 		return KeyValueRef( keyForIndex( n, false ), randomValue() );
 	}
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return _setup(cx, this);
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start(cx, this);
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
-
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> _setup( Database cx, MemoryLifetime* self) {
 		state Promise<double> loadTime;

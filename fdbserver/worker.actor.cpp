@@ -21,6 +21,8 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbrpc/Locality.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
@@ -112,11 +114,13 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 }
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastCommitProxyUIDs;
+	state std::vector<CommitProxyInterface> lastCommitProxies;
+	state std::vector<UID> lastGrvProxyUIDs;
+	state std::vector<GrvProxyInterface> lastGrvProxies;
 	loop {
 		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 		info->set( ni );
 		wait( db->onChange() );
 	}
@@ -212,7 +216,8 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.role, err.id, "Error", ok, err.error);
 
-			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
+
+			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout || (err.role == Role::SHARED_TRANSACTION_LOG && err.error.code() == error_code_io_error )) throw err.error;
 		}
 	}
 }
@@ -248,11 +253,25 @@ StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
 StringRef tlogQueueExtension = LiteralStringRef("fdq");
 
-std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyValueStoreType::SSD_BTREE_V1, ".fdb" );
-std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
-std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
-std::pair<KeyValueStoreType, std::string> memoryRTSuffix = std::make_pair( KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr" );
-std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
+enum class FilesystemCheck {
+	FILES_ONLY,
+	DIRECTORIES_ONLY,
+	FILES_AND_DIRECTORIES,
+};
+
+struct KeyValueStoreSuffix {
+	KeyValueStoreType type;
+	std::string suffix;
+	FilesystemCheck check;
+};
+
+KeyValueStoreSuffix bTreeV1Suffix = { KeyValueStoreType::SSD_BTREE_V1, ".fdb", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix bTreeV2Suffix = { KeyValueStoreType::SSD_BTREE_V2, ".sqlite", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix memorySuffix = { KeyValueStoreType::MEMORY, "-0.fdq", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix memoryRTSuffix = { KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix redwoodSuffix = { KeyValueStoreType::SSD_REDWOOD_V1, ".redwood", FilesystemCheck::FILES_ONLY };
+KeyValueStoreSuffix rocksdbSuffix = { KeyValueStoreType::SSD_ROCKSDB_V1, ".rocksdb",
+	                                  FilesystemCheck::DIRECTORIES_ONLY };
 
 std::string validationFilename = "_validate";
 
@@ -264,6 +283,8 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
+		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
@@ -277,6 +298,8 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
+	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, prefix + id.toString() + ".rocksdb");
 
 	UNREACHABLE();
 }
@@ -330,6 +353,7 @@ struct TLogOptions {
 				"_LS_" + boost::lexical_cast<std::string>(spillType);
 			break;
 		case TLogVersion::V5:
+		case TLogVersion::V6:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
@@ -351,6 +375,7 @@ TLogFn tLogFnForOptions( TLogOptions options ) {
 			else
 				return oldTLog_6_2::tLog;
 		case TLogVersion::V5:
+		case TLogVersion::V6:
 			return tLog;
 		default:
 			ASSERT(false);
@@ -368,9 +393,21 @@ struct DiskStore {
 	TLogOptions tLogOptions;
 };
 
-std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, KeyValueStoreType type) {
+std::vector<DiskStore> getDiskStores(std::string folder, std::string suffix, KeyValueStoreType type,
+                                     FilesystemCheck check) {
 	std::vector< DiskStore > result;
-	vector<std::string> files = platform::listFiles( folder, suffix );
+	vector<std::string> files;
+
+	if (check == FilesystemCheck::FILES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
+		files = platform::listFiles(folder, suffix);
+	}
+	if (check == FilesystemCheck::DIRECTORIES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
+		for (const auto& directory : platform::listDirectories(folder)) {
+			if (StringRef(directory).endsWith(suffix)) {
+				files.push_back(directory);
+			}
+		}
+	}
 
 	for( int idx = 0; idx < files.size(); idx++ ) {
 		DiskStore store;
@@ -415,15 +452,17 @@ std::vector< DiskStore > getDiskStores( std::string folder, std::string suffix, 
 }
 
 std::vector< DiskStore > getDiskStores( std::string folder ) {
-	auto result = getDiskStores( folder, bTreeV1Suffix.second, bTreeV1Suffix.first);
-	auto result1 = getDiskStores( folder, bTreeV2Suffix.second, bTreeV2Suffix.first);
+	auto result = getDiskStores(folder, bTreeV1Suffix.suffix, bTreeV1Suffix.type, bTreeV1Suffix.check);
+	auto result1 = getDiskStores(folder, bTreeV2Suffix.suffix, bTreeV2Suffix.type, bTreeV2Suffix.check);
 	result.insert( result.end(), result1.begin(), result1.end() );
-	auto result2 = getDiskStores( folder, memorySuffix.second, memorySuffix.first );
+	auto result2 = getDiskStores(folder, memorySuffix.suffix, memorySuffix.type, memorySuffix.check);
 	result.insert( result.end(), result2.begin(), result2.end() );
-	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
+	auto result3 = getDiskStores(folder, redwoodSuffix.suffix, redwoodSuffix.type, redwoodSuffix.check);
 	result.insert( result.end(), result3.begin(), result3.end() );
-    auto result4 = getDiskStores( folder, memoryRTSuffix.second, memoryRTSuffix.first );
-    result.insert( result.end(), result4.begin(), result4.end() );
+	auto result4 = getDiskStores(folder, memoryRTSuffix.suffix, memoryRTSuffix.type, memoryRTSuffix.check);
+	result.insert( result.end(), result4.begin(), result4.end() );
+	auto result5 = getDiskStores(folder, rocksdbSuffix.suffix, rocksdbSuffix.type, rocksdbSuffix.check);
+	result.insert( result.end(), result5.begin(), result5.end() );
 	return result;
 }
 
@@ -452,7 +491,7 @@ ACTOR Future<Void> registrationClient(
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
 	loop {
-		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), scInterf->get(), degraded->get());
+		RegisterWorkerRequest request(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++, ddInterf->get(), rkInterf->get(), degraded->get());
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
 		}
@@ -490,41 +529,10 @@ ACTOR Future<Void> registrationClient(
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
 				processClass = reply.processClass;
 				asyncPriorityInfo->set( reply.priorityInfo );
-
-				if(!reply.storageCache.present()) {
-					cacheProcessFuture.cancel();
-					scInterf->set(Optional<std::pair<uint16_t,StorageServerInterface>>());
-				} else if (!scInterf->get().present() || scInterf->get().get().first != reply.storageCache.get()) {
-					StorageServerInterface recruited;
-					recruited.locality = locality;
-					recruited.initEndpoints();
-
-					std::map<std::string, std::string> details;
-					startRole( Role::STORAGE_CACHE, recruited.id(), interf.id(), details );
-
-					//DUMPTOKEN(recruited.getVersion);
-					DUMPTOKEN(recruited.getValue);
-					DUMPTOKEN(recruited.getKey);
-					DUMPTOKEN(recruited.getKeyValues);
-					DUMPTOKEN(recruited.getShardState);
-					DUMPTOKEN(recruited.waitMetrics);
-					DUMPTOKEN(recruited.splitMetrics);
-					DUMPTOKEN(recruited.getReadHotRanges);
-					DUMPTOKEN(recruited.getStorageMetrics);
-					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.getQueuingMetrics);
-					DUMPTOKEN(recruited.getKeyValueStoreType);
-					DUMPTOKEN(recruited.watchValue);
-
-					cacheProcessFuture = storageCache( recruited, reply.storageCache.get(), dbInfo );
-					cacheErrorsFuture = forwardError(errors, Role::STORAGE_CACHE, recruited.id(), setWhenDoneOrError(cacheProcessFuture, scInterf, Optional<std::pair<uint16_t,StorageServerInterface>>()));
-					scInterf->set(std::make_pair(reply.storageCache.get(), recruited));
-				}
 			}
 			when ( wait( ccInterface->onChange() )) {}
 			when ( wait( ddInterf->onChange() ) ) {}
 			when ( wait( rkInterf->onChange() ) ) {}
-			when ( wait( scInterf->onChange() ) ) {}
 			when ( wait( degraded->onChange() ) ) {}
 			when ( wait( FlowTransport::transport().onIncompatibleChanged() ) ) {}
 			when ( wait( issues->onChange() ) ) {}
@@ -564,7 +572,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 			const char *path = (const char*)req.outputFile.begin();
 			ProfilerOptions *options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
-			options->filter_in_thread_arg = NULL;
+			options->filter_in_thread_arg = nullptr;
 			ProfilerStartWithOptions(path, options);
 			break;
 		}
@@ -700,6 +708,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
 		DUMPTOKEN(recruited.getReadHotRanges);
+		DUMPTOKEN(recruited.getRangeSplitPoints);
 		DUMPTOKEN(recruited.getStorageMetrics);
 		DUMPTOKEN(recruited.waitFailure);
 		DUMPTOKEN(recruited.getQueuingMetrics);
@@ -708,6 +717,41 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		prevStorageServer = storageServer( store, recruited, db, folder, Promise<Void>(), Reference<ClusterConnectionFile> (nullptr) );
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
+	}
+}
+
+ACTOR Future<Void> storageCacheRollbackRebooter( Future<Void> prevStorageCache, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db) {
+	loop {
+		ErrorOr<Void> e = wait( errorOr( prevStorageCache) );
+		if (!e.isError()) {
+			TraceEvent("StorageCacheRequestedReboot1", id);
+			return Void();
+		}
+		else if (e.getError().code() != error_code_please_reboot && e.getError().code() != error_code_worker_removed) {
+			TraceEvent("StorageCacheRequestedReboot2", id).detail("Code",e.getError().code());
+			throw e.getError();
+		}
+
+		TraceEvent("StorageCacheRequestedReboot", id);
+
+		StorageServerInterface recruited;
+		recruited.uniqueID = deterministicRandom()->randomUniqueID();// id;
+		recruited.locality = locality;
+		recruited.initEndpoints();
+
+		DUMPTOKEN(recruited.getValue);
+		DUMPTOKEN(recruited.getKey);
+		DUMPTOKEN(recruited.getKeyValues);
+		DUMPTOKEN(recruited.getShardState);
+		DUMPTOKEN(recruited.waitMetrics);
+		DUMPTOKEN(recruited.splitMetrics);
+		DUMPTOKEN(recruited.getStorageMetrics);
+		DUMPTOKEN(recruited.waitFailure);
+		DUMPTOKEN(recruited.getQueuingMetrics);
+		DUMPTOKEN(recruited.getKeyValueStoreType);
+		DUMPTOKEN(recruited.watchValue);
+
+		prevStorageCache = storageCacheServer(recruited, 0, db);
 	}
 }
 
@@ -953,7 +997,8 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
-		DUMPTOKEN(recruited.masterProxy);
+		DUMPTOKEN(recruited.commitProxy);
+		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
@@ -994,6 +1039,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
 				DUMPTOKEN(recruited.getReadHotRanges);
+				DUMPTOKEN(recruited.getRangeSplitPoints);
 				DUMPTOKEN(recruited.getStorageMetrics);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1048,10 +1094,40 @@ ACTOR Future<Void> workerServer(
 			}
 		}
 
+		bool hasCache = false;
+		//  start cache role if we have the right process class
+		if (initialClass.classType() == ProcessClass::StorageCacheClass) {
+			hasCache = true;
+			StorageServerInterface recruited;
+			recruited.locality = locality;
+			recruited.initEndpoints();
+
+			std::map<std::string, std::string> details;
+			startRole(Role::STORAGE_CACHE, recruited.id(), interf.id(), details);
+
+			// DUMPTOKEN(recruited.getVersion);
+			DUMPTOKEN(recruited.getValue);
+			DUMPTOKEN(recruited.getKey);
+			DUMPTOKEN(recruited.getKeyValues);
+			DUMPTOKEN(recruited.getShardState);
+			DUMPTOKEN(recruited.waitMetrics);
+			DUMPTOKEN(recruited.splitMetrics);
+			DUMPTOKEN(recruited.getStorageMetrics);
+			DUMPTOKEN(recruited.waitFailure);
+			DUMPTOKEN(recruited.getQueuingMetrics);
+			DUMPTOKEN(recruited.getKeyValueStoreType);
+			DUMPTOKEN(recruited.watchValue);
+
+			auto f = storageCacheServer(recruited, 0, dbInfo);
+			f = storageCacheRollbackRebooter( f, recruited.id(), recruited.locality, dbInfo);
+			errorForwarders.add(forwardError(errors, Role::STORAGE_CACHE, recruited.id(), f));
+		}
+
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
 		details["StoresPresent"] = format("%d", stores.size());
+		details["CachePresent"] = hasCache ? "true" : "false";
 		startRole( Role::WORKER, interf.id(), interf.id(), details );
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
@@ -1077,7 +1153,7 @@ ACTOR Future<Void> workerServer(
 						notUpdated = interf.updateServerDBInfo.getEndpoint();
 					}
 					else if(localInfo.infoGeneration > dbInfo->get().infoGeneration || dbInfo->get().clusterInterface != ccInterface->get().get()) {
-						
+
 						TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
 						.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
@@ -1147,9 +1223,12 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.tlogRejoin );
 				DUMPTOKEN( recruited.changeCoordinators );
 				DUMPTOKEN( recruited.getCommitVersion );
+				DUMPTOKEN( recruited.getLiveCommittedVersion);
+				DUMPTOKEN( recruited.reportLiveCommittedVersion);
+				DUMPTOKEN( recruited.notifyBackupWorkerDone);
 
 				//printf("Recruited as masterServer\n");
-				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
+				Future<Void> masterProcess = masterServer( recruited, dbInfo, ccInterface, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER, recruited.id(), masterProcess )) );
 				req.reply.send(recruited);
 			}
@@ -1183,6 +1262,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
+					DUMPTOKEN(recruited.reportCommitCostEstimation);
 
 					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
 					errorForwarders.add(
@@ -1271,6 +1351,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
 					DUMPTOKEN(recruited.getReadHotRanges);
+					DUMPTOKEN(recruited.getRangeSplitPoints);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1292,27 +1373,46 @@ ACTOR Future<Void> workerServer(
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
-			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
-				MasterProxyInterface recruited;
+			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
+				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
 				details["ForMaster"] = req.master.id().shortString();
-				startRole( Role::MASTER_PROXY, recruited.id(), interf.id(), details );
+				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.getConsistentReadVersion);
 				DUMPTOKEN(recruited.getKeyServersLocations);
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.getRawCommittedVersion);
 				DUMPTOKEN(recruited.txnState);
 
-				//printf("Recruited as masterProxyServer\n");
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
-						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+				// printf("Recruited as commitProxyServer\n");
+				errorForwarders.add(
+				    zombie(recruited, forwardError(errors, Role::COMMIT_PROXY, recruited.id(),
+				                                   commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
+				req.reply.send(recruited);
+			}
+			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
+				GrvProxyInterface recruited;
+				recruited.processId = locality.processId();
+				recruited.provisional = false;
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				details["ForMaster"] = req.master.id().shortString();
+				startRole( Role::GRV_PROXY, recruited.id(), interf.id(), details );
+
+				DUMPTOKEN(recruited.getConsistentReadVersion);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.getHealthMetrics);
+
+				//printf("Recruited as grvProxyServer\n");
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::GRV_PROXY, recruited.id(),
+						grvProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
@@ -1345,8 +1445,13 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.lock );
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
+				DUMPTOKEN( recruited.waitFailure );
+				DUMPTOKEN( recruited.recoveryFinished );
+				DUMPTOKEN( recruited.disablePopRequest );
+				DUMPTOKEN( recruited.enablePopRequest );
+				DUMPTOKEN( recruited.snapRequest );
 
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(), 
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
@@ -1385,6 +1490,9 @@ ACTOR Future<Void> workerServer(
 						}
 						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
+						}
+						else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
 							included = fileExists(d.filename + "1.fdq");
 						} else {
@@ -1534,7 +1642,7 @@ ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessCla
 ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
 	loop {
 		wait(asyncPriorityInfo->onChange());
-		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(), IncludeVersion()).toString());
+		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(), IncludeVersion(ProtocolVersion::withClusterControllerPriorityInfo())).toString());
 		atomicReplace(filePath, contents, false);
 	}
 }
@@ -1552,7 +1660,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 				Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
 				lockFile = _lockFile;
 				processIDUid = deterministicRandom()->randomUniqueID();
-				BinaryWriter wr(IncludeVersion());
+				BinaryWriter wr(IncludeVersion(ProtocolVersion::withProcessIDFile()));
 				wr << processIDUid;
 				wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
 				wait(lockFile.get()->sync());
@@ -1590,14 +1698,17 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 
 ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> result, MonitorLeaderInfo info ) {
 	state ClusterConnectionString ccf = info.intermediateConnFile->getConnectionString();
+	state vector<NetworkAddress> addrs = ccf.coordinators();
 	state ElectionResultRequest request;
-	request.key = ccf.clusterKey();
-	request.coordinators = ccf.coordinators();
 	state int index = 0;
 	state int successIndex = 0;
+	request.key = ccf.clusterKey();
+	request.coordinators = ccf.coordinators();
+
+	deterministicRandom()->randomShuffle(addrs);
 
 	loop {
-		LeaderElectionRegInterface interf( request.coordinators[index] );
+		LeaderElectionRegInterface interf( addrs[index] );
 		request.reply = ReplyPromise<Optional<LeaderInfo>>();
 
 		ErrorOr<Optional<LeaderInfo>> leader = wait( interf.electionResult.tryGetReply( request ) );
@@ -1633,7 +1744,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 			}
 			successIndex = index;
 		} else {
-			index = (index+1) % request.coordinators.size();
+			index = (index+1) % addrs.size();
 			if (index == successIndex) {
 				wait( delay( CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY ) );
 			}
@@ -1668,7 +1779,7 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 		if(currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() && IFailureMonitor::failureMonitor().getState( currentCC->get().get().registerWorker.getEndpoint() ).isAvailable()) {
 			timeout = Future<Void>();
 		} else if(!timeout.isValid()) {
-			timeout = delay( SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_STORAGE_CANDIDACY_SECONDS)) );
+			timeout = delay( SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS + (deterministicRandom()->random01()*(SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS-SERVER_KNOBS->MIN_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS)) );
 		}
 		choose {
 			when( wait(currentCC->onChange()) ) {}
@@ -1725,9 +1836,9 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
-		if (processClass == ProcessClass::TesterClass) {
+		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
 			actors.push_back( reportErrors( monitorLeader( connFile, cc ), "ClusterController" ) );
-		} else if (processClass == ProcessClass::StorageClass && SERVER_KNOBS->MAX_DELAY_STORAGE_CANDIDACY_SECONDS > 0) {
+		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit && SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
 			actors.push_back( reportErrors( monitorLeaderRemotelyWithDelayedCandidacy( connFile, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, dbInfo ), "ClusterController" ) );
 		} else {
 			actors.push_back( reportErrors( clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities ), "ClusterController") );
@@ -1752,7 +1863,8 @@ const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
-const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
+const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
+const Role Role::GRV_PROXY("GrvProxyServer", "GP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");

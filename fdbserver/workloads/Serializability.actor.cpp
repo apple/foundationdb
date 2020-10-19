@@ -79,34 +79,27 @@ struct SerializabilityWorkload : TestWorkload {
 			TraceEvent("SerializabilityConfiguration").detail("Nodes", nodes).detail("AdjacentKeys", adjacentKeys).detail("ValueSizeMin", valueSizeRange.first).detail("ValueSizeMax", valueSizeRange.second).detail("MaxClearSize", maxClearSize);
 	}
 
-	virtual std::string description() { return "Serializability"; }
+	std::string description() const override { return "Serializability"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) { 
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
 			return _start( cx, this );
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
-	Value getRandomValue() {
+	Value getRandomValue() const {
 		return Value( std::string( deterministicRandom()->randomInt(valueSizeRange.first,valueSizeRange.second+1), 'x' ) );
 	}
 
-	Key getRandomKey() {
-		return getKeyForIndex( deterministicRandom()->randomInt(0, nodes ) );
-	}
+	Key getRandomKey() const { return getKeyForIndex(deterministicRandom()->randomInt(0, nodes)); }
 
-	Key getKeyForIndex( int idx ) {
+	Key getKeyForIndex(int idx) const {
 		if( adjacentKeys ) {
 			return Key( idx ? keyPrefix + std::string( idx, '\x00' ) : "" );
 		} else {
@@ -114,12 +107,12 @@ struct SerializabilityWorkload : TestWorkload {
 		}
 	}
 
-	KeySelector getRandomKeySelector() {
+	KeySelector getRandomKeySelector() const {
 		int scale = 1 << deterministicRandom()->randomInt(0,14);
 		return KeySelectorRef( getRandomKey(), deterministicRandom()->random01() < 0.5, deterministicRandom()->randomInt(-scale, scale) );
 	}
 
-	KeyRange getRandomRange(int sizeLimit) {
+	KeyRange getRandomRange(int sizeLimit) const {
 		int startLocation = deterministicRandom()->randomInt(0, nodes);
 		int scale = deterministicRandom()->randomInt(0, deterministicRandom()->randomInt(2, 5) * deterministicRandom()->randomInt(2, 5));
 		int endLocation = startLocation + deterministicRandom()->randomInt(0, 1+std::min(sizeLimit, std::min(nodes-startLocation, 1<<scale)));
@@ -316,7 +309,7 @@ struct SerializabilityWorkload : TestWorkload {
 
 	ACTOR static Future<Void> resetDatabase( Database cx, Standalone<VectorRef<KeyValueRef>> data ) {
 		state ReadYourWritesTransaction tr(cx);
-	
+
 		tr.clear(normalKeys);
 		for(auto kv : data)
 			tr.set(kv.key, kv.value);
@@ -346,7 +339,7 @@ struct SerializabilityWorkload : TestWorkload {
 			try {
 				if(now() - startTime > self->testDuration)
 					return Void();
-				
+
 				//Generate initial data
 				state Standalone<VectorRef<KeyValueRef>> initialData;
 				int initialAmount = deterministicRandom()->randomInt(0, 100);
@@ -356,7 +349,7 @@ struct SerializabilityWorkload : TestWorkload {
 					initialData.push_back_deep(initialData.arena(), KeyValueRef(key, value));
 					//TraceEvent("SRL_Init").detail("Key", printable(key)).detail("Value", printable(value));
 				}
-		
+
 				//Generate three random transactions
 				state std::vector<TransactionOperation> a = self->randomTransaction();
 				state std::vector<TransactionOperation> b = self->randomTransaction();
@@ -369,7 +362,7 @@ struct SerializabilityWorkload : TestWorkload {
 				wait( tr[0].commit() );
 
 				//TraceEvent("SRL_FinishedA");
-		
+
 				wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
 				wait( tr[1].commit() );
 

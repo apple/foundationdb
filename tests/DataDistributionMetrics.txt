@@ -1,0 +1,24 @@
+testTitle=DataDistributionMetricsCorrectness
+    testName=DataDistributionMetrics
+    testDuration=10.0
+    nodeCount=100000
+    actorCount=64
+    keyPrefix=DDMetrics
+
+    testName=Cycle
+    transactionsPerSecond=2500.0
+    testDuration=10.0
+    expectedRate=0.025
+
+    testName=Mako
+    testDuration=10.0
+    transactionsPerSecond=2500
+    rows=100000
+    sampleSize=100
+    valueBytes=16
+    keyBytes=16
+    operations=u8i
+    actorCountPerClient=64
+    populateData=true
+    runBenchmark=true
+    preserveData=false

@@ -661,6 +661,33 @@ struct GetEstimatedRangeSize : InstructionFunc {
 const char* GetEstimatedRangeSize::name = "GET_ESTIMATED_RANGE_SIZE";
 REGISTER_INSTRUCTION_FUNC(GetEstimatedRangeSize);
 
+struct GetRangeSplitPoints : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		state std::vector<StackItem> items = data->stack.pop(3);
+		if (items.size() != 3)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		state Standalone<StringRef> beginKey = Tuple::unpack(s1).getString(0);
+
+		Standalone<StringRef> s2 = wait(items[1].value);
+		state Standalone<StringRef> endKey = Tuple::unpack(s2).getString(0);
+
+		Standalone<StringRef> s3 = wait(items[2].value);
+		state int64_t chunkSize = Tuple::unpack(s3).getInt(0);
+
+		Future<FDBStandalone<VectorRef<KeyRef>>> fsplitPoints = instruction->tr->getRangeSplitPoints(KeyRangeRef(beginKey, endKey), chunkSize);
+		FDBStandalone<VectorRef<KeyRef>> splitPoints = wait(fsplitPoints);
+		data->stack.pushTuple(LiteralStringRef("GOT_RANGE_SPLIT_POINTS"));
+
+		return Void();
+	}
+};
+const char* GetRangeSplitPoints::name = "GET_RANGE_SPLIT_POINTS";
+REGISTER_INSTRUCTION_FUNC(GetRangeSplitPoints);
+
 struct GetKeyFunc : InstructionFunc {
 	static const char* name;
 
@@ -1365,12 +1392,12 @@ const char* StartThreadFunc::name = "START_THREAD";
 REGISTER_INSTRUCTION_FUNC(StartThreadFunc);
 
 ACTOR template <class Function>
-Future<decltype(fake<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
-                                                                                 Function func) {
+Future<decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue())> read(Reference<Database> db,
+                                                                                         Function func) {
 	state Reference<ReadTransaction> tr = db->createTransaction();
 	loop {
 		try {
-			state decltype(fake<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
+			state decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue()) result = wait(func(tr));
 			return result;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -1817,7 +1844,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(TLSConfig());
 
-		API *fdb = FDB::API::selectAPIVersion(630);
+		API *fdb = FDB::API::selectAPIVersion(700);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);

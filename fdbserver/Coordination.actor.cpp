@@ -34,6 +34,8 @@
 struct GenerationRegVal {
 	UniqueGeneration readGen, writeGen;
 	Optional<Value> val;
+
+	//To change this serialization, ProtocolVersion::GenerationRegVal must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, readGen, writeGen, val);
@@ -94,7 +96,7 @@ ServerCoordinators::ServerCoordinators( Reference<ClusterConnectionFile> cf )
 // The coordination server wants to create its key value store only if it is actually used
 struct OnDemandStore {
 public:
-	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(NULL), myID(myID) {}
+	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(nullptr), myID(myID) {}
 	~OnDemandStore() { if (store) store->close(); }
 
 	IKeyValueStore* get() {
@@ -144,7 +146,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			TraceEvent("GenerationRegReadReply").detail("RVSize", rawV.present() ? rawV.get().size() : -1).detail("VWG", v.writeGen.generation);
 			if (v.readGen < req.gen) {
 				v.readGen = req.gen;
-				store->set( KeyValueRef( req.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
+				store->set( KeyValueRef( req.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal())) ) );
 				wait(store->commit());
 			}
 			req.reply.send( GenerationRegReadReply( v.val, v.writeGen, v.readGen ) );
@@ -156,7 +158,7 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 			if (v.readGen <= wrq.gen && v.writeGen < wrq.gen) {
 				v.writeGen = wrq.gen;
 				v.val = wrq.kv.value;
-				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
+				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion(ProtocolVersion::withGenerationRegVal())) ) );
 				wait(store->commit());
 				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().getPrimaryAddress()).detail("Key", wrq.kv.key)
 					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
@@ -213,10 +215,6 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 }
 
 ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, OpenDatabaseCoordRequest req) {
-	if(db->clientInfo->get().read().id != req.knownClientInfoID && !db->clientInfo->get().read().forward.present()) {
-		req.reply.send( db->clientInfo->get() );
-		return Void();
-	}
 	++(*clientCount);
 	hasConnectedClients->set(true);
 	
@@ -245,11 +243,6 @@ ACTOR Future<Void> openDatabase(ClientData* db, int* clientCount, Reference<Asyn
 }
 
 ACTOR Future<Void> remoteMonitorLeader( int* clientCount, Reference<AsyncVar<bool>> hasConnectedClients, Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader, ElectionResultRequest req ) {
-	if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
-		req.reply.send( currentElectedLeader->get() );
-		return Void();
-	}
-
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
@@ -291,16 +284,24 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {
-			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+			if (clientData.clientInfo->get().read().id != req.knownClientInfoID && !clientData.clientInfo->get().read().forward.present()) {
+				req.reply.send(clientData.clientInfo->get());
+			} else {
+				if(!leaderMon.isValid()) {
+					leaderMon = monitorLeaderForProxies(req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+				}
+				actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 			}
-			actors.add(openDatabase(&clientData, &clientCount, hasConnectedClients, req));
 		}
 		when ( ElectionResultRequest req = waitNext( interf.electionResult.getFuture() ) ) {
-			if(!leaderMon.isValid()) {
-				leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+			if (currentElectedLeader->get().present() && req.knownLeader != currentElectedLeader->get().get().changeID) {
+				req.reply.send(currentElectedLeader->get());
+			} else {
+				if(!leaderMon.isValid()) {
+					leaderMon = monitorLeaderForProxies(req.key, req.coordinators, &clientData, currentElectedLeader);
+				}
+				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
 			}
-			actors.add( remoteMonitorLeader( &clientCount, hasConnectedClients, currentElectedLeader, req ) );
 		}
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {

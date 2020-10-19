@@ -32,13 +32,13 @@ public:
 	enum SEGMENT_TYPE { UNKNOWN_RANGE, EMPTY_RANGE, KV };
 	static const SEGMENT_TYPE typeMap[12];
 
-	SEGMENT_TYPE type();
+	SEGMENT_TYPE type() const;
 
-	bool is_kv();
-	bool is_unknown_range();
-	bool is_empty_range();
-	bool is_unreadable();
-	bool is_dependent();
+	bool is_kv() const;
+	bool is_unknown_range() const;
+	bool is_empty_range() const;
+	bool is_unreadable() const;
+	bool is_dependent() const;
 
 	ExtStringRef beginKey();
 	ExtStringRef endKey();
@@ -50,6 +50,7 @@ public:
 	RYWIterator& operator--();
 
 	bool operator == ( const RYWIterator& r ) const;
+	bool operator!=(const RYWIterator& r) const;
 
 	void skip( KeyRef key );
 	

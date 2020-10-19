@@ -19,10 +19,12 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "flow/TDMetric.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-
+#include "fdbclient/StorageServerInterface.h"
+#include "flow/Arena.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/serialize.h"
 
 const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
@@ -46,6 +48,11 @@ const KeyRef keyServersKey( const KeyRef& k, Arena& arena ) {
 	return k.withPrefix( keyServersPrefix, arena );
 }
 const Value keyServersValue( Standalone<RangeResultRef> result, const std::vector<UID>& src, const std::vector<UID>& dest ) {
+	if(!CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS) {
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue())); wr << src << dest;
+		return wr.toValue();
+	}
+	
 	std::vector<Tag> srcTag;
 	std::vector<Tag> destTag;
 
@@ -70,7 +77,7 @@ const Value keyServersValue( Standalone<RangeResultRef> result, const std::vecto
 
 	if(foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
 		ASSERT_WE_THINK(foundOldLocality);
-		BinaryWriter wr(IncludeVersion()); wr << src << dest;
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue())); wr << src << dest;
 		return wr.toValue();
 	}
 
@@ -78,7 +85,7 @@ const Value keyServersValue( Standalone<RangeResultRef> result, const std::vecto
 }
 const Value keyServersValue( const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag ) {
 	// src and dest are expected to be sorted
-	BinaryWriter wr(IncludeVersion()); wr << srcTag << destTag;
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2())); wr << srcTag << destTag;
 	return wr.toValue();
 }
 
@@ -91,19 +98,11 @@ void decodeKeyServersValue( Standalone<RangeResultRef> result, const ValueRef& v
 	}
 
 	BinaryReader rd(value, IncludeVersion());
-	rd.checkpoint();
-	int srcLen, destLen;
-	rd >> srcLen;
-	rd.readBytes(srcLen * sizeof(Tag));
-	rd >> destLen;
-	rd.rewind();
-
-	if (value.size() != sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
+	if(!rd.protocolVersion().hasKeyServerValueV2()) {
 		rd >> src >> dest;
-		rd.assertEnd();
 		return;
 	}
-
+	
 	std::vector<Tag> srcTag, destTag;
 	rd >> srcTag >> destTag;
 
@@ -203,6 +202,32 @@ const KeyRangeRef writeConflictRangeKeysRange =
     KeyRangeRef(LiteralStringRef("\xff\xff/transaction/write_conflict_range/"),
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
+// "\xff/cacheServer/[[UID]] := StorageServerInterface"
+// This will be added by the cache server on initialization and removed by DD
+// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
+//                versions. For now caches simply cache everything so the ids
+//                are not yet meaningful.
+const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"),
+                                         LiteralStringRef("\xff/cacheServer0"));
+const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
+const KeyRef storageCacheServersEnd = storageCacheServerKeys.end;
+
+const Key storageCacheServerKey(UID id) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(storageCacheServersPrefix);
+	wr << id;
+	return wr.toValue();
+}
+
+const Value storageCacheServerValue(const StorageServerInterface& ssi) {
+	BinaryWriter wr(IncludeVersion());
+	wr << ssi;
+	return wr.toValue();
+}
+
+const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
+                                             LiteralStringRef("\xff\xff/metrics/data_distribution_stats/\xff\xff"));
+
 //    "\xff/storageCache/[[begin]]" := "[[vector<uint16_t>]]"
 const KeyRangeRef storageCacheKeys( LiteralStringRef("\xff/storageCache/"), LiteralStringRef("\xff/storageCache0") );
 const KeyRef storageCachePrefix = storageCacheKeys.begin;
@@ -212,7 +237,7 @@ const Key storageCacheKey( const KeyRef& k ) {
 }
 
 const Value storageCacheValue( const vector<uint16_t>& serverIndices ) {
-	BinaryWriter wr((IncludeVersion())); 
+	BinaryWriter wr((IncludeVersion(ProtocolVersion::withStorageCacheValue()))); 
 	wr << serverIndices;
 	return wr.toValue();
 }
@@ -226,7 +251,7 @@ void decodeStorageCacheValue( const ValueRef& value, vector<uint16_t>& serverInd
 }
 
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLogsValue()));
 	wr << logs;
 	wr << oldLogs;
 	return wr.toValue();
@@ -363,7 +388,7 @@ const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
 }
 
 const Value serverTagValue( Tag tag ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerTagValue()));
 	wr << tag;
 	return wr.toValue();
 }
@@ -423,7 +448,7 @@ const Key tagLocalityListKeyFor( Optional<Value> dcID ) {
 }
 
 const Value tagLocalityListValue( int8_t const& tagLocality ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagLocalityListValue()));
 	wr << tagLocality;
 	return wr.toValue();
 }
@@ -453,7 +478,7 @@ const Key datacenterReplicasKeyFor( Optional<Value> dcID ) {
 }
 
 const Value datacenterReplicasValue( int const& replicas ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withDatacenterReplicasValue()));
 	wr << replicas;
 	return wr.toValue();
 }
@@ -509,7 +534,7 @@ const Key serverListKeyFor( UID serverID ) {
 }
 
 const Value serverListValue( StorageServerInterface const& server ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
 	wr << server;
 	return wr.toValue();
 }
@@ -525,6 +550,7 @@ StorageServerInterface decodeServerListValue( ValueRef const& value ) {
 	reader >> s;
 	return s;
 }
+
 
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef processClassKeys(
@@ -543,7 +569,7 @@ const Key processClassKeyFor(StringRef processID ) {
 }
 
 const Value processClassValue( ProcessClass const& processClass ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withProcessClassValue()));
 	wr << processClass;
 	return wr.toValue();
 }
@@ -617,7 +643,7 @@ const Key workerListKeyFor( StringRef processID ) {
 }
 
 const Value workerListValue( ProcessData const& processData ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withWorkerListValue()));
 	wr << processData;
 	return wr.toValue();
 }
@@ -650,7 +676,7 @@ const Key backupProgressKeyFor(UID workerID) {
 }
 
 const Value backupProgressValue(const WorkerBackupStatus& status) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
 	wr << status;
 	return wr.toValue();
 }
@@ -670,7 +696,7 @@ WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value) {
 }
 
 Value encodeBackupStartedValue(const std::vector<std::pair<UID, Version>>& ids) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupStartValue()));
 	wr << ids;
 	return wr.toValue();
 }
@@ -789,7 +815,7 @@ KeyRef logRangesDecodeKey(KeyRef key, UID* logUid) {
 
 // Returns the encoded key value comprised of the end key and destination path
 Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withLogRangeEncodeValue()));
 	wr << std::make_pair(keyEnd, destPath);
 	return wr.toValue();
 }
@@ -880,6 +906,7 @@ std::pair<MetricNameRef, KeyRef> decodeMetricConfKey( KeyRef const& prefix, KeyR
 const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
+const KeyRef databaseLockedKeyEnd = LiteralStringRef("\xff/dbLocked\x00");
 const KeyRef metadataVersionKey = LiteralStringRef("\xff/metadataVersion");
 const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00");
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
@@ -935,7 +962,7 @@ const Key restoreWorkerKeyFor(UID const& workerID) {
 
 // Encode restore agent value
 const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue()));
 	wr << cmdInterf;
 	return wr.toValue();
 }
@@ -950,7 +977,7 @@ RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value) 
 // Encode and decode restore request value
 // restoreRequestTrigger key
 const Value restoreRequestTriggerValue(UID randomID, int const numRequests) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestTriggerValue()));
 	wr << numRequests;
 	wr << randomID;
 	return wr.toValue();
@@ -966,7 +993,7 @@ int decodeRestoreRequestTriggerValue(ValueRef const& value) {
 
 // restoreRequestDone key
 const Value restoreRequestDoneVersionValue(Version readVersion) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestDoneVersionValue()));
 	wr << readVersion;
 	return wr.toValue();
 }
@@ -985,7 +1012,7 @@ const Key restoreRequestKeyFor(int const& index) {
 }
 
 const Value restoreRequestValue(RestoreRequest const& request) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreRequestValue()));
 	wr << request;
 	return wr.toValue();
 }
@@ -1006,7 +1033,7 @@ const Key restoreStatusKeyFor(StringRef statusType) {
 }
 
 const Value restoreStatusValue(double val) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreStatusValue()));
 	wr << StringRef(std::to_string(val));
 	return wr.toValue();
 }
@@ -1015,7 +1042,7 @@ const StringRef ignoreSSFailuresZoneString = LiteralStringRef("IgnoreSSFailures"
 const KeyRef rebalanceDDIgnoreKey = LiteralStringRef("\xff\x02/rebalanceDDIgnored");
 
 const Value healthyZoneValue( StringRef const& zoneId, Version version ) {
-	BinaryWriter wr(IncludeVersion());
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withHealthyZoneValue()));
 	wr << zoneId;
 	wr << version;
 	return wr.toValue();
@@ -1033,3 +1060,7 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(
     LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
     LiteralStringRef("\xff/TESTONLYtxnStateStore0")
 );
+
+const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
+const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
+const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");

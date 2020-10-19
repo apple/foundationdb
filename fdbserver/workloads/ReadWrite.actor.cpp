@@ -219,22 +219,28 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual std::string description() { return descriptionString.toString(); }
-	virtual Future<Void> setup( Database const& cx ) { return _setup( cx, this ); }
-	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
+	std::string description() const override { return descriptionString.toString(); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR static Future<bool> traceDumpWorkers( Reference<AsyncVar<ServerDBInfo>> db ) {
 		try {
 			loop {
-				ErrorOr<std::vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );
-				if( workerList.present() ) {
-					std::vector<Future<ErrorOr<Void>>> dumpRequests;
-					for( int i = 0; i < workerList.get().size(); i++)
-						dumpRequests.push_back( workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
-					wait( waitForAll( dumpRequests ) );
-					return true;
+				choose {
+					when( wait( db->onChange() ) ) {}
+
+					when (ErrorOr<std::vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );)
+					{
+						if( workerList.present() ) {
+							std::vector<Future<ErrorOr<Void>>> dumpRequests;
+							for( int i = 0; i < workerList.get().size(); i++)
+								dumpRequests.push_back( workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply( TraceBatchDumpRequest() ) );
+							wait( waitForAll( dumpRequests ) );
+							return true;
+						}
+						wait( delay( 1.0 ) );
+					}
 				}
-				wait( delay( 1.0 ) );
 			}
 		} catch( Error &e ) {
 			TraceEvent(SevError, "FailedToDumpWorkers").error(e);
@@ -255,7 +261,7 @@ struct ReadWriteWorkload : KVWorkload {
 			return true;
 	}
 
-	virtual void getMetrics(std::vector<PerfMetric>& m) {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = metricsDuration;
 		int reads = (aTransactions.getValue() * readsPerTransactionA) + (bTransactions.getValue() * readsPerTransactionB);
 		int writes = (aTransactions.getValue() * writesPerTransactionA) + (bTransactions.getValue() * writesPerTransactionB);

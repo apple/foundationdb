@@ -121,7 +121,8 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	    .suppressFor(1.0)
 	    .detail("Address", endpoint.getPrimaryAddress())
 	    .detail("Token", endpoint.token);
-	endpointKnownFailed.set(endpoint, true);
+	failedEndpoints.insert(endpoint);
+	endpointKnownFailed.trigger(endpoint);
 }
 
 void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
@@ -132,7 +133,7 @@ void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
 Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoint) {
 	// If the endpoint or address is already failed, return right away
 	auto i = addressStatus.find(endpoint.getPrimaryAddress());
-	if (i == addressStatus.end() || i->second.isFailed() || endpointKnownFailed.get(endpoint)) {
+	if (i == addressStatus.end() || i->second.isFailed() || failedEndpoints.count(endpoint)) {
 		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
 		return Void();
 	}
@@ -149,14 +150,14 @@ Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
 	//   failure status for that endpoint can never change (and we could be spuriously triggered by setStatus)
 	// Also returns spuriously when notifyDisconnect is called (which doesn't actually change the state), but callers
 	//   check the state so it's OK
-	if (endpointKnownFailed.get(endpoint))
+	if (failedEndpoints.count(endpoint))
 		return Never();
 	else
 		return endpointKnownFailed.onChange(endpoint);
 }
 
-FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) {
-	if (endpointKnownFailed.get(endpoint))
+FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) const {
+	if (failedEndpoints.count(endpoint))
 		return FailureStatus(true);
 	else {
 		auto a = addressStatus.find(endpoint.getPrimaryAddress());
@@ -169,7 +170,7 @@ FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) {
 	}
 }
 
-FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
+FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) const {
 	auto a = addressStatus.find(address);
 	if (a == addressStatus.end())
 		return FailureStatus();
@@ -177,8 +178,8 @@ FailureStatus SimpleFailureMonitor::getState(NetworkAddress const& address) {
 		return a->second;
 }
 
-bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
-	if (!endpointKnownFailed.get(endpoint)) return false;
+bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) const {
+	if (!failedEndpoints.count(endpoint)) return false;
 	auto a = addressStatus.find(endpoint.getPrimaryAddress());
 	if (a == addressStatus.end())
 		return true;
@@ -186,11 +187,12 @@ bool SimpleFailureMonitor::onlyEndpointFailed(Endpoint const& endpoint) {
 		return !a->second.failed;
 }
 
-bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) {
-	return endpointKnownFailed.get(endpoint);
+bool SimpleFailureMonitor::permanentlyFailed(Endpoint const& endpoint) const {
+	return failedEndpoints.count(endpoint);
 }
 
 void SimpleFailureMonitor::reset() {
 	addressStatus = std::unordered_map<NetworkAddress, FailureStatus>();
+	failedEndpoints = std::unordered_set<Endpoint>();
 	endpointKnownFailed.resetNoWaiting();
 }

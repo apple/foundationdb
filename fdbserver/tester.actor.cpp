@@ -18,8 +18,13 @@
  * limitations under the License.
  */
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <cinttypes>
 #include <fstream>
+#include <functional>
+#include <map>
+#include <toml.hpp>
+
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
@@ -73,11 +78,11 @@ Key doubleToTestKey(double p, const KeyRef& prefix) {
 	return doubleToTestKey(p).withPrefix(prefix);
 }
 
-Key KVWorkload::getRandomKey() {
+Key KVWorkload::getRandomKey() const {
 	return getRandomKey(absentFrac);
 }
 
-Key KVWorkload::getRandomKey(double absentFrac) {
+Key KVWorkload::getRandomKey(double absentFrac) const {
 	if ( absentFrac > 0.0000001 ) {
 		return getRandomKey(deterministicRandom()->random01() < absentFrac);
 	} else {
@@ -85,11 +90,11 @@ Key KVWorkload::getRandomKey(double absentFrac) {
 	}
 }
 
-Key KVWorkload::getRandomKey(bool absent) {
+Key KVWorkload::getRandomKey(bool absent) const {
 	return keyForIndex(deterministicRandom()->randomInt( 0, nodeCount ), absent);
 }
 
-Key KVWorkload::keyForIndex( uint64_t index ) {
+Key KVWorkload::keyForIndex(uint64_t index) const {
 	if ( absentFrac > 0.0000001 ) {
 		return keyForIndex(index, deterministicRandom()->random01() < absentFrac);
 	} else {
@@ -97,7 +102,7 @@ Key KVWorkload::keyForIndex( uint64_t index ) {
 	}
 }
 
-Key KVWorkload::keyForIndex( uint64_t index, bool absent ) {
+Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	int adjustedKeyBytes = (absent) ? (keyBytes + 1) : keyBytes;
 	Key result = makeString( adjustedKeyBytes );
 	uint8_t* data = mutateString( result );
@@ -249,32 +254,34 @@ struct CompoundWorkload : TestWorkload {
 	CompoundWorkload( WorkloadContext& wcx ) : TestWorkload( wcx ) {}
 	CompoundWorkload* add( TestWorkload* w ) { workloads.push_back(w); return this; }
 
-	virtual ~CompoundWorkload() { for(int w=0; w<workloads.size(); w++) delete workloads[w]; }
-	virtual std::string description() {
+	~CompoundWorkload() {
+		for (int w = 0; w < workloads.size(); w++) delete workloads[w];
+	}
+	std::string description() const override {
 		std::string d;
 		for(int w=0; w<workloads.size(); w++)
 			d += workloads[w]->description() + (w==workloads.size()-1?"":";");
 		return d;
 	}
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		vector<Future<Void>> all;
 		for(int w=0; w<workloads.size(); w++)
 			all.push_back( workloads[w]->setup(cx) );
 		return waitForAll(all);
 	}
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		vector<Future<Void>> all;
 		for(int w=0; w<workloads.size(); w++)
 			all.push_back( workloads[w]->start(cx) );
 		return waitForAll(all);
 	}
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		vector<Future<bool>> all;
 		for(int w=0; w<workloads.size(); w++)
 			all.push_back( workloads[w]->check(cx) );
 		return allTrue(all);
 	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		for(int w=0; w<workloads.size(); w++) {
 			vector<PerfMetric> p;
 			workloads[w]->getMetrics(p);
@@ -282,7 +289,7 @@ struct CompoundWorkload : TestWorkload {
 				m.push_back( p[i].withPrefix( workloads[w]->description()+"." ) );
 		}
 	}
-	virtual double getCheckTimeout() {
+	double getCheckTimeout() const override {
 		double m = 0;
 		for(int w=0; w<workloads.size(); w++)
 			m = std::max( workloads[w]->getCheckTimeout(), m );
@@ -867,11 +874,146 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 	return ok;
 }
 
+std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
+	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
+	// be recognized and accepted, but there's no point in placing them into a testSpec.
+	{"extraDB", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		}},
+	{"configureLocked", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
+		}},
+	{"minimumReplication", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		}},
+	{"minimumRegions", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
+		}},
+	{"logAntiQuorum", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedLogAntiQuorum", "");
+		}},
+	{"buggify", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
+		}},
+	// The test harness handles NewSeverity events specially.
+	{"StderrSeverity", [](const std::string& value) {
+			TraceEvent("StderrSeverity").detail("NewSeverity", value);
+		}},
+	{"ClientInfoLogging", [](const std::string& value) {
+			if (value == "false") {
+				setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
+			}
+			// else { } It is enable by default for tester
+			TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
+		}},
+};
+
+std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
+	{ "testTitle", [](const std::string& value, TestSpec* spec) {
+			spec->title = value;
+			TraceEvent("TestParserTest").detail("ParsedTest",  spec->title );
+		}},
+	{ "timeout", [](const std::string& value, TestSpec* spec) {
+			sscanf( value.c_str(), "%d", &(spec->timeout) );
+			ASSERT( spec->timeout > 0 );
+			TraceEvent("TestParserTest").detail("ParsedTimeout", spec->timeout);
+		}},
+	{ "databasePingDelay", [](const std::string& value, TestSpec* spec) {
+			double databasePingDelay;
+			sscanf( value.c_str(), "%lf", &databasePingDelay );
+			ASSERT( databasePingDelay >= 0 );
+			if( !spec->useDB && databasePingDelay > 0 ) {
+				TraceEvent(SevError, "TestParserError")
+					.detail("Reason", "Cannot have non-zero ping delay on test that does not use database")
+					.detail("PingDelay", databasePingDelay).detail("UseDB", spec->useDB);
+				ASSERT( false );
+			}
+			spec->databasePingDelay = databasePingDelay;
+			TraceEvent("TestParserTest").detail("ParsedPingDelay", spec->databasePingDelay);
+		}},
+	{ "runSetup", [](const std::string& value, TestSpec* spec) {
+			spec->phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
+			if( value == "true" )
+				spec->phases |= TestWorkload::SETUP;
+			TraceEvent("TestParserTest").detail("ParsedSetupFlag", (spec->phases & TestWorkload::SETUP) != 0);
+		}},
+	{ "dumpAfterTest", [](const std::string& value, TestSpec* spec) {
+			spec->dumpAfterTest = ( value == "true" );
+			TraceEvent("TestParserTest").detail("ParsedDumpAfter", spec->dumpAfterTest);
+		}},
+	{ "clearAfterTest", [](const std::string& value, TestSpec* spec) {
+			spec->clearAfterTest = ( value == "true" );
+			TraceEvent("TestParserTest").detail("ParsedClearAfter", spec->clearAfterTest);
+		}},
+	{ "useDB", [](const std::string& value, TestSpec* spec) {
+			spec->useDB = ( value == "true" );
+			TraceEvent("TestParserTest").detail("ParsedUseDB", spec->useDB);
+			if( !spec->useDB )
+				spec->databasePingDelay = 0.0;
+		}},
+	{ "startDelay", [](const std::string& value, TestSpec* spec) {
+			sscanf( value.c_str(), "%lf", &spec->startDelay );
+			TraceEvent("TestParserTest").detail("ParsedStartDelay", spec->startDelay);
+		}},
+	{ "runConsistencyCheck", [](const std::string& value, TestSpec* spec) {
+			spec->runConsistencyCheck = ( value == "true" );
+			TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheck", spec->runConsistencyCheck);
+		}},
+	{ "waitForQuiescence", [](const std::string& value, TestSpec* spec) {
+			bool toWait = value == "true";
+			spec->waitForQuiescenceBegin = toWait;
+			spec->waitForQuiescenceEnd = toWait;
+			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescence", toWait);
+		}},
+	{ "waitForQuiescenceBegin", [](const std::string& value, TestSpec* spec) {
+			bool toWait = value == "true";
+			spec->waitForQuiescenceBegin = toWait;
+			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceBegin", toWait);
+		}},
+	{ "waitForQuiescenceEnd", [](const std::string& value, TestSpec* spec) {
+			bool toWait = value == "true";
+			spec->waitForQuiescenceEnd = toWait;
+			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceEnd", toWait);
+		}},
+	{ "simCheckRelocationDuration", [](const std::string& value, TestSpec* spec) {
+			spec->simCheckRelocationDuration = (value == "true");
+			TraceEvent("TestParserTest").detail("ParsedSimCheckRelocationDuration", spec->simCheckRelocationDuration);
+		}},
+	{ "connectionFailuresDisableDuration", [](const std::string& value, TestSpec* spec) {
+			double connectionFailuresDisableDuration;
+			sscanf( value.c_str(), "%lf", &connectionFailuresDisableDuration );
+			ASSERT( connectionFailuresDisableDuration >= 0 );
+			spec->simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
+			if(g_network->isSimulated())
+				g_simulator.connectionFailuresDisableDuration = spec->simConnectionFailuresDisableDuration;
+			TraceEvent("TestParserTest").detail("ParsedSimConnectionFailuresDisableDuration", spec->simConnectionFailuresDisableDuration);
+		}},
+	{ "simBackupAgents", [](const std::string& value, TestSpec* spec) {
+			if (value == "BackupToFile" || value == "BackupToFileAndDB")
+				spec->simBackupAgents = ISimulator::BackupToFile;
+			else
+				spec->simBackupAgents = ISimulator::NoBackupAgents;
+			TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec->simBackupAgents);
+
+			if (value == "BackupToDB" || value == "BackupToFileAndDB")
+				spec->simDrAgents = ISimulator::BackupToDB;
+			else
+				spec->simDrAgents = ISimulator::NoBackupAgents;
+			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec->simDrAgents);
+		}},
+	{ "checkOnly", [](const std::string& value, TestSpec* spec) {
+			if(value == "true")
+				spec->phases = TestWorkload::CHECK;
+		}},
+};
+
 vector<TestSpec> readTests( ifstream& ifs ) {
 	TestSpec spec;
 	vector<TestSpec> result;
 	Standalone< VectorRef< KeyValueRef > > workloadOptions;
 	std::string cline;
+	bool beforeFirstTest = true;
+	bool parsingWorkloads = false;
 
 	while( ifs.good() ) {
 		getline(ifs, cline);
@@ -887,6 +1029,8 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 		string value = removeWhitespace(line.substr( found + 1 ));
 
 		if( attrib == "testTitle" ) {
+			beforeFirstTest = false;
+			parsingWorkloads = false;
 			if( workloadOptions.size() ) {
 				spec.options.push_back_deep( spec.options.arena(), workloadOptions );
 				workloadOptions = Standalone< VectorRef< KeyValueRef > >();
@@ -896,107 +1040,17 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 				spec = TestSpec();
 			}
 
-			spec.title = StringRef( value );
-			TraceEvent("TestParserTest").detail("ParsedTest",  spec.title );
-		} else if( attrib == "timeout" ) {
-			sscanf( value.c_str(), "%d", &(spec.timeout) );
-			ASSERT( spec.timeout > 0 );
-			TraceEvent("TestParserTest").detail("ParsedTimeout", spec.timeout);
-		}  else if( attrib == "databasePingDelay" ) {
-			double databasePingDelay;
-			sscanf( value.c_str(), "%lf", &databasePingDelay );
-			ASSERT( databasePingDelay >= 0 );
-			if( !spec.useDB && databasePingDelay > 0 ) {
-				TraceEvent(SevError, "TestParserError")
-					.detail("Reason", "Cannot have non-zero ping delay on test that does not use database")
-					.detail("PingDelay", databasePingDelay).detail("UseDB", spec.useDB);
-				ASSERT( false );
-			}
-			spec.databasePingDelay = databasePingDelay;
-			TraceEvent("TestParserTest").detail("ParsedPingDelay", spec.databasePingDelay);
-		} else if( attrib == "runSetup" ) {
-			spec.phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
-			if( value == "true" )
-				spec.phases |= TestWorkload::SETUP;
-			TraceEvent("TestParserTest").detail("ParsedSetupFlag", (spec.phases & TestWorkload::SETUP) != 0);
-		} else if( attrib == "dumpAfterTest" ) {
-			spec.dumpAfterTest = ( value == "true" );
-			TraceEvent("TestParserTest").detail("ParsedDumpAfter", spec.dumpAfterTest);
-		} else if( attrib == "clearAfterTest" ) {
-			spec.clearAfterTest = ( value == "true" );
-			TraceEvent("TestParserTest").detail("ParsedClearAfter", spec.clearAfterTest);
-		} else if( attrib == "useDB" ) {
-			spec.useDB = ( value == "true" );
-			TraceEvent("TestParserTest").detail("ParsedUseDB", spec.useDB);
-			if( !spec.useDB )
-				spec.databasePingDelay = 0.0;
-		} else if( attrib == "startDelay" ) {
-			sscanf( value.c_str(), "%lf", &spec.startDelay );
-			TraceEvent("TestParserTest").detail("ParsedStartDelay", spec.startDelay);
-		} else if( attrib == "runConsistencyCheck" ) {
-			spec.runConsistencyCheck = ( value == "true" );
-			TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheck", spec.runConsistencyCheck);
-		} else if( attrib == "waitForQuiescence" ) {
-			bool toWait = value == "true";
-			spec.waitForQuiescenceBegin = toWait;
-			spec.waitForQuiescenceEnd = toWait;
-			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescence", toWait);
-		} else if( attrib == "waitForQuiescenceBegin" ) {
-			bool toWait = value == "true";
-			spec.waitForQuiescenceBegin = toWait;
-			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceBegin", toWait);
-		} else if( attrib == "waitForQuiescenceEnd" ) {
-			bool toWait = value == "true";
-			spec.waitForQuiescenceEnd = toWait;
-			TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceEnd", toWait);
-		} else if( attrib == "simCheckRelocationDuration" ) {
-			spec.simCheckRelocationDuration = (value == "true");
-			TraceEvent("TestParserTest").detail("ParsedSimCheckRelocationDuration", spec.simCheckRelocationDuration);
-		} else if( attrib == "connectionFailuresDisableDuration" ) {
-			double connectionFailuresDisableDuration;
-			sscanf( value.c_str(), "%lf", &connectionFailuresDisableDuration );
-			ASSERT( connectionFailuresDisableDuration >= 0 );
-			spec.simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
-			if(g_network->isSimulated())
-				g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
-			TraceEvent("TestParserTest").detail("ParsedSimConnectionFailuresDisableDuration", spec.simConnectionFailuresDisableDuration);
-		} else if( attrib == "simBackupAgents" ) {
-			if (value == "BackupToFile" || value == "BackupToFileAndDB")
-				spec.simBackupAgents = ISimulator::BackupToFile;
-			else
-				spec.simBackupAgents = ISimulator::NoBackupAgents;
-			TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec.simBackupAgents);
-
-			if (value == "BackupToDB" || value == "BackupToFileAndDB")
-				spec.simDrAgents = ISimulator::BackupToDB;
-			else
-				spec.simDrAgents = ISimulator::NoBackupAgents;
-			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec.simDrAgents);
-		} else if( attrib == "extraDB" ) {
-			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
-		} else if ( attrib == "configureLocked" ) {
-			TraceEvent("TestParserTest").detail("ParsedConfigureLocked", "");
-		} else if( attrib == "minimumReplication" ) {
-			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
-		} else if( attrib == "minimumRegions" ) {
-			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
-		} else if( attrib == "buggify" ) {
-			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
-		} else if( attrib == "checkOnly" ) {
-			if(value == "true")
-				spec.phases = TestWorkload::CHECK;
-		} else if( attrib == "StderrSeverity" ) {
-			TraceEvent("StderrSeverity").detail("NewSeverity", value);
-		}
-		else if (attrib == "ClientInfoLogging") {
-			if (value == "false") {
-				setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
-			}
-			// else { } It is enable by default for tester
-			TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
+			testSpecTestKeys[attrib](value, &spec);
+		} else if ( testSpecTestKeys.find(attrib) != testSpecTestKeys.end() ) {
+			if (parsingWorkloads) TraceEvent(SevError, "TestSpecTestParamInWorkload").detail("Attrib", attrib).detail("Value", value);
+			testSpecTestKeys[attrib](value, &spec);
+		} else if ( testSpecGlobalKeys.find(attrib) != testSpecGlobalKeys.end() ) {
+			if (!beforeFirstTest) TraceEvent(SevError, "TestSpecGlobalParamInTest").detail("Attrib", attrib).detail("Value", value);
+			testSpecGlobalKeys[attrib](value);
 		}
 		else {
 			if( attrib == "testName" ) {
+				parsingWorkloads = true;
 				if( workloadOptions.size() ) {
 					TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
 					spec.options.push_back_deep( spec.options.arena(), workloadOptions );
@@ -1016,6 +1070,89 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	}
 
 	return result;
+}
+
+template <typename T>
+std::string toml_to_string(const T& value) {
+	// TOML formatting converts numbers to strings exactly how they're in the file
+	// and thus, is equivalent to testspec.  However, strings are quoted, so we
+	// must remove the quotes.
+	if (value.type() == toml::value_t::string) {
+		const std::string& formatted = toml::format(value);
+		return formatted.substr(1, formatted.size()-2);
+	} else {
+		return toml::format(value);
+	}
+}
+
+
+std::vector<TestSpec> readTOMLTests_( std::string fileName ) {
+	TestSpec spec;
+	Standalone< VectorRef< KeyValueRef > > workloadOptions;
+	std::vector<TestSpec> result;
+
+	const toml::value& conf = toml::parse(fileName);
+
+	// Handle all global settings
+	for (const auto& [k, v] : conf.as_table()) {
+		if (k == "test") {
+			continue;
+		}
+		if (testSpecGlobalKeys.find(k) != testSpecGlobalKeys.end()) {
+			testSpecGlobalKeys[k](toml_to_string(v));
+		} else {
+			TraceEvent(SevError, "TestSpecUnrecognizedGlobalParam").detail("Attrib", k).detail("Value", toml_to_string(v));
+		}
+	}
+
+	// Then parse each test
+	const toml::array& tests = toml::find(conf, "test").as_array();
+	for (const toml::value& test : tests) {
+		spec = TestSpec();
+
+		// First handle all test-level settings
+		for (const auto& [k, v] : test.as_table()) {
+			if (k == "workload") {
+				continue;
+			}
+			if (testSpecTestKeys.find(k) != testSpecTestKeys.end()) {
+				testSpecTestKeys[k](toml_to_string(v), &spec);
+			} else {
+				TraceEvent(SevError, "TestSpecUnrecognizedTestParam").detail("Attrib", k).detail("Value", toml_to_string(v));
+			}
+		}
+
+		// And then copy the workload attributes to spec.options
+		const toml::array& workloads = toml::find(test, "workload").as_array();
+		for (const toml::value& workload : workloads) {
+			workloadOptions = Standalone< VectorRef< KeyValueRef > >();
+			TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
+			for (const auto& [attrib, v] : workload.as_table()) {
+				const std::string& value = toml_to_string(v);
+				workloadOptions.push_back_deep( workloadOptions.arena(), 
+					KeyValueRef( StringRef( attrib ), StringRef( value ) ) );
+				TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
+			}
+			spec.options.push_back_deep( spec.options.arena(), workloadOptions );
+		}
+
+		result.push_back(spec);
+	}
+
+	return result;
+}
+
+// A hack to catch and log std::exception, because TOML11 has very useful
+// error messages, but the actor framework can't handle std::exception.
+std::vector<TestSpec> readTOMLTests( std::string fileName ) {
+	try {
+		return readTOMLTests_( fileName );
+	} catch (std::exception &e) {
+		std::cerr << e.what() << std::endl;
+		TraceEvent("TOMLParseError").detail("Error", printable(e.what()));
+		// TODO: replace with toml_parse_error();
+		throw unknown_error();
+	}
 }
 
 ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
@@ -1210,11 +1347,20 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 		ifs.open( fileName.c_str(), ifstream::in );
 		if( !ifs.good() ) {
 			TraceEvent(SevError, "TestHarnessFail").detail("Reason", "file open failed").detail("File", fileName.c_str());
-			fprintf(stderr, "ERROR: Could not open test spec file `%s'\n", fileName.c_str());
+			fprintf(stderr, "ERROR: Could not open file `%s'\n", fileName.c_str());
 			return Void();
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester
-		testSpecs = readTests( ifs );
+		if ( boost::algorithm::ends_with(fileName, ".txt") ) {
+			testSpecs = readTests( ifs );
+		} else if ( boost::algorithm::ends_with(fileName, ".toml") ) {
+			// TOML is weird about opening the file as binary on windows, so we
+			// just let TOML re-open the file instead of using ifs.
+			testSpecs = readTOMLTests( fileName );
+		} else {
+			TraceEvent(SevError, "TestHarnessFail").detail("Reason", "unknown tests specification extension").detail("File", fileName.c_str());
+			return Void();
+		}
 		ifs.close();
 	}
 

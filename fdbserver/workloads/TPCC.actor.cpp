@@ -158,7 +158,7 @@ struct TPCC : TestWorkload {
 		}
 	}
 
-	virtual std::string description() override { return DESCRIPTION; }
+	std::string description() const override { return DESCRIPTION; }
 
 	// Transactions
 
@@ -458,7 +458,7 @@ struct TPCC : TestWorkload {
 		state int d_id = deterministicRandom()->randomInt(0, 10);
 		state int i;
 		state Order order;
-		state VectorRef<OrderLine> orderLines;
+		state std::vector<OrderLine> orderLines;
 		try {
 			state Customer customer = wait(getRandomCustomer(self, &tr, w_id, d_id));
 			order.o_w_id = customer.c_w_id;
@@ -481,7 +481,7 @@ struct TPCC : TestWorkload {
 				BinaryReader r(olValue.get(), IncludeVersion());
 				OrderLine ol;
 				serializer(r, ol);
-				orderLines.push_back(order.arena, ol);
+				orderLines.push_back(ol);
 			}
 		} catch (Error& e) {
 			return false;
@@ -674,16 +674,16 @@ struct TPCC : TestWorkload {
 		}
 	}
 
-	double transactionsPerMinute() {
+	double transactionsPerMinute() const {
 		return metrics.successfulNewOrderTransactions * 60.0 / (testDuration - 2 * warmupTime);
 	}
 
-	bool recordMetrics() {
+	bool recordMetrics() const {
 		auto now = g_network->now();
 		return (now > startTime + warmupTime && now < startTime + testDuration - warmupTime);
 	}
 
-	virtual Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override {
 		if (clientId >= clientsUsed) return Void();
 		return _start(cx, this);
 	}
@@ -705,10 +705,10 @@ struct TPCC : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) override {
+	Future<bool> check(Database const& cx) override {
 		return (transactionsPerMinute() > expectedTransactionsPerMinute);
 	}
-	virtual void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientsUsed);
 
 		m.push_back(PerfMetric("Transactions Per Minute", transactionsPerMinute(), false));

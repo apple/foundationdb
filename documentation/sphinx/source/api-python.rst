@@ -100,7 +100,7 @@ When you import the ``fdb`` module, it exposes only one useful symbol:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
+For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :ref:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -108,7 +108,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(630)
+    fdb.api_version(700)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -678,8 +678,6 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 
     |atomic-versionstamps-2|
 
-    |atomic-set-versionstamped-key-2|
-
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 
 .. method:: Transaction.set_versionstamped_value(key, param)
@@ -801,7 +799,14 @@ Transaction misc functions
 
 .. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
 
-    Get the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+    Gets the estimated byte size of the given key range. Returns a :class:`FutureInt64`.
+    .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
+
+.. method:: Transaction.get_range_split_points(self, begin_key, end_key, chunk_size)
+
+    Gets a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``. Returns a :class:`FutureKeyArray`.
+    .. note:: The returned split points contain the start key and end key of the given range
+
 
 .. _api-python-transaction-options:
 
@@ -1160,7 +1165,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
 .. method:: has_incomplete_versionstamp(tuple)
 
     Returns ``True`` if there is at least one element contained within the tuple that is a
-    :class`Versionstamp` instance that is incomplete. If there are multiple incomplete
+    :class:`Versionstamp` instance that is incomplete. If there are multiple incomplete
     :class:`Versionstamp` instances, this method will return ``True``, but trying to pack it into a
     byte string will result in an error.
 

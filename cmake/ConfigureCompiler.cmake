@@ -4,6 +4,7 @@ env_set(USE_GPERFTOOLS OFF BOOL "Use gperfools for profiling")
 env_set(USE_DTRACE ON BOOL "Enable dtrace probes on supported platforms")
 env_set(USE_VALGRIND OFF BOOL "Compile for valgrind usage")
 env_set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} BOOL "Use valgrind for ctest")
+env_set(VALGRIND_ARENA OFF BOOL "Inform valgrind about arena-allocated memory. Makes valgrind slower but more precise.")
 env_set(ALLOC_INSTRUMENTATION OFF BOOL "Instrument alloc")
 env_set(WITH_UNDODB OFF BOOL "Use rr or undodb")
 env_set(USE_ASAN OFF BOOL "Compile with address sanitizer")
@@ -40,6 +41,7 @@ endif()
 add_compile_options(-DCMAKE_BUILD)
 add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 if(ALLOC_INSTRUMENTATION)
   add_compile_options(-DALLOC_INSTRUMENTATION)
@@ -85,7 +87,17 @@ include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(NOT WIN32)
+  include(CheckIncludeFile)
+  CHECK_INCLUDE_FILE("stdatomic.h" HAS_C11_ATOMICS)
+  if (NOT HAS_C11_ATOMICS)
+    message(FATAL_ERROR "C compiler does not support c11 atomics")
+  endif()
+endif()
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
@@ -199,8 +211,46 @@ else()
   #   -mavx
   #   -msse4.2)
 
+  # Tentatively re-enabling vector instructions
+  set(USE_AVX512F OFF CACHE BOOL "Enable AVX 512F instructions")
+  if (USE_AVX512F)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx512f)
+    elseif(USE_VALGRIND)
+      message(STATUS "USE_VALGRIND=ON make USE_AVX OFF to satisfy valgrind analysis requirement")
+      set(USE_AVX512F OFF)
+    else()
+      message(STATUS "USE_AVX512F is supported on x86 or x86_64 only")
+      set(USE_AVX512F OFF)
+    endif()
+  endif()
+  set(USE_AVX ON CACHE BOOL "Enable AVX instructions")
+  if (USE_AVX)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+      add_compile_options(-mavx)
+    elseif(USE_VALGRIND)
+      message(STATUS "USE_VALGRIND=ON make USE_AVX OFF to satisfy valgrind analysis requirement")
+      set(USE_AVX OFF)
+    else()
+      message(STATUS "USE_AVX is supported on x86 or x86_64 only")
+      set(USE_AVX OFF)
+    endif()
+  endif()
+
+  # Intentionally using builtin memcpy.  G++ does a good job on small memcpy's when the size is known at runtime.
+  # If the size is not known, then it falls back on the memcpy that's available at runtime (rte_memcpy, as of this
+  # writing; see flow.cpp).
+  #
+  # The downside of the builtin memcpy is that it's slower at large copies, so if we spend a lot of time on large
+  # copies of sizes that are known at compile time, this might not be a win.  See the output of performance/memcpy
+  # for more information.
+  #add_compile_options(-fno-builtin-memcpy)
+
   if (USE_VALGRIND)
-    add_compile_options(-DVALGRIND -DUSE_VALGRIND)
+    add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
+  endif()
+  if (VALGRIND_ARENA)
+    add_compile_options(-DVALGRIND_ARENA=1)
   endif()
   if (CLANG)
     add_compile_options()
@@ -223,15 +273,32 @@ else()
         -Wno-unknown-attributes)
     endif()
     add_compile_options(
-      -Wno-unknown-warning-option
-      -Wno-dangling-else
-      -Wno-sign-compare
+      -Wall -Wextra
+      # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 10
       -Wno-comment
-      -Wno-unknown-pragmas
+      -Wno-dangling-else
       -Wno-delete-non-virtual-dtor
+      -Wno-format
+      -Wno-mismatched-tags
+      -Wno-missing-field-initializers
+      -Wno-overloaded-virtual
+      -Wno-reorder
+      -Wno-reorder-ctor
+      -Wno-sign-compare
+      -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
       -Wno-tautological-pointer-compare
-      -Wno-format)
+      -Wredundant-move
+      -Wpessimizing-move
+      -Woverloaded-virtual
+      -Wno-unknown-pragmas
+      -Wno-unknown-warning-option
+      -Wno-unused-function
+      -Wno-unused-local-typedef
+      -Wno-unused-parameter
+      -Wno-unused-value
+      -Wno-self-assign
+      )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
@@ -243,7 +310,6 @@ else()
   endif()
   if (GCC)
     add_compile_options(-Wno-pragmas)
-
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
@@ -257,6 +323,9 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
+  endif()
   if (GPERFTOOLS_FOUND AND GCC)
     add_compile_options(
       -fno-builtin-malloc
@@ -295,3 +364,4 @@ else()
     endif()
   endif()
 endif()
+

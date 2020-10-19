@@ -74,7 +74,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		TEST(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT); //WriteDuringReadWorkload testing large keys
 
-		useExtraDB = g_simulator.extraDB != NULL;
+		useExtraDB = g_simulator.extraDB != nullptr;
 		if(useExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			extraDB = Database::createDatabase(extraFile, -1);
@@ -93,28 +93,24 @@ struct WriteDuringReadWorkload : TestWorkload {
 			TraceEvent("RYWConfiguration").detail("Nodes", nodes).detail("InitialKeyDensity", initialKeyDensity).detail("AdjacentKeys", adjacentKeys).detail("ValueSizeMin", valueSizeRange.first).detail("ValueSizeMax", valueSizeRange.second).detail("MaxClearSize", maxClearSize);
 	}
 
-	virtual std::string description() { return "WriteDuringRead"; }
+	std::string description() const override { return "WriteDuringRead"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) { 
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
 			return loadAndRun( cx, this );
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 	}
 
-	Key memoryGetKey( std::map<Key, Value> *db, KeySelector key ) {
+	Key memoryGetKey(std::map<Key, Value>* db, KeySelector key) const {
 		std::map<Key, Value>::iterator iter;
 		if( key.orEqual )
 			iter = db->upper_bound( key.getKey() );

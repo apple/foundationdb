@@ -59,7 +59,7 @@ public:
 	virtual void delref() { ReferenceCounted<AsyncFileBlobStoreWrite>::delref(); }
 
 	struct Part : ReferenceCounted<Part> {
-		Part(int n) : number(n), writer(content.getWriteBuffer(), NULL, Unversioned()), length(0) {
+		Part(int n, int minSize) : number(n), writer(content.getWriteBuffer(minSize), nullptr, Unversioned()), length(0) {
 			etag = std::string();
 			::MD5_Init(&content_md5_buf);
 		}
@@ -92,7 +92,7 @@ public:
 		MD5_CTX content_md5_buf;
 	};
 
-	virtual Future<int> read( void *data, int length, int64_t offset ) { throw file_not_readable(); }
+	Future<int> read(void* data, int length, int64_t offset) override { throw file_not_readable(); }
 
 	ACTOR static Future<Void> write_impl(Reference<AsyncFileBlobStoreWrite> f, const uint8_t *data, int length) {
 		state Part *p = f->m_parts.back().getPtr();
@@ -115,7 +115,7 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> write( void const *data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		if(offset != m_cursor)
 			throw non_sequential_op();
 		m_cursor += length;
@@ -123,7 +123,7 @@ public:
 		return m_error.getFuture() || write_impl(Reference<AsyncFileBlobStoreWrite>::addRef(this), (const uint8_t *)data, length);
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
+	Future<Void> truncate(int64_t size) override {
 		if(size != m_cursor)
 			return non_sequential_op();
 		return Void();
@@ -165,7 +165,7 @@ public:
 	}
 
 	// Ready once all data has been sent AND acknowledged from the remote side
-	virtual Future<Void> sync() {
+	Future<Void> sync() override {
 		// Only initiate the finish operation once, and also prevent further writing.
 		if(!m_finished.isValid()) {
 			m_finished = doFinishUpload(this);
@@ -182,25 +182,25 @@ public:
 	// their size.  So in the case of a write buffer that does not meet the part minimum size the part could be sent
 	// but then if there is any more data written then that part needs to be sent again in its entirety.  So a client
 	// that calls flush often could generate far more blob store write traffic than they intend to.
-	virtual Future<Void> flush() { return Void(); }
+	Future<Void> flush() override { return Void(); }
 
-	virtual Future<int64_t> size() { return m_cursor; }
+	Future<int64_t> size() const override { return m_cursor; }
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
 		TraceEvent(SevError, "ReadZeroCopyNotSupported").detail("FileType", "BlobStoreWrite");
 		return platform_error();
 	}
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
+	void releaseZeroCopy(void* data, int length, int64_t offset) override {}
 
-	virtual int64_t debugFD() { return -1; }
+	int64_t debugFD() const override { return -1; }
 
-	virtual ~AsyncFileBlobStoreWrite() {
+	~AsyncFileBlobStoreWrite() override {
 		m_upload_id.cancel();
 		m_finished.cancel();
 		m_parts.clear();  // Contains futures
 	}
 
-	virtual std::string getFilename() { return m_object; }
+	std::string getFilename() const override { return m_object; }
 
 private:
 	Reference<BlobStoreEndpoint> m_bstore;
@@ -225,13 +225,13 @@ private:
 
 		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to m_error
 		// Also, hold a releaser for the concurrent upload slot while all that is going on.
-		f->m_parts.back()->etag = holdWhile(std::shared_ptr<FlowLock::Releaser>(new FlowLock::Releaser(f->m_concurrentUploads, 1)),
-									joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error)
-								  );
+		auto releaser = std::make_shared<FlowLock::Releaser>(f->m_concurrentUploads, 1);
+		f->m_parts.back()->etag =
+		    holdWhile(std::move(releaser), joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error));
 
 		// Make a new part to write to
 		if(startNew)
-			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1)));
+			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1, f->m_bstore->knobs.multipart_min_part_size)));
 
 		return Void();
 	}
@@ -247,7 +247,7 @@ public:
 		: m_bstore(bstore), m_bucket(bucket), m_object(object), m_cursor(0), m_concurrentUploads(bstore->knobs.concurrent_writes_per_file) {
 
 		// Add first part
-		m_parts.push_back(Reference<Part>(new Part(1)));
+		m_parts.push_back(Reference<Part>(new Part(1, m_bstore->knobs.multipart_min_part_size)));
 	}
 
 };
@@ -259,32 +259,32 @@ public:
 	virtual void addref() { ReferenceCounted<AsyncFileBlobStoreRead>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileBlobStoreRead>::delref(); }
 
-	virtual Future<int> read( void *data, int length, int64_t offset );
+	Future<int> read(void* data, int length, int64_t offset) override;
 
-	virtual Future<Void> write( void const *data, int length, int64_t offset ) { throw file_not_writable(); }
-	virtual Future<Void> truncate( int64_t size ) { throw file_not_writable(); }
+	Future<Void> write(void const* data, int length, int64_t offset) override { throw file_not_writable(); }
+	Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 
-	virtual Future<Void> sync() { return Void(); }
-	virtual Future<Void> flush() { return Void(); }
+	Future<Void> sync() override { return Void(); }
+	Future<Void> flush() override { return Void(); }
 
-	virtual Future<int64_t> size();
+	Future<int64_t> size() const override;
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
 		TraceEvent(SevError, "ReadZeroCopyNotSupported").detail("FileType", "BlobStoreRead");
 		return platform_error();
 	}
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
+	void releaseZeroCopy(void* data, int length, int64_t offset) override {}
 
-	virtual int64_t debugFD() { return -1; }
+	int64_t debugFD() const override { return -1; }
 
-	virtual std::string getFilename() { return m_object; }
+	std::string getFilename() const override { return m_object; }
 
 	virtual ~AsyncFileBlobStoreRead() {}
 
 	Reference<BlobStoreEndpoint> m_bstore;
 	std::string m_bucket;
 	std::string m_object;
-	Future<int64_t> m_size;
+	mutable Future<int64_t> m_size;
 
 	AsyncFileBlobStoreRead(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object)
 		: m_bstore(bstore), m_bucket(bucket), m_object(object) {

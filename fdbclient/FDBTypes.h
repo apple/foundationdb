@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "flow/Arena.h"
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
 
@@ -35,6 +36,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
+typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1,
@@ -77,6 +79,10 @@ struct Tag {
 		serializer(ar, locality, id);
 	}
 };
+
+template <>
+struct flow_ref<Tag> : std::integral_constant<bool, false> {};
+
 #pragma pack(pop)
 
 template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
@@ -251,6 +257,7 @@ struct Traceable<std::set<T>> : std::true_type {
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
 std::string printable( const KeyRangeRef& range );
+std::string printable(const VectorRef<KeyRangeRef>& val);
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
@@ -273,6 +280,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef( const KeyRef& begin, const KeyRef& end ) : begin(begin), end(end) {
 		if( begin > end ) {
+			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		}
 	}
@@ -282,6 +290,14 @@ struct KeyRangeRef {
 	bool contains( const KeyRef& key ) const { return begin <= key && key < end; }
 	bool contains( const KeyRangeRef& keys ) const { return begin <= keys.begin && keys.end <= end; }
 	bool intersects( const KeyRangeRef& keys ) const { return begin < keys.end && keys.begin < end; }
+	bool intersects(const VectorRef<KeyRangeRef>& keysVec) const {
+		for (const auto& keys : keysVec) {
+			if (intersects(keys)) {
+				return true;
+			}
+		}
+		return false;
+	}
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
@@ -643,9 +659,10 @@ struct GetRangeLimits {
 	bool hasRowLimit();
 
 	bool hasSatisfiedMinRows();
-	bool isValid() { return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED)
-							&& (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED)
-							&& minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED); }
+	bool isValid() const {
+		return (rows >= 0 || rows == ROW_LIMIT_UNLIMITED) && (bytes >= 0 || bytes == BYTE_LIMIT_UNLIMITED) &&
+		       minRows >= 0 && (minRows <= rows || rows == ROW_LIMIT_UNLIMITED);
+	}
 };
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
@@ -691,6 +708,7 @@ struct KeyValueStoreType {
 		SSD_BTREE_V2,
 		SSD_REDWOOD_V1,
 		MEMORY_RADIXTREE,
+		SSD_ROCKSDB_V1,
 		END
 	};
 
@@ -710,6 +728,7 @@ struct KeyValueStoreType {
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
+			case SSD_ROCKSDB_V1: return "ssd-rocksdb-experimental";
 			case MEMORY: return "memory";
 			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
@@ -735,15 +754,17 @@ struct TLogVersion {
 		// V3 was the introduction of spill by reference;
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
+		// V6 added span context to list of serialized mutations sent from proxy to tlogs
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
-		V5 = 5, // 7.0
+		V5 = 5, // 6.3
+		V6 = 6, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V5,
-		MIN_RECRUITABLE = V3,
-		DEFAULT = V4,
+		MAX_SUPPORTED = V6,
+		MIN_RECRUITABLE = V5,
+		DEFAULT = V5,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -765,6 +786,7 @@ struct TLogVersion {
 		if (s == LiteralStringRef("3")) return V3;
 		if (s == LiteralStringRef("4")) return V4;
 		if (s == LiteralStringRef("5")) return V5;
+		if (s == LiteralStringRef("6")) return V6;
 		return default_error_or();
 	}
 };
@@ -848,6 +870,9 @@ struct LogMessageVersion {
 		if (r.version<version) return false;
 		return sub < r.sub;
 	}
+	bool operator>(LogMessageVersion const& r) const { return r < *this; }
+	bool operator<=(LogMessageVersion const& r) const { return !(*this > r); }
+	bool operator>=(LogMessageVersion const& r) const { return !(*this < r); }
 
 	bool operator==(LogMessageVersion const& r) const { return version == r.version && sub == r.sub; }
 
@@ -934,11 +959,13 @@ struct ClusterControllerPriorityInfo {
 	uint8_t dcFitness;
 
 	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
+	bool operator!=(ClusterControllerPriorityInfo const& r) const { return !(*this == r); }
 	ClusterControllerPriorityInfo()
 	  : ClusterControllerPriorityInfo(/*ProcessClass::UnsetFit*/ 2, false,
 	                                  ClusterControllerPriorityInfo::FitnessUnknown) {}
 	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
 
+	//To change this serialization, ProtocolVersion::ClusterControllerPriorityInfo must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, processClassFitness, isExcluded, dcFitness);
@@ -1019,6 +1046,21 @@ struct HealthMetrics {
 	}
 };
 
+struct DDMetricsRef {
+	int64_t shardBytes;
+	KeyRef beginKey;
+
+	DDMetricsRef() : shardBytes(0) {}
+	DDMetricsRef(int64_t bytes, KeyRef begin) : shardBytes(bytes), beginKey(begin) {}
+	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
+	  : shardBytes(copyFrom.shardBytes), beginKey(a, copyFrom.beginKey) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, shardBytes, beginKey);
+	}
+};
+
 struct WorkerBackupStatus {
 	LogEpoch epoch;
 	Version version;
@@ -1028,6 +1070,7 @@ struct WorkerBackupStatus {
 	WorkerBackupStatus() : epoch(0), version(invalidVersion) {}
 	WorkerBackupStatus(LogEpoch e, Version v, Tag t, int32_t total) : epoch(e), version(v), tag(t), totalTags(total) {}
 
+	//To change this serialization, ProtocolVersion::BackupProgressValue must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, epoch, version, tag, totalTags);

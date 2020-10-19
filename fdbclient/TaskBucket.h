@@ -35,6 +35,20 @@
 class FutureBucket;
 class TaskFuture;
 
+// A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
+// The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved
+// parameter keys which are used by TaskBucket to determine which TaskFunc to run and provide
+// several other core features of TaskBucket.
+//
+// Task Life Cycle
+//   1.  Task is created in database transaction.
+//   2.  An executor (see TaskBucket class) will reserve an begin executing the task
+//   3.  Task's _execute() function is run.  This is non-transactional, and can run indefinitely.
+//   4.  If the executor loses contact with FDB, another executor may begin at step 2.  The first
+//       Task execution can detect this by checking the result of keepRunning() periodically.
+//   5.  Once a Task execution's _execute() call returns, the _finish() step is called.
+//       _finish() is transactional and is guaraunteed to never be called more than once for the 
+//       same Task
 class Task : public ReferenceCounted<Task> {
 public:
 	Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
@@ -53,13 +67,18 @@ public:
 	Map<Key, Value> params; // SOMEDAY: use one arena?
 
 	// New reserved task parameter keys should be added in ReservedTaskParams below instead of here.
+	// Task priority, determines execution order relative to other queued Tasks
 	static Key reservedTaskParamKeyPriority;
+	// Name of the registered TaskFunc that this Task is for
 	static Key reservedTaskParamKeyType;
 	static Key reservedTaskParamKeyAddTask;
 	static Key reservedTaskParamKeyDone;
 	static Key reservedTaskParamKeyFuture;
 	static Key reservedTaskParamKeyBlockID;
 	static Key reservedTaskParamKeyVersion;
+
+	// Optional parameters that specify a database Key that must have a specific Value in order for the Task
+	// to be executed (for _execute() or _finish() to be called)  OR for keepRunning() to return true for the Task.
 	static Key reservedTaskParamValidKey;
 	static Key reservedTaskParamValidValue;
 
@@ -74,6 +93,7 @@ public:
 	}
 };
 
+// TaskParam is a convenience class to make storing non-string types into Task Parameters easier.
 template <typename T>
 class TaskParam {
 public:
@@ -103,6 +123,23 @@ struct ReservedTaskParams {
 
 class FutureBucket;
 
+// A TaskBucket is a subspace in which a set of Tasks and TaskFutures exists.  Within the subspace, there
+// are several other subspaces including
+//   available - Tasks that are waiting to run at default priority
+//	 available_prioritized - Tasks with priorities 0 through max priority, all higher than default
+//   timeouts - Tasks that are currently running and are scheduled to timeout a specific FDB commit version.
+//   futures - TaskFutures that have not been completed
+//
+// One or more processes must instantiate a TaskBucket call run() or doOne() repeatedly in order for Tasks
+// in the TaskBucket to make progress.  The calling process is directly used to execute the Task code.
+//
+// Tasks are added to a TaskBucket with addTask(), and this can be done at any time but is typically done
+// in the _finish() step of a Task.  This makes the completion of one Task and the creation of its one or
+// more child Tasks atomic.
+//
+// While a TaskBucket instance is executing a task, there is timeout set for the Task and periodically the
+// executor will extend this timeout in the database.  If this fails to happen, then another TaskBucket
+// instance may declare the Task a failure and move it back to the available subspace.
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
 	TaskBucket(const Subspace& subspace, bool sysAccess = false, bool priorityBatch = false, bool lockAware = false);
@@ -219,7 +256,7 @@ public:
 		return pauseKey;	
 	}
 
-	Subspace getAvailableSpace(int priority = 0) {
+	Subspace getAvailableSpace(int priority = 0) const {
 		if(priority == 0)
 			return available;
 		return available_prioritized.get(priority);

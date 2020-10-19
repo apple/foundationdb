@@ -22,6 +22,11 @@
 #define FLOW_MULTIINTERFACE_H
 #pragma once
 
+#include "flow/FastRef.h"
+#include "fdbrpc/Locality.h"
+
+#include <vector>
+
 extern uint64_t debug_lastLoadBalanceResultEndpointToken;
 
 template <class K, class V>
@@ -62,10 +67,10 @@ struct AlternativeInfo {
 	T interf;
 	double probability;
 	double cumulativeProbability;
-	int recentRequests;
+	int processBusyTime;
 	double lastUpdate;
 
-	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), recentRequests(-1), lastUpdate(0) {}
+	AlternativeInfo(T const& interf, double probability, double cumulativeProbability) : interf(interf), probability(probability), cumulativeProbability(cumulativeProbability), processBusyTime(-1), lastUpdate(0) {}
 
 	bool operator < (double const& r) const {
 		return cumulativeProbability < r;
@@ -100,26 +105,28 @@ public:
 		return std::lower_bound( alternatives.begin(), alternatives.end(), deterministicRandom()->random01() ) - alternatives.begin();
 	}
 
-	void updateRecent( int index, int recentRequests ) {
-		alternatives[index].recentRequests = recentRequests;
+	void updateRecent( int index, int processBusyTime ) {
+		alternatives[index].processBusyTime = processBusyTime;
 		alternatives[index].lastUpdate = now();
 	}
 
 	void updateProbabilities() {
-		double totalRequests = 0;
+		double totalBusyTime = 0;
 		for(auto& it : alternatives) {
-			totalRequests += it.recentRequests;
+			totalBusyTime += it.processBusyTime;
 			if(now() - it.lastUpdate > FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/2.0) {
 				return;
 			}
 		}
-		if(totalRequests < 1000) {
+
+		//Do not update probabilities if the average proxy busyness is less than 5%
+		if(totalBusyTime < FLOW_KNOBS->BASIC_LOAD_BALANCE_MIN_AMOUNT*alternatives.size()) {
 			return;
 		}
 		
 		double totalProbability = 0;
 		for(auto& it : alternatives) {
-			it.probability += (1.0/alternatives.size()-(it.recentRequests/totalRequests))*FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
+			it.probability += (1.0/alternatives.size()-(it.processBusyTime/totalBusyTime))*FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_CHANGE;
 			it.probability = std::max(it.probability, 1/(FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB*alternatives.size()));
 			it.probability = std::min(it.probability, FLOW_KNOBS->BASIC_LOAD_BALANCE_MAX_PROB/alternatives.size());
 			totalProbability += it.probability;
@@ -168,7 +175,7 @@ class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 template <class T>
 class MultiInterface<ReferencedInterface<T>> : public ReferenceCounted<MultiInterface<ReferencedInterface<T>>> {
 public:
-	MultiInterface( const vector<Reference<ReferencedInterface<T>>>& v ) : alternatives(v), bestCount(0) {
+	MultiInterface( const std::vector<Reference<ReferencedInterface<T>>>& v ) : alternatives(v), bestCount(0) {
 		deterministicRandom()->randomShuffle(alternatives);
 		if ( LBLocalityData<T>::Present ) {
 			std::stable_sort( alternatives.begin(), alternatives.end(), ReferencedInterface<T>::sort_by_distance );
@@ -204,6 +211,18 @@ public:
 
 	T const& getInterface(int index) { return alternatives[index]->interf; }
 	UID getId( int index ) const { return alternatives[index]->interf.id(); }
+	bool hasInterface(UID id) const {
+		for (const auto& ref : alternatives) {
+			if (ref->interf.id() == id) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	Reference<ReferencedInterface<T>>& operator[](int i) { return alternatives[i]; }
+
+	const Reference<ReferencedInterface<T>>& operator[](int i) const { return alternatives[i]; }
 
 	virtual ~MultiInterface() {}
 
@@ -211,7 +230,7 @@ public:
 		return describe( alternatives );
 	}
 private:
-	vector<Reference<ReferencedInterface<T>>> alternatives;
+	std::vector<Reference<ReferencedInterface<T>>> alternatives;
 	int16_t bestCount;
 };
 

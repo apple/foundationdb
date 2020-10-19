@@ -33,9 +33,6 @@ ClientKnobs::ClientKnobs() {
 
 void ClientKnobs::initialize(bool randomize) {
 	// clang-format off
-	// FIXME: These are not knobs, get them out of ClientKnobs!
-	BYTE_LIMIT_UNLIMITED = GetRangeLimits::BYTE_LIMIT_UNLIMITED;
-	ROW_LIMIT_UNLIMITED = GetRangeLimits::ROW_LIMIT_UNLIMITED;
 
 	init( TOO_MANY,                            1000000 );
 
@@ -55,7 +52,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
-	init( MAX_PROXY_CONNECTIONS,                     5 ); if( randomize && BUGGIFY ) MAX_PROXY_CONNECTIONS = 1;
+	init( MAX_COMMIT_PROXY_CONNECTIONS,              5 ); if( randomize && BUGGIFY ) MAX_COMMIT_PROXY_CONNECTIONS = 1;
+	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
@@ -68,6 +66,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 	init( PROXY_COMMIT_OVERHEAD_BYTES,              23 ); //The size of serializing 7 tags (3 primary, 3 remote, 1 log router) + 2 for the tag length
+	init( SHARD_STAT_SMOOTH_AMOUNT,                5.0 );
+	init( INIT_MID_SHARD_BYTES,                 200000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -92,6 +92,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
+	init( MID_SHARD_SIZE_MAX_STALENESS,           10.0 );
+	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -102,7 +104,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( WATCH_POLLING_TIME,                      1.0 ); if( randomize && BUGGIFY ) WATCH_POLLING_TIME = 5.0;
 	init( NO_RECENT_UPDATES_DURATION,             20.0 ); if( randomize && BUGGIFY ) NO_RECENT_UPDATES_DURATION = 0.1;
 	init( FAST_WATCH_TIMEOUT,                     20.0 ); if( randomize && BUGGIFY ) FAST_WATCH_TIMEOUT = 1.0;
-	init( WATCH_TIMEOUT,                         900.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
+	init( WATCH_TIMEOUT,                          30.0 ); if( randomize && BUGGIFY ) WATCH_TIMEOUT = 20.0;
 
 	// Core
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
@@ -143,6 +145,11 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
+	init( COPY_LOG_BLOCK_SIZE,              LOG_RANGE_BLOCK_SIZE ); // the maximum possible value due the getLogRanges limitations
+	init( COPY_LOG_BLOCKS_PER_TASK,               1000 );
+	init( COPY_LOG_PREFETCH_BLOCKS,                  3 );
+	init( COPY_LOG_READ_AHEAD_BYTES,        BACKUP_LOCK_BYTES / COPY_LOG_PREFETCH_BLOCKS); // each task will use up to COPY_LOG_PREFETCH_BLOCKS * COPY_LOG_READ_AHEAD_BYTES memory
+	init( COPY_LOG_TASK_DURATION_NANOS,	      1e10 ); // 10 seconds
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
 	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND
@@ -164,9 +171,12 @@ void ClientKnobs::initialize(bool randomize) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 
 	// Configuration
-	init( DEFAULT_AUTO_PROXIES,                      3 );
+	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
+	init( DEFAULT_AUTO_GRV_PROXIES,                  1 );
 	init( DEFAULT_AUTO_RESOLVERS,                    1 );
 	init( DEFAULT_AUTO_LOGS,                         3 );
+	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
+	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
 
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
@@ -178,7 +188,7 @@ void ClientKnobs::initialize(bool randomize) {
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                60 );
+	init( BLOBSTORE_REQUEST_TIMEOUT_MIN,            60 );
 
 	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
 	init( BLOBSTORE_CONCURRENT_LISTS,               20 );
@@ -224,6 +234,9 @@ void ClientKnobs::initialize(bool randomize) {
 	// transaction tags
 	init( MAX_TAGS_PER_TRANSACTION,                   5 );
 	init( MAX_TRANSACTION_TAG_LENGTH,                16 );
+	init( COMMIT_SAMPLE_COST,                       100 ); if( randomize && BUGGIFY ) COMMIT_SAMPLE_COST = 10;
+	init( WRITE_COST_BYTE_FACTOR,                 16384 ); if( randomize && BUGGIFY ) WRITE_COST_BYTE_FACTOR = 4096;
+	init( INCOMPLETE_SHARD_PLUS,                   4096 );
 	init( READ_TAG_SAMPLE_RATE,                    0.01 ); if( randomize && BUGGIFY ) READ_TAG_SAMPLE_RATE = 1.0; // Communicated to clients from cluster
 	init( TAG_THROTTLE_SMOOTHING_WINDOW,            2.0 );
 	init( TAG_THROTTLE_RECHECK_INTERVAL,            5.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_RECHECK_INTERVAL = 0.0;

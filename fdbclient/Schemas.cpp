@@ -47,7 +47,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "storage",
                   "transaction",
                   "resolution",
-                  "proxy",
+                  "commit_proxy",
+                  "grv_proxy",
                   "master",
                   "test",
                   "storage_cache"
@@ -83,7 +84,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "role":{
                      "$enum":[
                         "master",
-                        "proxy",
+                        "commit_proxy",
+                        "grv_proxy",
                         "log",
                         "storage",
                         "resolver",
@@ -136,6 +138,44 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "counter":0,
                      "roughness":0.0
                   },
+                  "grv_latency_statistics":{
+                     "default":{
+                        "count":0,
+                        "min":0.0,
+                        "max":0.0,
+                        "median":0.0,
+                        "mean":0.0,
+                        "p25":0.0,
+                        "p90":0.0,
+                        "p95":0.0,
+                        "p99":0.0,
+                        "p99.9":0.0
+                     }
+                  },
+                  "read_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
+                  "commit_latency_statistics":{
+                     "count":0,
+                     "min":0.0,
+                     "max":0.0,
+                     "median":0.0,
+                     "mean":0.0,
+                     "p25":0.0,
+                     "p90":0.0,
+                     "p95":0.0,
+                     "p99":0.0,
+                     "p99.9":0.0
+                  },
                   "grv_latency_bands":{
                      "$map": 1
                   },
@@ -150,7 +190,14 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      "fractional_cost": 0.0,
                      "estimated_cost":{
                         "hz": 0.0
-                     } 
+                     }
+                  },
+                  "busiest_write_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz": 0.0
+                     }
                   }
                }
             ],
@@ -231,15 +278,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "run_loop_busy":0.2
          }
       },
-      "old_logs":[
+      "logs":[
          {
-            "logs":[
+            "log_interfaces":[
                {
                   "id":"7f8d623d0cb9966e",
                   "healthy":true,
                   "address":"1.2.3.4:1234"
                }
             ],
+            "epoch":1,
+            "current":false,
+            "begin_version":23,
+            "end_version":112315141,
+            "possibly_losing_data":true,
             "log_replication_factor":3,
             "log_write_anti_quorum":0,
             "log_fault_tolerance":2,
@@ -303,17 +355,18 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
          "throttled_tags":{
-            "auto":{
-               "count":0
+            "auto" : {
+                "busy_read" : 0,
+                "busy_write" : 0,
+                "count" : 0,
+                "recommended_only": 0
             },
-            "manual":{
-               "count":0
+            "manual" : {
+                "count" : 0
             }
          },
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-         "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0,
          "limiting_data_lag_storage_server":{
             "versions":0,
             "seconds":0.0
@@ -437,8 +490,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 )statusSchema"
                                                           R"statusSchema(
       "recovery_state":{
+         "seconds_since_last_recovered":1,
          "required_resolvers":1,
-         "required_proxies":1,
+         "required_commit_proxies":1,
+         "required_grv_proxies":1,
          "name":{
             "$enum":[
                "reading_coordinated_state",
@@ -614,6 +669,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
              "memory-2",
@@ -625,10 +681,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "address":"10.0.4.1"
             }
          ],
-         "auto_proxies":3,
+         "auto_commit_proxies":3,
+         "auto_grv_proxies":1,
          "auto_resolvers":1,
          "auto_logs":3,
-         "proxies":5,
+         "commit_proxies":5,
+         "grv_proxies":1,
          "backup_worker_enabled":1
       },
       "data":{
@@ -827,10 +885,12 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
         "ssd-2",
         "memory"
     ]},
-    "auto_proxies":3,
+    "auto_commit_proxies":3,
+    "auto_grv_proxies":1,
     "auto_resolvers":1,
     "auto_logs":3,
-    "proxies":5
+    "commit_proxies":5,
+    "grv_proxies":1
 })configSchema");
 
 const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"configSchema(
@@ -854,3 +914,42 @@ const KeyRef JSONSchemas::latencyBandConfigurationSchema = LiteralStringRef(R"co
         "max_commit_bytes":0
     }
 })configSchema");
+
+const KeyRef JSONSchemas::dataDistributionStatsSchema = LiteralStringRef(R"""(
+{
+  "shard_bytes": 1947000
+}
+)""");
+
+const KeyRef JSONSchemas::logHealthSchema = LiteralStringRef(R"""(
+{
+  "log_queue": 156
+}
+)""");
+
+const KeyRef JSONSchemas::storageHealthSchema = LiteralStringRef(R"""(
+{
+  "cpu_usage": 3.28629447047675,
+  "disk_usage": 0.19997897369207954,
+  "storage_durability_lag": 5050809,
+  "storage_queue": 2030
+}
+)""");
+
+const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
+{
+  "batch_limited": false,
+  "tps_limit": 457082.8105811302,
+  "worst_storage_durability_lag": 5050809,
+  "worst_storage_queue": 2030,
+  "worst_log_queue": 156
+}
+)""");
+
+const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
+{
+   "retriable": false,
+   "command": "exclude",
+   "message": "The reason of the error"
+}
+)""");

@@ -44,10 +44,10 @@ public:
 	~UnsentPacketQueue() { discardAll(); }
 
 	// Get a PacketBuffer to write new packets into
-	PacketBuffer* getWriteBuffer() {
+	PacketBuffer* getWriteBuffer(size_t sizeHint = 0) {
 		if (!unsent_last) {
 			ASSERT(!unsent_first);
-			unsent_first = unsent_last = PacketBuffer::create();
+			unsent_first = unsent_last = PacketBuffer::create(sizeHint);
 		};
 		return unsent_last;
 	}
@@ -69,7 +69,7 @@ public:
 	void discardAll();
 
 private:
-	PacketBuffer *unsent_first, *unsent_last;  // Both NULL, or inclusive range of PacketBuffers that haven't been sent.  The last one may have space for more packets to be written.
+	PacketBuffer *unsent_first, *unsent_last;  // Both nullptr, or inclusive range of PacketBuffers that haven't been sent.  The last one may have space for more packets to be written.
 };
 
 class ReliablePacketList : NonCopyable {

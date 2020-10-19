@@ -21,7 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -32,18 +32,23 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/Error.h"
 
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+
+#define SevDebugMemory SevVerbose
 
 struct VersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
 	VectorRef<Tag> tags;
 	Arena arena; // Keep a reference to the memory containing the message
+	size_t bytes; // arena's size when inserted, which can grow afterwards
 
 	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
-	  : version(v), message(m), tags(t), arena(a) {}
-	const Version getVersion() const { return version.version; }
-	const uint32_t getSubVersion() const { return version.sub; }
+	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
+	Version getVersion() const { return version.version; }
+	uint32_t getSubVersion() const { return version.sub; }
 
 	// Returns true if the message is a mutation that should be backuped, i.e.,
 	// either key is not in system key space or is not a metadataVersionKey.
@@ -56,8 +61,9 @@ struct VersionedMessage {
 
 		ArenaReader reader(arena, message, AssumeVersion(currentProtocolVersion));
 
-		// Return false for LogProtocolMessage.
+		// Return false for LogProtocolMessage and SpanContextMessage metadata messages.
 		if (LogProtocolMessage::isNextIn(reader)) return false;
+		if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) return false;
 
 		reader >> *m;
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
@@ -84,6 +90,7 @@ struct BackupData {
 	bool stopped = false;
 	bool exitEarly = false; // If the worker is on an old epoch and all backups starts a version >= the endVersion
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
+	Reference<FlowLock> lock;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -231,12 +238,15 @@ struct BackupData {
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), popVersion(req.startVersion - 1),
-	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false) {
+	    cc("BackupWorker", myId.toString()), pulledVersion(0), paused(false),
+	    lock(new FlowLock(SERVER_KNOBS->BACKUP_LOCK_BYTES)) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, true, true);
 
 		specialCounter(cc, "SavedVersion", [this]() { return this->savedVersion; });
 		specialCounter(cc, "MinKnownCommittedVersion", [this]() { return this->minKnownCommittedVersion; });
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
+		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
+		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
 		logger = traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "BackupWorkerMetrics");
 	}
@@ -310,6 +320,33 @@ struct BackupData {
 		doneTrigger.trigger();
 	}
 
+	// Erases messages and updates lock with memory released.
+	void eraseMessages(int num) {
+		ASSERT(num <= messages.size());
+		if (num == 0) return;
+
+		if (messages.size() == num) {
+			messages.clear();
+			TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId).detail("ReleaseAll", lock->activePermits());
+			lock->release(lock->activePermits());
+			return;
+		}
+
+		// keep track of each arena and accumulate their sizes
+		int64_t bytes = 0;
+		for (int i = 0; i < num; i++) {
+			const Arena& a = messages[i].arena;
+			const Arena& b = messages[i + 1].arena;
+			if (!a.sameArena(b)) {
+				bytes += messages[i].bytes;
+				TraceEvent(SevDebugMemory, "BackupWorkerMemory", myId)
+				    .detail("Release", messages[i].bytes);
+			}
+		}
+		lock->release(bytes);
+		messages.erase(messages.begin(), messages.begin() + num);
+	}
+
 	void eraseMessagesAfterEndVersion() {
 		ASSERT(endVersion.present());
 		const Version ver = endVersion.get();
@@ -333,7 +370,7 @@ struct BackupData {
 		bool modified = false;
 		bool minVersionChanged = false;
 		Version minVersion = std::numeric_limits<Version>::max();
-		for (const auto [uid, version] : uidVersions) {
+		for (const auto& [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
@@ -390,13 +427,14 @@ struct BackupData {
 	}
 
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
+		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(1, TransactionPriority::DEFAULT,
+			GetReadVersionRequest request(span.context, 1, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
-				when(wait(self->cx->onMasterProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getMasterProxies(false),
-				                                                  &MasterProxyInterface::getConsistentReadVersion,
+				when(wait(self->cx->onProxiesChanged())) {}
+				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(false),
+				                                                  &GrvProxyInterface::getConsistentReadVersion,
 				                                                  request, self->cx->taskID))) {
 					return reply.version;
 				}
@@ -522,7 +560,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
 		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
-		wait(getBackupProgress(self->cx, self->myId, progress));
+		wait(getBackupProgress(self->cx, self->myId, progress, /*logging=*/false));
 		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		state std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
@@ -637,6 +675,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	state std::vector<Reference<IBackupFile>> logFiles;
 	state std::vector<int64_t> blockEnds;
 	state std::vector<UID> activeUids; // active Backups' UIDs
+	state std::vector<Version> beginVersions; // logFiles' begin versions
 	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
 	state std::vector<Standalone<StringRef>> mutations;
 	state int idx;
@@ -655,15 +694,20 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		const int index = logFileFutures.size();
 		activeUids.push_back(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
+
 		if (it->second.lastSavedVersion == invalidVersion) {
 			if (it->second.startVersion > self->startVersion && !self->messages.empty()) {
 				// True-up first mutation log's begin version
 				it->second.lastSavedVersion = self->messages[0].getVersion();
 			} else {
-				it->second.lastSavedVersion =
-				    std::max(self->popVersion, std::max(self->savedVersion, self->startVersion));
+				it->second.lastSavedVersion = std::max({ self->popVersion, self->savedVersion, self->startVersion });
 			}
+			TraceEvent("BackupWorkerTrueUp", self->myId).detail("LastSavedVersion", it->second.lastSavedVersion);
 		}
+		// The true-up version can be larger than first message version, so keep
+		// the begin versions for later muation filtering.
+		beginVersions.push_back(it->second.lastSavedVersion);
+
 		logFileFutures.push_back(it->second.container.get().get()->writeTaggedLogFile(
 		    it->second.lastSavedVersion, popVersion + 1, blockSize, self->tag.id, self->totalTags));
 		it++;
@@ -675,7 +719,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	std::transform(logFileFutures.begin(), logFileFutures.end(), std::back_inserter(logFiles),
 	               [](const Future<Reference<IBackupFile>>& f) { return f.get(); });
 
-	ASSERT(activeUids.size() == logFiles.size());
+	ASSERT(activeUids.size() == logFiles.size() && beginVersions.size() == logFiles.size());
 	for (int i = 0; i < logFiles.size(); i++) {
 		TraceEvent("OpenMutationFile", self->myId)
 		    .detail("BackupID", activeUids[i])
@@ -698,7 +742,10 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
 			for (int index : keyRangeMap[m.param1]) {
-				adds.push_back(addMutation(logFiles[index], message, message.message, &blockEnds[index], blockSize));
+				if (message.getVersion() >= beginVersions[index]) {
+					adds.push_back(
+					    addMutation(logFiles[index], message, message.message, &blockEnds[index], blockSize));
+				}
 			}
 		} else {
 			KeyRangeRef mutationRange(m.param1, m.param2);
@@ -713,8 +760,10 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 				wr << subm;
 				mutations.push_back(wr.toValue());
 				for (int index : range.value()) {
-					adds.push_back(
-					    addMutation(logFiles[index], message, mutations.back(), &blockEnds[index], blockSize));
+					if (message.getVersion() >= beginVersions[index]) {
+						adds.push_back(
+						    addMutation(logFiles[index], message, mutations.back(), &blockEnds[index], blockSize));
+					}
 				}
 			}
 		}
@@ -791,12 +840,12 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
 			wait(saveMutationsToFile(self, popVersion, numMsg));
-			self->messages.erase(self->messages.begin(), self->messages.begin() + numMsg);
+			self->eraseMessages(numMsg);
 		}
 
 		// If transition into NOOP mode, should clear messages
-		if (!self->pulling) {
-			self->messages.clear();
+		if (!self->pulling && self->backupEpoch == self->recruitedEpoch) {
+			self->eraseMessages(self->messages.size());
 		}
 
 		if (popVersion > self->savedVersion && popVersion > self->popVersion) {
@@ -810,7 +859,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (self->allMessageSaved()) {
-			self->messages.clear();
+			self->eraseMessages(self->messages.size());
 			return Void();
 		}
 
@@ -825,6 +874,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
+	state Arena prev;
 
 	TraceEvent("BackupWorkerPull", self->myId);
 	loop {
@@ -850,6 +900,14 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
+			if (!prev.sameArena(r->arena())) {
+				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
+				    .detail("Take", r->arena().getSize())
+				    .detail("Current", self->lock->activePermits());
+
+				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
+				prev = r->arena();
+			}
 			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
 			r->nextMessage();
 		}
@@ -1027,7 +1085,11 @@ ACTOR Future<Void> backupWorker(BackupInterface interf, InitializeBackupRequest 
 		if (e.code() == error_code_worker_removed) {
 			pull = Void(); // cancels pulling
 			self.stop();
-			wait(done);
+			try {
+				wait(done);
+			} catch (Error& e) {
+				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
+			}
 		}
 		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {

@@ -32,10 +32,10 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range requested
-class AsyncFileReadAheadCache : public IAsyncFile, public ReferenceCounted<AsyncFileReadAheadCache> {
+class AsyncFileReadAheadCache final : public IAsyncFile, public ReferenceCounted<AsyncFileReadAheadCache> {
 public:
-	virtual void addref() { ReferenceCounted<AsyncFileReadAheadCache>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileReadAheadCache>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileReadAheadCache>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileReadAheadCache>::delref(); }
 
 	struct CacheBlock : ReferenceCounted<CacheBlock> {
 		CacheBlock(int size = 0) : data(new uint8_t[size]), len(size) {}
@@ -155,29 +155,29 @@ public:
 		return wpos;
 	}
 
-	virtual Future<int> read( void *data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		return read_impl(Reference<AsyncFileReadAheadCache>::addRef(this), data, length, offset);
 	}
 
-	virtual Future<Void> write( void const *data, int length, int64_t offset ) { throw file_not_writable(); }
-	virtual Future<Void> truncate( int64_t size ) { throw file_not_writable(); }
+	Future<Void> write(void const* data, int length, int64_t offset) override { throw file_not_writable(); }
+	Future<Void> truncate(int64_t size) override { throw file_not_writable(); }
 
-	virtual Future<Void> sync() { return Void(); }
-	virtual Future<Void> flush() { return Void(); }
+	Future<Void> sync() override { return Void(); }
+	Future<Void> flush() override { return Void(); }
 
-	virtual Future<int64_t> size() { return m_f->size(); }
+	Future<int64_t> size() const override { return m_f->size(); }
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override {
 		TraceEvent(SevError, "ReadZeroCopyNotSupported").detail("FileType", "ReadAheadCache");
 		return platform_error();
 	}
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
+	void releaseZeroCopy(void* data, int length, int64_t offset) override {}
 
-	virtual int64_t debugFD() { return -1; }
+	int64_t debugFD() const override { return -1; }
 
-	virtual std::string getFilename() { return m_f->getFilename(); }
+	std::string getFilename() const override { return m_f->getFilename(); }
 
-	virtual ~AsyncFileReadAheadCache() {
+	~AsyncFileReadAheadCache() {
 		for(auto &it : m_blocks) {
 			it.second.cancel();
 		}
@@ -196,7 +196,6 @@ public:
 		: m_f(f), m_block_size(blockSize), m_read_ahead_blocks(readAheadBlocks), m_max_concurrent_reads(maxConcurrentReads),
 		  m_cache_block_limit(std::max<int>(1, cacheSizeBlocks)) {
 	}
-
 };
 
 #include "flow/unactorcompiler.h"

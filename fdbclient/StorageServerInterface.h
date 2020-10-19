@@ -27,7 +27,7 @@
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.actor.h"
-#include "flow/Stats.h"
+#include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 #include "fdbclient/TagThrottle.h"
 
@@ -54,7 +54,6 @@ struct StorageServerInterface {
 
 	LocalityData locality;
 	UID uniqueID;
-	Endpoint base;
 
 	RequestStream<struct GetValueRequest> getValue;
 	RequestStream<struct GetKeyRequest> getKey;
@@ -73,6 +72,7 @@ struct StorageServerInterface {
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
+	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
@@ -83,24 +83,24 @@ struct StorageServerInterface {
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
 	void serialize(Ar& ar) {
-		// StorageServerInterface is persisted in the database and in the tLog's data structures, so changes here have to be
-		// versioned carefully!
+		// StorageServerInterface is persisted in the database, so changes here have to be versioned carefully!
+		//To change this serialization, ProtocolVersion::ServerListValue must be updated, and downgrades need to be considered
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
-			serializer(ar, uniqueID, locality, base);
+			serializer(ar, uniqueID, locality, getValue);
 			if( Ar::isDeserializing ) {
-				getValue = RequestStream<struct GetValueRequest>( base.getAdjustedEndpoint(0) );
-				getKey = RequestStream<struct GetKeyRequest>( base.getAdjustedEndpoint(1) );
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>( base.getAdjustedEndpoint(2) );
-				getShardState = RequestStream<struct GetShardStateRequest>( base.getAdjustedEndpoint(3) );
-				waitMetrics = RequestStream<struct WaitMetricsRequest>( base.getAdjustedEndpoint(4) );
-				splitMetrics = RequestStream<struct SplitMetricsRequest>( base.getAdjustedEndpoint(5) );
-				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( base.getAdjustedEndpoint(6) );
-				waitFailure = RequestStream<ReplyPromise<Void>>( base.getAdjustedEndpoint(7) );
-				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( base.getAdjustedEndpoint(8) );
-				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( base.getAdjustedEndpoint(9) );
-				watchValue = RequestStream<struct WatchValueRequest>( base.getAdjustedEndpoint(10) );
-				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( base.getAdjustedEndpoint(11) );
+				getKey = RequestStream<struct GetKeyRequest>( getValue.getEndpoint().getAdjustedEndpoint(1) );
+				getKeyValues = RequestStream<struct GetKeyValuesRequest>( getValue.getEndpoint().getAdjustedEndpoint(2) );
+				getShardState = RequestStream<struct GetShardStateRequest>( getValue.getEndpoint().getAdjustedEndpoint(3) );
+				waitMetrics = RequestStream<struct WaitMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(4) );
+				splitMetrics = RequestStream<struct SplitMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(5) );
+				getStorageMetrics = RequestStream<struct GetStorageMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(6) );
+				waitFailure = RequestStream<ReplyPromise<Void>>( getValue.getEndpoint().getAdjustedEndpoint(7) );
+				getQueuingMetrics = RequestStream<struct StorageQueuingMetricsRequest>( getValue.getEndpoint().getAdjustedEndpoint(8) );
+				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
+				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
+				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
+				getRangeSplitPoints = RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -110,7 +110,6 @@ struct StorageServerInterface {
 			serializer(ar, uniqueID, locality, getValue, getKey, getKeyValues, getShardState, waitMetrics,
 					splitMetrics, getStorageMetrics, waitFailure, getQueuingMetrics, getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) serializer(ar, watchValue);
-			base = getValue.getEndpoint();
 		}
 	}
 	bool operator == (StorageServerInterface const& s) const { return uniqueID == s.uniqueID; }
@@ -129,7 +128,8 @@ struct StorageServerInterface {
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
-		base = FlowTransport::transport().addEndpoints(streams);
+		streams.push_back(getRangeSplitPoints.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
@@ -160,18 +160,20 @@ struct ServerCacheInfo {
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
+	bool cached;
 
-	GetValueReply() {}
-	GetValueReply(Optional<Value> value) : value(value) {}
+	GetValueReply() : cached(false) {}
+	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value, cached);
 	}
 };
 
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
+	SpanID spanContext;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
@@ -179,11 +181,12 @@ struct GetValueRequest : TimedRequest {
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest(){}
-	GetValueRequest(const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID) : key(key), version(ver), tags(tags), debugID(debugID) {}
-	
-	template <class Ar> 
+	GetValueRequest(SpanID spanContext, const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID)
+	  : spanContext(spanContext), key(key), version(ver), tags(tags), debugID(debugID) {}
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, key, version, tags, debugID, reply);
+		serializer(ar, key, version, tags, debugID, reply, spanContext);
 	}
 };
 
@@ -191,17 +194,19 @@ struct WatchValueReply {
 	constexpr static FileIdentifier file_identifier = 3;
 
 	Version version;
+	bool cached = false;
 	WatchValueReply() = default;
 	explicit WatchValueReply(Version version) : version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version);
+		serializer(ar, version, cached);
 	}
 };
 
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
+	SpanID spanContext;
 	Key key;
 	Optional<Value> value;
 	Version version;
@@ -210,11 +215,13 @@ struct WatchValueRequest {
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest(){}
-	WatchValueRequest(const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags, Optional<UID> debugID) : key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
-	
-	template <class Ar> 
+	WatchValueRequest(SpanID spanContext, const Key& key, Optional<Value> value, Version ver, Optional<TagSet> tags,
+	                  Optional<UID> debugID)
+	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+
+	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, key, value, version, tags, debugID, reply);
+		serializer(ar, key, value, version, tags, debugID, reply, spanContext);
 	}
 };
 
@@ -224,18 +231,19 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	VectorRef<KeyValueRef, VecSerStrategy::String> data;
 	Version version; // useful when latestVersion was requested
 	bool more;
-	bool cached;
+	bool cached = false;
 
 	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, arena);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
 	}
 };
 
 struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
+	SpanID spanContext;
 	Arena arena;
 	KeySelectorRef begin, end;
 	Version version;		// or latestVersion
@@ -248,25 +256,27 @@ struct GetKeyValuesRequest : TimedRequest {
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, arena);
+		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
 	}
 };
 
 struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
+	bool cached;
 
-	GetKeyReply() {}
-	GetKeyReply(KeySelector sel) : sel(sel) {}
+	GetKeyReply() : cached(false) {}
+	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel, cached);
 	}
 };
 
 struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
+	SpanID spanContext;
 	Arena arena;
 	KeySelectorRef sel;
 	Version version;		// or latestVersion
@@ -275,11 +285,13 @@ struct GetKeyRequest : TimedRequest {
 	ReplyPromise<GetKeyReply> reply;
 
 	GetKeyRequest() {}
-	GetKeyRequest(KeySelectorRef const& sel, Version version, Optional<TagSet> tags, Optional<UID> debugID) : sel(sel), version(version), debugID(debugID) {}
+	GetKeyRequest(SpanID spanContext, KeySelectorRef const& sel, Version version, Optional<TagSet> tags,
+	              Optional<UID> debugID)
+	  : spanContext(spanContext), sel(sel), version(version), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		serializer(ar, sel, version, tags, debugID, reply, arena);
+		serializer(ar, sel, version, tags, debugID, reply, spanContext, arena);
 	}
 };
 
@@ -320,6 +332,8 @@ struct GetShardStateRequest {
 struct StorageMetrics {
 	constexpr static FileIdentifier file_identifier = 13622226;
 	int64_t bytes = 0;				// total storage
+	// FIXME: currently, neither of bytesPerKSecond or iosPerKSecond are actually used in DataDistribution calculations.
+	// This may change in the future, but this comment is left here to avoid any confusion for the time being.
 	int64_t bytesPerKSecond = 0;	// network bandwidth (average over 10s)
 	int64_t iosPerKSecond = 0;
 	int64_t bytesReadPerKSecond = 0;
@@ -424,9 +438,30 @@ struct SplitMetricsRequest {
 	}
 };
 
+// Should always be used inside a `Standalone`.
+struct ReadHotRangeWithMetrics {
+	KeyRangeRef keys;
+	double density;
+	double readBandwidth;
+
+	ReadHotRangeWithMetrics() = default;
+	ReadHotRangeWithMetrics(KeyRangeRef const& keys, double density, double readBandwidth)
+	  : keys(keys), density(density), readBandwidth(readBandwidth) {}
+
+	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
+	  : keys(arena, rhs.keys), density(rhs.density), readBandwidth(rhs.readBandwidth) {}
+
+	int expectedSize() { return keys.expectedSize() + sizeof(density) + sizeof(readBandwidth); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, density, readBandwidth);
+	}
+};
+
 struct ReadHotSubRangeReply {
 	constexpr static FileIdentifier file_identifier = 10424537;
-	Standalone<VectorRef<KeyRangeRef>> readHotRanges;
+	Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -445,6 +480,34 @@ struct ReadHotSubRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, reply, arena);
+	}
+};
+
+struct SplitRangeReply {
+	constexpr static FileIdentifier file_identifier = 11813134;
+	// If the given range can be divided, contains the split points.
+	// If the given range cannot be divided(for exmaple its total size is smaller than the chunk size), this would be
+	// empty
+	Standalone<VectorRef<KeyRef>> splitPoints;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, splitPoints);
+	}
+};
+struct SplitRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10725174;
+	Arena arena;
+	KeyRangeRef keys;
+	int64_t chunkSize;
+	ReplyPromise<SplitRangeReply> reply;
+
+	SplitRangeRequest() {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, chunkSize, reply, arena);
 	}
 };
 

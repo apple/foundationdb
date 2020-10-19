@@ -298,11 +298,11 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	** are numbered starting from zero. Each shared-memory region is szRegion 
 	** bytes in size.
 	**
-	** If an error occurs, an error code is returned and *pp is set to NULL.
+	** If an error occurs, an error code is returned and *pp is set to nullptr.
 	**
 	** Otherwise, if the bExtend parameter is 0 and the requested shared-memory
 	** region has not been allocated (by any client, including one running in a
-	** separate process), then *pp is set to NULL and SQLITE_OK returned. If 
+	** separate process), then *pp is set to nullptr and SQLITE_OK returned. If 
 	** bExtend is non-zero and the requested shared-memory region has not yet 
 	** been allocated, it is allocated by this function.
 	**
@@ -335,7 +335,7 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	  }
 
 	  if (iRegion >= memInfo->regions.size()) {
-		  if (!bExtend) { *pp = NULL; return SQLITE_OK; }
+		  if (!bExtend) { *pp = nullptr; return SQLITE_OK; }
 		  while (memInfo->regions.size() <= iRegion) {
 			  void *mem = new uint8_t[ szRegion ];
 			  memset( mem, 0, szRegion );
@@ -492,7 +492,7 @@ static int asyncOpen(
   const char *zName,              /* File to open, or 0 for a temp file */
   sqlite3_file *pFile,            /* Pointer to VFSAsyncFile struct to populate */
   int flags,                      /* Input SQLITE_OPEN_XXX flags */
-  int *pOutFlags                  /* Output SQLITE_OPEN_XXX flags (or NULL) */
+  int *pOutFlags                  /* Output SQLITE_OPEN_XXX flags (or nullptr) */
 ){
 	static const sqlite3_io_methods asyncio = {
 		3,                            /* iVersion */
@@ -531,7 +531,7 @@ static int asyncOpen(
 	if (flags & SQLITE_OPEN_WAL) oflags |= IAsyncFile::OPEN_LARGE_PAGES;
 	oflags |= IAsyncFile::OPEN_LOCK;
 
-	memset(p, 0, sizeof(VFSAsyncFile));
+	memset(static_cast<void*>(p), 0, sizeof(VFSAsyncFile));
 	new (p) VFSAsyncFile(zName, flags);
 	try {
 		// Note that SQLiteDB::open also opens the db file, so its flags and modes are important, too
@@ -734,7 +734,7 @@ static int asyncCurrentTimeInt64(sqlite3_vfs *NotUsed, sqlite3_int64 *piNow){
 #if __unixish__
 	static const sqlite3_int64 unixEpoch = 24405875*(sqlite3_int64)8640000;
 	struct timeval sNow;
-	gettimeofday(&sNow, NULL);
+	gettimeofday(&sNow, nullptr);
 	*piNow = unixEpoch + 1000*(sqlite3_int64)sNow.tv_sec + sNow.tv_usec/1000;
 #elif defined(_WIN32)
 	static const sqlite3_int64 winFiletimeEpoch = 23058135*(sqlite3_int64)8640000;

@@ -40,6 +40,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Util.h"
 
 // See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
 #include "fdbrpc/IAsyncFile.h"
@@ -62,12 +63,12 @@ std::atomic<int64_t> net2RunLoopIterations(0);
 std::atomic<int64_t> net2RunLoopSleeps(0);
 
 volatile size_t net2backtraces_max = 10000;
-volatile void** volatile net2backtraces = NULL;
+volatile void** volatile net2backtraces = nullptr;
 volatile size_t net2backtraces_offset = 0;
 volatile bool net2backtraces_overflow = false;
 volatile int net2backtraces_count = 0;
 
-volatile void **other_backtraces = NULL;
+volatile void **other_backtraces = nullptr;
 sigset_t sigprof_set;
 
 
@@ -118,7 +119,7 @@ class Net2 sealed : public INetwork, public INetworkConnections {
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
-	void initTLS();
+	void initTLS(ETLSInitState targetState);
 	void run();
 	void initMetrics();
 
@@ -128,12 +129,12 @@ public:
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
 	// INetwork interface
-	virtual double now() { return currentTime; };
-	virtual double timer() { return ::timer(); };
-	virtual Future<Void> delay( double seconds, TaskPriority taskId );
-	virtual Future<class Void> yield( TaskPriority taskID );
-	virtual bool check_yield(TaskPriority taskId);
-	virtual TaskPriority getCurrentTask() { return currentTaskID; }
+	virtual double now() const override { return currentTime; };
+	virtual double timer() override { return ::timer(); };
+	virtual Future<Void> delay(double seconds, TaskPriority taskId) override;
+	virtual Future<class Void> yield(TaskPriority taskID) override;
+	virtual bool check_yield(TaskPriority taskId) override;
+	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
 	virtual void setCurrentTask(TaskPriority taskID ) { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
 	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID );
 	bool isOnMainThread() const override {
@@ -143,7 +144,7 @@ public:
 		if ( thread_network == this )
 			stopImmediately();
 		else
-			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
+			onMainThreadVoid( [this] { this->stopImmediately(); }, nullptr );
 	}
 	virtual void addStopCallback( std::function<void()> fn ) {
 		if ( thread_network == this )
@@ -156,25 +157,31 @@ public:
 	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg);
 
 	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total );
-	virtual bool isAddressOnThisHost( NetworkAddress const& addr );
+	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override;
 	void updateNow(){ currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; }
+	virtual flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 	std::vector<flowGlobalType>		globals;
 
-	virtual const TLSConfig& getTLSConfig() { return tlsConfig; }
+	virtual const TLSConfig& getTLSConfig() const override { return tlsConfig; }
+
+	virtual bool checkRunnable() override;
 
 	bool useThreadPool;
+
 //private:
 
 	ASIOReactor reactor;
 #ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
+	Reference<IThreadPool> sslHandshakerPool;
+	int sslHandshakerThreadsStarted;
+	int sslPoolHandshakesInProgress;
 #endif
 	TLSConfig tlsConfig;
 	Future<Void> backgroundCertRefresh;
-	bool tlsInitialized;
+	ETLSInitState tlsInitializedState;
 
 	INetworkConnections *network;  // initially this, but can be changed
 
@@ -185,7 +192,9 @@ public:
 	TDMetricCollection tdmetrics;
 	double currentTime;
 	bool stopped;
-	std::map<IPAddress, bool> addressOnHostCache;
+	mutable std::map<IPAddress, bool> addressOnHostCache;
+
+	std::atomic<bool> started;
 
 	uint64_t numYields;
 
@@ -260,7 +269,7 @@ class BindPromise {
 public:
 	BindPromise( const char* errContext, UID errID ) : errContext(errContext), errID(errID) {}
 	BindPromise( BindPromise const& r ) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) BOOST_NOEXCEPT : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
 
 	Future<Void> getFuture() { return p.getFuture(); }
 
@@ -289,6 +298,35 @@ public:
 		} catch (...) {
 			p.sendError(unknown_error());
 		}
+	}
+};
+
+struct SendBufferIterator {
+	typedef boost::asio::const_buffer value_type;
+	typedef std::forward_iterator_tag iterator_category;
+	typedef size_t difference_type;
+	typedef boost::asio::const_buffer* pointer;
+	typedef boost::asio::const_buffer& reference;
+
+	SendBuffer const* p;
+	int limit;
+
+	SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
+		ASSERT(limit > 0);
+	}
+
+	bool operator == (SendBufferIterator const& r) const { return p == r.p; }
+	bool operator != (SendBufferIterator const& r) const { return p != r.p; }
+	void operator++() {
+		limit -= p->bytes_written - p->bytes_sent;
+		if(limit > 0)
+			p = p->next;
+		else
+			p = nullptr;
+	}
+
+	boost::asio::const_buffer operator*() const {
+		return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
 	}
 };
 
@@ -406,44 +444,15 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() { return peer_address; }
+	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() { return id; }
+	virtual UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 private:
 	UID id;
 	tcp::socket socket;
 	NetworkAddress peer_address;
-
-	struct SendBufferIterator {
-		typedef boost::asio::const_buffer value_type;
-		typedef std::forward_iterator_tag iterator_category;
-		typedef size_t difference_type;
-		typedef boost::asio::const_buffer* pointer;
-		typedef boost::asio::const_buffer& reference;
-
-		SendBuffer const* p;
-		int limit;
-
-		SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-			ASSERT(limit > 0);
-		}
-
-		bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-		bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-		void operator++() {
-			limit -= p->bytes_written - p->bytes_sent;
-			if(limit > 0)
-				p = p->next;
-			else
-				p = NULL;
-		}
-
-		boost::asio::const_buffer operator*() const {
-			return boost::asio::const_buffer( p->data + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent) );
-		}
-	};
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -498,7 +507,7 @@ public:
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() { return listenAddress; }
+	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
@@ -523,6 +532,47 @@ private:
 
 #ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
+
+struct SSLHandshakerThread : IThreadPoolReceiver {
+	SSLHandshakerThread() {}
+	virtual void init() {}
+
+	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
+		Handshake(ssl_socket &socket, ssl_socket::handshake_type type) : socket(socket), type(type) {
+		}
+		double getTimeEstimate() const override { return 0.001; }
+
+		ThreadReturnPromise<Void> done;
+		ssl_socket &socket;
+		ssl_socket::handshake_type type;
+		boost::system::error_code err;
+	};
+
+	void action( Handshake &h) {
+		try {
+			h.socket.next_layer().non_blocking(false, h.err);
+			if(!h.err.failed()) {
+				h.socket.handshake(h.type, h.err);
+			}
+			if(!h.err.failed()) {
+				h.socket.next_layer().non_blocking(true, h.err);
+			}
+			if(h.err.failed()) {
+				TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError" : "N2_AcceptHandshakeError")
+					.detail("ErrorCode", h.err.value())
+					.detail("ErrorMsg", h.err.message().c_str())
+					.detail("BackgroundThread", true);
+				h.done.sendError(connection_failed());
+			} else {
+				h.done.send(Void());
+			}
+		} catch(...) {
+			TraceEvent(SevWarn, h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError" : "N2_AcceptHandshakeUnknownError")
+				.detail("BackgroundThread", true);
+			h.done.sendError(connection_failed());
+		}
+	}
+};
 
 class SSLConnection : public IConnection, ReferenceCounted<SSLConnection> {
 public:
@@ -580,8 +630,11 @@ public:
 	}
 
 	ACTOR static void doAcceptHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
+		state std::pair<IPAddress,uint16_t> peerIP;
+		state Hold<int> holder;
+
 		try {
-			state std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
+			peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
 			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
 				if (now() < iter->second.second) {
@@ -597,12 +650,24 @@ public:
 				}
 			}
 
-			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
-			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
+			wait(g_network->networkInfo.handshakeLock->take());
+			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
 
-			BindPromise p("N2_AcceptHandshakeError", UID());
-			auto onHandshook = p.getFuture();
-			self->getSSLSocket().async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
+			Future<Void> onHandshook;
+
+			// If the background handshakers are not all busy, use one
+			if(N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
+				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::server);
+				onHandshook = handshake->done.getFuture();
+				N2::g_net2->sslHandshakerPool->post(handshake);
+			}
+			else {
+				// Otherwise use flow network thread
+				BindPromise p("N2_AcceptHandshakeError", UID());
+				onHandshook = p.getFuture();
+				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::server, std::move(p) );
+			}
 			wait( onHandshook );
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
@@ -636,13 +701,26 @@ public:
 	}
 
 	ACTOR static void doConnectHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
-		try {
-			int64_t permitNumber = wait(g_network->networkInfo.handshakeLock->take());
-			state BoundedFlowLock::Releaser releaser(g_network->networkInfo.handshakeLock, permitNumber);
+		state Hold<int> holder;
 
-			BindPromise p("N2_ConnectHandshakeError", self->id);
-			Future<Void> onHandshook = p.getFuture();
-			self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
+		try {
+			wait(g_network->networkInfo.handshakeLock->take());
+			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+
+			Future<Void> onHandshook;
+			// If the background handshakers are not all busy, use one
+			if(N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
+				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
+				auto handshake = new SSLHandshakerThread::Handshake(self->ssl_sock, boost::asio::ssl::stream_base::client);
+				onHandshook = handshake->done.getFuture();
+				N2::g_net2->sslHandshakerPool->post(handshake);
+			}
+			else {
+				// Otherwise use flow network thread
+				BindPromise p("N2_ConnectHandshakeError", self->id);
+				onHandshook = p.getFuture();
+				self->ssl_sock.async_handshake( boost::asio::ssl::stream_base::client, std::move(p) );
+			}
 			wait( onHandshook );
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
@@ -717,6 +795,10 @@ public:
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	virtual int write( SendBuffer const* data, int limit ) {
+#ifdef __APPLE__
+		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a broken pipe error.
+		limit = std::min(limit, 2016);
+#endif
 		boost::system::error_code err;
 		++g_net2->countWrites;
 
@@ -745,9 +827,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() { return peer_address; }
+	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() { return id; }
+	virtual UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 
@@ -758,35 +840,6 @@ private:
 	ssl_socket ssl_sock;
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
-
-	struct SendBufferIterator {
-		typedef boost::asio::const_buffer value_type;
-		typedef std::forward_iterator_tag iterator_category;
-		typedef size_t difference_type;
-		typedef boost::asio::const_buffer* pointer;
-		typedef boost::asio::const_buffer& reference;
-
-		SendBuffer const* p;
-		int limit;
-
-		SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-			ASSERT(limit > 0);
-		}
-
-		bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-		bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-		void operator++() {
-			limit -= p->bytes_written - p->bytes_sent;
-			if(limit > 0)
-				p = p->next;
-			else
-				p = NULL;
-		}
-
-		boost::asio::const_buffer operator*() const {
-			return boost::asio::const_buffer( p->data + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent) );
-		}
-	};
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -835,7 +888,7 @@ public:
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() { return listenAddress; }
+	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( SSLListener* self ) {
@@ -862,7 +915,7 @@ private:
 struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
 	PromiseTask() {}
-	explicit PromiseTask( Promise<Void>&& promise ) BOOST_NOEXCEPT : promise(std::move(promise)) {}
+	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
 	virtual void operator()() {
 		promise.send(Void());
@@ -882,10 +935,12 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  tscBegin(0), tscEnd(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  numYields(0),
 	  lastPriorityStats(nullptr),
-	  tlsInitialized(false),
-	  tlsConfig(tlsConfig)
+	  tlsInitializedState(ETLSInitState::NONE),
+	  tlsConfig(tlsConfig),
+	  started(false)
 #ifndef TLS_DISABLED
-	  ,sslContextVar({ReferencedObject<boost::asio::ssl::context>::from(boost::asio::ssl::context(boost::asio::ssl::context::tls))})
+	  ,sslContextVar({ReferencedObject<boost::asio::ssl::context>::from(boost::asio::ssl::context(boost::asio::ssl::context::tls))}),
+	  sslPoolHandshakesInProgress(0), sslHandshakerThreadsStarted(0)
 #endif
 
 {
@@ -982,29 +1037,66 @@ ACTOR static Future<Void> reloadCertificatesOnChange( TLSConfig config, std::fun
 }
 #endif
 
-void Net2::initTLS() {
-	if(tlsInitialized) {
+void Net2::initTLS(ETLSInitState targetState) {
+	if(tlsInitializedState >= targetState) {
 		return;
 	}
 #ifndef TLS_DISABLED
-	auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
-	try {
-		boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-		const LoadedTLSConfig& loaded = tlsConfig.loadSync();
-		TraceEvent("Net2TLSConfig")
-			.detail("CAPath", tlsConfig.getCAPathSync())
-			.detail("CertificatePath", tlsConfig.getCertificatePathSync())
-			.detail("KeyPath", tlsConfig.getKeyPathSync())
-			.detail("HasPassword", !loaded.getPassword().empty())
-			.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
-		ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
-		sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
-	} catch (Error& e) {
-		TraceEvent("Net2TLSInitError").error(e);
+	// Any target state must be higher than NONE so if the current state is NONE
+	// then initialize the TLS config
+	if(tlsInitializedState == ETLSInitState::NONE) {
+		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
+		try {
+			boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
+			const LoadedTLSConfig& loaded = tlsConfig.loadSync();
+			TraceEvent("Net2TLSConfig")
+				.detail("CAPath", tlsConfig.getCAPathSync())
+				.detail("CertificatePath", tlsConfig.getCertificatePathSync())
+				.detail("KeyPath", tlsConfig.getKeyPathSync())
+				.detail("HasPassword", !loaded.getPassword().empty())
+				.detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
+			ConfigureSSLContext( tlsConfig.loadSync(), &newContext, onPolicyFailure );
+			sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
+		} catch (Error& e) {
+			TraceEvent("Net2TLSInitError").error(e);
+		}
+		backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
 	}
-	backgroundCertRefresh = reloadCertificatesOnChange( tlsConfig, onPolicyFailure, &sslContextVar );
+
+	// If a TLS connection is actually going to be used then start background threads if configured
+	if(targetState > ETLSInitState::CONFIG) {
+		int threadsToStart;
+		switch(targetState) {
+			case ETLSInitState::CONNECT:
+				threadsToStart = FLOW_KNOBS->TLS_CLIENT_HANDSHAKE_THREADS;
+				break;
+			case ETLSInitState::LISTEN:
+				threadsToStart = FLOW_KNOBS->TLS_SERVER_HANDSHAKE_THREADS;
+				break;
+			default:
+				threadsToStart = 0;
+		};
+		threadsToStart -= sslHandshakerThreadsStarted;
+
+		if(threadsToStart > 0) {
+			if(sslHandshakerThreadsStarted == 0) {
+				#if defined(__linux__)
+				if(mallopt(M_ARENA_MAX, FLOW_KNOBS->TLS_MALLOC_ARENA_MAX) != 1) {
+					TraceEvent(SevWarn, "TLSMallocSetMaxArenasFailure").detail("MaxArenas", FLOW_KNOBS->TLS_MALLOC_ARENA_MAX);
+				};
+				#endif
+				sslHandshakerPool = createGenericThreadPool(FLOW_KNOBS->TLS_HANDSHAKE_THREAD_STACKSIZE);
+			}
+
+			for(int i = 0; i < threadsToStart; ++i) {
+				++sslHandshakerThreadsStarted;
+				sslHandshakerPool->addThread(new SSLHandshakerThread());
+			}
+		}
+	}
 #endif
-	tlsInitialized = true;
+
+	tlsInitializedState = targetState;
 }
 
 ACTOR Future<Void> Net2::logTimeOffset() {
@@ -1042,6 +1134,10 @@ void Net2::initMetrics() {
 	countReactTime.init(LiteralStringRef("Net2.CountReactTime"));
 }
 
+bool Net2::checkRunnable() {
+	return !started.exchange(true);
+}
+
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running");
@@ -1064,6 +1160,7 @@ void Net2::run() {
 	typedef void (*runCycleFuncPtr)();
 	runCycleFuncPtr runFunc = reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc)));
 
+	started.store(true);
 	double nnow = timer_monotonic();
 
 	while(!stopped) {
@@ -1202,7 +1299,7 @@ void Net2::run() {
 			net2backtraces_overflow = false;
 			net2backtraces_count = 0;
 
-			pthread_sigmask(SIG_SETMASK, &orig_set, NULL);
+			pthread_sigmask(SIG_SETMASK, &orig_set, nullptr);
 
 			if (was_overflow) {
 				TraceEvent("Net2RunLoopProfilerOverflow")
@@ -1397,7 +1494,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 
 Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
 #ifndef TLS_DISABLED
-	initTLS();
+	initTLS(ETLSInitState::CONNECT);
 	if ( toAddr.isTLS() ) {
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
 	}
@@ -1449,7 +1546,7 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, 
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
-bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
+bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 	auto it = addressOnHostCache.find( addr.ip );
 	if (it != addressOnHostCache.end())
 		return it->second;
@@ -1477,7 +1574,7 @@ bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
 Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	try {
 #ifndef TLS_DISABLED
-		initTLS();
+		initTLS(ETLSInitState::LISTEN);
 		if ( localAddr.isTLS() ) {
 			return Reference<IListener>(new SSLListener( reactor.ios, &this->sslContextVar, localAddr ));
 		}
@@ -1507,7 +1604,7 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 	}
 }
 
-void Net2::getDiskBytes( std::string const& directory, int64_t& free, int64_t& total ) {
+void Net2::getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	return ::getDiskBytes(directory, free, total);
 }
 
@@ -1547,7 +1644,7 @@ void ASIOReactor::sleep(double sleepTime) {
 			timespec tv;
 			tv.tv_sec = 0;
 			tv.tv_nsec = 20000;
-			nanosleep(&tv, NULL);
+			nanosleep(&tv, nullptr);
 #endif
 		}
 		else

@@ -37,7 +37,7 @@
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/RestoreWorker.actor.h"
-#include "fdbserver/RestoreMaster.actor.h"
+#include "fdbserver/RestoreController.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -75,8 +75,9 @@ ACTOR Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req, Refer
 // Future: Multiple roles in a restore worker
 void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWorkerData> self,
                                       ActorCollection* actors, Database cx) {
-	// Already recruited a role
 	// Future: Allow multiple restore roles on a restore worker. The design should easily allow this.
+	ASSERT(!self->loaderInterf.present() || !self->applierInterf.present()); // Only one role per worker for now
+	// Already recruited a role
 	if (self->loaderInterf.present()) {
 		ASSERT(req.role == RestoreRole::Loader);
 		req.reply.send(RestoreRecruitRoleReply(self->id(), RestoreRole::Loader, self->loaderInterf.get()));
@@ -88,23 +89,30 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req, Reference<RestoreWo
 
 	if (req.role == RestoreRole::Loader) {
 		ASSERT(!self->loaderInterf.present());
+		self->controllerInterf = req.ci;
 		self->loaderInterf = RestoreLoaderInterface();
 		self->loaderInterf.get().initEndpoints();
 		RestoreLoaderInterface& recruited = self->loaderInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
+		DUMPTOKEN(recruited.updateRestoreSysInfo);
 		DUMPTOKEN(recruited.initVersionBatch);
 		DUMPTOKEN(recruited.loadFile);
 		DUMPTOKEN(recruited.sendMutations);
+		DUMPTOKEN(recruited.initVersionBatch);
+		DUMPTOKEN(recruited.finishVersionBatch);
 		DUMPTOKEN(recruited.collectRestoreRoleInterfaces);
 		DUMPTOKEN(recruited.finishRestore);
-		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx));
+		actors->add(restoreLoaderCore(self->loaderInterf.get(), req.nodeIndex, cx, req.ci));
 		TraceEvent("FastRestoreWorker").detail("RecruitedLoaderNodeIndex", req.nodeIndex);
 		req.reply.send(
 		    RestoreRecruitRoleReply(self->loaderInterf.get().id(), RestoreRole::Loader, self->loaderInterf.get()));
 	} else if (req.role == RestoreRole::Applier) {
 		ASSERT(!self->applierInterf.present());
+		self->controllerInterf = req.ci;
 		self->applierInterf = RestoreApplierInterface();
 		self->applierInterf.get().initEndpoints();
 		RestoreApplierInterface& recruited = self->applierInterf.get();
+		DUMPTOKEN(recruited.heartbeat);
 		DUMPTOKEN(recruited.sendMutationVector);
 		DUMPTOKEN(recruited.applyToDB);
 		DUMPTOKEN(recruited.initVersionBatch);
@@ -177,17 +185,17 @@ ACTOR Future<Void> monitorWorkerLiveness(Reference<RestoreWorkerData> self) {
 	}
 }
 
-// RestoreWorkerLeader is the worker that runs RestoreMaster role
+// RestoreWorkerLeader is the worker that runs RestoreController role
 ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, RestoreWorkerInterface workerInterf,
                                             Database cx) {
 	// We must wait for enough time to make sure all restore workers have registered their workerInterfaces into the DB
 	TraceEvent("FastRestoreWorker")
-	    .detail("Master", workerInterf.id())
+	    .detail("Controller", workerInterf.id())
 	    .detail("WaitForRestoreWorkerInterfaces",
 	            SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 	wait(delay(10.0));
 	TraceEvent("FastRestoreWorker")
-	    .detail("Master", workerInterf.id())
+	    .detail("Controller", workerInterf.id())
 	    .detail("CollectRestoreWorkerInterfaces",
 	            SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS);
 
@@ -197,7 +205,11 @@ ACTOR Future<Void> startRestoreWorkerLeader(Reference<RestoreWorkerData> self, R
 	// TODO: Needs to keep this monitor's future. May use actorCollection
 	state Future<Void> workersFailureMonitor = monitorWorkerLiveness(self);
 
-	wait(startRestoreMaster(self, cx) || workersFailureMonitor);
+	RestoreControllerInterface recruited;
+	DUMPTOKEN(recruited.samples);
+
+	self->controllerInterf = recruited;
+	wait(startRestoreController(self, cx) || workersFailureMonitor);
 
 	return Void();
 }
@@ -249,7 +261,6 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 }
 
 ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
-	state Future<Void> watch4RestoreRequest;
 	state ReadYourWritesTransaction tr(cx);
 	state Optional<Value> numRequests;
 
@@ -263,10 +274,10 @@ ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID())
 			Optional<Value> _numRequests = wait(tr.get(restoreRequestTriggerKey));
 			numRequests = _numRequests;
 			if (!numRequests.present()) {
-				watch4RestoreRequest = tr.watch(restoreRequestTriggerKey);
+				state Future<Void> watchForRestoreRequest = tr.watch(restoreRequestTriggerKey);
 				wait(tr.commit());
 				TraceEvent(SevInfo, "FastRestoreWaitOnRestoreRequestTriggerKey", nodeID);
-				wait(watch4RestoreRequest);
+				wait(watchForRestoreRequest);
 				TraceEvent(SevInfo, "FastRestoreDetectRestoreRequestTriggerKeyChanged", nodeID);
 			} else {
 				TraceEvent(SevInfo, "FastRestoreRestoreRequestTriggerKey", nodeID)
@@ -281,7 +292,7 @@ ACTOR static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID())
 	return Void();
 }
 
-// RestoreMaster is the leader
+// RestoreController is the leader
 ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader, Database cx,
                                  RestoreWorkerInterface myWorkerInterf) {
 	wait(delay(SERVER_KNOBS->FASTRESTORE_MONITOR_LEADER_DELAY));
@@ -307,7 +318,7 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 				}
 			} else {
 				// Workers compete to be the leader
-				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion()));
+				tr.set(restoreLeaderKey, BinaryWriter::toValue(myWorkerInterf, IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue())));
 				leaderInterf = myWorkerInterf;
 			}
 			wait(tr.commit());
@@ -370,7 +381,7 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 
 	TraceEvent("FastRestoreWorker", myWorkerInterf.id()).detail("LeaderElection", "WaitForLeader");
 	if (leader->get() == myWorkerInterf) {
-		// Restore master worker: doLeaderThings();
+		// Restore controller worker: doLeaderThings();
 		myWork = startRestoreWorkerLeader(self, myWorkerInterf, cx);
 	} else {
 		// Restore normal worker (for RestoreLoader and RestoreApplier roles): doWorkerThings();

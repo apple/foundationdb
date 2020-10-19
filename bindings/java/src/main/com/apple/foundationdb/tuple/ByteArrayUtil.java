@@ -35,6 +35,7 @@ import com.apple.foundationdb.Transaction;
  *
  */
 public class ByteArrayUtil extends FastByteComparisons {
+	private static final byte[] EMPTY_BYTES = new byte[0];
 
 	/**
 	 * Joins a set of byte arrays into a larger array. The {@code interlude} is placed
@@ -45,36 +46,46 @@ public class ByteArrayUtil extends FastByteComparisons {
 	 *  concatenated elements.
 	 * @param parts the pieces to be joined. May be {@code null}, but does not allow
 	 *  for elements in the list to be {@code null}.
-	 *
+	 * 
 	 * @return a newly created concatenation of the input
 	 */
 	public static byte[] join(byte[] interlude, List<byte[]> parts) {
+		return interludeJoin(interlude, parts.toArray(new byte[0][]));
+	}
+	/**
+	 * Joins a set of byte arrays into a larger array. The {@code interlude} is placed
+	 *  between each of the elements, but not at the beginning or end. In the case that
+	 *  the list is empty or {@code null}, a zero-length byte array will be returned.
+	 *
+	 * @param interlude can be {@code null} or zero length. Placed internally between
+	 *  concatenated elements.
+	 * @param parts the pieces to be joined. May be {@code null}, but does not allow
+	 *  for elements in the array to be {@code null}.
+	 *
+	 * @return a newly created concatenation of the input
+	 */
+	public static byte[] interludeJoin(byte[] interlude, byte[][] parts) {
 		if(parts == null)
 			return new byte[0];
-		int partCount = parts.size();
+		int partCount = parts.length;
 		if(partCount == 0)
-			return new byte[0];
+			return EMPTY_BYTES;
 
 		if(interlude == null)
-			interlude = new byte[0];
+			interlude = EMPTY_BYTES;
 
 		int elementTotals = 0;
 		int interludeSize = interlude.length;
-		for(byte[] e : parts) {
-			elementTotals += e.length;
+		for (int i = 0; i < partCount; i++) {
+			elementTotals += parts[i].length;
 		}
-
 		byte[] dest = new byte[(interludeSize * (partCount - 1)) + elementTotals];
-
-		//System.out.println(" interlude -> " + ArrayUtils.printable(interlude));
-
 		int startByte = 0;
 		int index = 0;
-		for(byte[] part : parts) {
-			//System.out.println(" section -> " + ArrayUtils.printable(parts.get(i)));
-			int length = part.length;
+		for (int i = 0; i < partCount; i++) {
+			int length = parts[i].length;
 			if(length > 0) {
-				System.arraycopy(part, 0, dest, startByte, length);
+				System.arraycopy(parts[i], 0, dest, startByte, length);
 				startByte += length;
 			}
 			if(index < partCount - 1 && interludeSize > 0) {
@@ -84,8 +95,6 @@ public class ByteArrayUtil extends FastByteComparisons {
 			}
 			index++;
 		}
-
-		//System.out.println(" complete -> " + ArrayUtils.printable(dest));
 		return dest;
 	}
 
@@ -97,7 +106,7 @@ public class ByteArrayUtil extends FastByteComparisons {
 	 * @return a newly created concatenation of the input
 	 */
 	public static byte[] join(byte[]... parts) {
-		return join(null, Arrays.asList(parts));
+		return interludeJoin(null, parts);
 	}
 
 	/**

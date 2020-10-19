@@ -12,7 +12,7 @@ endif()
 # SSL
 ################################################################################
 include(CheckSymbolExists)
- 
+
 set(DISABLE_TLS OFF CACHE BOOL "Don't try to find OpenSSL and always build without TLS support")
 if(DISABLE_TLS)
   set(WITH_TLS OFF)
@@ -102,6 +102,29 @@ if(GEM_EXECUTABLE)
   set(WITH_RUBY ON)
 endif()
 
+################################################################################
+# RocksDB
+################################################################################
+
+set(SSD_ROCKSDB_EXPERIMENTAL OFF CACHE BOOL "Build with experimental RocksDB support")
+# RocksDB is currently enabled by default for GCC but does not build with the latest
+# Clang.
+if (SSD_ROCKSDB_EXPERIMENTAL OR GCC)
+  set(WITH_ROCKSDB_EXPERIMENTAL ON)
+else()
+  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
+endif()
+
+################################################################################
+# TOML11
+################################################################################
+
+# TOML can download and install itself into the binary directory, so it should
+# always be available.
+find_package(TOML11)
+
+################################################################################
+
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
 
@@ -117,6 +140,7 @@ function(print_components)
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Bindings (depends on Python):   ${WITH_PYTHON}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
+  message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
   message(STATUS "=========================================")
 endfunction()
 

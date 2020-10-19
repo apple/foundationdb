@@ -33,8 +33,8 @@ import com.apple.foundationdb.directory.DirectorySubspace;
 public class DirectoryTest {
 	public static void main(String[] args) throws Exception {
 		try {
-			FDB fdb = FDB.selectAPIVersion(630);
-			try(Database db = fdb.open()) {
+			FDB fdb = FDB.selectAPIVersion(700);
+			try(Database db = args.length > 0 ? fdb.open(args[0]) : fdb.open()) {
 				runTests(db);
 			}
 		}

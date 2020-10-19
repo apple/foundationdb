@@ -27,8 +27,7 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 
-
-class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
+class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {
 		ThreadPool *pool;
 		IThreadPoolReceiver* userObject;
@@ -43,11 +42,12 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 			threadUserObject = userObject;
 			try {
 				userObject->init();
-				while (pool->ios.run_one() && !pool->mode);
+				while (pool->ios.run_one() && (pool->mode == Mode::Run));
 			} catch (Error& e) {
 				TraceEvent(SevError, "ThreadPoolError").error(e);
 			}
-			delete userObject; userObject = 0;
+			delete userObject;
+			userObject = nullptr;
 			stopped.set();
 		}
 		static void dispatch( PThreadAction action ) {
@@ -64,21 +64,21 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	boost::asio::io_service::work dontstop;
 	enum Mode { Run=0, Shutdown=2 };
 	volatile int mode;
+	int stackSize;
 
 	struct ActionWrapper {
 		PThreadAction action;
 		ActionWrapper(PThreadAction action) : action(action) {}
 		// HACK: Boost won't use move constructors, so we just assume the last copy made is the one that will be called or cancelled
-		ActionWrapper(ActionWrapper const& r) : action(r.action) { const_cast<ActionWrapper&>(r).action=NULL; }
-		void operator()() { Thread::dispatch(action); action = NULL; }
+		ActionWrapper(ActionWrapper const& r) : action(r.action) { const_cast<ActionWrapper&>(r).action=nullptr; }
+		void operator()() { Thread::dispatch(action); action = nullptr; }
 		~ActionWrapper() { if (action) { action->cancel(); } }
-	private:
-		void operator=(ActionWrapper const&);
+		ActionWrapper &operator=(ActionWrapper const&)=delete;
 	};
 public:
-	ThreadPool() : dontstop(ios), mode(Run) {}
+	ThreadPool(int stackSize) : dontstop(ios), mode(Run), stackSize(stackSize) {}
 	~ThreadPool() {}
-	Future<Void> stop(Error const& e = success()) {
+	Future<Void> stop(Error const& e = success()) override {
 		if (mode == Shutdown) return Void();
 		ReferenceCounted<ThreadPool>::addref();
 		ios.stop(); // doesn't work?
@@ -90,22 +90,21 @@ public:
 		ReferenceCounted<ThreadPool>::delref();
 		return Void();
 	}
-	virtual Future<Void> getError() { return Never(); }  // FIXME
-	virtual void addref() { ReferenceCounted<ThreadPool>::addref(); }
-	virtual void delref() { if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop(); }
-	void addThread( IThreadPoolReceiver* userData ) {
+	Future<Void> getError() const override { return Never(); } // FIXME
+	void addref() override { ReferenceCounted<ThreadPool>::addref(); }
+	void delref() override {
+		if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop();
+	}
+	void addThread(IThreadPoolReceiver* userData) override {
 		threads.push_back(new Thread(this, userData));
-		startThread(start, threads.back());
+		startThread(start, threads.back(), stackSize);
 	}
-	void post( PThreadAction action ) {
-		ios.post( ActionWrapper( action ) );
-	}
+	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
 };
 
-
-Reference<IThreadPool>	createGenericThreadPool()
+Reference<IThreadPool>	createGenericThreadPool(int stackSize)
 {
-	return Reference<IThreadPool>( new ThreadPool );
+	return Reference<IThreadPool>( new ThreadPool(stackSize) );
 }
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;

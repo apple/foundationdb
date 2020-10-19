@@ -2,7 +2,7 @@ version: "3"
 
 services:
   common: &common
-    image: foundationdb/foundationdb-build:0.1.13
+    image: foundationdb/foundationdb-build:0.1.17
 
   build-setup: &build-setup
     <<: *common
@@ -72,6 +72,14 @@ services:
 
   prb-bindings-cmake:
     <<: *snapshot-bindings-cmake
+
+
+  snapshot-cmake: &snapshot-testpackages
+    <<: *build-setup
+    command: scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash -c 'mkdir -p "$${BUILD_DIR}" && cd "$${BUILD_DIR}" && cmake -G "Ninja" -DFDB_RELEASE=0 /__this_is_some_very_long_name_dir_needed_to_fix_a_bug_with_debug_rpms__/foundationdb && ninja -v -j "$${MAKEJOBS}"'
+
+  prb-testpackages:
+    <<: *snapshot-testpackages
 
 
   snapshot-ctest: &snapshot-ctest

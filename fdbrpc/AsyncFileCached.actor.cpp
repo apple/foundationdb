@@ -80,15 +80,16 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl( std::string filename, 
 	return open_impl(filename, flags, mode, pageCache);
 }
 
-Future<Void> AsyncFileCached::read_write_impl( AsyncFileCached* self, void* data, int length, int64_t offset, bool writing ) {
-	if (writing) {
+template <bool writing>
+Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
+                                              typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+                                              int length, int64_t offset) {
+	if constexpr (writing) {
 		if (offset + length > self->length)
 			self->length = offset + length;
 	}
 
 	std::vector<Future<Void>> actors;
-
-	uint8_t* cdata = static_cast<uint8_t*>(data);
 
 	int offsetInPage = offset % self->pageCache->pageSize;
 	int64_t pageOffset = offset - offsetInPage;
@@ -108,13 +109,16 @@ Future<Void> AsyncFileCached::read_write_impl( AsyncFileCached* self, void* data
 
 		int bytesInPage = std::min(self->pageCache->pageSize - offsetInPage, remaining);
 
-		auto w = writing
-			? p->second->write( cdata, bytesInPage, offsetInPage )
-			: p->second->read( cdata, bytesInPage, offsetInPage );
+		Future<Void> w;
+		if constexpr (writing) {
+			w = p->second->write(data, bytesInPage, offsetInPage);
+		} else {
+			w = p->second->read(data, bytesInPage, offsetInPage);
+		}
 		if (!w.isReady() || w.isError())
 			actors.push_back( w );
 
-		cdata += bytesInPage;
+		data += bytesInPage;
 		pageOffset += self->pageCache->pageSize;
 		offsetInPage = 0;
 

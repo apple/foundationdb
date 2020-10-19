@@ -299,11 +299,14 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			state Transaction tr(self->cx);
 			loop {
 				try {
-					Standalone<VectorRef<KeyRangeRef>> readHotRanges = wait(tr.getReadHotRanges(keys));
+					Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges = wait(tr.getReadHotRanges(keys));
 					for (auto& keyRange : readHotRanges) {
 						TraceEvent("ReadHotRangeLog")
-						    .detail("KeyRangeBegin", keyRange.begin)
-						    .detail("KeyRangeEnd", keyRange.end);
+						    .detail("ReadDensity", keyRange.density)
+						    .detail("ReadBandwidth", keyRange.readBandwidth)
+						    .detail("ReadDensityThreshold", SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO)
+						    .detail("KeyRangeBegin", keyRange.keys.begin)
+						    .detail("KeyRangeEnd", keyRange.keys.end);
 					}
 					break;
 				} catch (Error& e) {
@@ -813,12 +816,62 @@ ACTOR Future<Void> fetchShardMetrics( DataDistributionTracker* self, GetMetricsR
 	return Void();
 }
 
+
+ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, GetMetricsListRequest req ) {
+	try {
+		loop {
+			// used to control shard limit
+			int shardNum = 0;
+			// list of metrics, regenerate on loop when full range unsuccessful
+			Standalone<VectorRef<DDMetricsRef>> result;
+			Future<Void> onChange;
+			auto beginIter = self->shards.containedRanges(req.keys).begin();
+			auto endIter = self->shards.intersectingRanges(req.keys).end();
+			for (auto t = beginIter; t != endIter; ++t) {
+				auto &stats = t.value().stats;
+				if( !stats->get().present() ) {
+					onChange = stats->onChange();
+					break;
+				}
+				result.push_back_deep(result.arena(),
+				                      DDMetricsRef(stats->get().get().metrics.bytes, KeyRef(t.begin().toString())));
+				++shardNum;
+				if (shardNum >= req.shardLimit) {
+					break;
+				}
+			}
+
+			if( !onChange.isValid() ) {
+				req.reply.send( result );
+				return Void();
+			}
+
+			wait( onChange );
+		}
+	} catch( Error &e ) {
+		if( e.code() != error_code_actor_cancelled && !req.reply.isSet() )
+			req.reply.sendError(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> fetchShardMetricsList( DataDistributionTracker* self, GetMetricsListRequest req ) {
+	choose {
+		when( wait( fetchShardMetricsList_impl( self, req ) ) ) {}
+		when( wait( delay( SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT ) ) ) {
+			req.reply.sendError(timed_out());
+		}
+	}
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> initData,
 	Database cx,
 	PromiseStream<RelocateShard> output,
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	PromiseStream<GetMetricsRequest> getShardMetrics,
+	PromiseStream<GetMetricsListRequest> getShardMetricsList,
 	FutureStream<Promise<int64_t>> getAverageShardBytes,
 	Promise<Void> readyToStart,
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams,
@@ -846,6 +899,9 @@ ACTOR Future<Void> dataDistributionTracker(
 			}
 			when( GetMetricsRequest req = waitNext( getShardMetrics.getFuture() ) ) {
 				self.sizeChanges.add( fetchShardMetrics( &self, req ) );
+			}
+			when( GetMetricsListRequest req = waitNext( getShardMetricsList.getFuture() ) ) {
+				self.sizeChanges.add( fetchShardMetricsList( &self, req ) );
 			}
 			when( wait( self.sizeChanges.getResult() ) ) {}
 		}

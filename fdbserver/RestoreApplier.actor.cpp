@@ -34,19 +34,21 @@
 #include "fdbserver/RestoreApplier.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self);
 ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req, Reference<RestoreApplierData> self,
                                                  Database cx);
+void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreApplierData> self);
 
 ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx) {
 	state Reference<RestoreApplierData> self =
 	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
-	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
+	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreApplier"));
 	actors.add(traceRoleVersionBatchProgress(self, "RestoreApplier"));
 
@@ -66,7 +68,13 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.applyToDB.getFuture())) {
 					requestTypeStr = "applyToDB";
-					actors.add(handleApplyToDBRequest(req, self, cx));
+					actors.add(handleApplyToDBRequest(
+					    req, self, cx)); // TODO: Check how FDB uses TaskPriority for ACTORS. We may need to add
+					                     // priority here to avoid requests at later VB block requests at earlier VBs
+				}
+				when(RestoreUpdateRateRequest req = waitNext(applierInterf.updateRate.getFuture())) {
+					requestTypeStr = "updateRate";
+					handleUpdateRateRequest(req, self);
 				}
 				when(RestoreVersionBatchRequest req = waitNext(applierInterf.initVersionBatch.getFuture())) {
 					requestTypeStr = "initVersionBatch";
@@ -74,24 +82,25 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 				}
 				when(RestoreFinishRequest req = waitNext(applierInterf.finishRestore.getFuture())) {
 					requestTypeStr = "finishRestore";
+					actors.clear(false); // cancel all pending actors
 					handleFinishRestoreRequest(req, self);
 					if (req.terminate) {
 						exitRole = Void();
 					}
 				}
-				when(wait(updateProcessStatsTimer)) {
-					updateProcessStats(self);
-					updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
-				}
+				when(wait(actors.getResult())) {}
 				when(wait(exitRole)) {
 					TraceEvent("RestoreApplierCoreExitRole", self->id());
 					break;
 				}
 			}
+			//TraceEvent("RestoreApplierCore", self->id()).detail("Request", requestTypeStr); // For debug only
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreApplierError", self->id())
+			bool isError = e.code() != error_code_operation_cancelled;
+			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreApplierError", self->id())
 			    .detail("RequestType", requestTypeStr)
 			    .error(e, true);
+			actors.clear(false);
 			break;
 		}
 	}
@@ -99,7 +108,7 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 	return Void();
 }
 
-// The actor may be invovked multiple times and executed async.
+// The actor may be invoked multiple times and executed async.
 // No race condition as long as we do not wait or yield when operate the shared
 // data. Multiple such actors can run on different fileIDs.
 // Different files may contain mutations of the same commit versions, but with
@@ -107,36 +116,62 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 // Only one actor can process mutations from the same file.
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self) {
-	state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
-	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
-	// Note: Insert new items into processedFileState will not invalidate the reference.
-	state NotifiedVersion& curMsgIndex = batchData->processedFileState[req.asset];
+	state Reference<ApplierBatchData> batchData; // initialized as nullptr
+	state bool printTrace = false;
+	state NotifiedVersion* curMsgIndex = nullptr;
 
-	TraceEvent(SevInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
-	    .suppressFor(1.0)
+	if (req.batchIndex <= self->finishedBatch.get()) { // Handle duplicate request from batchIndex that has finished
+		TraceEvent(SevWarn, "FastRestoreApplierRestoreSendVersionedMutationsRequestTooLate")
+		    .detail("RequestBatchIndex", req.batchIndex)
+		    .detail("FinishedBatchIndex", self->finishedBatch.get());
+		req.reply.send(RestoreCommonReply(self->id(), true));
+		ASSERT_WE_THINK(false); // Test to see if simulation can reproduce this
+		return Void();
+	}
+
+	batchData = self->batch[req.batchIndex];
+
+	ASSERT(batchData.isValid());
+	ASSERT(self->finishedBatch.get() < req.batchIndex);
+	// wait(delay(0.0, TaskPriority::RestoreApplierReceiveMutations)); // This hurts performance from 100MB/s to 60MB/s
+	// on circus
+
+	batchData->receiveMutationReqs += 1;
+	// Trace when the receive phase starts at a VB and when it finishes.
+	// This can help check if receiveMutations block applyMutation phase.
+	// If so, we need more sophisticated scheduler to ensure priority execution
+	printTrace = (batchData->receiveMutationReqs % SERVER_KNOBS->FASTRESTORE_NUM_TRACE_EVENTS == 0);
+	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("RestoreAssetMesssageIndex", curMsgIndex.get())
+	    .detail("RestoreAssetMesssageIndex", batchData->processedFileState[req.asset].get())
 	    .detail("Request", req.toString())
 	    .detail("CurrentMemory", getSystemStatistics().processMemory)
-	    .detail("PreviousVersionBatchState", batchData->vbState.get());
+	    .detail("PreviousVersionBatchState", batchData->vbState.get())
+	    .detail("ReceiveMutationRequests", batchData->receiveMutationReqs);
 
 	wait(isSchedulable(self, req.batchIndex, __FUNCTION__));
 
-	wait(curMsgIndex.whenAtLeast(req.msgIndex - 1));
+	ASSERT(batchData.isValid());
+	ASSERT(req.batchIndex > self->finishedBatch.get());
+	// Assume: processedFileState[req.asset] will not be erased while the actor is active.
+	// Note: Insert new items into processedFileState will not invalidate the reference.
+	curMsgIndex = &batchData->processedFileState[req.asset];
+	wait(curMsgIndex->whenAtLeast(req.msgIndex - 1));
 	batchData->vbState = ApplierVersionBatchState::RECEIVE_MUTATIONS;
 
 	state bool isDuplicated = true;
-	if (curMsgIndex.get() == req.msgIndex - 1) {
+	if (curMsgIndex->get() == req.msgIndex - 1) {
 		isDuplicated = false;
 
 		for (int mIndex = 0; mIndex < req.versionedMutations.size(); mIndex++) {
 			const VersionedMutation& versionedMutation = req.versionedMutations[mIndex];
-			TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
+			TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutations", self->id())
 			    .detail("RestoreAsset", req.asset.toString())
 			    .detail("Version", versionedMutation.version.toString())
 			    .detail("Index", mIndex)
 			    .detail("MutationReceived", versionedMutation.mutation.toString());
+			batchData->receivedBytes += versionedMutation.mutation.totalSize();
 			batchData->counters.receivedBytes += versionedMutation.mutation.totalSize();
 			batchData->counters.receivedWeightedBytes +=
 			    versionedMutation.mutation.weightedTotalSize(); // atomicOp will be amplified
@@ -145,7 +180,8 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			    isAtomicOp((MutationRef::Type)versionedMutation.mutation.type) ? 1 : 0;
 			// Sanity check
 			ASSERT_WE_THINK(req.asset.isInVersionRange(versionedMutation.version.version));
-			ASSERT_WE_THINK(req.asset.isInKeyRange(versionedMutation.mutation));
+			ASSERT_WE_THINK(req.asset.isInKeyRange(
+			    versionedMutation.mutation)); // mutation is already applied removePrefix and addPrefix
 
 			// Note: Log and range mutations may be delivered out of order. Can we handle it?
 			batchData->addMutation(versionedMutation.mutation, versionedMutation.version);
@@ -153,49 +189,59 @@ ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMu
 			ASSERT(versionedMutation.mutation.type != MutationRef::SetVersionstampedKey &&
 			       versionedMutation.mutation.type != MutationRef::SetVersionstampedValue);
 		}
-		curMsgIndex.set(req.msgIndex);
+		curMsgIndex->set(req.msgIndex);
 	}
 
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
-	TraceEvent(SevInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
-	    .suppressFor(1.0)
+	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreApplierPhaseReceiveMutationsDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("RestoreAsset", req.asset.toString())
-	    .detail("ProcessedMessageIndex", curMsgIndex.get())
+	    .detail("ProcessedMessageIndex", curMsgIndex->get())
 	    .detail("Request", req.toString());
 	return Void();
 }
 
 // Clear all ranges in input ranges
 ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRangeRef>> ranges, double delayTime,
-                                                   Database cx, UID applierID, int batchIndex) {
+                                                   Database cx, UID applierID, int batchIndex,
+                                                   ApplierBatchData::Counters* cc) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int retries = 0;
 	state double numOps = 0;
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
-	TraceEvent("FastRestoreApplierClearRangeMutationsStart", applierID)
+	TraceEvent(delayTime > 5 ? SevWarnAlways : SevDebug, "FastRestoreApplierClearRangeMutationsStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Ranges", ranges.size())
 	    .detail("DelayTime", delayTime);
+	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) {
+		TraceEvent("FastRestoreApplierClearRangeMutationsNotWriteDB", applierID)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("Ranges", ranges.size());
+		ASSERT(!g_network->isSimulated());
+		return Void();
+	}
+
 	loop {
 		try {
-			tr->reset();
+			// TODO: Consider clearrange traffic in write traffic control
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& range : ranges) {
 				debugFRMutation("FastRestoreApplierApplyClearRangeMutation", 0,
 				                MutationRef(MutationRef::ClearRange, range.begin, range.end));
 				tr->clear(range);
+				cc->clearOps += 1;
 				++numOps;
 				if (numOps >= SERVER_KNOBS->FASTRESTORE_TXN_CLEAR_MAX) {
-					TraceEvent(SevWarnAlways, "FastRestoreApplierClearRangeMutationsTooManyClearsInTxn")
-					    .suppressFor(1.0)
+					TraceEvent(SevWarn, "FastRestoreApplierClearRangeMutationsTooManyClearsInTxn")
+					    .suppressFor(5.0)
 					    .detail("Clears", numOps)
 					    .detail("Ranges", ranges.size())
 					    .detail("Range", range.toString());
 				}
 			}
 			wait(tr->commit());
+			cc->clearTxns += 1;
 			break;
 		} catch (Error& e) {
 			retries++;
@@ -214,51 +260,76 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 // Get keys in incompleteStagingKeys and precompute the stagingKey which is stored in batchData->stagingKeys
 ACTOR static Future<Void> getAndComputeStagingKeys(
     std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys, double delayTime, Database cx,
-    UID applierID, int batchIndex) {
+    UID applierID, int batchIndex, ApplierBatchData::Counters* cc) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state std::vector<Future<Optional<Value>>> fValues;
+	state std::vector<Future<Optional<Value>>> fValues(incompleteStagingKeys.size(), Never());
 	state int retries = 0;
+	state UID randomID = deterministicRandom()->randomUniqueID();
 
 	wait(delay(delayTime + deterministicRandom()->random01() * delayTime));
+
+	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) { // Get dummy value to short-circut DB
+		TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStartNotUseDB", applierID)
+		    .detail("RandomUID", randomID)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("GetKeys", incompleteStagingKeys.size())
+		    .detail("DelayTime", delayTime);
+		ASSERT(!g_network->isSimulated());
+		int i = 0;
+		for (auto& key : incompleteStagingKeys) {
+			MutationRef m(MutationRef::SetValue, key.first, LiteralStringRef("0"));
+			key.second->second.add(m, LogMessageVersion(1));
+			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
+			i++;
+		}
+		return Void();
+	}
+
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysStart", applierID)
+	    .detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("GetKeys", incompleteStagingKeys.size())
 	    .detail("DelayTime", delayTime);
+
 	loop {
 		try {
-			tr->reset();
+			int i = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto& key : incompleteStagingKeys) {
-				fValues.push_back(tr->get(key.first));
+				fValues[i++] = tr->get(key.first);
+				cc->fetchKeys += 1;
 			}
 			wait(waitForAll(fValues));
+			cc->fetchTxns += 1;
 			break;
 		} catch (Error& e) {
-			if (retries++ > 10) { // TODO: Can we stop retry at the first error?
-				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysGetKeysStuck", applierID)
+			cc->fetchTxnRetries += 1;
+			if (retries++ > incompleteStagingKeys.size()) {
+				TraceEvent(SevWarnAlways, "GetAndComputeStagingKeys", applierID)
+				    .suppressFor(1.0)
+				    .detail("RandomUID", randomID)
 				    .detail("BatchIndex", batchIndex)
-				    .detail("GetKeys", incompleteStagingKeys.size())
 				    .error(e);
-				break;
 			}
 			wait(tr->onError(e));
-			fValues.clear();
 		}
 	}
 
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
 	for (auto& key : incompleteStagingKeys) {
-		if (!fValues[i].get().present()) { // Debug info to understand which key does not exist in DB
-			TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
+		if (!fValues[i].get().present()) { // Key not exist in DB
+			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
+			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
+			    .suppressFor(5.0)
 			    .detail("BatchIndex", batchIndex)
 			    .detail("Key", key.first)
-			    .detail("Reason", "Not found in DB")
+			    .detail("IsReady", fValues[i].isReady())
 			    .detail("PendingMutations", key.second->second.pendingMutations.size())
-			    .detail("StagingKeyType", (int)key.second->second.type);
+			    .detail("StagingKeyType", getTypeString(key.second->second.type));
 			for (auto& vm : key.second->second.pendingMutations) {
-				TraceEvent(SevWarn, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
+				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
 				    .detail("PendingMutationVersion", vm.first.toString())
 				    .detail("PendingMutation", vm.second.toString());
 			}
@@ -274,8 +345,10 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 	}
 
 	TraceEvent("FastRestoreApplierGetAndComputeStagingKeysDone", applierID)
+	    .detail("RandomUID", randomID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("GetKeys", incompleteStagingKeys.size());
+	    .detail("GetKeys", incompleteStagingKeys.size())
+	    .detail("DelayTime", delayTime);
 
 	return Void();
 }
@@ -298,14 +371,16 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 		clearRanges.push_back_deep(clearRanges.arena(), range);
 		curTxnSize += range.expectedSize();
 		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
-			fClearRanges.push_back(applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex));
-			delayTime += 0.1;
+			fClearRanges.push_back(
+			    applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex, &batchData->counters));
+			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
 			clearRanges = Standalone<VectorRef<KeyRangeRef>>();
 			curTxnSize = 0;
 		}
 	}
 	if (curTxnSize > 0) {
-		fClearRanges.push_back(applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex));
+		fClearRanges.push_back(
+		    applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex, &batchData->counters));
 	}
 
 	// Apply range mutations (i.e., clearRange) to stagingKeyRanges
@@ -348,30 +423,33 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
-	double delayTime = 0; // Start transactions at different time to avoid overwelming FDB.
+	int numGetTxns = 0;
+	double delayTime = 0; // Start transactions at different time to avoid overwhelming FDB.
 	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
 		if (!stagingKeyIter->second.hasBaseValue()) {
 			incompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
-			batchData->counters.fetchKeys += 1;
 			numKeysInBatch++;
 		}
 		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
-			fGetAndComputeKeys.push_back(
-			    getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID, batchIndex));
-			delayTime += 0.1;
+			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
+			                                                      batchIndex, &batchData->counters));
+			numGetTxns++;
+			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
 			numKeysInBatch = 0;
 			incompleteStagingKeys.clear();
 		}
 	}
 	if (numKeysInBatch > 0) {
-		fGetAndComputeKeys.push_back(
-		    getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID, batchIndex));
+		numGetTxns++;
+		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
+		                                                      batchIndex, &batchData->counters));
 	}
 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("Step", "Compute the other staging keys")
-	    .detail("StagingKeys", batchData->stagingKeys.size());
+	    .detail("StagingKeys", batchData->stagingKeys.size())
+	    .detail("GetStagingKeyBatchTxns", numGetTxns);
 	// Pre-compute pendingMutations to other keys in stagingKeys that has base value
 	for (stagingKeyIter = batchData->stagingKeys.begin(); stagingKeyIter != batchData->stagingKeys.end();
 	     stagingKeyIter++) {
@@ -391,26 +469,56 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	return Void();
 }
 
+bool okToReleaseTxns(double targetMB, double applyingDataBytes) {
+	return applyingDataBytes < targetMB * 1024 * 1024;
+}
+
+ACTOR static Future<Void> shouldReleaseTransaction(double* targetMB, double* applyingDataBytes,
+                                                   AsyncTrigger* releaseTxns) {
+	loop {
+		if (okToReleaseTxns(*targetMB, *applyingDataBytes)) {
+			break;
+		} else {
+			wait(releaseTxns->onTrigger());
+			wait(delay(0.0)); // Avoid all waiting txns are triggered at the same time and all decide to proceed before
+			                  // applyingDataBytes has a chance to update
+		}
+	}
+	return Void();
+}
+
 // Apply mutations in batchData->stagingKeys [begin, end).
 ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::iterator begin,
-                                                std::map<Key, StagingKey>::iterator end, Database cx,
-                                                FlowLock* applyStagingKeysBatchLock, UID applierID) {
-	wait(applyStagingKeysBatchLock->take(TaskPriority::RestoreApplierWriteDB));
-	state FlowLock::Releaser releaser(*applyStagingKeysBatchLock);
+                                                std::map<Key, StagingKey>::iterator end, Database cx, UID applierID,
+                                                ApplierBatchData::Counters* cc, double* appliedBytes,
+                                                double* applyingDataBytes, double* targetMB,
+                                                AsyncTrigger* releaseTxnTrigger) {
+	if (SERVER_KNOBS->FASTRESTORE_NOT_WRITE_DB) {
+		TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchSkipped", applierID).detail("Begin", begin->first);
+		ASSERT(!g_network->isSimulated());
+		return Void();
+	}
+	wait(shouldReleaseTransaction(targetMB, applyingDataBytes, releaseTxnTrigger));
+
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state int sets = 0;
 	state int clears = 0;
-	state Key endKey = begin->second.key;
-	TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
+	state Key endKey = begin->first;
+	state double txnSize = 0;
+	state double txnSizeUsed = 0; // txn size accounted in applyingDataBytes
+	TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID).detail("Begin", begin->first);
 	loop {
 		try {
-			tr->reset();
+			txnSize = 0;
+			txnSizeUsed = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			std::map<Key, StagingKey>::iterator iter = begin;
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
 					tr->set(iter->second.key, iter->second.val);
+					txnSize += iter->second.totalSize();
+					cc->appliedMutations += 1;
 					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID)
 					    .detail("SetKey", iter->second.key);
 					sets++;
@@ -423,13 +531,15 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 						    .detail("SubVersion", iter->second.version.sub);
 					}
 					tr->clear(singleKeyRange(iter->second.key));
+					txnSize += iter->second.totalSize();
+					cc->appliedMutations += 1;
 					TraceEvent(SevFRMutationInfo, "FastRestoreApplierPhaseApplyStagingKeysBatch", applierID)
 					    .detail("ClearKey", iter->second.key);
 					clears++;
 				} else {
 					ASSERT(false);
 				}
-				endKey = iter != end ? iter->second.key : endKey;
+				endKey = iter != end ? iter->first : endKey;
 				iter++;
 				if (sets > 10000000 || clears > 10000000) {
 					TraceEvent(SevError, "FastRestoreApplierPhaseApplyStagingKeysBatchInfiniteLoop", applierID)
@@ -438,15 +548,27 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 					    .detail("Clears", clears);
 				}
 			}
-			TraceEvent("FastRestoreApplierPhaseApplyStagingKeysBatchPrecommit", applierID)
+			TraceEvent(SevFRDebugInfo, "FastRestoreApplierPhaseApplyStagingKeysBatchPrecommit", applierID)
 			    .detail("Begin", begin->first)
 			    .detail("End", endKey)
 			    .detail("Sets", sets)
 			    .detail("Clears", clears);
+			tr->addWriteConflictRange(KeyRangeRef(begin->first, keyAfter(endKey))); // Reduce resolver load
+			txnSizeUsed = txnSize;
+			*applyingDataBytes += txnSizeUsed; // Must account for applying bytes before wait for write traffic control
 			wait(tr->commit());
+			cc->appliedTxns += 1;
+			cc->appliedBytes += txnSize;
+			*appliedBytes += txnSize;
+			*applyingDataBytes -= txnSizeUsed;
+			if (okToReleaseTxns(*targetMB, *applyingDataBytes)) {
+				releaseTxnTrigger->trigger();
+			}
 			break;
 		} catch (Error& e) {
+			cc->appliedTxnRetries += 1;
 			wait(tr->onError(e));
+			*applyingDataBytes -= txnSizeUsed;
 		}
 	}
 	return Void();
@@ -457,40 +579,104 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
                                            Database cx) {
 	std::map<Key, StagingKey>::iterator begin = batchData->stagingKeys.begin();
 	std::map<Key, StagingKey>::iterator cur = begin;
+	state int txnBatches = 0;
 	double txnSize = 0;
 	std::vector<Future<Void>> fBatches;
 	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysStart", applierID)
 	    .detail("BatchIndex", batchIndex)
 	    .detail("StagingKeys", batchData->stagingKeys.size());
+	batchData->totalBytesToWrite = 0;
 	while (cur != batchData->stagingKeys.end()) {
-		txnSize += cur->second.expectedMutationSize();
+		txnSize += cur->second.totalSize(); // should be consistent with receivedBytes accounting method
 		if (txnSize > SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
-			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID));
+			fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, applierID, &batchData->counters,
+			                                         &batchData->appliedBytes, &batchData->applyingDataBytes,
+			                                         &batchData->targetWriteRateMB, &batchData->releaseTxnTrigger));
+			batchData->totalBytesToWrite += txnSize;
 			begin = cur;
 			txnSize = 0;
+			txnBatches++;
 		}
 		cur++;
 	}
 	if (begin != batchData->stagingKeys.end()) {
-		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, &batchData->applyStagingKeysBatchLock, applierID));
+		fBatches.push_back(applyStagingKeysBatch(begin, cur, cx, applierID, &batchData->counters,
+		                                         &batchData->appliedBytes, &batchData->applyingDataBytes,
+		                                         &batchData->targetWriteRateMB, &batchData->releaseTxnTrigger));
+		batchData->totalBytesToWrite += txnSize;
+		txnBatches++;
 	}
 
 	wait(waitForAll(fBatches));
 
 	TraceEvent("FastRestoreApplerPhaseApplyStagingKeysDone", applierID)
 	    .detail("BatchIndex", batchIndex)
-	    .detail("StagingKeys", batchData->stagingKeys.size());
+	    .detail("StagingKeys", batchData->stagingKeys.size())
+	    .detail("TransactionBatches", txnBatches)
+	    .detail("TotalBytesToWrite", batchData->totalBytesToWrite);
 	return Void();
 }
 
 // Write mutations to the destination DB
 ACTOR Future<Void> writeMutationsToDB(UID applierID, int64_t batchIndex, Reference<ApplierBatchData> batchData,
                                       Database cx) {
-	TraceEvent("FastRestoreApplerPhaseApplyTxnStart", applierID).detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreApplierPhaseApplyTxnStart", applierID).detail("BatchIndex", batchIndex);
 	wait(precomputeMutationsResult(batchData, applierID, batchIndex, cx));
 
 	wait(applyStagingKeys(batchData, applierID, batchIndex, cx));
-	TraceEvent("FastRestoreApplerPhaseApplyTxnDone", applierID).detail("BatchIndex", batchIndex);
+	TraceEvent("FastRestoreApplierPhaseApplyTxnDone", applierID)
+	    .detail("BatchIndex", batchIndex)
+	    .detail("AppliedBytes", batchData->appliedBytes)
+	    .detail("ReceivedBytes", batchData->receivedBytes);
+
+	return Void();
+}
+
+void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreApplierData> self) {
+	TraceEvent ev("FastRestoreApplierUpdateRateRequest", self->id());
+	ev.suppressFor(10)
+	    .detail("BatchIndex", req.batchIndex)
+	    .detail("FinishedBatch", self->finishedBatch.get())
+	    .detail("WriteMB", req.writeMB);
+	double remainingDataMB = 0;
+	if (self->finishedBatch.get() == req.batchIndex - 1) { // current applying batch
+		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		ASSERT(batchData.isValid());
+		batchData->targetWriteRateMB = req.writeMB;
+		remainingDataMB = batchData->totalBytesToWrite > 0
+		                      ? std::max(0.0, batchData->totalBytesToWrite - batchData->appliedBytes) / 1024 / 1024
+		                      : batchData->receivedBytes / 1024 / 1024;
+		ev.detail("TotalBytesToWrite", batchData->totalBytesToWrite)
+		    .detail("AppliedBytes", batchData->appliedBytes)
+		    .detail("ReceivedBytes", batchData->receivedBytes)
+		    .detail("TargetWriteRateMB", batchData->targetWriteRateMB)
+		    .detail("RemainingDataMB", remainingDataMB);
+	}
+	req.reply.send(RestoreUpdateRateReply(self->id(), remainingDataMB));
+
+	return;
+}
+
+ACTOR static Future<Void> traceRate(const char* context, Reference<ApplierBatchData> batchData, int batchIndex,
+                                    UID nodeID, NotifiedVersion* finishedVB, bool once = false) {
+	loop {
+		if ((finishedVB->get() != batchIndex - 1) || !batchData.isValid()) {
+			break;
+		}
+		TraceEvent(context, nodeID)
+		    .suppressFor(10)
+		    .detail("BatchIndex", batchIndex)
+		    .detail("FinishedBatchIndex", finishedVB->get())
+		    .detail("TotalDataToWriteMB", batchData->totalBytesToWrite / 1024 / 1024)
+		    .detail("AppliedBytesMB", batchData->appliedBytes / 1024 / 1024)
+		    .detail("TargetBytesMB", batchData->targetWriteRateMB)
+		    .detail("InflightBytesMB", batchData->applyingDataBytes)
+		    .detail("ReceivedBytes", batchData->receivedBytes);
+		if (once) {
+			break;
+		}
+		wait(delay(5.0));
+	}
 
 	return Void();
 }
@@ -502,11 +688,14 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	    .detail("FinishedBatch", self->finishedBatch.get());
 
 	// Ensure batch (i-1) is applied before batch i
+	// TODO: Add a counter to warn when too many requests are waiting on the actor
 	wait(self->finishedBatch.whenAtLeast(req.batchIndex - 1));
 
 	state bool isDuplicated = true;
 	if (self->finishedBatch.get() == req.batchIndex - 1) {
-		Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		// duplicate request from earlier version batch will be ignored
+		state Reference<ApplierBatchData> batchData = self->batch[req.batchIndex];
+		ASSERT(batchData.isValid());
 		TraceEvent("FastRestoreApplierPhaseHandleApplyToDBRunning", self->id())
 		    .detail("BatchIndex", req.batchIndex)
 		    .detail("FinishedBatch", self->finishedBatch.get())
@@ -520,17 +709,24 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 			batchData->dbApplier = Never();
 			batchData->dbApplier = writeMutationsToDB(self->id(), req.batchIndex, batchData, cx);
 			batchData->vbState = ApplierVersionBatchState::WRITE_TO_DB;
+			batchData->rateTracer = traceRate("FastRestoreApplierTransactionRateControl", batchData, req.batchIndex,
+			                                  self->id(), &self->finishedBatch);
 		}
 
 		ASSERT(batchData->dbApplier.present());
+		ASSERT(!batchData->dbApplier.get().isError()); // writeMutationsToDB actor cannot have error.
+		                                               // We cannot blindly retry because it is not idempodent
 
 		wait(batchData->dbApplier.get());
 
-		// Multiple actor invokation can wait on req.batchIndex-1;
+		// Multiple actors can wait on req.batchIndex-1;
 		// Avoid setting finishedBatch when finishedBatch > req.batchIndex
 		if (self->finishedBatch.get() == req.batchIndex - 1) {
+			batchData->rateTracer =
+			    traceRate("FastRestoreApplierTransactionRateControlDone", batchData, req.batchIndex, self->id(),
+			              &self->finishedBatch, true /*print once*/); // Track the last rate info
 			self->finishedBatch.set(req.batchIndex);
-			self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
+			// self->batch[req.batchIndex]->vbState = ApplierVersionBatchState::DONE;
 			// Free memory for the version batch
 			self->batch.erase(req.batchIndex);
 			if (self->delayedActors > 0) {

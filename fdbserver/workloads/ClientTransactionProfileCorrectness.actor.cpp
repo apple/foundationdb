@@ -138,11 +138,9 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 
 	while (!reader.empty()) {
 		// Get EventType and timestamp
-		FdbClientLogEvents::EventType event;
+		FdbClientLogEvents::Event event;
 		reader >> event;
-		double timeStamp;
-		reader >> timeStamp;
-		switch (event)
+		switch (event.type)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
 			parser->parseGetVersion(reader);
@@ -166,7 +164,7 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 			parser->parseErrorCommit(reader);
 			break;
 		default:
-			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event);
+			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event.type);
 			return false;
 		}
 	}
@@ -186,9 +184,9 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("ClientId", clientId).detail("SamplingProbability", samplingProbability).detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
 
-	virtual std::string description() { return "ClientTransactionProfileCorrectness"; }
+	std::string description() const override { return "ClientTransactionProfileCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_STATUS_DELAY = 2.0; // 2 seconds
 			return changeProfilingParameters(cx, trInfoSizeLimit, samplingProbability);
@@ -196,21 +194,17 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
-		return Void();
-	}
+	Future<Void> start(Database const& cx) override { return Void(); }
 
-	int getNumChunks(KeyRef key) {
+	int getNumChunks(KeyRef key) const {
 		return bigEndian32(BinaryReader::fromStringRef<int>(key.substr(numChunksStartIndex, chunkFormatSize), Unversioned()));
 	}
 
-	int getChunkNum(KeyRef key) {
+	int getChunkNum(KeyRef key) const {
 		return bigEndian32(BinaryReader::fromStringRef<int>(key.substr(chunkNumStartIndex, chunkFormatSize), Unversioned()));
 	}
 
-	std::string getTrId(KeyRef key) {
-		return key.substr(trIdStartIndex, trIdFormatSize).toString();
-	}
+	std::string getTrId(KeyRef key) const { return key.substr(trIdStartIndex, trIdFormatSize).toString(); }
 
 	bool checkTxInfoEntriesFormat(const Standalone<RangeResultRef> &txInfoEntries) {
 		std::string val;
@@ -339,15 +333,13 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		return self->checkTxInfoEntriesFormat(txInfoEntries);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (clientId != 0)
 			return true;
 		return _check(cx, this);
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
-
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory("ClientTransactionProfileCorrectness");

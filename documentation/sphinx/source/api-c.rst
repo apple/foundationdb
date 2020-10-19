@@ -133,7 +133,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 630
+  #define FDB_API_VERSION 700
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -195,7 +195,7 @@ The FoundationDB client library performs most tasks on a singleton thread (which
 
    Must be called after :func:`fdb_setup_network()` before any asynchronous functions in this API can be expected to complete. Unless your program is entirely event-driven based on results of asynchronous functions in this API and has no event loop of its own, you will want to invoke this function on an auxiliary thread (which it is your responsibility to create).
 
-   This function will not return until :func:`fdb_stop_network()` is called by you or a serious error occurs. You must not invoke :func:`fdb_run_network()` concurrently or reentrantly while it is already running.
+   This function will not return until :func:`fdb_stop_network()` is called by you or a serious error occurs. It is not possible to run more than one network thread, and the network thread cannot be restarted once it has been stopped. This means that once ``fdb_run_network`` has been called, it is not legal to call it again for the lifetime of the running program.
 
 .. function:: fdb_error_t fdb_stop_network()
 
@@ -263,9 +263,9 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
 .. function:: fdb_error_t fdb_future_block_until_ready(FDBFuture* future)
 
-   Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error -- you must call :func:`fdb_future_get_error()` to determine that. :func:`fdb_future_block_until_ready()` will return an error only in exceptional conditions (e.g. out of memory or other operating system resources).
+   Blocks the calling thread until the given Future is ready. It will return success even if the Future is set to an error -- you must call :func:`fdb_future_get_error()` to determine that. :func:`fdb_future_block_until_ready()` will return an error only in exceptional conditions (e.g. deadlock detected, out of memory or other operating system resources).
 
-   .. warning:: Never call this function from a callback passed to :func:`fdb_future_set_callback()`. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock.
+   .. warning:: Never call this function from a callback passed to :func:`fdb_future_set_callback()`. This may block the thread on which :func:`fdb_run_network()` was invoked, resulting in a deadlock. In some cases the client can detect the deadlock and throw a ``blocked_from_network_thread`` error.
 
 .. function:: fdb_bool_t fdb_future_is_ready(FDBFuture* future)
 
@@ -298,6 +298,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
    Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
+.. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
+
+   Extracts an array of :type:`FDBKey` from an :type:`FDBFuture*` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
@@ -476,8 +482,15 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length)
    Returns an estimated byte size of the key range.
+   .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
 
    |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
+.. function:: FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size)
+   Returns a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``.
+   .. note:: The returned split points contain the start key and end key of the given range
+
+   |future-return0| the list of split points. |future-return1| call :func:`fdb_future_get_key_array()` to extract the array, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
@@ -699,8 +712,6 @@ Applications must provide error handling and an appropriate retry loop around th
     |atomic-versionstamps-1|
 
     |atomic-versionstamps-2|
-
-    |atomic-set-versionstamped-key-2|
 
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 

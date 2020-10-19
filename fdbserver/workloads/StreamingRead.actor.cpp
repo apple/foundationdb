@@ -54,24 +54,24 @@ struct StreamingReadWorkload : TestWorkload {
 		readSequentially = getOption( options, LiteralStringRef("readSequentially"), false);
 	}
 
-	virtual std::string description() { return "StreamingRead"; }
+	std::string description() const override { return "StreamingRead"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		return bulkSetup( cx, this, nodeCount, Promise<double>(), true, warmingDelay );
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		for(int c = clientId; c < actorCount; c+=clientCount)
 			clients.push_back( timeout( streamingReadClient( cx, this, clientId, c ), testDuration, Void() ) );
 		return waitForAll( clients );
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( readKeys.getMetric() );
 		m.push_back( PerfMetric( "Bytes read/sec", 

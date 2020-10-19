@@ -30,40 +30,58 @@
 // This store is used in testing to let us simulate having much bigger disks than we actually
 //   have, in order to test really big databases.
 
-struct KeyValueStoreCompressTestData : IKeyValueStore {
+struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	IKeyValueStore* store;
 
 	KeyValueStoreCompressTestData(IKeyValueStore* store) : store(store) {}
 
-	virtual Future<Void> getError() { return store->getError(); }
-	virtual Future<Void> onClosed() { return store->onClosed(); }
-	virtual void dispose() { store->dispose(); delete this; }
-	virtual void close() { store->close(); delete this; }
+	bool canPipelineCommits() const override {return false;}
+	Future<Void> getError() override { return store->getError(); }
+	Future<Void> onClosed() override { return store->onClosed(); }
+	void dispose() override {
+		store->dispose();
+		delete this;
+	}
+	void close() override {
+		store->close();
+		delete this;
+	}
 
-	virtual KeyValueStoreType getType() { return store->getType(); }
-	virtual StorageBytes getStorageBytes() { return store->getStorageBytes(); }
+	KeyValueStoreType getType() const override { return store->getType(); }
+	StorageBytes getStorageBytes() const override { return store->getStorageBytes(); }
 
-	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		store->set( KeyValueRef( keyValue.key, pack(keyValue.value) ), arena );
 	}
-	virtual void clear( KeyRangeRef range, const Arena* arena = NULL ) { store->clear( range, arena ); }
-	virtual Future<Void> commit(bool sequential = false) { return store->commit(sequential); }
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
+	Future<Void> commit(bool sequential = false) { return store->commit(sequential); }
 
-	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		return doReadValue(store, key, debugID);
-	}
-	ACTOR static Future<Optional<Value>> doReadValue( IKeyValueStore* store, Key key, Optional<UID> debugID ) {
-		Optional<Value> v = wait( store->readValue(key, debugID) );
-		if (!v.present()) return v;
-		return unpack(v.get());
 	}
 
 	// Note that readValuePrefix doesn't do anything in this implementation of IKeyValueStore, so the "atomic bomb" problem is still
 	// present if you are using this storage interface, but this storage interface is not used by customers ever. However, if you want
 	// to try to test malicious atomic op workloads with compressed values for some reason, you will need to fix this.
-	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	                                        Optional<UID> debugID = Optional<UID>()) override {
 		return doReadValuePrefix( store, key, maxLength, debugID );
 	}
+
+	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
+	// The total size of the returned value (less the last entry) will be less than byteLimit
+	Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, int rowLimit = 1 << 30,
+	                                             int byteLimit = 1 << 30) override {
+		return doReadRange(store, keys, rowLimit, byteLimit);
+	}
+
+private:
+	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
+		Optional<Value> v = wait(store->readValue(key, debugID));
+		if (!v.present()) return v;
+		return unpack(v.get());
+	}
+
 	ACTOR static Future<Optional<Value>> doReadValuePrefix( IKeyValueStore* store, Key key, int maxLength, Optional<UID> debugID ) {
 		Optional<Value> v = wait( doReadValue(store, key, debugID) );
 		if (!v.present()) return v;
@@ -74,12 +92,6 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 			return v;
 		}
 	}
-
-	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
-	// The total size of the returned value (less the last entry) will be less than byteLimit
-	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) {
-		return doReadRange(store, keys, rowLimit, byteLimit);
-	}
 	ACTOR Future<Standalone<RangeResultRef>> doReadRange( IKeyValueStore* store, KeyRangeRef keys, int rowLimit, int byteLimit ) {
 		Standalone<RangeResultRef> _vs = wait( store->readRange(keys, rowLimit, byteLimit) );
 		Standalone<RangeResultRef> vs = _vs; // Get rid of implicit const& from wait statement
@@ -89,7 +101,6 @@ struct KeyValueStoreCompressTestData : IKeyValueStore {
 		return vs;
 	}
 
-private:
 	// These implement the actual "compression" scheme
 	static Value pack( Value val ) {
 		if (!val.size()) return val;
@@ -124,7 +135,6 @@ private:
 		memset(p, c, n);
 		return val;
 	}
-
 };
 
 IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store) {

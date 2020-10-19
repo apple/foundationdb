@@ -85,7 +85,7 @@ When you require the ``FDB`` gem, it exposes only one useful method:
 
 .. warning:: |api-version-multi-version-warning|
 
-For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :doc:`release-notes` and :doc:`api-version-upgrade-guide`.
+For API changes between version 14 and |api-version| (for the purpose of porting older programs), see :ref:`release-notes` and :doc:`api-version-upgrade-guide`.
 
 Opening a database
 ==================
@@ -93,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 630
+    FDB.api_version 700
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -627,8 +627,6 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 
     |atomic-versionstamps-2|
 
-    |atomic-set-versionstamped-key-2|
-
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 
 .. method:: Transaction.set_versionstamped_value(key, param) -> nil
@@ -743,9 +741,15 @@ Most applications should use the read version that FoundationDB determines autom
 Transaction misc functions
 --------------------------
 
-.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key) -> Int64Future
 
-    Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
+    Gets the estimated byte size of the given key range. Returns a :class:`Int64Future`.
+    .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
+
+.. method:: Transaction.get_range_split_points(begin_key, end_key, chunk_size) -> FutureKeyArray
+
+    Gets a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``. Returns a :class:`FutureKeyArray`.
+    .. note:: The returned split points contain the start key and end key of the given range
 
 .. method:: Transaction.get_approximate_size() -> Int64Future
 

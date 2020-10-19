@@ -45,8 +45,6 @@
 // TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
-template<> inline Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
-template<> inline ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
 struct RestoreFileFR;
 
@@ -309,6 +307,12 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel, std::ma
 					if (ongoingReplies[j].isReady()) {
 						std::get<2>(replyDurations[ongoingRepliesIndex[j]]) = now();
 						--oustandingReplies;
+					} else if (ongoingReplies[j].isError()) {
+						// When this happens,
+						// the above assertion ASSERT(ongoingReplies.size() == oustandingReplies) will fail
+						TraceEvent(SevError, "FastRestoreGetBatchRepliesReplyError")
+						    .detail("OngoingReplyIndex", j)
+						    .detail("FutureError", ongoingReplies[j].getError().what());
 					}
 				}
 			}

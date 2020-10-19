@@ -65,16 +65,14 @@ struct SidebandWorkload : TestWorkload {
 		operationsPerSecond = getOption( options, LiteralStringRef("operationsPerSecond"), 50.0 );
 	}
 
-	virtual std::string description() { return "SidebandWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { 
-		return persistInterface( this, cx->clone() );
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "SidebandWorkload"; }
+	Future<Void> setup(Database const& cx) override { return persistInterface(this, cx->clone()); }
+	Future<Void> start(Database const& cx) override {
 		clients.push_back( mutator( this, cx->clone() ) );
 		clients.push_back( checker( this, cx->clone() ) );
 		return delay(testDuration);
 	}
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		int errors = 0;
 		for(int c=0; c<clients.size(); c++)
 			errors += clients[c].isError();
@@ -86,7 +84,7 @@ struct SidebandWorkload : TestWorkload {
 		return !errors && !consistencyErrors.getValue();
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( messages.getMetric() );
 		m.push_back( consistencyErrors.getMetric() );
 		m.push_back( keysUnexpectedlyPresent.getMetric() );

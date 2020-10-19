@@ -43,23 +43,23 @@ struct IndexScanWorkload : KVWorkload {
 		readYourWrites = getOption( options, LiteralStringRef("readYourWrites"), true );
 	}
 
-	virtual std::string description() { return "SimpleRead"; }
+	std::string description() const override { return "SimpleRead"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		// this will be set up by and external force!
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( singleProcess && clientId != 0 ) {
 			return Void();
 		}
 		return _start( cx, this );
 	}
 
-	virtual Future<bool> check(const Database&) { return true; }
+	Future<bool> check(const Database&) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		if( singleProcess && clientId != 0 )
 			return;
 
@@ -108,7 +108,7 @@ struct IndexScanWorkload : KVWorkload {
 		state int startNode = deterministicRandom()->randomInt(0, self->nodeCount / 2); //start in the first half of the database
 		state KeySelector begin = firstGreaterOrEqual( self->keyForIndex( startNode ) );
 		state KeySelector end = firstGreaterThan( self->keyForIndex( self->nodeCount ) );
-		state GetRangeLimits limits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, self->bytesPerRead );
+		state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, self->bytesPerRead);
 
 		state int rowsRead;
 		state int chunks;

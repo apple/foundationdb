@@ -44,19 +44,17 @@ struct Increment : TestWorkload {
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption( options, LiteralStringRef("expectedRate"), 0.7 );
 	}
 
-	virtual std::string description() { return "IncrementWorkload"; }
+	std::string description() const override { return "IncrementWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				timeout(
 					incrementClient( cx->clone(), this, actorCount / transactionsPerSecond ), testDuration, Void()) );
 		return delay(testDuration);
 	}
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		int errors = 0;
 		for(int c=0; c<clients.size(); c++)
 			errors += clients[c].isError();
@@ -65,7 +63,7 @@ struct Increment : TestWorkload {
 		clients.clear();
 		return incrementCheck( cx->clone(), this, !errors );
 	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 		m.push_back( tooOldRetries.getMetric() );
@@ -135,7 +133,10 @@ struct Increment : TestWorkload {
 	}
 	ACTOR Future<bool> incrementCheck( Database cx, Increment* self, bool ok ) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
-			TraceEvent(SevWarnAlways, "TestFailure").detail("Reason", "Rate below desired rate").detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
+			TraceEvent(SevWarnAlways, "TestFailure")
+				.detail("Reason", "Rate below desired rate")
+				.detail("File", __FILE__)
+				.detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
 				.detail("TransactionsAchieved", self->transactions.getMetric().value())
 				.detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 				.detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);

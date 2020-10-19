@@ -18,14 +18,17 @@
  * limitations under the License.
  */
 
+#include "flow/Platform.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
+#include "flow/Arena.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/Status.h"
@@ -243,7 +246,7 @@ std::string BackupDescription::toJSON() const {
  *     file written will be after the start version of the snapshot's execution.
  *
  *   Log files are at file paths like
- *       /plogs/...log,startVersion,endVersion,UID,tagID-of-N,blocksize
+ *       /plogs/.../log,startVersion,endVersion,UID,tagID-of-N,blocksize
  *       /logs/.../log,startVersion,endVersion,UID,blockSize
  *     where ... is a multi level path which sorts lexically into version order and results in approximately 1
  *     unique folder per day containing about 5,000 files. Logs after FDB 6.3 are stored in "plogs"
@@ -841,9 +844,17 @@ public:
 
 		state std::vector<LogFile> logs;
 		state std::vector<LogFile> plogs;
+		TraceEvent("BackupContainerListFiles").detail("URL", bc->getURL());
+
 		wait(store(logs, bc->listLogFiles(scanBegin, scanEnd, false)) &&
 		     store(plogs, bc->listLogFiles(scanBegin, scanEnd, true)) &&
 		     store(desc.snapshots, bc->listKeyspaceSnapshots()));
+
+		TraceEvent("BackupContainerListFiles")
+		    .detail("URL", bc->getURL())
+		    .detail("LogFiles", logs.size())
+		    .detail("PLogsFiles", plogs.size())
+		    .detail("Snapshots", desc.snapshots.size());
 
 		if (plogs.size() > 0) {
 			desc.partitioned = true;
@@ -1206,7 +1217,7 @@ public:
 		}
 
 		// for each range in tags, check all tags from 1 are continouous
-		for (const auto [beginEnd, count] : tags) {
+		for (const auto& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
 				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
@@ -1309,7 +1320,7 @@ public:
 
 		// for each range in tags, check all partitions from 1 are continouous
 		Version lastEnd = begin;
-		for (const auto [beginEnd, count] : tags) {
+		for (const auto& [beginEnd, count] : tags) {
 			Version tagEnd = beginEnd.second; // This range's minimum continous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
@@ -1333,19 +1344,44 @@ public:
 
 	ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem> bc,
 	                                                           RangeFile file) {
-		state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+		state int readFileRetries = 0;
 		state bool beginKeySet = false;
 		state Key beginKey;
 		state Key endKey;
-		state int64_t j = 0;
-		for (; j < file.fileSize; j += file.blockSize) {
-			int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
-			Standalone<VectorRef<KeyValueRef>> blockData = wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
-			if (!beginKeySet) {
-				beginKey = blockData.front().key;
-				beginKeySet = true;
+		loop {
+			try {
+				state Reference<IAsyncFile> inFile = wait(bc->readFile(file.fileName));
+				beginKeySet = false;
+				state int64_t j = 0;
+				for (; j < file.fileSize; j += file.blockSize) {
+					int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - j);
+					Standalone<VectorRef<KeyValueRef>> blockData =
+					    wait(fileBackup::decodeRangeFileBlock(inFile, j, len));
+					if (!beginKeySet) {
+						beginKey = blockData.front().key;
+						beginKeySet = true;
+					}
+					endKey = blockData.back().key;
+				}
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_restore_bad_read ||
+				    e.code() == error_code_restore_unsupported_file_version ||
+				    e.code() == error_code_restore_corrupted_data_padding) { // no retriable error
+					TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRange").error(e);
+					throw;
+				} else if (e.code() == error_code_http_request_failed || e.code() == error_code_connection_failed ||
+				           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
+					// blob http request failure, retry
+					TraceEvent(SevWarnAlways, "BackupContainerGetSnapshotFileKeyRangeConnectionFailure")
+					    .detail("Retries", ++readFileRetries)
+					    .error(e);
+					wait(delayJittered(0.1));
+				} else {
+					TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRangeUnexpectedError").error(e);
+					throw;
+				}
 			}
-			endKey = blockData.back().key;
 		}
 		return KeyRange(KeyRangeRef(beginKey, endKey));
 	}
@@ -1355,24 +1391,88 @@ public:
 		return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 	}
 
-	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
-		// Find the most recent keyrange snapshot to end at or before targetVersion
-		state Optional<KeyspaceSnapshotFile> snapshot;
-		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
-		for(auto const &s : snapshots) {
-			if(s.endVersion <= targetVersion)
-				snapshot = s;
+	static Optional<RestorableFileSet> getRestoreSetFromLogs(std::vector<LogFile> logs, Version targetVersion,
+	                                                         RestorableFileSet restorable) {
+		Version end = logs.begin()->endVersion;
+		computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
+		if (end >= targetVersion) {
+			restorable.continuousBeginVersion = logs.begin()->beginVersion;
+			restorable.continuousEndVersion = end;
+			return Optional<RestorableFileSet>(restorable);
+		}
+		return Optional<RestorableFileSet>();
+	}
+
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc,
+	                                                                    Version targetVersion,
+	                                                                    VectorRef<KeyRangeRef> keyRangesFilter, bool logsOnly = false,
+	                                                                    Version beginVersion = invalidVersion) {
+		// Does not support use keyRangesFilter for logsOnly yet
+		if (logsOnly && !keyRangesFilter.empty()) {
+			TraceEvent(SevError, "BackupContainerRestoreSetUnsupportedAPI").detail("KeyRangesFilter", keyRangesFilter.size());
+			return Optional<RestorableFileSet>();
 		}
 
-		if(snapshot.present()) {
+		if (logsOnly) {
+			state RestorableFileSet restorableSet;
+			state std::vector<LogFile> logFiles;
+			Version begin = beginVersion == invalidVersion ? 0 : beginVersion;
+			wait(store(logFiles, bc->listLogFiles(begin, targetVersion, false)));
+			// List logs in version order so log continuity can be analyzed
+			std::sort(logFiles.begin(), logFiles.end());
+			if (!logFiles.empty()) {
+				return getRestoreSetFromLogs(logFiles, targetVersion, restorableSet);
+			}
+		}
+
+		// Find the most recent keyrange snapshot through which we can restore filtered key ranges into targetVersion.
+		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		state int i = snapshots.size() - 1;
+		for (; i >= 0; i--) {
+			// The smallest version of filtered range files >= snapshot beginVersion > targetVersion
+			if (targetVersion >= 0 && snapshots[i].beginVersion > targetVersion) {
+				continue;
+			}
+
 			state RestorableFileSet restorable;
-			restorable.snapshot = snapshot.get();
-			restorable.targetVersion = targetVersion;
+			state Version minKeyRangeVersion = MAX_VERSION;
+			state Version maxKeyRangeVersion = -1;
 
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
-			    wait(bc->readKeyspaceSnapshot(snapshot.get()));
-			restorable.ranges = std::move(results.first);
-			restorable.keyRanges = std::move(results.second);
+			    wait(bc->readKeyspaceSnapshot(snapshots[i]));
+
+			// Old backup does not have metadata about key ranges and can not be filtered with key ranges.
+			if (keyRangesFilter.size() && results.second.empty() && !results.first.empty()) {
+				throw backup_not_filterable_with_key_ranges();
+			}
+
+			// Filter by keyRangesFilter.
+			if (keyRangesFilter.empty()) {
+				restorable.ranges = std::move(results.first);
+				restorable.keyRanges = std::move(results.second);
+				minKeyRangeVersion = snapshots[i].beginVersion;
+				maxKeyRangeVersion = snapshots[i].endVersion;
+			} else {
+				for (const auto& rangeFile : results.first) {
+					const auto& keyRange = results.second.at(rangeFile.fileName);
+					if (keyRange.intersects(keyRangesFilter)) {
+						restorable.ranges.push_back(rangeFile);
+						restorable.keyRanges[rangeFile.fileName] = keyRange;
+						minKeyRangeVersion = std::min(minKeyRangeVersion, rangeFile.version);
+						maxKeyRangeVersion = std::max(maxKeyRangeVersion, rangeFile.version);
+					}
+				}
+				// No range file matches 'keyRangesFilter'.
+				if (restorable.ranges.empty()) {
+					throw backup_not_overlapped_with_keys_filter();
+				}
+			}
+			// 'latestVersion' represents using the minimum restorable version in a snapshot.
+			restorable.targetVersion = targetVersion == latestVersion ? maxKeyRangeVersion : targetVersion;
+			// Any version < maxKeyRangeVersion is not restorable.
+			if (restorable.targetVersion < maxKeyRangeVersion) continue;
+
+			restorable.snapshot = snapshots[i];
 			// TODO: Reenable the sanity check after TooManyFiles error is resolved
 			if (false && g_network->isSimulated()) {
 				// Sanity check key ranges
@@ -1386,18 +1486,21 @@ public:
 				}
 			}
 
-			// No logs needed if there is a complete key space snapshot at the target version.
-			if (snapshot.get().beginVersion == snapshot.get().endVersion &&
-			    snapshot.get().endVersion == targetVersion) {
+			// No logs needed if there is a complete filtered key space snapshot at the target version.
+			if (minKeyRangeVersion == maxKeyRangeVersion && maxKeyRangeVersion == restorable.targetVersion) {
 				restorable.continuousBeginVersion = restorable.continuousEndVersion = invalidVersion;
+				TraceEvent("BackupContainerGetRestorableFilesWithoutLogs")
+				    .detail("KeyRangeVersion", restorable.targetVersion)
+				    .detail("NumberOfRangeFiles", restorable.ranges.size())
+				    .detail("KeyRangesFilter", printable(keyRangesFilter));
 				return Optional<RestorableFileSet>(restorable);
 			}
 
 			// FIXME: check if there are tagged logs. for each tag, there is no version gap.
 			state std::vector<LogFile> logs;
 			state std::vector<LogFile> plogs;
-			wait(store(logs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, false)) &&
-			     store(plogs, bc->listLogFiles(snapshot.get().beginVersion, targetVersion, true)));
+			wait(store(logs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, false)) &&
+			     store(plogs, bc->listLogFiles(minKeyRangeVersion, restorable.targetVersion, true)));
 
 			if (plogs.size() > 0) {
 				logs.swap(plogs);
@@ -1409,13 +1512,12 @@ public:
 
 				// Remove duplicated log files that can happen for old epochs.
 				std::vector<LogFile> filtered = filterDuplicates(logs);
-
 				restorable.logs.swap(filtered);
 				// sort by version order again for continuous analysis
 				std::sort(restorable.logs.begin(), restorable.logs.end());
-				if (isPartitionedLogsContinuous(restorable.logs, snapshot.get().beginVersion, targetVersion)) {
-					restorable.continuousBeginVersion = snapshot.get().beginVersion;
-					restorable.continuousEndVersion = targetVersion + 1; // not inclusive
+				if (isPartitionedLogsContinuous(restorable.logs, minKeyRangeVersion, restorable.targetVersion)) {
+					restorable.continuousBeginVersion = minKeyRangeVersion;
+					restorable.continuousEndVersion = restorable.targetVersion + 1; // not inclusive
 					return Optional<RestorableFileSet>(restorable);
 				}
 				return Optional<RestorableFileSet>();
@@ -1423,24 +1525,19 @@ public:
 
 			// List logs in version order so log continuity can be analyzed
 			std::sort(logs.begin(), logs.end());
-
-			// If there are logs and the first one starts at or before the snapshot begin version then proceed
-			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
-				Version end = logs.begin()->endVersion;
-				computeRestoreEndVersion(logs, &restorable.logs, &end, targetVersion);
-				if (end >= targetVersion) {
-					restorable.continuousBeginVersion = logs.begin()->beginVersion;
-					restorable.continuousEndVersion = end;
-					return Optional<RestorableFileSet>(restorable);
-				}
+			// If there are logs and the first one starts at or before the keyrange's snapshot begin version, then
+			// it is valid restore set and proceed
+			if (!logs.empty() && logs.front().beginVersion <= minKeyRangeVersion) {
+				return getRestoreSetFromLogs(logs, targetVersion, restorable);
 			}
 		}
-
 		return Optional<RestorableFileSet>();
 	}
 
-	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) final {
-		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, VectorRef<KeyRangeRef> keyRangesFilter,
+	                                                  bool logsOnly, Version beginVersion) final {
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion, keyRangesFilter,
+		                          logsOnly, beginVersion);
 	}
 
 private:
@@ -1544,9 +1641,13 @@ public:
 		// Remove trailing slashes on path
 		path.erase(path.find_last_not_of("\\/") + 1);
 
-		if(!g_network->isSimulated() && path != abspath(path)) {
-			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path);
-			throw io_error();
+		std::string absolutePath = abspath(path);
+		
+		if(!g_network->isSimulated() && path != absolutePath) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path).detail("AbsolutePath", absolutePath);
+			// throw io_error();
+			IBackupContainer::lastOpenError = format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
+			throw backup_invalid_url();
 		}
 
 		// Finalized path written to will be will be <path>/backup-<uid>
@@ -1601,12 +1702,17 @@ public:
 		std::string fullPath = joinPath(m_path, path);
 		#ifndef _WIN32
 		if(g_network->isSimulated()) {
-			if(!fileExists(fullPath))
+			if(!fileExists(fullPath)) {
 				throw file_not_found();
-			std::string uniquePath = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".lnk";
+			}
+
+			if (g_simulator.getCurrentProcess()->uid == UID()) {
+				TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID");
+			}
+			std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
 			unlink(uniquePath.c_str());
 			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
-			fullPath = uniquePath = uniquePath;
+			fullPath = uniquePath;
 		}
 		// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
 		// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
@@ -1687,11 +1793,11 @@ public:
 		return Void();
 	}
 
-	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const&)>) final {
-		FilesAndSizesT results;
+	ACTOR static Future<FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
+		state std::vector<std::string> files;
+		wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files));
 
-		std::vector<std::string> files;
-		platform::findFilesRecursively(joinPath(m_path, path), files);
+		FilesAndSizesT results;
 
 		// Remove .lnk files from results, they are a side effect of a backup that was *read* during simulation.  See openFile() above for more info on why they are created.
 		if(g_network->isSimulated())
@@ -1707,7 +1813,11 @@ public:
 		return results;
 	}
 
-	Future<Void> deleteContainer(int* pNumDeleted) final {
+	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)>) final {
+		return listFiles_impl(path, m_path);
+	}
+
+	Future<Void> deleteContainer(int *pNumDeleted) final {
 		// In order to avoid deleting some random directory due to user error, first describe the backup
 		// and make sure it has something in it.
 		return map(describeBackup(false, invalidVersion), [=](BackupDescription const &desc) {
@@ -1727,7 +1837,7 @@ private:
 	std::string m_path;
 };
 
-class BackupContainerBlobStore : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
+class BackupContainerBlobStore final : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
 private:
 	// Backup files to under a single folder prefix with subfolders for each named backup
 	static const std::string DATAFOLDER;
@@ -1767,14 +1877,12 @@ public:
 		}
 	}
 
-	void addref() final { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
-	void delref() final { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
+	void addref() override { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
+	void delref() override { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
 
 	static std::string getURLFormat() {
 		return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
 	}
-
-	virtual ~BackupContainerBlobStore() {}
 
 	Future<Reference<IAsyncFile>> readFile(std::string path) final {
 		return Reference<IAsyncFile>(

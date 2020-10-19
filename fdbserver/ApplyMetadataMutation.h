@@ -29,23 +29,22 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/ProxyCommitData.actor.h"
 
 inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by applyMetadataMutations
-	return (m.type == MutationRef::SetValue && m.param1.size() && m.param1[0] == systemKeys.begin[0] && !m.param1.startsWith(nonMetadataSystemKeys.begin)) ||
-		(m.type == MutationRef::ClearRange && m.param2.size() && m.param2[0] == systemKeys.begin[0] && !nonMetadataSystemKeys.contains(KeyRangeRef(m.param1, m.param2)) );
+	return (m.type == MutationRef::SetValue && m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
+	        !m.param1.startsWith(nonMetadataSystemKeys.begin)) ||
+	       (m.type == MutationRef::ClearRange && m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] &&
+	        !nonMetadataSystemKeys.contains(KeyRangeRef(m.param1, m.param2)));
 }
-
-struct applyMutationsData {
-	Future<Void> worker;
-	Version endVersion;
-	Reference<KeyRangeMap<Version>> keyVersion;
-};
 
 Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInfo>>* storageCache, IKeyValueStore* txnStateStore);
 
-void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
-	KeyRangeMap<std::set<Key> >* vecBackupKeys = nullptr, KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr, KeyRangeMap<bool>* cacheInfo = nullptr, std::map<Key, applyMutationsData>* uid_applyMutationsData = nullptr, RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(),
-	Database cx = Database(), NotifiedVersion* commitVersion = nullptr, std::map<UID, Reference<StorageInfo>>* storageCache = nullptr, std::map<Tag, Version>* tag_popped = nullptr, bool initialCommit = false );
+void applyMetadataMutations(SpanID const& spanContext, ProxyCommitData& proxyCommitData, Arena& arena,
+                            Reference<ILogSystem> logSystem, const VectorRef<MutationRef>& mutations,
+                            LogPushData* pToCommit, bool& confChange, Version popVersion, bool initialCommit);
+void applyMetadataMutations(SpanID const& spanContext, const UID& dbgid, Arena& arena,
+                            const VectorRef<MutationRef>& mutations, IKeyValueStore* txnStateStore);
 
 #endif

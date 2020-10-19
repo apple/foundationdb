@@ -36,6 +36,7 @@
 #include <typeinfo>
 #include <typeindex>
 #include <unordered_map>
+#include <deque>
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
 
@@ -125,6 +126,33 @@ struct vector_like_traits<std::vector<T, Alloc>> : std::true_type {
 	}
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
+};
+
+template <class T, class Alloc>
+struct vector_like_traits<std::deque<T, Alloc>> : std::true_type {
+	using Deq = std::deque<T, Alloc>;
+	using value_type = typename Deq::value_type;
+	using iterator = typename Deq::const_iterator;
+	using insert_iterator = std::back_insert_iterator<Deq>;
+
+	template <class Context>
+	static size_t num_entries(const Deq& v, Context&) {
+		return v.size();
+	}
+	template <class Context>
+	static void reserve(Deq& v, size_t size, Context&) {
+		v.resize(size);
+		v.clear();
+	}
+
+	template <class Context>
+	static insert_iterator insert(Deq& v, Context&) {
+		return std::back_inserter(v);
+	}
+	template <class Context>
+	static iterator begin(const Deq& v, Context&) {
 		return v.begin();
 	}
 };
@@ -597,7 +625,7 @@ struct TraverseMessageTypes : Context {
 		// we don't need to check for recursion here because the next call
 		// to operator() will do that and we don't generate a vtable for the
 		// vector-like type itself
-		T t;
+		T t{};
 		(*this)(t);
 	}
 
@@ -612,7 +640,7 @@ struct TraverseMessageTypes : Context {
 private:
 	template <class T, class... Ts>
 	void union_helper(pack<T, Ts...>) {
-		T t;
+		T t{};
 		(*this)(t);
 		union_helper(pack<Ts...>{});
 	}
@@ -1216,6 +1244,7 @@ namespace detail {
 template <class T>
 struct YesFileIdentifier {
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
+	constexpr static bool composition_depth = CompositionDepthFor<T>::value;
 };
 struct NoFileIdentifier {};
 }; // namespace detail

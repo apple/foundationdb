@@ -38,6 +38,7 @@ struct ReadYourWritesTransactionOptions {
 	bool debugRetryLogging : 1;
 	bool disableUsedDuringCommitProtection : 1;
 	bool specialKeySpaceRelaxed : 1;
+	bool specialKeySpaceChangeConfiguration : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -85,7 +86,8 @@ public:
 	}
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
-	Future<int64_t> getEstimatedRangeSizeBytes( const KeyRangeRef& keys );
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize);
+	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys);
 
 	void addReadConflictRange( KeyRangeRef const& keys );
 	void makeSelfConflicting() { tr.makeSelfConflicting(); }
@@ -110,8 +112,8 @@ public:
 
 	// These are to permit use as state variables in actors:
 	ReadYourWritesTransaction() : cache(&arena), writes(&arena) {}
-	void operator=(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
-	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) BOOST_NOEXCEPT;
+	void operator=(ReadYourWritesTransaction&& r) noexcept;
+	ReadYourWritesTransaction(ReadYourWritesTransaction&& r) noexcept;
 
 	virtual void addref() { ReferenceCounted<ReadYourWritesTransaction>::addref(); }
 	virtual void delref() { ReferenceCounted<ReadYourWritesTransaction>::delref(); }
@@ -124,6 +126,8 @@ public:
 
 	// Wait for all reads that are currently pending to complete
 	Future<Void> pendingReads() { return resetPromise.getFuture() || reading; }
+	// Throws before the lifetime of this transaction ends
+	Future<Void> resetFuture() { return resetPromise.getFuture(); }
 
 	// Used by ThreadSafeTransaction for exceptions thrown in void methods
 	Error deferredError;
@@ -146,6 +150,13 @@ public:
 	Standalone<RangeResultRef> getWriteConflictRangeIntersecting(KeyRangeRef kr);
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
+	bool specialKeySpaceChangeConfiguration() const { return options.specialKeySpaceChangeConfiguration; }
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
+	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
+	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
+	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
+	Transaction& getTransaction() { return tr; }
 
 private:
 	friend class RYWImpl;
@@ -173,6 +184,9 @@ private:
 	    nativeWriteRanges; // Used to read conflict ranges after committing an ryw disabled transaction
 
 	Reference<TransactionDebugInfo> transactionDebugInfo;
+
+	KeyRangeMap<std::pair<bool, Optional<Value>>> specialKeySpaceWriteMap;
+	Optional<std::string> specialKeySpaceErrorMsg;
 
 	void resetTimeout();
 	void updateConflictMap( KeyRef const& key, WriteMap::iterator& it ); // pre: it.segmentContains(key)

@@ -3590,7 +3590,7 @@ FORCE_INLINE void *_mm_malloc(size_t size, size_t align)
         align = sizeof(void *);
     if (!posix_memalign(&ptr, align, size))
         return ptr;
-    return NULL;
+    return nullptr;
 }
 
 FORCE_INLINE void _mm_free(void *addr)

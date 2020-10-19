@@ -28,6 +28,7 @@
 	#define GENERICACTORS_ACTOR_H
 
 #include <list>
+#include <utility>
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
@@ -299,9 +300,8 @@ Future<Void> storeOrThrow(T &out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 //Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
-Future<U> mapAsync(Future<T> what, F actorFunc)
-{
+ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
+Future<U> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
 	U ret = wait(actorFunc(val));
 	return ret;
@@ -318,8 +318,8 @@ std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> 
 }
 
 //maps a stream with an asynchronous function
-ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
-Future<Void> mapAsync( FutureStream<T> input, F actorFunc, PromiseStream<U> output ) {
+ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
+Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> output) {
 	state Deque<Future<U>> futures;
 
 	loop {
@@ -613,11 +613,11 @@ protected:
 		Promise<Void> noDestroy = trigger;  // The send(Void()) or even V::operator= could cause destroyOnCancel,
 			                                // which could undo the change to i.value here.  Keeping the promise reference count >= 2
 			                                // prevents destroyOnCancel from erasing anything from the map.
-
-		if (v == defaultValue)
+		if (v == defaultValue) {
 			items.erase(k);
-		else
+		} else {
 			i.value = v;
+		}
 
 		trigger.send(Void());
 	}
@@ -804,7 +804,7 @@ Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 }
 
 ACTOR template <class T>
-Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = NULL ) {
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = nullptr ) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
 	state int resetCount = 0;
@@ -861,7 +861,7 @@ Future<T> ioTimeoutError( Future<T> what, double time ) {
 	Future<Void> end = lowPriorityDelay( time );
 	choose {
 		when( T t = wait( what ) ) { return t; }
-		when( wait( end ) ) { 
+		when(wait(end)) {
 			Error err = io_timeout();
 			if(g_network->isSimulated()) {
 				err = err.asInjectedFault();
@@ -1086,7 +1086,7 @@ Future<T> reportErrorsExcept( Future<T> in, const char* context, UID id, std::se
 
 template <class T>
 Future<T> reportErrors( Future<T> const& in, const char* context, UID id = UID() ) {
-	return reportErrorsExcept(in, context, id, NULL);
+	return reportErrorsExcept(in, context, id, nullptr);
 }
 
 ACTOR template <class T>
@@ -1251,7 +1251,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		int remaining;
 		Releaser() : lock(0), remaining(0) {}
 		Releaser( FlowLock& lock, int64_t amount = 1 ) : lock(&lock), remaining(amount) {}
-		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
+		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) { if (remaining) lock->release(remaining); lock = r.lock; remaining = r.remaining; r.remaining = 0; }
 
 		void release( int64_t amount = -1 ) {
@@ -1364,8 +1364,7 @@ struct NotifiedInt {
 	NotifiedInt( int64_t val = 0 ) : val(val) {}
 
 	Future<Void> whenAtLeast( int64_t limit ) {
-		if (val >= limit) 
-			return Void();
+		if (val >= limit) return Void();
 		Promise<Void> p;
 		waiting.push( std::make_pair(limit,p) );
 		return p.getFuture();
@@ -1394,8 +1393,11 @@ struct NotifiedInt {
 		set( v );
 	}
 
-	NotifiedInt(NotifiedInt&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
-	void operator=(NotifiedInt&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
+	NotifiedInt(NotifiedInt&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
+	void operator=(NotifiedInt&& r) noexcept {
+		waiting = std::move(r.waiting);
+		val = r.val;
+	}
 
 private:
 	typedef std::pair<int64_t,Promise<Void>> Item;
@@ -1416,7 +1418,7 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 		int64_t permitNumber;
 		Releaser() : lock(nullptr), permitNumber(0) {}
 		Releaser( BoundedFlowLock* lock, int64_t permitNumber ) : lock(lock), permitNumber(permitNumber) {}
-		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
+		Releaser(Releaser&& r) noexcept : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
 		void operator=(Releaser&& r) { if (permitNumber) lock->release(permitNumber); lock = r.lock; permitNumber = r.permitNumber; r.permitNumber = 0; }
 
 		void release() {
@@ -1592,9 +1594,7 @@ public:
 		futures = f.futures;
 	}
 
-	AndFuture(AndFuture&& f) BOOST_NOEXCEPT {
-		futures = std::move(f.futures);
-	}
+	AndFuture(AndFuture&& f) noexcept { futures = std::move(f.futures); }
 
 	AndFuture(Future<Void> const& f) {
 		futures.push_back(f);
@@ -1612,9 +1612,7 @@ public:
 		futures = f.futures;
 	}
 
-	void operator=(AndFuture&& f) BOOST_NOEXCEPT {
-		futures = std::move(f.futures);
-	}
+	void operator=(AndFuture&& f) noexcept { futures = std::move(f.futures); }
 
 	void operator=(Future<Void> const& f) {
 		futures.push_back(f);

@@ -49,6 +49,9 @@ struct KeyValueMapPair {
 	}
 
 	bool operator<(KeyValueMapPair const& r) const { return key < r.key; }
+	bool operator>(KeyValueMapPair const& r) const { return r < *this; }
+	bool operator<=(KeyValueMapPair const& r) const { return !(*this > r); }
+	bool operator>=(KeyValueMapPair const& r) const { return !(*this < r); }
 	bool operator==(KeyValueMapPair const& r) const { return key == r.key; }
 	bool operator!=(KeyValueMapPair const& r) const { return key != r.key; }
 };
@@ -69,23 +72,33 @@ bool operator<(CompatibleWithKey const& l, KeyValueMapPair const& r) {
 
 class IKeyValueContainer {
 public:
-	typedef typename IndexedSet<KeyValueMapPair, uint64_t>::iterator iterator;
+	using const_iterator = IndexedSet<KeyValueMapPair, uint64_t>::const_iterator;
+	using iterator = IndexedSet<KeyValueMapPair, uint64_t>::iterator;
 
 	IKeyValueContainer() = default;
 	~IKeyValueContainer() = default;
 
-	bool empty() { return data.empty(); }
+	bool empty() const { return data.empty(); }
 	void clear() { return data.clear(); }
 
-	std::tuple<size_t, size_t, size_t> size() { return std::make_tuple(0, 0, 0); }
+	std::tuple<size_t, size_t, size_t> size() const { return std::make_tuple(0, 0, 0); }
 
+	const_iterator find(const StringRef& key) const { return data.find(key); }
 	iterator find(const StringRef& key) { return data.find(key); }
+	const_iterator begin() const { return data.begin(); }
 	iterator begin() { return data.begin(); }
+	const_iterator cbegin() const { return begin(); }
+	const_iterator end() const { return data.end(); }
 	iterator end() { return data.end(); }
+	const_iterator cend() const { return end(); }
 
+	const_iterator lower_bound(const StringRef& key) const { return data.lower_bound(key); }
 	iterator lower_bound(const StringRef& key) { return data.lower_bound(key); }
+	const_iterator upper_bound(const StringRef& key) const { return data.upper_bound(key); }
 	iterator upper_bound(const StringRef& key) { return data.upper_bound(key); }
-	iterator previous(iterator i) const { return data.previous(i); }
+	const_iterator previous(const_iterator i) const { return data.previous(i); }
+	const_iterator previous(iterator i) const { return data.previous(const_iterator{ i }); }
+	iterator previous(iterator i) { return data.previous(i); }
 
 	void erase(iterator begin, iterator end) { data.erase(begin, end); }
 	iterator insert(const StringRef& key, const StringRef& val, bool replaceExisting = true) {
@@ -96,9 +109,10 @@ public:
 		return data.insert(pairs, replaceExisting);
 	}
 
-	uint64_t sumTo(iterator to) { return data.sumTo(to); }
+	uint64_t sumTo(const_iterator to) const { return data.sumTo(to); }
+	uint64_t sumTo(iterator to) const { return data.sumTo(const_iterator{ to }); }
 
-	static int getElementBytes() { return IndexedSet<KeyValueMapPair, uint64_t>::getElementBytes(); }
+	static constexpr int getElementBytes() { return IndexedSet<KeyValueMapPair, uint64_t>::getElementBytes(); }
 
 private:
 	IKeyValueContainer(IKeyValueContainer const&); // unimplemented

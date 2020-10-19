@@ -33,13 +33,13 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 		TraceEvent("RunRestoreWorkerWorkloadMX");
 	}
 
-	virtual std::string description() { return "RunRestoreWorkerWorkload"; }
+	std::string description() const override { return "RunRestoreWorkerWorkload"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		int num_myWorkers = SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS + SERVER_KNOBS->FASTRESTORE_NUM_LOADERS + 1;
-		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreAgentDB").detail("Workers", num_myWorkers);
+		TraceEvent("RunParallelRestoreWorkerWorkload").detail("Start", "RestoreToolDB").detail("Workers", num_myWorkers);
 		printf("RunParallelRestoreWorkerWorkload, we will start %d restore workers\n", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;
 		for (int i = 0; i < num_myWorkers; ++i) {
@@ -51,9 +51,9 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<RunRestoreWorkerWorkload> RunRestoreWorkerWorkloadFactory("RunRestoreWorkerWorkload");

@@ -68,23 +68,17 @@ public:
 	Endpoint getAdjustedEndpoint( uint32_t index ) {
 		uint32_t newIndex = token.second();
 		newIndex += index;
-		return Endpoint( addresses, UID(token.first(), (token.second()&0xffffffff00000000LL) | newIndex) );
+		return Endpoint( addresses, UID(token.first()+(uint64_t(index)<<32), (token.second()&0xffffffff00000000LL) | newIndex) );
 	}
 
 	bool operator == (Endpoint const& r) const {
-		return getPrimaryAddress() == r.getPrimaryAddress() && token == r.token;
+		return token == r.token && getPrimaryAddress() == r.getPrimaryAddress();
 	}
 	bool operator != (Endpoint const& r) const {
 		return !(*this == r);
 	}
-
 	bool operator < (Endpoint const& r) const {
-		const NetworkAddress& left = getPrimaryAddress();
-		const NetworkAddress& right = r.getPrimaryAddress();
-		if (left != right)
-			return left < right;
-		else
-			return token < r.token;
+		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
 
 	template <class Ar>
@@ -109,6 +103,18 @@ public:
 };
 #pragma pack(pop)
 
+namespace std
+{
+	template <>
+	struct hash<Endpoint>
+	{
+		size_t operator()(const Endpoint& ep) const
+		{
+			return  ep.token.hash() + ep.addresses.address.hash();
+		}
+	};
+}
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
@@ -126,6 +132,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
 	AsyncTrigger resetPing;
+	AsyncTrigger resetConnection;
 	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
@@ -186,7 +193,7 @@ public:
 	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
-	const Endpoint& addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
+	void addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
@@ -207,10 +214,10 @@ public:
 	Reference<AsyncVar<bool>> getDegraded();
 	// This async var will be set to true when the process cannot connect to a public network address that the failure monitor thinks is healthy.
 
-	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
+	void resetConnection( NetworkAddress address );
+	// Forces the connection with this address to be reset
 
-	int getEndpointCount();
-	// for tracing only
+	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 
 	bool incompatibleOutgoingConnectionsPresent();
 

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
  *   with incorrect assumptions from the current version. The API version documented here is version
- *   {@code 630}.<br><br>
+ *   {@code 700}.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
@@ -84,6 +84,8 @@ public class FDB {
 	private final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
+	private boolean enableDirectBufferQueries = false;
+
 	private boolean useShutdownHook = true;
 	private Thread shutdownHook;
 	private final Semaphore netRunning = new Semaphore(1);
@@ -180,8 +182,8 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 630)
-			throw new IllegalArgumentException("API version not supported (maximum 630)");
+		if(version > 700)
+			throw new IllegalArgumentException("API version not supported (maximum 700)");
 
 		Select_API_version(version);
 		singleton = new FDB(version);
@@ -224,6 +226,35 @@ public class FDB {
 	 */
 	public int getAPIVersion() {
 		return apiVersion;
+	}
+
+	/**
+	 * Enables or disables use of DirectByteBuffers for getRange() queries.
+	 *
+	 *	@param enabled Whether DirectByteBuffer should be used for getRange() queries.
+	 */
+	public void enableDirectBufferQuery(boolean enabled) {
+		enableDirectBufferQueries = enabled;
+	}
+
+	/**
+	 * Determines whether {@code getRange()} queries can use {@code DirectByteBuffer} from
+	 * {@link DirectBufferPool} to copy results.
+	 *
+	 * @return {@code true} if direct buffer queries have been enabled and {@code false} otherwise
+	 */
+	public boolean isDirectBufferQueriesEnabled() {
+		return enableDirectBufferQueries;
+	}
+
+	/**
+	 * Resizes the DirectBufferPool with given parameters, which is used by getRange() requests.
+	 *
+	 * @param poolSize Number of buffers in pool
+	 * @param bufferSize Size of each buffer in bytes
+	 */
+	public void resizeDirectBufferPool(int poolSize, int bufferSize) {
+		DirectBufferPool.getInstance().resize(poolSize, bufferSize);
 	}
 
 	/**

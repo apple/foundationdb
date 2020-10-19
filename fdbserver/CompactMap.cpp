@@ -268,7 +268,7 @@ struct CompactPreOrderTree {
 
 		Deque< BuildInfo > queue;
 		Deque< BuildInfo > deferred;
-		queue.push_back(BuildInfo(NULL, false, prefix, &input[0], &input[0] + input.size()));
+		queue.push_back(BuildInfo(nullptr, false, prefix, &input[0], &input[0] + input.size()));
 
 		Node* node = &root;
 		uint8_t* cacheLineEnd = (uint8_t*)node + 64;

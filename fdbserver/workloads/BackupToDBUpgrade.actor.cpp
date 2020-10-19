@@ -74,28 +74,23 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		TraceEvent("DRU_Start");
 	}
 
-	virtual std::string description() {
-		return "BackupToDBUpgrade";
-	}
+	virtual std::string description() const override { return "BackupToDBUpgrade"; }
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _setup(cx, this);
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self, DatabaseBackupAgent* backupAgent, Database cx, Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {
@@ -340,7 +335,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
-		state DatabaseBackupAgent restoreAgent(self->extraDB);
+		state DatabaseBackupAgent restoreTool(self->extraDB);
 		state Standalone<VectorRef<KeyRangeRef>> prevBackupRanges;
 		state UID logUid;
 		state Version commitVersion;
@@ -436,7 +431,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			// start restoring db
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
-				wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
+				wait(restoreTool.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
 			}
 			catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
@@ -444,12 +439,12 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					throw;
 			}
 
-			wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
-			wait(restoreAgent.unlockBackup(cx, self->restoreTag));
+			wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
+			wait(restoreTool.unlockBackup(cx, self->restoreTag));
 			wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
 
-			state UID restoreUid = wait(restoreAgent.getLogUid(cx, self->restoreTag));
-			wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent));
+			state UID restoreUid = wait(restoreTool.getLogUid(cx, self->restoreTag));
+			wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreTool));
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 

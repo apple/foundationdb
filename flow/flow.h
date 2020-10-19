@@ -48,8 +48,6 @@
 
 #include <boost/version.hpp>
 
-using namespace std::rel_ops;
-
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
@@ -132,7 +130,7 @@ public:
 class Never {};
 
 template <class T>
-class ErrorOr : public ComposedIdentifier<T, 0x1> {
+class ErrorOr : public ComposedIdentifier<T, 2> {
 public:
 	ErrorOr() : ErrorOr(default_error_or()) {}
 	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
@@ -341,6 +339,7 @@ struct Callback {
 	Callback<T> *prev, *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T&&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -408,7 +407,7 @@ struct SingleCallback {
 	}
 };
 
-// SAV is short for Single Assigment Variable: It can be assigned for only once!
+// SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -435,10 +434,10 @@ public:
 	bool canBeSet() const { return int16_t(error_state.code()) == UNSET_ERROR_CODE; }
 	bool isError() const { return int16_t(error_state.code()) > SET_ERROR_CODE; }
 
-	T const& get() {
+	T const& get() const {
 		ASSERT(isSet());
 		if (isError()) throw error_state;
-		return value();
+		return *(T const*)&value_storage;
 	}
 
 	template <class U>
@@ -560,10 +559,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -644,10 +641,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() {
-		delFutureRef();
-	}
-	virtual void fire() { ASSERT(false); }
+	virtual void unwait() override { delFutureRef(); }
+	virtual void fire(T const&) override { ASSERT(false); }
+	virtual void fire(T&&) override { ASSERT(false); }
 };
 
 
@@ -680,7 +676,7 @@ public:
 		if (sav) sav->addFutureRef();
 		//if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
 	}
-	Future(Future<T>&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) {
+	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
 		rhs.sav = 0;
 		//if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
 	}
@@ -719,7 +715,7 @@ public:
 		if (sav) sav->delFutureRef();
 		sav = rhs.sav;
 	}
-	void operator=(Future<T>&& rhs) BOOST_NOEXCEPT {
+	void operator=(Future<T>&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delFutureRef();
 			sav = rhs.sav;
@@ -790,12 +786,16 @@ public:
 	void sendError(const E& exc) const { sav->sendError(exc); }
 
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
-	bool isSet() { return sav->isSet(); }
-	bool canBeSet() { return sav->canBeSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isSet() const { return sav->isSet(); }
+	bool canBeSet() const { return sav->canBeSet(); }
+
+	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
-	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
-	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(const Promise& rhs) : sav(rhs.sav) {
+		sav->addPromiseRef();
+	}
+	Promise(Promise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
+
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
 	void operator=(const Promise& rhs) {
@@ -803,7 +803,7 @@ public:
 		if (sav) sav->delPromiseRef();
 		sav = rhs.sav;
 	}
-	void operator=(Promise && rhs) BOOST_NOEXCEPT {
+	void operator=(Promise&& rhs) noexcept {
 		if (sav != rhs.sav) {
 			if (sav) sav->delPromiseRef();
 			sav = rhs.sav;
@@ -818,7 +818,7 @@ public:
 	}
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() { auto ptr = sav; sav = nullptr; return ptr; }
 	explicit Promise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
@@ -846,16 +846,16 @@ public:
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}
-	FutureStream() : queue(NULL) {}
+	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
-	FutureStream(FutureStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }
 	void operator=(const FutureStream& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue) queue->delFutureRef();
 		queue = rhs.queue;
 	}
-	void operator=(FutureStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(FutureStream&& rhs) noexcept {
 		if (rhs.queue != queue) {
 			if (queue) queue->delFutureRef();
 			queue = rhs.queue;
@@ -880,20 +880,20 @@ private:
 };
 
 template <class Request>
-decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) { return r.reply; }
-
-
+decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
-#define REPLY_TYPE(RequestType) decltype( getReplyPromise( fake<RequestType>() ).getFuture().getValue() )
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( fake<RequestType>() ).getValue() )
+#define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
+//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
 	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
 	//   breaks IntelliSense in VS2010; this is a workaround.
-	typedef decltype(fake<T>().reply.getFuture().getValue()) Type;
+	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
 };
 template <class T> class ReplyPromise;
 template <class T>
@@ -952,13 +952,13 @@ public:
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
 	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
-	PromiseStream(PromiseStream&& rhs) BOOST_NOEXCEPT : queue(rhs.queue) { rhs.queue = 0; }
+	PromiseStream(PromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const PromiseStream& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue) queue->delPromiseRef();
 		queue = rhs.queue;
 	}
-	void operator=(PromiseStream&& rhs) BOOST_NOEXCEPT {
+	void operator=(PromiseStream&& rhs) noexcept {
 		if (queue != rhs.queue) {
 			if (queue) queue->delPromiseRef();
 			queue = rhs.queue;
@@ -1006,12 +1006,8 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void error(Error e) {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>

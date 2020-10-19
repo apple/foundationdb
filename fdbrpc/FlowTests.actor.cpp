@@ -75,13 +75,25 @@ TEST_CASE("/flow/buggifiedDelay") {
 }
 
 template <class T, class Func, class ErrFunc, class CallbackType>
-class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
+class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCallback<T, Func, ErrFunc, CallbackType>> {
 	Func func;
 	ErrFunc errFunc;
 
-	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
-	virtual void fire(T && t) { CallbackType::remove(); func(std::move(t)); delete this; }
-	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
+	void fire(T const& t) override {
+		CallbackType::remove();
+		func(t);
+		delete this;
+	}
+	void fire(T&& t) {
+		CallbackType::remove();
+		func(std::move(t));
+		delete this;
+	}
+	void error(Error e) override {
+		CallbackType::remove();
+		errFunc(e);
+		delete this;
+	}
 
 public:
 	LambdaCallback(Func&& f, ErrFunc&& e) : func(std::move(f)), errFunc(std::move(e)) {}
@@ -192,14 +204,17 @@ ACTOR static Future<Void> testHygeine() {
 //bool expectActorCount(int x) { return actorCount == x; }
 bool expectActorCount(int) { return true; }
 
-struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
+struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	int ticks;
 	Promise<Void> nextTick;
 	int nextYield;
 	INetwork* baseNetwork;
 
-	virtual flowGlobalType global(int id) { return baseNetwork->global(id); }
-	virtual void setGlobal(size_t id, flowGlobalType v) { baseNetwork->setGlobal(id, v); return; }
+	flowGlobalType global(int id) const override { return baseNetwork->global(id); }
+	void setGlobal(size_t id, flowGlobalType v) override {
+		baseNetwork->setGlobal(id, v);
+		return;
+	}
 
 	YieldMockNetwork() : ticks(0), nextYield(0) {
 		baseNetwork = g_network;
@@ -216,38 +231,52 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		t.send(Void());
 	}
 
-	virtual Future<class Void> delay(double seconds, TaskPriority taskID) {
-		return nextTick.getFuture();
-	}
+	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
-	virtual Future<class Void> yield(TaskPriority taskID) {
+	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0,taskID);
 		return Void();
 	}
 
-	virtual bool check_yield(TaskPriority taskID) {
+	bool check_yield(TaskPriority taskID) override {
 		if (nextYield > 0) --nextYield;
 		return nextYield == 0;
 	}
 
 	// Delegate everything else.  TODO: Make a base class NetworkWrapper for delegating everything in INetwork
-	virtual TaskPriority getCurrentTask() { return baseNetwork->getCurrentTask(); }
-	virtual void setCurrentTask(TaskPriority taskID) { baseNetwork->setCurrentTask(taskID); }
-	virtual double now() { return baseNetwork->now(); }
-	virtual double timer() { return baseNetwork->timer(); }
-	virtual void stop() { return baseNetwork->stop(); }
-	virtual void addStopCallback( std::function<void()> fn ) { ASSERT(false); return; }
-	virtual bool isSimulated() const { return baseNetwork->isSimulated(); }
-	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) { return baseNetwork->onMainThread(std::move(signal), taskID); }
+	TaskPriority getCurrentTask() const override { return baseNetwork->getCurrentTask(); }
+	void setCurrentTask(TaskPriority taskID) override { baseNetwork->setCurrentTask(taskID); }
+	double now() const override { return baseNetwork->now(); }
+	double timer() override { return baseNetwork->timer(); }
+	void stop() override { return baseNetwork->stop(); }
+	void addStopCallback(std::function<void()> fn) override {
+		ASSERT(false);
+		return;
+	}
+	bool isSimulated() const override { return baseNetwork->isSimulated(); }
+	void onMainThread(Promise<Void>&& signal, TaskPriority taskID) override {
+		return baseNetwork->onMainThread(std::move(signal), taskID);
+	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN(*func) (void *), void *arg) { return baseNetwork->startThread(func,arg); }
-	virtual Future< Reference<class IAsyncFile> > open(std::string filename, int64_t flags, int64_t mode) { return IAsyncFileSystem::filesystem()->open(filename,flags,mode); }
-	virtual Future< Void > deleteFile(std::string filename, bool mustBeDurable) { return IAsyncFileSystem::filesystem()->deleteFile(filename,mustBeDurable); }
-	virtual void run() { return baseNetwork->run(); }
-	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
-	virtual const TLSConfig& getTLSConfig() {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+		return baseNetwork->startThread(func, arg);
+	}
+	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
+		return IAsyncFileSystem::filesystem()->open(filename, flags, mode);
+	}
+	Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
+		return IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable);
+	}
+	void run() override { return baseNetwork->run(); }
+	bool checkRunnable() override { return baseNetwork->checkRunnable(); }
+	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
+		return baseNetwork->getDiskBytes(directory, free, total);
+	}
+	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
+		return baseNetwork->isAddressOnThisHost(addr);
+	}
+	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}

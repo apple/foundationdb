@@ -28,6 +28,7 @@
 	#define FLOW_ASYNCFILECACHED_ACTOR_H
 
 #include <boost/intrusive/list.hpp>
+#include <type_traits>
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
@@ -131,7 +132,7 @@ struct OpenFileInfo : NonCopyable {
 	Future<Reference<IAsyncFile>> opened; // Only valid until the file is fully opened
 
 	OpenFileInfo() : f(0) {}
-	OpenFileInfo(OpenFileInfo && r) BOOST_NOEXCEPT : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
+	OpenFileInfo(OpenFileInfo&& r) noexcept : f(r.f), opened(std::move(r.opened)) { r.f = 0; }
 
 	Future<Reference<IAsyncFile>> get() {
 		if (f) return Reference<IAsyncFile>::addRef(f);
@@ -159,14 +160,14 @@ public:
 		return openFiles[filename].get();
 	}
 
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) override {
 		++countFileCacheReads;
 		++countCacheReads;
 		if (offset + length > this->length) {
 			length = int(this->length - offset);
 			ASSERT(length >= 0);
 		}
-		auto f = read_write_impl(this, data, length, offset, false);
+		auto f = read_write_impl<false>(this, static_cast<uint8_t*>(data), length, offset);
 		if( f.isReady() && !f.isError() ) return length;
 		++countFileCacheReadsBlocked;
 		++countCacheReadsBlocked;
@@ -180,7 +181,7 @@ public:
 			wait(self->currentTruncate);
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
-		Future<Void> f = read_write_impl(self, const_cast<void*>(data), length, offset, true);
+		Future<Void> f = read_write_impl<true>(self, static_cast<const uint8_t*>(data), length, offset);
 		if (!f.isReady()) {
 			++self->countFileCacheWritesBlocked;
 			++self->countCacheWritesBlocked;
@@ -189,17 +190,15 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) override {
 		return write_impl(this, data, length, offset);
 	}
 
-	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset );
-	virtual void releaseZeroCopy( void* data, int length, int64_t offset );
+	Future<Void> readZeroCopy(void** data, int* length, int64_t offset) override;
+	void releaseZeroCopy(void* data, int length, int64_t offset) override;
 
 	// This waits for previously started truncates to finish and then truncates
-	virtual Future<Void> truncate( int64_t size ) {
-		return truncate_impl(this, size);
-	}
+	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
 
 	// This is the 'real' truncate that does the actual removal of cache blocks and then shortens the file
 	Future<Void> changeFileSize( int64_t size );
@@ -214,21 +213,13 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> sync() {
-		return waitAndSync( this, flush() );
-	}
+	Future<Void> sync() override { return waitAndSync(this, flush()); }
 
-	virtual Future<int64_t> size() {
-		return length;
-	}
+	Future<int64_t> size() const override { return length; }
 
-	virtual int64_t debugFD() {
-		return uncached->debugFD();
-	}
+	int64_t debugFD() const override { return uncached->debugFD(); }
 
-	virtual std::string getFilename() {
-		return filename;
-	}
+	std::string getFilename() const override { return filename; }
 
 	virtual void addref() { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
@@ -336,7 +327,7 @@ private:
 		}
 	}
 
-	virtual Future<Void> flush();
+	Future<Void> flush() override;
 
 	Future<Void> quiesce();
 
@@ -346,13 +337,16 @@ private:
 		return Void();
 	}
 
-	static Future<Void> read_write_impl( AsyncFileCached* self, void* data, int length, int64_t offset, bool writing );
+	template <bool writing>
+	static Future<Void> read_write_impl(AsyncFileCached* self,
+	                                    typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+	                                    int length, int64_t offset);
 
 	void remove_page( AFCPage* page );
 };
 
 struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
-	virtual bool evict() {
+	bool evict() override {
 		if ( notReading.isReady() && notFlushing.isReady() && !dirty && !zeroCopyRefCount && !truncated ) {
 			owner->remove_page( this );
 			delete this;

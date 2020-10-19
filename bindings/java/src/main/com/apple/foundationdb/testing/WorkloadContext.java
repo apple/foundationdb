@@ -20,8 +20,6 @@
 
 package com.apple.foundationdb.testing;
 
-import java.util.Map;
-
 public class WorkloadContext {
 	long impl;
 
