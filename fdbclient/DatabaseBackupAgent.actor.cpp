@@ -2122,9 +2122,10 @@ public:
 				UID destUid = destUidFuture.get();
 				if (destUid.isValid()) {
 					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
-				} else {
+				} else if (destUidValue.size() == 0) {
 					// Give DR task a chance to update destUid to avoid the problem of
-					// leftover version key.
+					// leftover version key. If we got an commit_unknown_result before,
+					// reuse the previous destUidValue.
 					throw not_committed();
 				}
 
