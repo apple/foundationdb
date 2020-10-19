@@ -89,6 +89,7 @@ struct SuppressionMap {
 	}
 };
 
+#define TRACE_BATCH_IMPLICIT_SEVERITY SevInfo
 TraceBatch g_traceBatch;
 std::atomic<trace_clock_t> g_trace_clock{ TRACE_CLOCK_NOW };
 
@@ -1140,6 +1141,9 @@ bool TraceBatch::dumpImmediately() {
 }
 
 void TraceBatch::addEvent( const char *name, uint64_t id, const char *location ) {
+	if(FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
+		return;
+	}
 	auto& eventInfo = eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), name, id, location));
 	if (dumpImmediately())
 		dump();
@@ -1148,6 +1152,9 @@ void TraceBatch::addEvent( const char *name, uint64_t id, const char *location )
 }
 
 void TraceBatch::addAttach( const char *name, uint64_t id, uint64_t to ) {
+	if(FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
+		return;
+	}
 	auto& attachInfo = attachBatch.emplace_back(AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
 	if (dumpImmediately())
 		dump();
@@ -1156,6 +1163,9 @@ void TraceBatch::addAttach( const char *name, uint64_t id, uint64_t to ) {
 }
 
 void TraceBatch::addBuggify( int activated, int line, std::string file ) {
+	if(FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
+		return;
+	}
 	if( g_network ) {
 		auto& buggifyInfo = buggifyBatch.emplace_back(BuggifyInfo(TraceEvent::getCurrentTime(), activated, line, file));
 		if (dumpImmediately())
@@ -1168,7 +1178,7 @@ void TraceBatch::addBuggify( int activated, int line, std::string file ) {
 }
 
 void TraceBatch::dump() {
-	if (!g_traceLog.isOpen())
+	if (!g_traceLog.isOpen() || FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY)
 		return;
 	std::string machine;
 	if(g_network->isSimulated()) {
@@ -1204,7 +1214,7 @@ void TraceBatch::dump() {
 }
 
 TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, const char *location) {
-	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
@@ -1212,7 +1222,7 @@ TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, con
 }
 
 TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, uint64_t to) {
-	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
@@ -1220,7 +1230,7 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, u
 }
 
 TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {
-	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", "BuggifySection");
 	fields.addField("Activated", format("%d", activated));
