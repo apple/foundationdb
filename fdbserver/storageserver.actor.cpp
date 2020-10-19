@@ -43,6 +43,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -2785,6 +2786,7 @@ private:
 ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 {
 	state double start;
+	state Span span("SS:update"_loc);
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -2855,6 +2857,10 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+				}
+				else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
+					SpanContextMessage scm;
+					cloneReader >> scm;
 				}
 				else {
 					MutationRef msg;
@@ -2948,6 +2954,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				data->logProtocol = rd.protocolVersion();
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
+			}
+			else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+				SpanContextMessage scm;
+				rd >> scm;
+				span.addParent(scm.spanContext);
 			}
 			else {
 				MutationRef msg;
@@ -3273,6 +3284,9 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 			}
 			if (stopEarly.isReady()) {
 				// Previous commit is done.
+				if (stopEarly.isError()) {
+					throw stopEarly.getError();
+				}
 				break;
 			}
 		} else {
@@ -3297,7 +3311,8 @@ ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, S
 		// Set the new durable version as part of the outstanding change set, before commit
 		data->storage.makeVersionDurable( newOldestVersion );
 	}
-	debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
+	debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
+
 	wait(forgetter.signal());
 	return finalCommit;
 }

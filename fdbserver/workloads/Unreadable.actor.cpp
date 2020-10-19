@@ -36,22 +36,19 @@ struct UnreadableWorkload : TestWorkload {
 		nodeCount = getOption( options, LiteralStringRef("nodeCount"), (uint64_t)100000 );
 	}
 
-	virtual std::string description() { return "Unreadable"; }
+	std::string description() const override { return "Unreadable"; }
 
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
 			return _start( cx, this );
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	static Optional<KeyRef> containsUnreadable(KeyRangeMap<bool> & unreadableMap, KeyRangeRef const& range, bool forward) {
 		auto unreadableRanges = unreadableMap.intersectingRanges(range);

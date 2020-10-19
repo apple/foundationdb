@@ -87,6 +87,7 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
+  SpanContextMessage.h
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
@@ -181,6 +182,7 @@ set(FDBSERVER_SRCS
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
+  workloads/RestoreBackup.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
@@ -196,6 +198,7 @@ set(FDBSERVER_SRCS
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/SubmitBackup.actor.cpp
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp

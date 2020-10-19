@@ -122,11 +122,9 @@ public:
 
 	virtual ~ApiCorrectnessWorkload(){ }
 
-	std::string description() {
-		return "ApiCorrectness";
-	}
+	std::string description() const override { return "ApiCorrectness"; }
 
-	void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("Number of Random Operations Performed", numRandomOperations.getValue(), false));
 	}
 

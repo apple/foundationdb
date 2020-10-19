@@ -120,7 +120,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES fast/IncrementalBackup.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementTest.toml)
   add_fdb_test(TEST_FILES fast/InventoryTestAlmostReadOnly.toml)
   add_fdb_test(TEST_FILES fast/InventoryTestSomeWrites.toml)
@@ -199,6 +199,9 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
                restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.txt
+               restarting/from_7.0.0/UpgradeAndBackupRestore-2.txt)
+  add_fdb_test(
     TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
                restarting/to_6.3.5/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
@@ -240,7 +243,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.toml)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml)
+  add_fdb_test(TEST_FILES ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml IGNORE)
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)

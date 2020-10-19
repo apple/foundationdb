@@ -32,15 +32,10 @@ struct WorkerErrorsWorkload : TestWorkload {
 	WorkerErrorsWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {}
 
-	virtual std::string description() { return "WorkerErrorsWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { 
-		return Void();
-	}
-	virtual Future<Void> start( Database const& cx ) {
-		return _start(cx, this);
-	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {}
-
+	std::string description() const override { return "WorkerErrorsWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future< std::vector< TraceEventFields > > latestEventOnWorkers( std::vector<WorkerDetails> workers ) {
 		state vector<Future<TraceEventFields>> eventTraces;
@@ -67,7 +62,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 };
 
 WorkloadFactory<WorkerErrorsWorkload> WorkerErrorsWorkloadFactory("WorkerErrors");

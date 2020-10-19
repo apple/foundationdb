@@ -1464,18 +1464,18 @@ TEST_CASE("/fdbclient/multiversionclient/EnvironmentVariableParsing" ) {
 	return Void();
 }
 
-class ValidateFuture : public ThreadCallback {
+class ValidateFuture final : public ThreadCallback {
 public:
 	ValidateFuture(ThreadFuture<int> f, ErrorOr<int> expectedValue, std::set<int> legalErrors) : f(f), expectedValue(expectedValue), legalErrors(legalErrors) { }
 
-	virtual bool canFire(int notMadeActive) { return true; }
+	bool canFire(int notMadeActive) const override { return true; }
 
-	virtual void fire(const Void &unused, int& userParam) {
+	void fire(const Void& unused, int& userParam) override {
 		ASSERT(!f.isError() && !expectedValue.isError() && f.get() == expectedValue.get());
 		delete this;
 	}
 
-	virtual void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		ASSERT(legalErrors.count(e.code()) > 0 || (f.isError() && expectedValue.isError() && f.getError().code() == expectedValue.getError().code()));
 		delete this;
 	}
@@ -1721,17 +1721,17 @@ TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar" ) {
 	return Void();
 }
 
-class CAPICallback : public ThreadCallback {
+class CAPICallback final : public ThreadCallback {
 public:
 	CAPICallback(void (*callbackf)(FdbCApi::FDBFuture*, void*), FdbCApi::FDBFuture* f, void* userdata)
 		: callbackf(callbackf), f(f), userdata(userdata) {}
 
-	virtual bool canFire(int notMadeActive) { return true; }
-	virtual void fire(const Void& unused, int& userParam) {
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	virtual void error(const Error& e, int& userParam) {
+	void error(const Error& e, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}

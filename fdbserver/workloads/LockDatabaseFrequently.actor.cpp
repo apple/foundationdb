@@ -34,7 +34,7 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60);
 	}
 
-	std::string description() override { return "LockDatabaseFrequently"; }
+	std::string description() const override { return "LockDatabaseFrequently"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

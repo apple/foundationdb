@@ -44,11 +44,11 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
-	virtual std::string description() { return "ReadHotDetection"; }
+	std::string description() const override { return "ReadHotDetection"; }
 
-	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < actorCount; c++) {
 			clients.push_back(timeout(keyReader(cx->clone(), this, actorCount / transactionsPerSecond,
 			                                    deterministicRandom()->random01() > 0.4),
@@ -58,7 +58,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (clientId != 0) return true;
 		return passed;
 	}
@@ -129,7 +129,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		}
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
 		state double lastTime = now();

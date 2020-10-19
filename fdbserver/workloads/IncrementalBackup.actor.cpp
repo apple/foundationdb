@@ -49,18 +49,18 @@ struct IncrementalBackupWorkload : TestWorkload {
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
 
-	virtual std::string description() { return "IncrementalBackup"; }
+	std::string description() const override { return "IncrementalBackup"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId) {
 			return Void();
 		}
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	 Future<bool> check(Database const& cx) override {
 		if (clientId) {
 			return true;
 		}
@@ -71,8 +71,16 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (self->waitForBackup) {
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
-			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-			state Version v = wait(tr->getReadVersion());
+			state Version v;
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(store(v, tr.getReadVersion()));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
 			// Wait for backup container to be created and avoid race condition
 			TraceEvent("IBackupWaitContainer");
 			loop {
@@ -96,7 +104,13 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 		}
 		if (self->stopBackup) {
-			wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			try {
+				wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_unneeded) {
+					throw;
+				}
+			}
 		}
 		return true;
 	}
@@ -161,7 +175,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<IncrementalBackupWorkload> IncrementalBackupWorkloadFactory("IncrementalBackup");

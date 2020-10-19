@@ -170,23 +170,22 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 	}
 }
 
-struct EndpointNotFoundReceiver : NetworkMessageReceiver {
+struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, WLTOKEN_ENDPOINT_NOT_FOUND, TaskPriority::DefaultEndpoint);
 	}
-
 	void receive(ArenaObjectReader& reader) override {
+		// Remote machine tells us it doesn't have endpoint e
 		Endpoint e;
 		reader.deserialize(e);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
 };
 
-struct PingReceiver : NetworkMessageReceiver {
+struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, WLTOKEN_PING_PACKET, TaskPriority::ReadSocket);
 	}
-
 	void receive(ArenaObjectReader& reader) override {
 		ReplyPromise<Void> reply;
 		reader.deserialize(reply);

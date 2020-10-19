@@ -27,8 +27,7 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 
-
-class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
+class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {
 		ThreadPool *pool;
 		IThreadPoolReceiver* userObject;
@@ -79,7 +78,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 public:
 	ThreadPool(int stackSize) : dontstop(ios), mode(Run), stackSize(stackSize) {}
 	~ThreadPool() {}
-	Future<Void> stop(Error const& e = success()) {
+	Future<Void> stop(Error const& e = success()) override {
 		if (mode == Shutdown) return Void();
 		ReferenceCounted<ThreadPool>::addref();
 		ios.stop(); // doesn't work?
@@ -91,18 +90,17 @@ public:
 		ReferenceCounted<ThreadPool>::delref();
 		return Void();
 	}
-	virtual Future<Void> getError() { return Never(); }  // FIXME
-	virtual void addref() { ReferenceCounted<ThreadPool>::addref(); }
-	virtual void delref() { if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop(); }
-	void addThread( IThreadPoolReceiver* userData ) {
+	Future<Void> getError() const override { return Never(); } // FIXME
+	void addref() override { ReferenceCounted<ThreadPool>::addref(); }
+	void delref() override {
+		if (ReferenceCounted<ThreadPool>::delref_no_destroy()) stop();
+	}
+	void addThread(IThreadPoolReceiver* userData) override {
 		threads.push_back(new Thread(this, userData));
 		startThread(start, threads.back(), stackSize);
 	}
-	void post( PThreadAction action ) {
-		ios.post( ActionWrapper( action ) );
-	}
+	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
 };
-
 
 Reference<IThreadPool>	createGenericThreadPool(int stackSize)
 {
