@@ -4170,6 +4170,65 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
+// Will not throw, will just return non-present Optional if error
+ACTOR Future<Optional<ProtocolVersion>> coordinatorProtocolsFetcher(Reference<ClusterConnectionFile> f, bool *quorum_reachable) {
+	try {
+		state ClientCoordinators coord(f);
+
+		state vector<Future<Optional<LeaderInfo>>> leaderServers;
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskPriority::CoordinationReply));
+		}
+
+		state vector<Future<ProtocolInfoReply>> coordProtocols;
+		coordProtocols.reserve(coord.clientLeaderServers.size());
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
+				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+		}
+
+		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
+		         smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
+		     delay(2.0));
+
+		*quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
+
+		if(quorum(coordProtocols, coordProtocols.size() / 2 + 1).isReady()) {
+			std::unordered_map<uint64_t, int> protocolCount;
+			for (int i = 0; i < leaderServers.size(); i++) {
+				if(coordProtocols[i].isReady()) {
+					protocolCount[coordProtocols[i].get().version.version()]++;
+				}
+			}
+			
+			uint64_t majorityProtocol = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
+				return l.second < r.second;
+			})->first;
+			return ProtocolVersion(majorityProtocol);
+		}
+		else {
+			return Optional<ProtocolVersion>();
+		}
+	}
+	catch (Error &e){
+		*quorum_reachable = false;
+		return Optional<ProtocolVersion>();
+	}
+}
+
+ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
+	state bool quorum_reachable = false;
+
+	Optional<ProtocolVersion> protocolVersionOptional = wait(coordinatorProtocolsFetcher(f, &quorum_reachable));
+
+	if(!protocolVersionOptional.present()) {
+		// what to do if optional isn't present?
+		return 0;
+	}
+	return protocolVersionOptional.get().version();
+}
+
 uint32_t Transaction::getSize() {
 	auto s = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
 	       tr.transaction.write_conflict_ranges.expectedSize();

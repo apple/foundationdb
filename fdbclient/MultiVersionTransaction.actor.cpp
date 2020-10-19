@@ -18,14 +18,22 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
+#include "flow/network.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/UnitTest.h"
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
+#include <cstdint>
+#include <ostream>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
@@ -306,6 +314,7 @@ void DLApi::init() {
 	}
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl");
+	loadClientFunction(&api->getServerProtocol, lib, fdbCPath, "fdb_get_server_protocol");
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
 	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option");
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
@@ -343,6 +352,7 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
+	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
 	loadClientFunction(&api->futureGetValue, lib, fdbCPath, "fdb_future_get_value");
@@ -376,6 +386,16 @@ const char* DLApi::getClientVersion() {
 	}
 
 	return api->getClientVersion();
+}
+
+ThreadFuture<uint64_t> DLApi::getServerProtocol(const char *clusterFilePath) {
+	FdbCApi::FDBFuture *f = api->getServerProtocol(clusterFilePath);
+	return toThreadFuture<uint64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		uint64_t version;
+		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &version);
+		ASSERT(!error);
+		return version;
+	});
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
@@ -987,6 +1007,12 @@ void MultiVersionApi::selectApiVersion(int apiVersion) {
 
 const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
+}
+
+
+ThreadFuture<uint64_t> MultiVersionApi::getServerProtocol(const char *clusterFilePath) {
+	// is this hacky
+	return api->localClient->api->getServerProtocol(clusterFilePath);
 }
 
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty=true) {

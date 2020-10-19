@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include <cstdint>
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -55,6 +56,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	//Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
+	FDBFuture* (*getServerProtocol)(const char* clusterFilePath);
 	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const *value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
@@ -107,6 +109,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	//Future
 	fdb_error_t (*futureGetDatabase)(FDBFuture *f, FDBDatabase **outDb);
 	fdb_error_t (*futureGetInt64)(FDBFuture *f, int64_t *outValue);
+	fdb_error_t (*futureGetUInt64)(FDBFuture *f, uint64_t *outValue);
 	fdb_error_t (*futureGetError)(FDBFuture *f);
 	fdb_error_t (*futureGetKey)(FDBFuture *f, uint8_t const **outKey, int *outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture *f, fdb_bool_t *outPresent, uint8_t const **outValue, int *outValueLength);
@@ -204,6 +207,7 @@ public:
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -381,6 +385,7 @@ class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;

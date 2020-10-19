@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cstdint>
 #define FDB_API_VERSION 700
 #define FDB_INCLUDE_LEGACY_TYPES
 
@@ -215,6 +216,11 @@ fdb_error_t fdb_future_get_version_v619( FDBFuture* f, int64_t* out_version ) {
 extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_int64( FDBFuture* f, int64_t* out_value ) {
 	CATCH_AND_RETURN( *out_value = TSAV(int64_t, f)->get(); );
+}
+
+extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_uint64(FDBFuture *f, uint64_t *out) {
+	CATCH_AND_RETURN( *out = TSAV(uint64_t, f)->get(); );
 }
 
 extern "C" DLLEXPORT
@@ -587,6 +593,11 @@ fdb_error_t fdb_transaction_get_committed_version( FDBTransaction* tr,
 extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
 	return (FDBFuture*)TXN(tr)->getApproximateSize().extractPtr();
+}
+
+extern "C" DLLEXPORT
+FDBFuture* fdb_get_server_protocol(const char* clusterFilePath){
+	return (FDBFuture*)( API->getServerProtocol(clusterFilePath).extractPtr() );
 }
 
 extern "C" DLLEXPORT

@@ -92,6 +92,8 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
+	ThreadFuture<uint64_t> getProtocolVersion() override;
+
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() ) override;
 
 	ThreadFuture<Void> checkDeferredError();
@@ -115,6 +117,7 @@ class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeAp
 public:
 	void selectApiVersion(int apiVersion);
 	const char* getClientVersion();
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 	void setupNetwork();

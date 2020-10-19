@@ -92,6 +92,7 @@ public:
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
+	virtual ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual void setupNetwork() = 0;

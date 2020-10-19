@@ -20,6 +20,10 @@
 
 #ifndef FLOW_TRANSPORT_H
 #define FLOW_TRANSPORT_H
+#include "flow/ProtocolVersion.h"
+#include "flow/serialize.h"
+#include <cstdint>
+#include <memory>
 #pragma once
 
 #include <algorithm>
@@ -248,5 +252,32 @@ inline bool Endpoint::isLocal() const {
 	const auto& localAddrs = FlowTransport::transport().getLocalAddresses();
 	return addresses.address == localAddrs.address || (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }
+
+struct IChecksum {
+	// width in number of bytes
+	virtual int width() const = 0;
+	virtual void append(const uint8_t* data, size_t processLength) = 0;
+	virtual void writeSum(SplitBuffer& buffer, int offset) = 0;
+	virtual bool checkSum(uint8_t*& unprocessed_begin) = 0;
+	virtual void reset() = 0;
+
+	std::variant<uint32_t> checksum;
+	int checksumWidth;
+};
+
+struct CRC32 : IChecksum {
+	CRC32();
+	int width() const override;
+	void append(const uint8_t* data, size_t processLength) override;
+	void writeSum(SplitBuffer& buffer, int offset) override;
+	bool checkSum(uint8_t*& unprocessed_begin) override;
+	void reset() override;
+};
+
+static const std::map<ProtocolVersion, std::unique_ptr<IChecksum>> protocolToChecksum = []() {
+	std::map<ProtocolVersion, std::unique_ptr<IChecksum>> m;
+	m[ProtocolVersion(0)] = std::make_unique<CRC32>(CRC32());
+	return m;
+}();
 
 #endif

@@ -137,6 +137,9 @@ extern "C" {
     fdb_future_get_int64( FDBFuture* f, int64_t* out );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_uint64( FDBFuture* f, uint64_t* out );
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
                         int* out_key_length );
 
@@ -247,6 +250,9 @@ extern "C" {
     // see them, this call has to be serviced by the main thread too.
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_transaction_get_approximate_size(FDBTransaction* tr);
+
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_get_server_protocol(const char* clusterFilePath);
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 

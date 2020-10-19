@@ -20,7 +20,9 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
+#include "flow/network.h"
 
+#include <cstdint>
 #include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
@@ -319,6 +321,38 @@ struct ConnectPacket {
 };
 
 #pragma pack( pop )
+
+CRC32::CRC32() : IChecksum() {
+	checksum = uint32_t(0);
+	checksumWidth = sizeof(std::get<uint32_t>(checksum));
+}
+
+int CRC32::width() const {
+	return checksumWidth;
+}
+
+void CRC32::append(const uint8_t* data, size_t processLength) {
+	checksum = crc32c_append(std::get<uint32_t>(checksum), data, processLength);
+}
+
+void CRC32::writeSum(SplitBuffer& buffer, int offset) {
+	buffer.write(&checksum, checksumWidth, offset);
+	reset();
+}
+
+bool CRC32::checkSum(uint8_t*& p) {
+	uint32_t packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+	uint32_t packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
+
+	append(p, packetLen);
+	bool matches = std::get<uint32_t>(checksum) == packetChecksum;
+	reset();
+	return matches;
+}
+
+void CRC32::reset() {
+	checksum = uint32_t(0);
+}
 
 ACTOR static Future<Void> connectionReader(TransportData* transport, Reference<IConnection> conn, Reference<struct Peer> peer,
                                            Promise<Reference<struct Peer>> onConnected);
@@ -823,27 +857,25 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 
 	const bool checksumEnabled = !peerAddress.isTLS();
 	loop {
-		uint32_t packetLen, packetChecksum;
+		uint32_t packetLen;
 
-		//Retrieve packet length and checksum
-		if (checksumEnabled) {
-			if (e-p < sizeof(uint32_t) * 2) break;
-			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
-			packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
-		} else {
-			if (e-p < sizeof(uint32_t)) break;
-			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
-		}
+		auto protocolChecksumIter = protocolToChecksum.upper_bound(std::min(g_network->protocolVersion(), peerProtocolVersion));
+		ASSERT(protocolChecksumIter != protocolToChecksum.begin());
+
+		IChecksum* checksum = (--protocolChecksumIter)->second.get();
+		int checksumWidth = checksumEnabled ? checksum->width() : 0;
+		if(e-p < sizeof(packetLen) + checksumWidth) break;
+		
+		packetLen = *(uint32_t*)p;
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
 		}
-
-		if (e-p<packetLen) break;
+		if(e < p + sizeof(packetLen) + packetLen + checksumWidth) break;
 		ASSERT( packetLen >= sizeof(UID) );
 
-		if (checksumEnabled) {
+		if(checksumEnabled) {
 			bool isBuggifyEnabled = false;
 			if(g_network->isSimulated() && g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
@@ -864,21 +896,24 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 					}
 				}
 			}
-
-			uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
-			if (calculatedChecksum != packetChecksum) {
+			if (!checksum->checkSum(p)) {
 				if (isBuggifyEnabled) {
-					TraceEvent(SevInfo, "ChecksumMismatchExp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)calculatedChecksum);
+					// how important is it to have the correct vs calculated checksum in the trace?
+					// TraceEvent(SevInfo, "ChecksumMismatchExp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)std::get<uint32_t>(checksum));
+					TraceEvent(SevInfo, "ChecksumMismatchExp");
 				} else {
-					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)calculatedChecksum);
+					// TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)std::get<uint32_t>(checksum));
+					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp");
 				}
 				throw checksum_failed();
 			} else {
 				if (isBuggifyEnabled) {
-					TraceEvent(SevError, "ChecksumMatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)calculatedChecksum);
+					// TraceEvent(SevError, "ChecksumMatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)std::get<uint32_t>(checksum));
+					TraceEvent(SevError, "ChecksumMatchUnexp");
 				}
 			}
 		}
+
 
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
@@ -1342,10 +1377,15 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
-	uint32_t len, checksum = 0;
+
+	auto protocolChecksumIter = protocolToChecksum.upper_bound(g_network->protocolVersion());
+	ASSERT(protocolChecksumIter != protocolToChecksum.begin());
+
+	IChecksum* checksum = (--protocolChecksumIter)->second.get();
+	uint32_t len;
 	int packetInfoSize = sizeof(len);
 	if (checksumEnabled) {
-		packetInfoSize += sizeof(checksum);
+		packetInfoSize += checksum->width();
 	}
 
 	wr.writeAhead(packetInfoSize , &packetInfoBuffer);
@@ -1367,7 +1407,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 		while (checksumUnprocessedLength > 0) {
 			uint32_t processLength =
 					std::min(checksumUnprocessedLength, (uint32_t)(checksumPb->bytes_written - prevBytesWritten));
-			checksum = crc32c_append(checksum, checksumPb->data() + prevBytesWritten, processLength);
+			checksum->append(checksumPb->data() + prevBytesWritten, processLength);
 			checksumUnprocessedLength -= processLength;
 			checksumPb = checksumPb->nextPacketBuffer();
 			prevBytesWritten = 0;
@@ -1377,7 +1417,7 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	// Write packet length and checksum into packet buffer
 	packetInfoBuffer.write(&len, sizeof(len));
 	if (checksumEnabled) {
-		packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
+		checksum->writeSum(packetInfoBuffer, sizeof(len));
 	}
 
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {

@@ -45,7 +45,7 @@ struct ProtocolVersionWorkload : TestWorkload {
         
     }
 
-	std::string description() override {
+	std::string description() const override {
 		return "ProtocolVersionWorkload";
 	}
 

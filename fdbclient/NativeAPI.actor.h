@@ -284,6 +284,8 @@ public:
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
+	Future<uint64_t> getProtocolVersion();
+
 	Promise<Standalone<StringRef>> versionstampPromise;
 
 	uint32_t getSize();
@@ -359,6 +361,8 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exclusions);
+
+ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f);
 
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;

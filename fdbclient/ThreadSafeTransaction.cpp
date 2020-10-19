@@ -22,6 +22,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
@@ -297,6 +298,13 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 	return onMainThread([tr]() -> Future<int64_t> { return tr->getApproximateSize(); });
 }
 
+// ThreadFuture<uint64_t> ThreadSafeTransaction::getProtocolVersion() {
+// 	ReadYourWritesTransaction *tr = this->tr;
+// 	return onMainThread( [tr]() -> Future< uint64_t > {
+// 			return tr->getProtocolVersion();
+// 		} );
+// }
+
 ThreadFuture<Standalone<StringRef>> ThreadSafeTransaction::getVersionstamp() {
 	ReadYourWritesTransaction *tr = this->tr;
 	return onMainThread([tr]() -> Future < Standalone<StringRef> > {
@@ -362,6 +370,14 @@ void ThreadSafeApi::selectApiVersion(int apiVersion) {
 const char* ThreadSafeApi::getClientVersion() {
 	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
 	return clientVersion.c_str();
+}
+
+ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
+	Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFilePath));
+	return onMainThread( [f]() -> Future< uint64_t > {
+			// Where should this function go?
+			return getCoordinatorProtocols(f);
+		} );
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {

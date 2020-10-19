@@ -733,6 +733,12 @@ class FutureInt64(Future):
         self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(value))
         return value.value
 
+class FutureUInt64(Future):
+    def wait(self):
+        self.block_until_ready()
+        value = ctypes.c_uint64()
+        self.capi.fdb_future_get_uint64(self.fpointer, ctypes.byref(value))
+        return value.value
 
 class FutureKeyValueArray(Future):
     def wait(self):
@@ -1417,6 +1423,10 @@ def init_c_api():
     _capi.fdb_future_get_int64.restype = ctypes.c_int
     _capi.fdb_future_get_int64.errcheck = check_error_code
 
+    _capi.fdb_future_get_int64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64)]
+    _capi.fdb_future_get_int64.restype = ctypes.c_uint
+    _capi.fdb_future_get_int64.errcheck = check_error_code
+
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]
     _capi.fdb_future_get_key.restype = ctypes.c_int
@@ -1520,6 +1530,9 @@ def init_c_api():
 
     _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_void_p
+
+    _capi.fdb_get_server_protocol.argtypes = [ctypes.c_char_p]
+    _capi.fdb_get_server_protocol.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_versionstamp.restype = ctypes.c_void_p
@@ -1720,6 +1733,8 @@ open_databases = {}
 
 cacheLock = threading.Lock()
 
+def get_server_protocol(clusterFilePath):
+    return FutureUInt64(_capi.fdb_get_server_protocol(paramToBytes(clusterFilePath)))
 
 def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated
