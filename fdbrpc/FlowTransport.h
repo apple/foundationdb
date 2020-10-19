@@ -254,13 +254,18 @@ inline bool Endpoint::isLocal() const {
 }
 
 struct IChecksum {
-	// width in number of bytes
+	// Width in number of bytes
 	virtual int width() const = 0;
-	virtual void append(const uint8_t* data, size_t processLength) = 0;
-	virtual void writeSum(SplitBuffer& buffer, int offset) = 0;
-	virtual bool checkSum(uint8_t*& unprocessed_begin) = 0;
+	// Append to checksum
+	virtual void append(std::string_view bytes) = 0;
+	// Write checksum to preallocated buffer
+	virtual void writeSum(char* buffer) = 0;
+	// Validate checksum of packet. buffer ptr points to beginning of packetlen
+	virtual bool checkSum(const char* buffer) = 0;
+	// Reset checksum
 	virtual void reset() = 0;
 
+	// variant that allows for checksum of varying widths
 	std::variant<uint32_t> checksum;
 	int checksumWidth;
 };
@@ -268,9 +273,9 @@ struct IChecksum {
 struct CRC32 : IChecksum {
 	CRC32();
 	int width() const override;
-	void append(const uint8_t* data, size_t processLength) override;
-	void writeSum(SplitBuffer& buffer, int offset) override;
-	bool checkSum(uint8_t*& unprocessed_begin) override;
+	void append(std::string_view bytes) override;
+	void writeSum(char* buffer) override;
+	bool checkSum(const char* buffer) override;
 	void reset() override;
 };
 

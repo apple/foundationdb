@@ -1011,7 +1011,6 @@ const char* MultiVersionApi::getClientVersion() {
 
 
 ThreadFuture<uint64_t> MultiVersionApi::getServerProtocol(const char *clusterFilePath) {
-	// is this hacky
 	return api->localClient->api->getServerProtocol(clusterFilePath);
 }
 
