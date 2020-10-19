@@ -256,9 +256,11 @@ inline bool Endpoint::isLocal() const {
 struct IChecksum {
 	// width in number of bytes
 	virtual int width() const = 0;
-	virtual void append(const uint8_t* data, size_t processLength) = 0;
-	virtual void writeSum(SplitBuffer& buffer, int offset) = 0;
-	virtual bool checkSum(uint8_t*& unprocessed_begin) = 0;
+	virtual void append(std::string_view bytes) = 0;
+	// write to a char buffer. User copies to buffer
+	virtual void writeSum(char* buffer) = 0; // use alloca to put in space for the checksum size to save 16 bytes
+	// copy the packet part needed to actually check the sum
+	virtual bool checkSum(const char* buffer) = 0;
 	virtual void reset() = 0;
 
 	std::variant<uint32_t> checksum;
@@ -268,9 +270,9 @@ struct IChecksum {
 struct CRC32 : IChecksum {
 	CRC32();
 	int width() const override;
-	void append(const uint8_t* data, size_t processLength) override;
-	void writeSum(SplitBuffer& buffer, int offset) override;
-	bool checkSum(uint8_t*& unprocessed_begin) override;
+	void append(std::string_view bytes) override;
+	void writeSum(char* buffer) override;
+	bool checkSum(const char* buffer) override;
 	void reset() override;
 };
 
