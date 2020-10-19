@@ -285,8 +285,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return errorPromise.getFuture();
 	}
 
-	bool canPipelineCommits() const override { return true; }
-
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(self->path, deleteOnClose);

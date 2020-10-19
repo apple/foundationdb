@@ -5738,8 +5738,6 @@ public:
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType::SSD_REDWOOD_V1; }
 
-	bool canPipelineCommits() const override { return true; }
-
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
 	Future<Void> getError() { return delayed(m_error.getFuture()); };
