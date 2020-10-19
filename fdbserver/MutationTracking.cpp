@@ -21,6 +21,7 @@
 #include <vector>
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
 
 #if defined(FDB_CLEAN_BUILD) && MUTATION_TRACKING_ENABLED
 #error "You cannot use mutation tracking in a clean/release build."
@@ -71,6 +72,10 @@ TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, Str
 			LogProtocolMessage lpm;
 			br >> lpm;
 			rdr.setProtocolVersion(br.protocolVersion());
+		} else if (SpanContextMessage::startsSpanContextMessage(mutationType)) {
+			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
+			SpanContextMessage scm;
+			br >> scm;
 		} else {
 			MutationRef m;
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));

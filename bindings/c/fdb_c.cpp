@@ -171,12 +171,12 @@ public:
 				 void* userdata)
 		: callbackf(callbackf), f(f), userdata(userdata) {}
 
-	virtual bool canFire(int notMadeActive) { return true; }
-	virtual void fire(const Void& unused, int& userParam) {
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	virtual void error(const Error&, int& userParam) {
+	void error(const Error&, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
@@ -646,9 +646,9 @@ FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, u
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name,
-        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunkSize) {
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size) {
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunkSize).extractPtr());
+	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

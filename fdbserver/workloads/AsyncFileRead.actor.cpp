@@ -182,13 +182,9 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 
 	virtual ~AsyncFileReadWorkload(){ }
 
-	virtual std::string description()
-	{
-		return "AsyncFileRead";
-	}
+	std::string description() const override { return "AsyncFileRead"; }
 
-	virtual Future<Void> setup(Database const& cx)
-	{
+	Future<Void> setup(Database const& cx) override {
 		if(enabled)
 			return _setup(this);
 
@@ -213,8 +209,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx)
-	{
+	Future<Void> start(Database const& cx) override {
 		if(enabled)
 			return _start(this);
 
@@ -335,7 +330,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		}
 	}
 
-	virtual void getMetrics(std::vector<PerfMetric>& m) {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (enabled) {
 			m.emplace_back("Bytes read/sec", bytesRead.getValue() / testDuration, false);
 			m.emplace_back("Average CPU Utilization (Percentage)", averageCpuUtilization * 100, false);

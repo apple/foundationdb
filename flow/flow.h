@@ -339,6 +339,7 @@ struct Callback {
 	Callback<T> *prev, *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T&&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -433,10 +434,10 @@ public:
 	bool canBeSet() const { return int16_t(error_state.code()) == UNSET_ERROR_CODE; }
 	bool isError() const { return int16_t(error_state.code()) > SET_ERROR_CODE; }
 
-	T const& get() {
+	T const& get() const {
 		ASSERT(isSet());
 		if (isError()) throw error_state;
-		return value();
+		return *(T const*)&value_storage;
 	}
 
 	template <class U>
@@ -558,8 +559,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>

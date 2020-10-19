@@ -46,18 +46,17 @@ struct RollbackWorkload : TestWorkload {
 		multiple = getOption( options, LiteralStringRef("multiple"), true );
 	}
 
-	virtual std::string description() { return "RollbackWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "RollbackWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (&g_simulator == g_network && enabled)
 			return timeout( 
 				reportErrors( rollbackFailureWorker( cx, this, meanDelay ), "RollbackFailureWorkerError" ), 
 				testDuration, Void() );
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> simulateFailure( Database cx, RollbackWorkload* self ) {
 		state ServerDBInfo system = self->dbInfo->get();

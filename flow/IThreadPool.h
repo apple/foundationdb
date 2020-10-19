@@ -50,14 +50,14 @@ public:
 struct ThreadAction { 
 	virtual void operator()(IThreadPoolReceiver*) = 0;		// self-destructs
 	virtual void cancel() = 0;
-	virtual double getTimeEstimate() = 0;                   // for simulation
+	virtual double getTimeEstimate() const = 0; // for simulation
 };
 typedef ThreadAction* PThreadAction;
 
 class IThreadPool {
 public:
 	virtual ~IThreadPool() {}
-	virtual Future<Void> getError() = 0;  // asynchronously throws an error if there is an internal error
+	virtual Future<Void> getError() const = 0; // asynchronously throws an error if there is an internal error
 	virtual void addThread( IThreadPoolReceiver* userData ) = 0;
 	virtual void post( PThreadAction action ) = 0;
 	virtual Future<Void> stop(Error const& e = success()) = 0;
@@ -109,13 +109,11 @@ private:
 
 Reference<IThreadPool>	createGenericThreadPool(int stackSize = 0);
 
-class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
+class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
 	DummyThreadPool() : thread(nullptr) {}
-	Future<Void> getError() {
-		return errors.getFuture();
-	}
+	Future<Void> getError() const override { return errors.getFuture(); }
 	void addThread( IThreadPoolReceiver* userData ) {
 		ASSERT( !thread );
 		thread = userData;
@@ -143,7 +141,5 @@ private:
 	IThreadPoolReceiver* thread;
 	Promise<Void> errors;
 };
-
-
 
 #endif

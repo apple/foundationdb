@@ -7,7 +7,9 @@ Wants=network-online.target
 Type=forking
 PIDFile=/var/run/fdbmonitor.pid
 ExecStart=/usr/lib/foundationdb/fdbmonitor --conffile /etc/foundationdb/foundationdb.conf --lockfile /var/run/fdbmonitor.pid --daemonize
-KillMode=process
+KillMode=mixed
+Restart=on-failure
+RestartSec=60s
 
 [Install]
 WantedBy=multi-user.target

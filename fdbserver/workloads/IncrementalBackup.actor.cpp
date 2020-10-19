@@ -49,51 +49,68 @@ struct IncrementalBackupWorkload : TestWorkload {
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
 	}
 
-	virtual std::string description() { return "IncrementalBackup"; }
+	std::string description() const override { return "IncrementalBackup"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId) {
 			return Void();
 		}
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		if (clientId || !waitForBackup) {
+	 Future<bool> check(Database const& cx) override {
+		if (clientId) {
 			return true;
 		}
 		return _check(cx, this);
 	}
 
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
-		state Reference<IBackupContainer> backupContainer;
-		state UID backupUID;
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state Version v = wait(tr->getReadVersion());
-		// Wait for backup container to be created and avoid race condition
-		TraceEvent("IBackupWaitContainer");
-		loop {
-			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			state bool e = wait(backupContainer->exists());
-			if (e) break;
-			wait(delay(5.0));
-		}
-		loop {
-			BackupDescription desc = wait(backupContainer->describeBackup(true));
-			TraceEvent("IBackupVersionGate")
-			    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
-			    .detail("ContiguousLogEndVersion",
-			            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
-			    .detail("TargetVersion", v);
-			if (!desc.contiguousLogEnd.present()) continue;
-			if (desc.contiguousLogEnd.get() >= v) break;
-			// Avoid spamming requests with a delay
-			wait(delay(5.0));
+		if (self->waitForBackup) {
+			state Reference<IBackupContainer> backupContainer;
+			state UID backupUID;
+			state Version v;
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(store(v, tr.getReadVersion()));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+			// Wait for backup container to be created and avoid race condition
+			TraceEvent("IBackupWaitContainer");
+			loop {
+				wait(success(
+				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				state bool e = wait(backupContainer->exists());
+				if (e) break;
+				wait(delay(5.0));
+			}
+			loop {
+				BackupDescription desc = wait(backupContainer->describeBackup(true));
+				TraceEvent("IBackupVersionGate")
+				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
+				    .detail("ContiguousLogEndVersion",
+				            desc.contiguousLogEnd.present() ? desc.contiguousLogEnd.get() : invalidVersion)
+				    .detail("TargetVersion", v);
+				if (!desc.contiguousLogEnd.present()) continue;
+				if (desc.contiguousLogEnd.get() >= v) break;
+				// Avoid spamming requests with a delay
+				wait(delay(5.0));
+			}
 		}
 		if (self->stopBackup) {
-			wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			try {
+				wait(self->backupAgent.discontinueBackup(cx, self->tag));
+			} catch (Error& e) {
+				if (e.code() != error_code_backup_unneeded) {
+					throw;
+				}
+			}
 		}
 		return true;
 	}
@@ -158,7 +175,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<IncrementalBackupWorkload> IncrementalBackupWorkloadFactory("IncrementalBackup");

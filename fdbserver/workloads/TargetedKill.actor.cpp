@@ -43,17 +43,16 @@ struct TargetedKillWorkload : TestWorkload {
 		killAllMachineProcesses = getOption( options, LiteralStringRef("killWholeMachine"), false );
 	}
 
-	virtual std::string description() { return "TargetedKillWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "TargetedKillWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		TraceEvent("StartTargetedKill").detail("Enabled", enabled);
 		if (enabled)
 			return assassin( cx, this );
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> killEndpoint( NetworkAddress address, Database cx, TargetedKillWorkload* self ) {
 		if( &g_simulator == g_network ) {
