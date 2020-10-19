@@ -141,10 +141,12 @@ struct Peer : public ReferenceCounted<Peer> {
 	int peerReferences;
 	bool incompatibleProtocolVersionNewer;
 	int64_t bytesReceived;
+	int64_t bytesSent;
 	double lastDataPacketSentTime;
 	int outstandingReplies;
 	ContinuousSample<double> pingLatencies;
 	int64_t lastLoggedBytesReceived;
+	int64_t lastLoggedBytesSent;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 

@@ -269,9 +269,11 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				  .detail("MedianLatency", peer->pingLatencies.median())
 				  .detail("P90Latency", peer->pingLatencies.percentile(0.90))
 				  .detail("Count", peer->pingLatencies.getPopulationSize())
-				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived);
+				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived)
+				  .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent);
 				peer->pingLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
+				peer->lastLoggedBytesSent = peer->bytesSent;
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
 			} else if(it == self->orderedAddresses.begin()) {
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
@@ -465,9 +467,9 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		loop {
 			lastWriteTime = now();
 
-			int sent = conn->write(self->unsent.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
-
-			if (sent != 0) {
+			int sent = conn->write(self->unsent.getUnsent(), /* limit= */ FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			if (sent) {
+				self->bytesSent += sent;
 				self->transport->bytesSent += sent;
 				self->unsent.sent(sent);
 			}
@@ -725,8 +727,8 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
   : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
     reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
     incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
-	pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0) {
-
+    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
+    bytesSent(0), lastLoggedBytesSent(0) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }
 
