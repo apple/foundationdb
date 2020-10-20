@@ -151,7 +151,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
 
 	if (!ks->isFirstGreaterOrEqual()) {
 		// The Key Selector clamps up to the legal key space
-		TraceEvent(SevInfo, "ReadToBoundary")
+		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
 		if (ks->offset < 1)
