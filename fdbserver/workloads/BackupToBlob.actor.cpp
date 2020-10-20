@@ -38,7 +38,7 @@ struct BackupToBlobWorkload : TestWorkload {
 		backupURL = getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000"));
 	}
 
-	std::string description() override { return DESCRIPTION; }
+	std::string description() const override { return DESCRIPTION; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

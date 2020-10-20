@@ -40,7 +40,7 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		waitForComplete = getOption(options, LiteralStringRef("waitForComplete"), true);
 	}
 
-	std::string description() override { return DESCRIPTION; }
+	std::string description() const override { return DESCRIPTION; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
