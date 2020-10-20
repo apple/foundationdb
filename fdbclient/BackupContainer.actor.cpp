@@ -2156,6 +2156,42 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
 		    });
 	}
 
+	static bool isDirectory(const std::string& blobName) { return blobName.size() && blobName.back() == '/'; }
+
+	ACTOR static Future<Reference<IAsyncFile>> readFile_impl(BackupContainerAzureBlobStore* self,
+	                                                         std::string fileName) {
+		bool exists = wait(self->blobExists(fileName));
+		if (!exists) {
+			throw file_not_found();
+		}
+		return Reference<IAsyncFile>(
+		    new ReadFile(self->asyncTaskThread, self->containerName, fileName, self->client.get()));
+	}
+
+	ACTOR static Future<Reference<IBackupFile>> writeFile_impl(BackupContainerAzureBlobStore* self,
+	                                                           std::string fileName) {
+		wait(self->asyncTaskThread.execAsync(
+		    [client = self->client.get(), containerName = self->containerName, fileName = fileName] {
+			    auto outcome = client->create_append_blob(containerName, fileName).get();
+			    return Void();
+		    }));
+		return Reference<IBackupFile>(
+		    new BackupFile(fileName, Reference<IAsyncFile>(new WriteFile(self->asyncTaskThread, self->containerName,
+		                                                                 fileName, self->client.get()))));
+	}
+
+	static void listFilesImpl(AzureClient* client, const std::string& containerName, const std::string& path,
+	                          std::function<bool(std::string const&)> folderPathFilter, FilesAndSizesT& result) {
+		auto resp = client->list_blobs_segmented(containerName, "/", "", path).get().response();
+		for (const auto& blob : resp.blobs) {
+			if (isDirectory(blob.name) && folderPathFilter(blob.name)) {
+				listFilesImpl(client, containerName, blob.name, folderPathFilter, result);
+			} else {
+				result.emplace_back(blob.name, blob.content_length);
+			}
+		}
+	}
+
 public:
 	BackupContainerAzureBlobStore() : containerName("test_container") {
 		// std::string account_name = std::getenv("AZURE_TESTACCOUNT");
@@ -2187,46 +2223,10 @@ public:
 		});
 	}
 
-	ACTOR static Future<Reference<IAsyncFile>> readFile_impl(BackupContainerAzureBlobStore* self,
-	                                                         std::string fileName) {
-		bool exists = wait(self->blobExists(fileName));
-		if (!exists) {
-			throw file_not_found();
-		}
-		return Reference<IAsyncFile>(
-		    new ReadFile(self->asyncTaskThread, self->containerName, fileName, self->client.get()));
-	}
-
 	Future<Reference<IAsyncFile>> readFile(std::string fileName) override { return readFile_impl(this, fileName); }
-
-	ACTOR static Future<Reference<IBackupFile>> writeFile_impl(BackupContainerAzureBlobStore* self,
-	                                                           std::string fileName) {
-		wait(self->asyncTaskThread.execAsync(
-		    [client = self->client.get(), containerName = self->containerName, fileName = fileName] {
-			    auto outcome = client->create_append_blob(containerName, fileName).get();
-			    return Void();
-		    }));
-		return Reference<IBackupFile>(
-		    new BackupFile(fileName, Reference<IAsyncFile>(new WriteFile(self->asyncTaskThread, self->containerName,
-		                                                                 fileName, self->client.get()))));
-	}
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& fileName) override {
 		return writeFile_impl(this, fileName);
-	}
-
-	static bool isDirectory(const std::string& blobName) { return blobName.size() && blobName.back() == '/'; }
-
-	static void listFilesImpl(AzureClient* client, const std::string& containerName, const std::string& path,
-	                          std::function<bool(std::string const&)> folderPathFilter, FilesAndSizesT& result) {
-		auto resp = client->list_blobs_segmented(containerName, "/", "", path).get().response();
-		for (const auto& blob : resp.blobs) {
-			if (isDirectory(blob.name) && folderPathFilter(blob.name)) {
-				listFilesImpl(client, containerName, blob.name, folderPathFilter, result);
-			} else {
-				result.emplace_back(blob.name, blob.content_length);
-			}
-		}
 	}
 
 	Future<FilesAndSizesT> listFiles(std::string path = "",
