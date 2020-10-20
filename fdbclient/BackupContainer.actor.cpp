@@ -2192,6 +2192,22 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
 		}
 	}
 
+	ACTOR static Future<Void> deleteContainerImpl(BackupContainerAzureBlobStore* self, int* pNumDeleted) {
+		state int filesToDelete = 0;
+		if (pNumDeleted) {
+			FilesAndSizesT files = wait(self->listFiles());
+			filesToDelete = files.size();
+		}
+		wait(self->asyncTaskThread.execAsync([containerName = self->containerName, client = self->client.get()] {
+			client->delete_container(containerName).wait();
+			return Void();
+		}));
+		if (pNumDeleted) {
+			*pNumDeleted += filesToDelete;
+		}
+		return Void();
+	}
+
 public:
 	BackupContainerAzureBlobStore() : containerName("test_container") {
 		// std::string account_name = std::getenv("AZURE_TESTACCOUNT");
@@ -2247,13 +2263,7 @@ public:
 		    });
 	}
 
-	Future<Void> deleteContainer(int* pNumDeleted) override {
-		// TODO: Update pNumDeleted?
-		return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client.get()] {
-			client->delete_container(containerName).wait();
-			return Void();
-		});
-	}
+	Future<Void> deleteContainer(int* pNumDeleted) override { return deleteContainerImpl(this, pNumDeleted); }
 };
 
 const std::string BackupContainerBlobStore::DATAFOLDER = "data";
