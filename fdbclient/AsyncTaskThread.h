@@ -1,5 +1,5 @@
 /*
- * AsyncTaskThread.cpp
+ * AsyncTaskThread.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef __AZURE_CONNECTION_H__
-#define __AZURE_CONNECTION_H__
+#ifndef __ASYNC_TASK_THREAD_H__
+#define __ASYNC_TASK_THREAD_H__
 
 #include <future>
 #include <thread>
