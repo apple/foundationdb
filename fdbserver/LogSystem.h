@@ -934,6 +934,11 @@ struct LogPushData : NonCopyable {
 			for (int loc : msg_locations) {
 				writeTransactionInfo(loc);
 			}
+		} else {
+			// When writing a metadata message, make sure transaction state has
+			// been reset. If you are running into this assertion, make sure
+			// you are calling addTransactionInfo before each transaction.
+			ASSERT(transactionSubseq == 0);
 		}
 
 		uint32_t subseq = this->subsequence++;
