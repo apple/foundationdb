@@ -82,9 +82,12 @@ public:
 		}
 		Promise<decltype(func())> promise;
 		addTask([&promise, &func, priority] {
-			auto funcResult = func();
-			onMainThreadVoid([&promise, &funcResult] { promise.send(funcResult); }, nullptr,
-			                 priority); // TODO: Add error handling
+			try {
+				auto funcResult = func();
+				onMainThreadVoid([&promise, &funcResult] { promise.send(funcResult); }, nullptr, priority);
+			} catch (Error& e) {
+				onMainThreadVoid([&promise, &e] { promise.sendError(e); }, nullptr, priority);
+			}
 		});
 		return promise.getFuture();
 	}
