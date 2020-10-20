@@ -536,6 +536,16 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	state const Optional<UID>& debugID = self->debugID;
 	state Span span("MP:preresolutionProcessing"_loc, self->span.context);
 
+	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchResolving.get() >
+	        SERVER_KNOBS->RESET_MASTER_BATCHES &&
+	    now() - self->pProxyCommitData->lastMasterReset > SERVER_KNOBS->RESET_MASTER_DELAY) {
+		TraceEvent(SevWarnAlways, "ResetMasterNetwork")
+		    .detail("CurrentBatch", self->localBatchNumber)
+		    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchResolving.get());
+		FlowTransport::transport().resetConnection(self->pProxyCommitData->master.address());
+		self->pProxyCommitData->lastMasterReset = now();
+	}
+
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
@@ -629,6 +639,18 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	self->releaseFuture = releaseResolvingAfter(
 		pProxyCommitData, self->releaseDelay, self->localBatchNumber
 	);
+
+	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchLogging.get() >
+	        SERVER_KNOBS->RESET_RESOLVER_BATCHES &&
+	    now() - self->pProxyCommitData->lastResolverReset > SERVER_KNOBS->RESET_RESOLVER_DELAY) {
+		TraceEvent(SevWarnAlways, "ResetResolverNetwork")
+		    .detail("CurrentBatch", self->localBatchNumber)
+		    .detail("InProcessBatch", self->pProxyCommitData->latestLocalCommitBatchLogging.get());
+		for (int r = 0; r < self->pProxyCommitData->resolvers.size(); r++) {
+			FlowTransport::transport().resetConnection(self->pProxyCommitData->resolvers[r].address());
+		}
+		self->pProxyCommitData->lastResolverReset = now();
+	}
 
 	// Wait for the final resolution
 	std::vector<ResolveTransactionBatchReply> resolutionResp = wait(getAll(replies));
@@ -1069,14 +1091,16 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	self->computeDuration += g_network->timer() - self->computeStart;
-	if(self->computeDuration > SERVER_KNOBS->MIN_PROXY_COMPUTE && self->batchOperations > 0) {
-		double computePerOperation = self->computeDuration / self->batchOperations;
-		if(computePerOperation <= pProxyCommitData->commitComputePerOperation[self->latencyBucket]) {
-			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = computePerOperation;
-		} else {
-			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
-		}
-	}
+	if (self->batchOperations > 0) {
+ 		double computePerOperation = std::min( SERVER_KNOBS->MAX_COMPUTE_PER_OPERATION, self->computeDuration / self->batchOperations );
+ 		if(computePerOperation <= pProxyCommitData->commitComputePerOperation[self->latencyBucket]) {
+ 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = computePerOperation;
+ 		} else {
+ 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE*computePerOperation + ((1.0-SERVER_KNOBS->PROXY_COMPUTE_GROWTH_RATE)*pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+ 		}
+ 		pProxyCommitData->stats.maxComputeNS = std::max<int64_t>(pProxyCommitData->stats.maxComputeNS, 1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+  		pProxyCommitData->stats.minComputeNS = std::min<int64_t>(pProxyCommitData->stats.minComputeNS, 1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+ 	}
 
 	return Void();
 }

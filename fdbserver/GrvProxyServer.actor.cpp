@@ -42,8 +42,35 @@ struct GrvProxyStats {
 
 	Future<Void> logger;
 
+	int recentRequests;
+  	Deque<int> requestBuckets;
+  	double lastBucketBegin;
+  	double bucketInterval;
+
+   	void updateRequestBuckets() {
+  		while(now() - lastBucketBegin > bucketInterval) {
+  			lastBucketBegin += bucketInterval;
+  			recentRequests -= requestBuckets.front();
+  			requestBuckets.pop_front();
+  			requestBuckets.push_back(0);
+  		}
+  	}
+
+   	void addRequest(int transactionCount) {
+  		updateRequestBuckets();
+  		recentRequests += transactionCount;
+  		requestBuckets.back() += transactionCount;
+  	}
+
+   	int getRecentRequests() {	
+  		updateRequestBuckets();
+  		return recentRequests/(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE-(lastBucketBegin+bucketInterval-now()));
+  	}
+
 	explicit GrvProxyStats(UID id)
-	  : cc("GrvProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
+	  : cc("GrvProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
+  	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+ 	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
 	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
 	    txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
 	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
@@ -55,6 +82,9 @@ struct GrvProxyStats {
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencyBands("GRVLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
 		logger = traceCounters("GrvProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "GrvProxyMetrics");
+		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
+  			requestBuckets.push_back(0);
+  		}
 	}
 };
 
@@ -280,6 +310,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 					req.reply.send(rep);
 					TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceeded").suppressFor(60);
 				} else {
+					stats->addRequest(req.transactionCount);
 					// TODO: check whether this is reasonable to do in the fast path
 					for(auto tag : req.tags) {
 						(*transactionTagCounter)[tag.first] += tag.second;
@@ -389,8 +420,13 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan, Grv
 	rep.version = repFromMaster.version;
 	rep.locked = repFromMaster.locked;
 	rep.metadataVersion = repFromMaster.metadataVersion;
-	rep.processBusyTime = 1e6 * (g_network->isSimulated() ? deterministicRandom()->random01() : g_network->networkInfo.metrics.lastRunLoopBusyness);
-
+	rep.processBusyTime =
+ 	    FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION *
+ 	    std::min((std::numeric_limits<int>::max() / FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION) - 1,
+ 	             grvProxyData->stats.getRecentRequests());
+ 	rep.processBusyTime += FLOW_KNOBS->BASIC_LOAD_BALANCE_COMPUTE_PRECISION *
+ 	                       (g_network->isSimulated() ? deterministicRandom()->random01()
+ 	                                                 : g_network->networkInfo.metrics.lastRunLoopBusyness);
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "GrvProxyServer.getLiveCommittedVersion.After");
