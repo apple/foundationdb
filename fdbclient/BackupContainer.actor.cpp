@@ -52,12 +52,13 @@
 namespace IBackupFile_impl {
 
 ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
-		state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
-		wait(file->append(&lenBuf, sizeof(lenBuf)));
-		wait(file->append(s.begin(), s.size()));
-		return Void();
-	}
+	state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
+	wait(file->append(&lenBuf, sizeof(lenBuf)));
+	wait(file->append(s.begin(), s.size()));
+	return Void();
 }
+
+} // namespace IBackupFile_impl
 
 Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
