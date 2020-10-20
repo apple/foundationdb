@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
@@ -40,6 +41,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 	int waitRetries;
 	bool stopBackup;
 	bool checkBeginVersion;
+	bool manualBackupAgentStart;
+
+	double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+	std::vector<Future<Void>> agentFutures;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
@@ -50,6 +55,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		waitRetries = getOption(options, LiteralStringRef("waitRetries"), -1);
 		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
+		manualBackupAgentStart = getOption(options, LiteralStringRef("manualBackupAgentStart"), false);
 	}
 
 	std::string description() const override { return "IncrementalBackup"; }
@@ -151,6 +157,24 @@ struct IncrementalBackupWorkload : TestWorkload {
 			TraceEvent("IBackupSubmitSuccess");
 		}
 		if (self->restoreOnly) {
+			if (self->manualBackupAgentStart) {
+				state Transaction earlyTr(cx);
+				// Clear Relevant System Keys
+				loop {
+					try {
+						earlyTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						earlyTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						earlyTr.clear(fileBackupPrefixRange);
+						wait(earlyTr.commit());
+						break;
+					} catch (Error& e) {
+						wait(earlyTr.onError(e));
+					}
+				}
+				TraceEvent("IBackupRunBackupAgent");
+				self->agentFutures.push_back(
+				    self->backupAgent.run(cx, &self->backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+			}
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
