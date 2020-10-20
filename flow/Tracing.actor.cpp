@@ -138,20 +138,20 @@ public:
 		// request.write_byte(6 | 0b10010000); // write as array
 		request.write_byte(6 | 0b10000000); // write as map
 
-		serialize_string(StringRef("first"), request);
+		serialize_string("first", request);
 		serialize_value(span.context.first(), request, 0xcf);
-		serialize_string(StringRef("second"), request);
+		serialize_string("second", request);
 		serialize_value(span.context.second(), request, 0xcf);
 
-		serialize_string(StringRef("begin"), request);
+		serialize_string("begin", request);
 		serialize_value(span.begin, request, 0xcb);
-		serialize_string(StringRef("end"), request);
+		serialize_string("end", request);
 		serialize_value(span.end, request, 0xcb);
 
-		serialize_string(StringRef("location"), request);
-		serialize_string(span.location.name, request);
+		serialize_string("location", request);
+		serialize_string(span.location.name.toString(), request);
 
-		serialize_string(StringRef("parents"), request);
+		serialize_string("parents", request);
 		serialize_vector(span.parents, request);
 
 		stream_.send(request);
@@ -175,7 +175,7 @@ private:
 	// Writes the given string to the request as a sequence of bytes. Inserts a
 	// format byte at the beginning of the string according to the its length,
 	// specified by the msgpack specification.
-	inline void serialize_string(const StringRef& str, TraceRequest& request) {
+	inline void serialize_string(const std::string& str, TraceRequest& request) {
 		int size = str.size();
 		if (size <= 31) {
 			request.write_byte((uint8_t) size | 0b10100000);
@@ -187,7 +187,7 @@ private:
 			ASSERT(false);
 		}
 
-		request.write_bytes((uint8_t*) str.begin(), size);
+		request.write_bytes((uint8_t*) str.data(), size);
 	}
 
 	// Writes the given vector to the request. Assumes each element in the
