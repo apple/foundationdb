@@ -4013,7 +4013,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 				}
 				return rep.get().storageMetricsList;
 			}
-			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
 }
