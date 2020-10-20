@@ -631,6 +631,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int highestUtilizationTeam;
 
 	AsyncTrigger printDetailedTeamsInfo;
+	PromiseStream<GetMetricsRequest> getShardMetrics;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -662,7 +663,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	                 DatabaseConfiguration configuration, std::vector<Optional<Key>> includedDCs,
 	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs, Future<Void> readyToStart,
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
-	                 Reference<AsyncVar<bool>> processingUnhealthy)
+	                 Reference<AsyncVar<bool>> processingUnhealthy, PromiseStream<GetMetricsRequest> getShardMetrics)
 	  : cx(cx), distributorId(distributorId), lock(lock), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams(true), lastBuildTeamsFailed(false),
 	    teamBuilder(Void()), badTeamRemover(Void()), redundantMachineTeamRemover(Void()),
@@ -675,8 +676,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)),
 	    optimalTeamCount(0), recruitingStream(0), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs),
-	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO),
-		lastMedianAvailableSpaceUpdate(0), processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0) {
+	    zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary),
+	    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
+	    processingUnhealthy(processingUnhealthy), lowestUtilizationTeam(0), highestUtilizationTeam(0),
+	    getShardMetrics(getShardMetrics) {
 		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", distributorId)
 				.detail( "State", "Inactive" )
@@ -2965,6 +2968,30 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 	}
 }
 
+ACTOR Future<Void> zeroServerLeftLogger_impl(DDTeamCollection* self, Reference<TCTeamInfo> team) {
+	wait(delay(SERVER_KNOBS->DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY));
+	state vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
+	    ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary));
+	state std::vector<Future<StorageMetrics>> sizes;
+	sizes.reserve(shards.size());
+
+	for (auto const& shard : shards) {
+		sizes.emplace_back(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(shard))));
+		TraceEvent(SevError, "DDShardLost").detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
+	}
+
+	wait(waitForAll(sizes));
+
+	int64_t bytesLost = 0;
+	for (auto const& size : sizes) {
+		bytesLost += size.get().bytes;
+	}
+
+	TraceEvent(SevError, "DDZeroServerLeftInTeam").detail("Team", team->getDesc()).detail("TotalBytesLost", bytesLost);
+
+	return Void();
+}
+
 // Track a team and issue RelocateShards when the level of degradation changes
 // A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
@@ -2978,6 +3005,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 	state bool firstCheck = true;
+
+	state Future<Void> zeroServerLeftLogger;
 
 	if(logTeamEvents) {
 		TraceEvent("TeamTrackerStarting", self->distributorId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
@@ -3126,12 +3155,24 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 				if(lastPriority != team->getPriority()) {
 					self->priority_teams[lastPriority]--;
 					self->priority_teams[team->getPriority()]++;
+					if (lastPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT &&
+					    team->getPriority() < SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
+						zeroServerLeftLogger = Void();
+					}
+					if (logTeamEvents) {
+						auto dataLoss = team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+						auto severity = dataLoss ? SevError : SevInfo;
+						TraceEvent(severity, "TeamPriorityChange", self->distributorId)
+						    .detail("Priority", team->getPriority())
+						    .detail("Info", team->getDesc())
+						    .detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
+						if (team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
+							// 0 servers left in this team, data might be lost.
+							zeroServerLeftLogger = zeroServerLeftLogger_impl(self, team);
+						}
+					}
 				}
 
-				if(logTeamEvents) {
-					TraceEvent("TeamPriorityChange", self->distributorId).detail("Priority", team->getPriority())
-					.detail("Info", team->getDesc()).detail("ZeroHealthyTeams", self->zeroHealthyTeams->get());
-				}
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
 				if( self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get() ) {
@@ -4521,10 +4562,16 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
+			Reference<DDTeamCollection> primaryTeamCollection(new DDTeamCollection(
+			    cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId,
+			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(),
+			    zeroHealthyTeams[0], true, processingUnhealthy, getShardMetrics));
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				Reference<DDTeamCollection> remoteTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
+				Reference<DDTeamCollection> remoteTeamCollection(new DDTeamCollection(
+				    cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds,
+				    Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo),
+				    zeroHealthyTeams[1], false, processingUnhealthy, getShardMetrics));
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
@@ -4764,20 +4811,11 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	conf.storageTeamSize = teamSize;
 	conf.storagePolicy = policy;
 
-	DDTeamCollection* collection = new DDTeamCollection(
-		database,
-		UID(0, 0),
-		MoveKeysLock(),
-		PromiseStream<RelocateShard>(),
-		Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()),
-		conf,
-		{},
-		{},
-		Future<Void>(Void()),
-		Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ),
-		true,
-		Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) )
-	);
+	DDTeamCollection* collection =
+	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
+	                         Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()), conf, {}, {},
+	                         Future<Void>(Void()), Reference<AsyncVar<bool>>(new AsyncVar<bool>(true)), true,
+	                         Reference<AsyncVar<bool>>(new AsyncVar<bool>(false)), PromiseStream<GetMetricsRequest>());
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -4805,9 +4843,8 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 	DDTeamCollection* collection =
 	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
 	                         Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()), conf, {}, {},
-	                         Future<Void>(Void()),
-	                         Reference<AsyncVar<bool>>(new AsyncVar<bool>(true)), true,
-	                         Reference<AsyncVar<bool>>(new AsyncVar<bool>(false)));
+	                         Future<Void>(Void()), Reference<AsyncVar<bool>>(new AsyncVar<bool>(true)), true,
+	                         Reference<AsyncVar<bool>>(new AsyncVar<bool>(false)), PromiseStream<GetMetricsRequest>());
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
