@@ -1852,6 +1852,10 @@ ACTOR Future<Void> ddMetricsRequestServer(MasterProxyInterface proxy, Reference<
 		choose {
 			when(state GetDDMetricsRequest req = waitNext(proxy.getDDMetrics.getFuture()))
 			{
+				if (!db->get().distributor.present()) {
+					req.reply.sendError(operation_failed());
+					continue;
+				}
 				ErrorOr<GetDataDistributorMetricsReply> reply = wait(errorOr(db->get().distributor.get().dataDistributorMetrics.getReply(GetDataDistributorMetricsRequest(req.keys, req.shardLimit))));
 				if ( reply.isError() ) {
 					req.reply.sendError(reply.getError());
