@@ -257,7 +257,7 @@ struct Traceable<std::set<T>> : std::true_type {
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
 std::string printable( const KeyRangeRef& range );
-std::string printable(const VectorRef<KeyRangeRef>& val);
+std::string printable( const VectorRef<KeyRangeRef>& val);
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
