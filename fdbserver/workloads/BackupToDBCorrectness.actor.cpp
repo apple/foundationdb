@@ -545,9 +545,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(self->backupTag));
 				try {
-					wait(backupAgent.abortBackup(self->extraDB, self->backupTag));
-				}
-				catch (Error& e) {
+					// This abort can race with submitBackup such that destUID may
+					// not be set yet. Adding "waitForDestUID" flag to avoid the race.
+					wait(backupAgent.abortBackup(self->extraDB, self->backupTag, /*partial=*/false,
+					                             /*abortOldBackup=*/false, /*dstOnly=*/false, /*waitForDestUID*/ true));
+				} catch (Error& e) {
 					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
 					if (e.code() != error_code_backup_unneeded)
 						throw;
