@@ -158,17 +158,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 		}
 		if (self->restoreOnly) {
 			if (self->manualBackupAgentStart) {
-				state Transaction earlyTr(cx);
+				state Transaction clearTr(cx);
 				// Clear Relevant System Keys
 				loop {
 					try {
-						earlyTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						earlyTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						earlyTr.clear(fileBackupPrefixRange);
-						wait(earlyTr.commit());
+						clearTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						clearTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						clearTr.clear(fileBackupPrefixRange);
+						wait(clearTr.commit());
 						break;
 					} catch (Error& e) {
-						wait(earlyTr.onError(e));
+						wait(clearTr.onError(e));
 					}
 				}
 				TraceEvent("IBackupRunBackupAgent");
@@ -179,7 +179,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
 			wait(success(self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-			state Key backupURL = LiteralStringRef("N/A");
 			if (self->checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys");
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -208,19 +207,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 						wait(tr->onError(e));
 					}
 				}
-				TraceEvent("IBackupStartListContainersAttempt");
-				state std::vector<std::string> containers =
-				    wait(IBackupContainer::listContainers(self->backupDir.toString()));
-				TraceEvent("IBackupStartListContainersSuccess")
-				    .detail("Size", containers.size())
-				    .detail("First", containers.front());
-				backupURL = Key(containers.front());
 			}
-			if (backupURL == LiteralStringRef("N/A")) {
-				wait(success(
-				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
-				backupURL = Key(backupContainer->getURL());
-			}
+			TraceEvent("IBackupStartListContainersAttempt");
+			state std::vector<std::string> containers =
+			    wait(IBackupContainer::listContainers(self->backupDir.toString()));
+			TraceEvent("IBackupStartListContainersSuccess")
+			    .detail("Size", containers.size())
+			    .detail("First", containers.front());
+			state Key backupURL = Key(containers.front());
 			TraceEvent("IBackupRestoreAttempt")
 				.detail("BeginVersion", beginVersion);
 			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), backupURL, true, invalidVersion,
