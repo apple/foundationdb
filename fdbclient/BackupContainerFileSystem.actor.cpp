@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupContainerAzureBlobStore.h"
-#include "fdbclient/BackupContainerFileSystem.actor.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/FDBTypes.h"
 

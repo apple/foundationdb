@@ -1,5 +1,5 @@
 /*
- * BackupContainerFileSystem.actor.h
+ * BackupContainerFileSystem.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,12 +18,9 @@
  * limitations under the License.
  */
 
-#pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_ACTOR_G_H)
-#define FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_ACTOR_G_H
-#include "fdbclient/BackupContainerFileSystem.actor.g.h"
-#elif !defined(FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_H)
+#ifndef FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_H
 #define FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_H
+#pragma once
 
 // FIXME: Trim this down
 #include "flow/Platform.actor.h"
@@ -50,7 +47,6 @@
 #include <time.h>
 
 #include "fdbclient/BackupContainer.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
  * Inheritors must only defined methods for writing, reading, deleting, sizing, and listing files.
@@ -276,5 +272,4 @@ public:
 	VersionProperty logType();
 };
 
-#include "flow/unactorcompiler.h"
 #endif

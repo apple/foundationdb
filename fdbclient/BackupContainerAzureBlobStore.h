@@ -22,7 +22,7 @@
 #define FDBCLIENT_BACKUP_CONTAINER_AZURE_BLOBSTORE_H
 #pragma once
 
-#include "fdbclient/BackupContainerFileSystem.actor.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 
 #include "storage_credential.h"
 #include "storage_account.h"

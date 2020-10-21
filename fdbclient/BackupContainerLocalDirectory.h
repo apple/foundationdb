@@ -22,7 +22,7 @@
 #define FDBCLIENT_BACKUP_CONTAINER_LOCAL_DIRECTORY_H
 #pragma once
 
-#include "fdbclient/BackupContainerFileSystem.actor.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 
 class BackupContainerLocalDirectory : public BackupContainerFileSystem,
                                       ReferenceCounted<BackupContainerLocalDirectory> {

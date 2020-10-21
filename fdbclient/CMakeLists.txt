@@ -11,7 +11,7 @@ set(FDBCLIENT_SRCS
   BackupContainerAzureBlobStore.actor.cpp
   BackupContainerAzureBlobStore.h
   BackupContainerFileSystem.actor.cpp
-  BackupContainerFileSystem.actor.h
+  BackupContainerFileSystem.h
   BackupContainerLocalDirectory.actor.cpp
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
