@@ -3180,8 +3180,8 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						zeroServerLeftLogger = Void();
 					}
 					if (logTeamEvents) {
-						auto dataLoss = team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
-						auto severity = dataLoss ? SevWarnAlways : SevInfo;
+						int dataLoss = team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+						Severity severity = dataLoss ? SevWarnAlways : SevInfo;
 						TraceEvent(severity, "ServerTeamPriorityChange", self->distributorId)
 						    .detail("Priority", team->getPriority())
 						    .detail("Info", team->getDesc())
