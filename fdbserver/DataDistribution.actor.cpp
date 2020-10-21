@@ -2206,7 +2206,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 				if (addedTeams <= 0 && self->teams.size() == 0) {
 					TraceEvent(SevWarn, "NoTeamAfterBuildTeam", self->distributorId)
-					    .detail("ServdfTeamNum", self->teams.size())
+					    .detail("ServerTeamNum", self->teams.size())
 					    .detail("Debug", "Check information below");
 					// Debug: set true for traceAllInfo() to print out more information
 					self->traceAllInfo();
@@ -3133,7 +3133,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					}
 
 					if(logTeamEvents) {
-						TraceEvent("ServewrTeamHealthDifference", self->distributorId)
+						TraceEvent("ServerTeamHealthDifference", self->distributorId)
 						    .detail("ServerTeam", team->getDesc())
 						    .detail("LastOptimal", lastOptimal)
 						    .detail("LastHealthy", lastHealthy)
