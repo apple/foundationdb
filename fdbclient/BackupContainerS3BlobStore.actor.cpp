@@ -22,107 +22,111 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-namespace {
-
-// Backup files to under a single folder prefix with subfolders for each named backup
-const std::string DATAFOLDER = "data";
-
-// Indexfolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
-// number of slashes so the backup names are kept in a separate folder tree from their actual data.
-const std::string INDEXFOLDER = "backups";
-
-ACTOR static Future<std::vector<std::string>> listURLs_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
-	state std::string basePath = INDEXFOLDER + '/';
-	BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
-	std::vector<std::string> results;
-	for (auto& f : contents.objects) {
-		results.push_back(bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
-	}
-	return results;
-}
-
-class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
+class BackupContainerS3BlobStoreImpl {
 public:
-	BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
+	// Backup files to under a single folder prefix with subfolders for each named backup
+	static const std::string DATAFOLDER;
 
-	Future<Void> append(const void* data, int len) {
-		Future<Void> r = m_file->write(data, len, m_offset);
-		m_offset += len;
-		return r;
+	// Indexfolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
+	// number of slashes so the backup names are kept in a separate folder tree from their actual data.
+	static const std::string INDEXFOLDER;
+
+	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
+		state std::string basePath = INDEXFOLDER + '/';
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
+		std::vector<std::string> results;
+		for (auto& f : contents.objects) {
+			results.push_back(
+			    bstore->getResourceURL(f.name.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
+		}
+		return results;
 	}
 
-	Future<Void> finish() {
-		Reference<BackupFile> self = Reference<BackupFile>::addRef(this);
-		return map(m_file->sync(), [=](Void _) {
-			self->m_file.clear();
-			return Void();
-		});
-	}
+	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
+	public:
+		BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
 
-	void addref() final { return ReferenceCounted<BackupFile>::addref(); }
-	void delref() final { return ReferenceCounted<BackupFile>::delref(); }
+		Future<Void> append(const void* data, int len) {
+			Future<Void> r = m_file->write(data, len, m_offset);
+			m_offset += len;
+			return r;
+		}
 
-private:
-	Reference<IAsyncFile> m_file;
-};
+		Future<Void> finish() {
+			Reference<BackupFile> self = Reference<BackupFile>::addRef(this);
+			return map(m_file->sync(), [=](Void _) {
+				self->m_file.clear();
+				return Void();
+			});
+		}
 
-ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(
-    Reference<BackupContainerS3BlobStore> bc, std::string path, std::function<bool(std::string const&)> pathFilter) {
-	// pathFilter expects container based paths, so create a wrapper which converts a raw path
-	// to a container path by removing the known backup name prefix.
-	state int prefixTrim = bc->dataPath("").size();
-	std::function<bool(std::string const&)> rawPathFilter = [=](const std::string& folderPath) {
-		ASSERT(folderPath.size() >= prefixTrim);
-		return pathFilter(folderPath.substr(prefixTrim));
+		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
+
+	private:
+		Reference<IAsyncFile> m_file;
 	};
 
-	state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(
-	    bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
-	BackupContainerFileSystem::FilesAndSizesT files;
-	for (auto& o : result.objects) {
-		ASSERT(o.name.size() >= prefixTrim);
-		files.push_back({ o.name.substr(prefixTrim), o.size });
-	}
-	return files;
-}
+	ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles(
+	    Reference<BackupContainerS3BlobStore> bc, std::string path,
+	    std::function<bool(std::string const&)> pathFilter) {
+		// pathFilter expects container based paths, so create a wrapper which converts a raw path
+		// to a container path by removing the known backup name prefix.
+		state int prefixTrim = bc->dataPath("").size();
+		std::function<bool(std::string const&)> rawPathFilter = [=](const std::string& folderPath) {
+			ASSERT(folderPath.size() >= prefixTrim);
+			return pathFilter(folderPath.substr(prefixTrim));
+		};
 
-ACTOR static Future<Void> create_impl(Reference<BackupContainerS3BlobStore> bc) {
-	wait(bc->m_bstore->createBucket(bc->m_bucket));
-
-	// Check/create the index entry
-	bool exists = wait(bc->m_bstore->objectExists(bc->m_bucket, bc->indexEntry()));
-	if (!exists) {
-		wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
-	}
-
-	return Void();
-}
-
-ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerS3BlobStore> bc, int* pNumDeleted) {
-	bool e = wait(bc->exists());
-	if (!e) {
-		TraceEvent(SevWarnAlways, "BackupContainerDoesNotExist").detail("URL", bc->getURL());
-		throw backup_does_not_exist();
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(
+		    bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
+		BackupContainerFileSystem::FilesAndSizesT files;
+		for (auto& o : result.objects) {
+			ASSERT(o.name.size() >= prefixTrim);
+			files.push_back({ o.name.substr(prefixTrim), o.size });
+		}
+		return files;
 	}
 
-	// First delete everything under the data prefix in the bucket
-	wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
+	ACTOR static Future<Void> create(Reference<BackupContainerS3BlobStore> bc) {
+		wait(bc->m_bstore->createBucket(bc->m_bucket));
 
-	// Now that all files are deleted, delete the index entry
-	wait(bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry()));
+		// Check/create the index entry
+		bool exists = wait(bc->m_bstore->objectExists(bc->m_bucket, bc->indexEntry()));
+		if (!exists) {
+			wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
+		}
 
-	return Void();
-}
+		return Void();
+	}
 
-} // namespace
+	ACTOR static Future<Void> deleteContainer(Reference<BackupContainerS3BlobStore> bc, int* pNumDeleted) {
+		bool e = wait(bc->exists());
+		if (!e) {
+			TraceEvent(SevWarnAlways, "BackupContainerDoesNotExist").detail("URL", bc->getURL());
+			throw backup_does_not_exist();
+		}
+
+		// First delete everything under the data prefix in the bucket
+		wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
+
+		// Now that all files are deleted, delete the index entry
+		wait(bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry()));
+
+		return Void();
+	}
+};
+
+const std::string BackupContainerS3BlobStoreImpl::DATAFOLDER = "data";
+const std::string BackupContainerS3BlobStoreImpl::INDEXFOLDER = "backups";
 
 std::string BackupContainerS3BlobStore::dataPath(const std::string path) {
-	return DATAFOLDER + "/" + m_name + "/" + path;
+	return BackupContainerS3BlobStoreImpl::DATAFOLDER + "/" + m_name + "/" + path;
 }
 
 // Get the path of the backups's index entry
 std::string BackupContainerS3BlobStore::indexEntry() {
-	return INDEXFOLDER + "/" + m_name;
+	return BackupContainerS3BlobStoreImpl::INDEXFOLDER + "/" + m_name;
 }
 
 BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, std::string name,
@@ -163,12 +167,12 @@ Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(std::string p
 
 Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<BlobStoreEndpoint> bstore,
                                                                       std::string bucket) {
-	return listURLs_impl(bstore, bucket);
+	return BackupContainerS3BlobStoreImpl::listURLs(bstore, bucket);
 }
 
 Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::string& path) {
-	return Reference<IBackupFile>(
-	    new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
+	return Reference<IBackupFile>(new BackupContainerS3BlobStoreImpl::BackupFile(
+	    path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
 }
 
 Future<Void> BackupContainerS3BlobStore::deleteFile(std::string path) {
@@ -177,11 +181,12 @@ Future<Void> BackupContainerS3BlobStore::deleteFile(std::string path) {
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerS3BlobStore::listFiles(
     std::string path, std::function<bool(std::string const&)> pathFilter) {
-	return listFiles_impl(Reference<BackupContainerS3BlobStore>::addRef(this), path, pathFilter);
+	return BackupContainerS3BlobStoreImpl::listFiles(Reference<BackupContainerS3BlobStore>::addRef(this), path,
+	                                                 pathFilter);
 }
 
 Future<Void> BackupContainerS3BlobStore::create() {
-	return create_impl(Reference<BackupContainerS3BlobStore>::addRef(this));
+	return BackupContainerS3BlobStoreImpl::create(Reference<BackupContainerS3BlobStore>::addRef(this));
 }
 
 Future<bool> BackupContainerS3BlobStore::exists() {
@@ -189,7 +194,8 @@ Future<bool> BackupContainerS3BlobStore::exists() {
 }
 
 Future<Void> BackupContainerS3BlobStore::deleteContainer(int* pNumDeleted) {
-	return deleteContainer_impl(Reference<BackupContainerS3BlobStore>::addRef(this), pNumDeleted);
+	return BackupContainerS3BlobStoreImpl::deleteContainer(Reference<BackupContainerS3BlobStore>::addRef(this),
+	                                                       pNumDeleted);
 }
 
 std::string BackupContainerS3BlobStore::getBucket() const {

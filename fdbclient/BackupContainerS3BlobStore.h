@@ -26,8 +26,6 @@
 
 class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
                                          ReferenceCounted<BackupContainerS3BlobStore> {
-public:
-	// TODO: Encapsulate these?
 	Reference<BlobStoreEndpoint> m_bstore;
 	std::string m_name;
 
@@ -38,6 +36,8 @@ public:
 
 	// Get the path of the backups's index entry
 	std::string indexEntry();
+
+	friend class BackupContainerS3BlobStoreImpl;
 
 public:
 	BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, std::string name,
