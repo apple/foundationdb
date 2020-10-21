@@ -61,5 +61,14 @@ RUN cd /opt/ &&\
     tar -xjf boost_1_72_0.tar.bz2 &&\
     rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0/libs
 
+RUN yum -y install rh-python36
+
+# Install CCACHE
+RUN cd /tmp && curl -L https://github.com/ccache/ccache/releases/download/v4.0/ccache-4.0.tar.gz > ccache.tar.gz &&\
+    echo "ac97af86679028ebc8555c99318352588ff50f515fc3a7f8ed21a8ad367e3d45  ccache.tar.gz" > ccache-sha256.txt &&\
+    sha256sum -c ccache-sha256.txt &&\
+    tar xf ccache.tar.gz && rm -rf build && mkdir build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DZSTD_FROM_INTERNET=ON ../ccache-4.0 &&\
+    cmake --build . --target install && cd / && rm -rf tmp/build && rm -rf tmp/ccache-4.0
+
 # do some cleanup
 RUN rm -rf /tmp/* && yum clean all && rm -rf /var/cache/yum
