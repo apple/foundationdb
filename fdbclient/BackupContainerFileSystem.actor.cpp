@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.actor.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/FDBTypes.h"

@@ -36,6 +36,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileBlobStore.actor.h"
+#include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.actor.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/Status.h"

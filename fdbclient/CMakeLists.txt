@@ -8,6 +8,8 @@ set(FDBCLIENT_SRCS
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
+  BackupContainerAzureBlobStore.actor.cpp
+  BackupContainerAzureBlobStore.h
   BackupContainerFileSystem.actor.cpp
   BackupContainerFileSystem.actor.h
   BackupContainerLocalDirectory.actor.cpp
