@@ -63,7 +63,7 @@ struct IDataDistributionTeam {
 
 	std::string getDesc() {
 		const auto& servers = getLastKnownServerInterfaces();
-		std::string s = format("[TeamID - %s]", getTeamID().shortString());
+		std::string s = format("[TeamID - %s]", getTeamID().shortString().c_str());
 		s += format("Size %d; ", servers.size());
 		for(int i=0; i<servers.size(); i++) {
 			if (i) s += ", ";
