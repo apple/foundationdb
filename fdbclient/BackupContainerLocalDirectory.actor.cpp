@@ -22,7 +22,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO: Put in namespace
+namespace {
+
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
 	BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath)
@@ -76,6 +77,8 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 
 	return results;
 }
+
+} // namespace
 
 void BackupContainerLocalDirectory::addref() {
 	return ReferenceCounted<BackupContainerLocalDirectory>::addref();
