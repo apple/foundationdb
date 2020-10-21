@@ -82,11 +82,14 @@ struct RelocateData {
 };
 
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
+private:
+	UID id;
+
 public:
 	vector<Reference<IDataDistributionTeam>> teams;
 	vector<UID> tempServerIDs;
 
-	ParallelTCInfo() { }
+	ParallelTCInfo() : id(deterministicRandom()->randomUniqueID()) {}
 
 	void addTeam(Reference<IDataDistributionTeam> team) {
 		teams.push_back(team);
@@ -250,6 +253,8 @@ public:
 		ASSERT(!teams.empty());
 		teams[0]->addServers(servers);
 	}
+
+	UID getTeamID() override { return id; }
 };
 
 struct Busyness {
