@@ -32,14 +32,15 @@ class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,
                                             ReferenceCounted<BackupContainerAzureBlobStore> {
 	using AzureClient = azure::storage_lite::blob_client;
 
-public:
-	// TODO: Encapsulate these?
 	std::unique_ptr<AzureClient> client;
 	std::string containerName;
 	AsyncTaskThread asyncTaskThread;
 
 	Future<bool> blobExists(const std::string& fileName);
 
+	friend class BackupContainerAzureBlobStoreImpl;
+
+public:
 	BackupContainerAzureBlobStore();
 
 	void addref() override;
