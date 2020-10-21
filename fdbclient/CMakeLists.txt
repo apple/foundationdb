@@ -10,6 +10,8 @@ set(FDBCLIENT_SRCS
   BackupContainer.h
   BackupContainerFileSystem.actor.cpp
   BackupContainerFileSystem.actor.h
+  BackupContainerLocalDirectory.actor.cpp
+  BackupContainerLocalDirectory.h
   BlobStore.actor.cpp
   ClientLogEvents.h
   ClientWorkerInterface.h

@@ -37,6 +37,7 @@
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/BackupContainerFileSystem.actor.h"
+#include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"

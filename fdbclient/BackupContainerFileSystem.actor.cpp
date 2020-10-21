@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupContainerFileSystem.actor.h"
+#include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/FDBTypes.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
