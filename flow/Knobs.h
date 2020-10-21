@@ -186,6 +186,9 @@ public:
 	double MAX_CLOGGING_LATENCY;
 	double MAX_BUGGIFIED_DELAY;
 	int SIM_CONNECT_ERROR_MODE;
+#if VALGRIND
+	int VALGRIND_PRECISE;
+#endif
 
 	//Tracefiles
 	int ZERO_LENGTH_FILE_PAD;

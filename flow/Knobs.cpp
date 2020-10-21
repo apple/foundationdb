@@ -167,6 +167,10 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * deterministicRandom()->random01();
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
 	init( SIM_CONNECT_ERROR_MODE, deterministicRandom()->randomInt(0,3) );
+#if VALGRIND
+    // If non-zero, the add additional instrumentation so that valgrind is more precise but slower.
+	init( VALGRIND_PRECISE, 0 );
+#endif
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );

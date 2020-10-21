@@ -24,17 +24,8 @@
 
 // See https://dox.ipxe.org/memcheck_8h_source.html and https://dox.ipxe.org/valgrind_8h_source.html for an explanation
 // of valgrind client requests
-#ifdef VALGRIND_ARENA
+#if VALGRIND
 #include <memcheck.h>
-#else
-// Since VALGRIND_ARENA is not set, we don't want to pay the performance penalty for precise tracking of arenas. We'll
-// make these macros noops just for this translation unit.
-#undef VALGRIND_MAKE_MEM_NOACCESS
-#undef VALGRIND_MAKE_MEM_DEFINED
-#undef VALGRIND_MAKE_MEM_UNDEFINED
-#define VALGRIND_MAKE_MEM_NOACCESS(addr, size) ((void)(addr), (void)(size))
-#define VALGRIND_MAKE_MEM_DEFINED(addr, size) ((void)(addr), (void)(size))
-#define VALGRIND_MAKE_MEM_UNDEFINED(addr, size) ((void)(addr), (void)(size))
 #endif
 
 // For each use of arena-internal memory (e.g. ArenaBlock::getSize()), unpoison the memory before use and
@@ -43,19 +34,39 @@
 // When allocating memory to a user, mark that memory as undefined.
 
 namespace {
+#if VALGRIND
 void allow_access(ArenaBlock* b) {
-	if (b) {
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE && b) {
 		VALGRIND_MAKE_MEM_DEFINED(b, ArenaBlock::TINY_HEADER);
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
 		VALGRIND_MAKE_MEM_DEFINED(b, headerSize);
 	}
 }
 void disallow_access(ArenaBlock* b) {
-	if (b) {
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE && b) {
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
 		VALGRIND_MAKE_MEM_NOACCESS(b, headerSize);
 	}
 }
+void make_no_access(void* addr, size_t size) {
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+		VALGRIND_MAKE_MEM_NOACCESS(addr, size);
+	}
+}
+void make_defined(void* addr, size_t size) {
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+		VALGRIND_MAKE_MEM_DEFINED(addr, size);
+	}
+}
+void make_undefined(void* addr, size_t size) {
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+		make_undefined(addr, size);
+	}
+}
+#else
+void allow_access(ArenaBlock*) {}
+void disallow_access(ArenaBlock*) {}
+#endif
 } // namespace
 
 Arena::Arena() : impl(nullptr) {}
@@ -102,17 +113,17 @@ bool Arena::hasFree(size_t size, const void* address) {
 }
 
 void ArenaBlock::addref() {
-	VALGRIND_MAKE_MEM_DEFINED(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	make_defined(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 	ThreadSafeReferenceCounted<ArenaBlock>::addref();
-	VALGRIND_MAKE_MEM_NOACCESS(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	make_no_access(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 }
 
 void ArenaBlock::delref() {
-	VALGRIND_MAKE_MEM_DEFINED(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+	make_defined(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 	if (delref_no_destroy()) {
 		destroy();
 	} else {
-		VALGRIND_MAKE_MEM_NOACCESS(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
+		make_no_access(this, sizeof(ThreadSafeReferenceCounted<ArenaBlock>));
 	}
 }
 
@@ -152,12 +163,12 @@ size_t ArenaBlock::totalSize() {
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
-		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
+		make_defined(r, sizeof(ArenaBlockRef));
 		allow_access(r->next);
 		s += r->next->totalSize();
 		disallow_access(r->next);
 		o = r->nextBlockOffset;
-		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
+		make_no_access(r, sizeof(ArenaBlockRef));
 	}
 	return s;
 }
@@ -169,10 +180,10 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
-		VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
+		make_defined(r, sizeof(ArenaBlockRef));
 		r->next->getUniqueBlocks(a);
 		o = r->nextBlockOffset;
-		VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
+		make_no_access(r, sizeof(ArenaBlockRef));
 	}
 	return;
 }
@@ -191,10 +202,10 @@ int ArenaBlock::addUsed(int bytes) {
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
 	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
-	VALGRIND_MAKE_MEM_DEFINED(r, sizeof(ArenaBlockRef));
+	make_defined(r, sizeof(ArenaBlockRef));
 	r->next = next;
 	r->nextBlockOffset = nextBlockOffset;
-	VALGRIND_MAKE_MEM_NOACCESS(r, sizeof(ArenaBlockRef));
+	make_no_access(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
 }
@@ -218,7 +229,7 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 
 	void* result = (char*)b->getData() + b->addUsed(bytes);
 	disallow_access(b);
-	VALGRIND_MAKE_MEM_UNDEFINED(result, bytes);
+	make_undefined(result, bytes);
 	return result;
 }
 
@@ -315,7 +326,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	}
 	b->setrefCountUnsafe(1);
 	next.setPtrUnsafe(b);
-	VALGRIND_MAKE_MEM_NOACCESS(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
+	make_no_access(reinterpret_cast<uint8_t*>(b) + b->used(), b->unused());
 	return b;
 }
 
@@ -336,7 +347,7 @@ void ArenaBlock::destroy() {
 			int o = b->nextBlockOffset;
 			while (o) {
 				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
-				VALGRIND_MAKE_MEM_DEFINED(br, sizeof(ArenaBlockRef));
+				make_defined(br, sizeof(ArenaBlockRef));
 				allow_access(br->next);
 				if (br->next->delref_no_destroy()) stack.push_back(stackArena, br->next);
 				disallow_access(br->next);

@@ -279,6 +279,12 @@ void *FastAllocator<Size>::allocate() {
 	return malloc(Size);
 #endif
 
+#if VALGRIND
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+		return malloc(Size);
+	}
+#endif
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (!thr.freelist) {
@@ -324,6 +330,12 @@ void FastAllocator<Size>::release(void *ptr) {
 
 #ifdef USE_GPERFTOOLS
 	return free(ptr);
+#endif
+
+#if VALGRIND
+	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+		return free(ptr);
+	}
 #endif
 
 #if FASTALLOC_THREAD_SAFE
