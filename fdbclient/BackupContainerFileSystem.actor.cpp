@@ -1311,9 +1311,6 @@ BackupContainerFileSystem::VersionProperty BackupContainerFileSystem::logType() 
 	return { Reference<BackupContainerFileSystem>::addRef(this), "mutation_log_type" };
 }
 
-const std::string BackupContainerBlobStore::DATAFOLDER = "data";
-const std::string BackupContainerBlobStore::INDEXFOLDER = "backups";
-
 namespace backup_test {
 
 int chooseFileSize(std::vector<int>& sizes) {

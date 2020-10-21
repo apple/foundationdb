@@ -39,6 +39,7 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.actor.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
+#include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -242,7 +243,7 @@ std::string IBackupContainer::lastOpenError;
 std::vector<std::string> IBackupContainer::getURLFormats() {
 	std::vector<std::string> formats;
 	formats.push_back(BackupContainerLocalDirectory::getURLFormat());
-	formats.push_back(BackupContainerBlobStore::getURLFormat());
+	formats.push_back(BackupContainerS3BlobStore::getURLFormat());
 	return formats;
 }
 
@@ -268,7 +269,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url) {
 			if (resource.empty()) throw backup_invalid_url();
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') throw backup_invalid_url();
-			r = Reference<IBackupContainer>(new BackupContainerBlobStore(bstore, resource, backupParams));
+			r = Reference<IBackupContainer>(new BackupContainerS3BlobStore(bstore, resource, backupParams));
 		} else if (u.startsWith(LiteralStringRef("http"))) {
 			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore());
 		} else {
@@ -314,9 +315,9 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			}
 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
-			BackupContainerBlobStore dummy(bstore, "dummy", backupParams);
+			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams);
 
-			std::vector<std::string> results = wait(BackupContainerBlobStore::listURLs(bstore, dummy.getBucket()));
+			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;
 		} else {
 			IBackupContainer::lastOpenError = "invalid URL prefix";
