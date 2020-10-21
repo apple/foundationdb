@@ -1146,7 +1146,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			// do not test the option since it's already used by the workload
 			if (op == FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED)
 				op = -1;
-			// do not test the option since it is not used anywhere
+			// disable for now(see issue#3934, pr#3930)
 			if (op == FDBTransactionOptions::CHECK_WRITES_ENABLE)
 				op = -1;
 
