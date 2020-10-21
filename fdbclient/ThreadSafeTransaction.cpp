@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/Platform.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
@@ -366,9 +367,9 @@ const char* ThreadSafeApi::getClientVersion() {
 }
 
 ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
-	Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFilePath));
+	std::string clusterFile = strcmp(clusterFilePath, "") != 0 ? std::string(clusterFilePath) : platform::getDefaultClusterFilePath();
+	Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
 	return onMainThread( [f]() -> Future< uint64_t > {
-			// Where should this function go?
 			return getCoordinatorProtocols(f);
 		} );
 }

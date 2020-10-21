@@ -1537,6 +1537,12 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
   }
 }
 
+TEST_CASE("fdb_get_server_protocol") {
+  FDBFuture* protocolFuture = fdb_get_server_protocol(nullptr);
+  uint64_t out;
+  fdb::UInt64Future(protocolFuture).get(&out);
+}
+
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
   // Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
   // should return a watches_disabled error.

@@ -61,6 +61,12 @@ void Future::cancel() {
   return fdb_future_get_int64(future_, out);
 }
 
+// UInt64Future
+
+[[nodiscard]] fdb_error_t UInt64Future::get(uint64_t* out) {
+  return fdb_future_get_uint64(future_, out);
+}
+
 // ValueFuture
 
 [[nodiscard]] fdb_error_t ValueFuture::get(fdb_bool_t* out_present,
@@ -90,6 +96,10 @@ void Future::cancel() {
                                                    int* out_count,
                                                    fdb_bool_t* out_more) {
   return fdb_future_get_keyvalue_array(future_, out_kv, out_count, out_more);
+}
+
+UInt64Future get_server_protocol(char* clusterFile) {
+  return UInt64Future(fdb_get_server_protocol(clusterFile));
 }
 
 // Transaction

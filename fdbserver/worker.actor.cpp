@@ -1801,7 +1801,7 @@ ACTOR Future<Void> serveProtocolInfo() {
 	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
 	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
 	loop {
-		ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
+		state ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
 		req.reply.send(ProtocolInfoReply{ g_network->protocolVersion() });
 	}
 }

@@ -330,7 +330,7 @@ public:
 	BackupAgentType drAgents;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
-	bool setDiffProtocol;
+	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };

@@ -41,6 +41,7 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
@@ -48,6 +49,68 @@ static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
 constexpr UID WLTOKEN_PING_PACKET(-1, 1);
 const uint64_t TOKEN_STREAM_FLAG = 1;
+
+struct IChecksum {
+public:
+	// Width in number of bytes
+	virtual int width() const = 0;
+	// Append to checksum
+	virtual void append(std::string_view bytes) = 0;
+	// Write checksum to preallocated buffer
+	virtual void writeSum(char* buffer) = 0;
+};
+
+struct CRC32 : IChecksum {
+public:
+	CRC32() {
+		checksum = uint32_t(0);
+		checksumWidth = sizeof(checksum);
+	}
+	int width() const override {
+		return checksumWidth;
+	}
+	void append(std::string_view bytes) override {
+		checksum = crc32c_append(checksum, (uint8_t*)bytes.data(), bytes.size());
+	}
+	void writeSum(char* buffer) override {
+		std::memcpy(buffer, &checksum, checksumWidth);
+		reset();
+	}
+private:
+	void reset() {
+		checksum = 0;
+	}
+
+	uint32_t checksum;
+	int checksumWidth;
+};
+
+static const std::map<ProtocolVersion, std::unique_ptr<IChecksum>> protocolToChecksum = []() {
+	std::map<ProtocolVersion, std::unique_ptr<IChecksum>> m;
+	m[ProtocolVersion(0)] = std::make_unique<CRC32>(CRC32());
+	return m;
+}();
+
+IChecksum* getMinChecksum(ProtocolVersion protocol) {
+	ASSERT(protocol >= protocolToChecksum.begin()->first);
+
+	// returns an iterator to the first pair in protocolToChecksum with key strictly greater than protocol
+	auto protocolChecksumIter = protocolToChecksum.upper_bound(protocol);
+	--protocolChecksumIter;
+
+	return protocolChecksumIter->second.get();
+}
+
+TEST_CASE("fdbrpc/ChecksumAlgorithm/GetAlgorithm") {
+	const ProtocolVersion IMPLEMENTED_PROTOCOL_VERSION = ProtocolVersion(0x0FDB00B070010001LL);
+
+	IChecksum* resOne = getMinChecksum(ProtocolVersion(0));
+	ASSERT(resOne == protocolToChecksum.at(ProtocolVersion(0)).get());
+
+	IChecksum* resTwo = getMinChecksum(IMPLEMENTED_PROTOCOL_VERSION);
+	ASSERT(resTwo == protocolToChecksum.at(ProtocolVersion(0)).get());
+	return Void();
+}
 
 class EndpointMap : NonCopyable {
 public:
@@ -321,39 +384,6 @@ struct ConnectPacket {
 };
 
 #pragma pack( pop )
-
-CRC32::CRC32() : IChecksum() {
-	checksum = uint32_t(0);
-	checksumWidth = sizeof(std::get<uint32_t>(checksum));
-}
-
-int CRC32::width() const {
-	return checksumWidth;
-}
-
-void CRC32::append(std::string_view bytes) {
-	checksum = crc32c_append(std::get<uint32_t>(checksum), (uint8_t*)bytes.data(), bytes.size());
-}
-
-void CRC32::writeSum(char* buffer) {
-	uint32_t cs = std::get<uint32_t>(checksum);
-	std::memcpy(buffer, &cs, checksumWidth);
-	reset();
-}
-
-bool CRC32::checkSum(const char* buffer) {
-	uint32_t packetLen = *(uint32_t*)buffer; buffer += sizeof(uint32_t);
-	uint32_t packetChecksum = *(uint32_t*)buffer; buffer += sizeof(uint32_t);
-
-	append(std::string_view(buffer, packetLen));
-	bool matches = std::get<uint32_t>(checksum) == packetChecksum;
-	reset();
-	return matches;
-}
-
-void CRC32::reset() {
-	checksum = uint32_t(0);
-}
 
 ACTOR static Future<Void> connectionReader(TransportData* transport, Reference<IConnection> conn, Reference<struct Peer> peer,
                                            Promise<Reference<struct Peer>> onConnected);
@@ -860,14 +890,11 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 	loop {
 		uint32_t packetLen;
 
-		auto protocolChecksumIter = protocolToChecksum.upper_bound(std::min(g_network->protocolVersion(), peerProtocolVersion));
-		ASSERT(protocolChecksumIter != protocolToChecksum.begin());
-
-		IChecksum* checksum = (--protocolChecksumIter)->second.get();
+		IChecksum* checksum = getMinChecksum(std::min(g_network->protocolVersion(), peerProtocolVersion));
 		int checksumWidth = checksumEnabled ? checksum->width() : 0;
 		if(e-p < sizeof(packetLen) + checksumWidth) break;
 		
-		packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+		packetLen = *(uint32_t*)p; p += PACKET_LEN_WIDTH;
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
@@ -877,7 +904,8 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		ASSERT( packetLen >= sizeof(UID) );
 
 		if(checksumEnabled) {
-			p += sizeof(uint32_t);
+			char* checksumStart = (char*)p;
+			p += checksum->width();
 			bool isBuggifyEnabled = false;
 			if(g_network->isSimulated() && g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
@@ -899,20 +927,32 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 				}
 			}
 
-			if (!checksum->checkSum((char*) unprocessed_begin)) {
+			char* checksumBuffer = (char*) alloca(checksum->width());
+			checksum->append(std::string_view((char*)p, packetLen));
+			checksum->writeSum(checksumBuffer);
+
+			// store stringified checksums in hex for trace
+			std::stringstream packetStream;
+			std::stringstream calculatedStream;
+			packetStream << std::hex;
+			calculatedStream << std::hex;
+			for(int i = 0; i<checksum->width(); i++){
+				packetStream << (int)checksumStart[i];
+				calculatedStream << (int)checksumBuffer[i];
+			}
+			std::string packetChecksum = packetStream.str();
+			std::string calculatedChecksum = calculatedStream.str();
+
+			if(memcmp(checksumBuffer, checksumStart, checksum->width()) != 0) {
 				if (isBuggifyEnabled) {
-					// how important is it to have the correct vs calculated checksum in the trace?
-					// TraceEvent(SevInfo, "ChecksumMismatchExp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)std::get<uint32_t>(checksum));
-					TraceEvent(SevInfo, "ChecksumMismatchExp");
+					TraceEvent(SevInfo, "ChecksumMismatchExp").detail("PacketChecksum", packetChecksum).detail("CalculatedChecksum", calculatedChecksum);
 				} else {
-					// TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)std::get<uint32_t>(checksum));
-					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp");
+					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("PacketChecksum", packetChecksum).detail("CalculatedChecksum", calculatedChecksum);
 				}
 				throw checksum_failed();
 			} else {
 				if (isBuggifyEnabled) {
-					// TraceEvent(SevError, "ChecksumMatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)std::get<uint32_t>(checksum));
-					TraceEvent(SevError, "ChecksumMatchUnexp");
+					TraceEvent(SevError, "ChecksumMatchUnexp").detail("PacketChecksum", packetChecksum).detail("CalculatedChecksum", calculatedChecksum);
 				}
 			}
 		}
@@ -950,18 +990,22 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 // Given unprocessed buffer [begin, end), check if next packet size is known and return
 // enough size for the next packet, whose format is: {size, optional_checksum, data} +
 // next_packet_size.
-static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress) {
+static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress, ProtocolVersion peerProtocolVersion) {
 	const int len = end - begin;
-	if (len < sizeof(uint32_t)) {
+	if (len < PACKET_LEN_WIDTH) {
 		return FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES;
 	}
+	ASSERT(peerProtocolVersion != ProtocolVersion());
 	const uint32_t packetLen = *(uint32_t*)begin;
+
 	if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 		TraceEvent(SevError, "PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 		throw platform_error();
 	}
+
+	int checksumWidth = !peerAddress.isTLS() ? getMinChecksum(std::min(g_network->protocolVersion(), peerProtocolVersion))->width() : 0;
 	return std::max<uint32_t>(FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES,
-	                          packetLen + sizeof(uint32_t) * (peerAddress.isTLS() ? 2 : 3));
+	                          packetLen + checksumWidth + sizeof(uint32_t) * 2);
 }
 
 ACTOR static Future<Void> connectionReader(
@@ -995,7 +1039,7 @@ ACTOR static Future<Void> connectionReader(
 				if (readAllBytes < FLOW_KNOBS->MIN_PACKET_BUFFER_FREE_BYTES) {
 					Arena newArena;
 					const int unproc_len = unprocessed_end - unprocessed_begin;
-					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
+					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress, peerProtocolVersion);
 					uint8_t* const newBuffer = new (newArena) uint8_t[ len ];
 					if (unproc_len > 0) {
 						memcpy(newBuffer, unprocessed_begin, unproc_len);
@@ -1381,12 +1425,9 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
 
-	auto protocolChecksumIter = protocolToChecksum.upper_bound(g_network->protocolVersion());
-	ASSERT(protocolChecksumIter != protocolToChecksum.begin());
-
-	IChecksum* checksum = (--protocolChecksumIter)->second.get();
+	IChecksum* checksum = getMinChecksum(g_network->protocolVersion());
 	uint32_t len;
-	int packetInfoSize = sizeof(len);
+	int packetInfoSize = PACKET_LEN_WIDTH;
 	if (checksumEnabled) {
 		packetInfoSize += checksum->width();
 	}
@@ -1423,8 +1464,6 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 		char* checksumBuffer = (char*) alloca(checksum->width());
 		checksum->writeSum(checksumBuffer);
 		packetInfoBuffer.write(checksumBuffer, checksum->width(), sizeof(len));
-		uint8_t* begin = packetInfoBuffer.begin;
-		begin += sizeof(uint32_t);
 	}
 
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {

@@ -253,36 +253,6 @@ inline bool Endpoint::isLocal() const {
 	return addresses.address == localAddrs.address || (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }
 
-struct IChecksum {
-	// Width in number of bytes
-	virtual int width() const = 0;
-	// Append to checksum
-	virtual void append(std::string_view bytes) = 0;
-	// Write checksum to preallocated buffer
-	virtual void writeSum(char* buffer) = 0;
-	// Validate checksum of packet. buffer ptr points to beginning of packetlen
-	virtual bool checkSum(const char* buffer) = 0;
-	// Reset checksum
-	virtual void reset() = 0;
-
-	// variant that allows for checksum of varying widths
-	std::variant<uint32_t> checksum;
-	int checksumWidth;
-};
-
-struct CRC32 : IChecksum {
-	CRC32();
-	int width() const override;
-	void append(std::string_view bytes) override;
-	void writeSum(char* buffer) override;
-	bool checkSum(const char* buffer) override;
-	void reset() override;
-};
-
-static const std::map<ProtocolVersion, std::unique_ptr<IChecksum>> protocolToChecksum = []() {
-	std::map<ProtocolVersion, std::unique_ptr<IChecksum>> m;
-	m[ProtocolVersion(0)] = std::make_unique<CRC32>(CRC32());
-	return m;
-}();
+const int PACKET_LEN_WIDTH = sizeof(uint32_t);
 
 #endif

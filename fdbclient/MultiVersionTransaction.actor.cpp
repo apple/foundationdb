@@ -314,7 +314,6 @@ void DLApi::init() {
 	}
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl");
-	loadClientFunction(&api->getServerProtocol, lib, fdbCPath, "fdb_get_server_protocol");
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
 	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option");
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
@@ -389,13 +388,8 @@ const char* DLApi::getClientVersion() {
 }
 
 ThreadFuture<uint64_t> DLApi::getServerProtocol(const char *clusterFilePath) {
-	FdbCApi::FDBFuture *f = api->getServerProtocol(clusterFilePath);
-	return toThreadFuture<uint64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-		uint64_t version;
-		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &version);
-		ASSERT(!error);
-		return version;
-	});
+	ASSERT(false);
+	return ThreadFuture<uint64_t>();
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
