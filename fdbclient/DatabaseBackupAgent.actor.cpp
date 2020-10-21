@@ -1530,6 +1530,7 @@ namespace dbBackup {
 					wait(tr->commit());
 					break;
 				} catch (Error &e) {
+					TraceEvent("SetDestUidOrBeginVersionError").error(e, true);
 					wait(tr->onError(e));
 				}
 			}
@@ -2097,7 +2098,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial, bool abortOldBackup, bool dstOnly) {
+	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial,
+	                                      bool abortOldBackup, bool dstOnly, bool waitForDestUID) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Key logUidValue, destUidValue;
 		state UID logUid, destUid;
@@ -2117,13 +2119,18 @@ public:
 				state Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
 				wait(success(statusFuture) && success(destUidFuture));
 
-				UID destUid = destUidFuture.get();
-				if (destUid.isValid()) {
-					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
-				}
 				int status = statusFuture.get();
 				if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 					throw backup_unneeded();
+				}
+				UID destUid = destUidFuture.get();
+				if (destUid.isValid()) {
+					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
+				} else if (destUidValue.size() == 0 && waitForDestUID) {
+					// Give DR task a chance to update destUid to avoid the problem of
+					// leftover version key. If we got an commit_unknown_result before,
+					// reuse the previous destUidValue.
+					throw not_committed();
 				}
 
 				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)));
@@ -2144,6 +2151,7 @@ public:
 				break;
 			}
 			catch (Error &e) {
+				TraceEvent("DBA_AbortError").error(e, true);
 				wait(tr->onError(e));
 			}
 		}
@@ -2452,8 +2460,9 @@ Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTran
 	return DatabaseBackupAgentImpl::discontinueBackup(this, tr, tagName);
 }
 
-Future<Void> DatabaseBackupAgent::abortBackup(Database cx, Key tagName, bool partial, bool abortOldBackup, bool dstOnly){
-	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly);
+Future<Void> DatabaseBackupAgent::abortBackup(Database cx, Key tagName, bool partial, bool abortOldBackup, bool dstOnly,
+                                              bool waitForDestUID) {
+	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 
 Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
