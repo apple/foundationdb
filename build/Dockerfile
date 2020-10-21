@@ -61,8 +61,8 @@ RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.
 ARG TIMEZONEINFO=America/Los_Angeles
 RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
 
-LABEL version=0.1.18
-ENV DOCKER_IMAGEVER=0.1.18
+LABEL version=0.1.19
+ENV DOCKER_IMAGEVER=0.1.19
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
