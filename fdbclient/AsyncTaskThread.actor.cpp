@@ -1,5 +1,5 @@
 /*
- * AsyncTaskThread.cpp
+ * AsyncTaskThread.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,5 +19,35 @@
  */
 
 #include "fdbclient/AsyncTaskThread.h"
+#include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 const double AsyncTaskThread::meanDelay = 0.01;
+
+namespace {
+
+ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, int* sum, int count) {
+	state int i = 0;
+	for (; i < count; ++i) {
+		wait(asyncTaskThread->execAsync([sum = sum] {
+			++(*sum);
+			return Void();
+		}));
+	}
+	return Void();
+}
+
+} // namespace
+
+TEST_CASE("/asynctaskthread/add") {
+	state int sum = 0;
+	state AsyncTaskThread asyncTaskThread;
+	std::vector<Future<Void>> clients;
+	clients.reserve(10);
+	for (int i = 0; i < 10; ++i) {
+		clients.push_back(asyncTaskThreadClient(&asyncTaskThread, &sum, 100));
+	}
+	wait(waitForAll(clients));
+	ASSERT(sum == 1000);
+	return Void();
+}

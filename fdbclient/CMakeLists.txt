@@ -1,7 +1,7 @@
 set(FDBCLIENT_SRCS
   AsyncFileBlobStore.actor.cpp
   AsyncFileBlobStore.actor.h
-  AsyncTaskThread.cpp
+  AsyncTaskThread.actor.cpp
   AsyncTaskThread.h
   Atomic.h
   AutoPublicAddress.cpp
