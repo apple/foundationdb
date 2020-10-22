@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
+#include <chrono>
 #include <map>
 #include <set>
 #include <type_traits>
@@ -381,6 +382,16 @@ struct SpecialTraceMetricType
 
 TRACE_METRIC_TYPE(double, double);
 
+struct RealTimePrinter {
+	using Clock = std::chrono::system_clock;
+
+	Clock::time_point beginTime;
+	double flowBeginTime;
+
+	RealTimePrinter();
+	std::string toString(double now);
+};
+
 struct TraceEvent {
 	TraceEvent();
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
@@ -395,6 +406,7 @@ struct TraceEvent {
 	static bool isNetworkThread();
 
 	static double getCurrentTime();
+	static std::string printRealTime(double time);
 
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
@@ -512,6 +524,7 @@ private:
 
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
+	static thread_local RealTimePrinter realTimePrinter;
 
 	bool init();
 	bool init( struct TraceInterval& );
