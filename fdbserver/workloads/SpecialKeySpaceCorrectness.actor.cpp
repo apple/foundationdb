@@ -741,7 +741,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
 			}
 		}
@@ -757,7 +756,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "DatabaseLockFailure").error(e);
-				if (e.code() == error_code_actor_cancelled) throw;
 				// In case commit_unknown_result is thrown by buggify, we may try to lock more than once
 				// The second lock commit will throw special_keys_api_failure error
 				if (e.code() == error_code_special_keys_api_failure) {
@@ -803,11 +801,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
 				ASSERT(e.code() != error_code_database_locked);
-				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
 			}
 		}
 		// test consistencycheck which only used by ConsistencyCheck Workload
+		// Note: we have exclusive ownership of fdbShouldConsistencyCheckBeSuspended,
+		// no existing workloads can modify the key
 		{
 			try {
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -833,7 +832,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(ccSuspendSetting2);
 				tx->reset();
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
 			}
 		}
@@ -847,7 +845,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->reset();
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_actor_cancelled) throw;
 					wait(tx->onError(e));
 				}
 			}
