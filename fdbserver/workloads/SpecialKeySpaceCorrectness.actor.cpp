@@ -816,20 +816,21 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    val1.present() ? BinaryReader::fromStringRef<bool>(val1.get(), Unversioned()) : false;
 				Optional<Value> val2 =
 				    wait(tx->get(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")));
+				// Make sure the read result from special key consistency with the system key
 				ASSERT(ccSuspendSetting ? val2.present() : !val2.present());
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				if (ccSuspendSetting)
-					tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"));
-				else
-					tx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
+				// Make sure by default, consistencycheck is enabled
+				ASSERT(!ccSuspendSetting);
+				// Disable consistencycheck
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
 				wait(tx->commit());
-				// check the system key is set/clear
 				tx->reset();
+				// Read system key to make sure it is disabled
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Optional<Value> val3 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
 				bool ccSuspendSetting2 =
 				    val3.present() ? BinaryReader::fromStringRef<bool>(val3.get(), Unversioned()) : false;
-				ASSERT(ccSuspendSetting == !ccSuspendSetting2);
+				ASSERT(ccSuspendSetting2);
 				tx->reset();
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
