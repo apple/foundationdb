@@ -951,6 +951,9 @@ Future<std::vector<std::string>> BlobStoreEndpoint::listBuckets() {
 std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
 	std::string key = secret;
 
+	if (key.size() > 64)
+		key = SHA1::from_string(key);
+
 	// First pad the key to 64 bytes.
 	key.append(64 - key.size(), '\0');
 
