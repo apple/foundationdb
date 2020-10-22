@@ -66,6 +66,9 @@ void make_undefined(void* addr, size_t size) {
 #else
 void allow_access(ArenaBlock*) {}
 void disallow_access(ArenaBlock*) {}
+void make_no_access(void*, size_t) {}
+void make_defined(void*, size_t) {}
+void make_undefined(void*, size_t) {}
 #endif
 } // namespace
 
