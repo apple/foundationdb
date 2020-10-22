@@ -241,10 +241,11 @@ std::string BackupDescription::toJSON() const {
 std::string IBackupContainer::lastOpenError;
 
 std::vector<std::string> IBackupContainer::getURLFormats() {
-	std::vector<std::string> formats;
-	formats.push_back(BackupContainerLocalDirectory::getURLFormat());
-	formats.push_back(BackupContainerS3BlobStore::getURLFormat());
-	return formats;
+	return {
+		BackupContainerAzureBlobStore::getURLFormat(),
+		BackupContainerLocalDirectory::getURLFormat(),
+		BackupContainerS3BlobStore::getURLFormat(),
+	};
 }
 
 // Get an IBackupContainer based on a container URL string

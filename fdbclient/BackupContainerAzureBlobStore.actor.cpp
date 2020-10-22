@@ -276,3 +276,7 @@ Future<Void> BackupContainerAzureBlobStore::deleteFile(const std::string& fileNa
 Future<Void> BackupContainerAzureBlobStore::deleteContainer(int* pNumDeleted) {
 	return BackupContainerAzureBlobStoreImpl::deleteContainer(this, pNumDeleted);
 }
+
+std::string BackupContainerAzureBlobStore::getURLFormat() {
+	return "azure_blobstore://<ip>:<port>/<accountname>/";
+}

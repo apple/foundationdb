@@ -60,6 +60,8 @@ public:
 	Future<Void> deleteFile(const std::string& fileName) override;
 
 	Future<Void> deleteContainer(int* pNumDeleted) override;
+
+	static std::string getURLFormat();
 };
 
 #endif
