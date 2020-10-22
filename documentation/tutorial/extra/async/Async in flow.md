@@ -8,7 +8,7 @@ FoundationDB is based on an asynchronous infrastructure named `flow`. `flow` int
 
 ### Using `ACTOR` compiler
 
-A C++ file must have `.actor.h` or `.actor.cpp` in order to trigger `actorcompiler.exe` transpiles the code into standard C++ code, the generated file will have `.g.h` or `.g.cpp` extension.
+A C++ file must have `.actor.h` or `.actor.cpp` in order to trigger `actorcompiler.exe` transpile the code into standard C++ code, the generated file will have `.g.h` or `.g.cpp` extension.
 
 The `ACTOR` file should have `#include "flow/actorcompiler.h"` as the **last** included file. If the file is a header file, at the end of the file it should have `#include "flow/unactorcompiler.h"` to prevent other include files being polluted by the macros defined in `flow/actorcompiler.h`.
 
@@ -97,7 +97,7 @@ See `state.actor.cpp` for more details.
 
 #### Add $\lambda$ functions to `ACTOR`
 
-`ACTOR`s will be compiled into several classes; thus, a $\lambda$ function inside the `ACTOR` will also affected by the scoping of `ACTOR`s. Additionally, the variable capturing of the $\lambda$ function is usually unexpected. To allow $\lambda$ functions access the `state` variables, it is necessary to explicitly let the $\lambda$ function capture `*this`. For example:
+`ACTOR`s will be compiled into C++ classes; thus, a $\lambda$ function inside the `ACTOR` will also affected by the scoping of `ACTOR`s. Additionally, the variable capturing of the $\lambda$ function is usually unexpected. To allow $\lambda$ functions access the `state` variables, it is necessary to explicitly let the $\lambda$ function capture `*this`. For example:
 
 ```c++
 ACTOR Future<Void> lambdaCapturing() {

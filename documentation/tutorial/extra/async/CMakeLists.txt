@@ -50,3 +50,8 @@ add_flow_target(EXECUTABLE NAME async_waitInt SRCS "waitInt.actor.cpp")
 target_link_libraries(async_waitInt PUBLIC fdbclient)
 set_target_properties(async_waitInt PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/extra_tutorials/)
 
+
+add_flow_target(EXECUTABLE NAME async_reportLatency SRCS "reportLatency.actor.cpp")
+target_link_libraries(async_reportLatency PUBLIC fdbclient)
+set_target_properties(async_reportLatency PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin/extra_tutorials/)
+
