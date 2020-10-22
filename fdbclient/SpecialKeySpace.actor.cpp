@@ -1138,7 +1138,7 @@ ACTOR Future<Standalone<RangeResultRef>> getLockedKeyActor(ReadYourWritesTransac
 LockDatabaseImpl::LockDatabaseImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
-	// sigle key range, the queried range should always be the same as the underlying range
+	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	auto lockEntry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")];
 	if (!ryw->readYourWritesDisabled() && lockEntry.first) {
@@ -1210,7 +1210,7 @@ ConsistencyCheckImpl::ConsistencyCheckImpl(KeyRangeRef kr) : SpecialKeyRangeRWIm
 
 Future<Standalone<RangeResultRef>> ConsistencyCheckImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                   KeyRangeRef kr) const {
-	// sigle key range, the queried range should always be the same as the underlying range
+	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")];
 	if (!ryw->readYourWritesDisabled() && entry.first) {
