@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BackupContainer_H
-#define FDBCLIENT_BackupContainer_H
+#ifndef FDBCLIENT_BACKUP_CONTAINER_H
+#define FDBCLIENT_BACKUP_CONTAINER_H
 #pragma once
 
 #include "flow/flow.h"
