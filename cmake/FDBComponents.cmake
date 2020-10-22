@@ -121,7 +121,6 @@ endif()
 
 # TOML can download and install itself into the binary directory, so it should
 # always be available.
-#find_package(TOML11)
 find_package(toml11 QUIET)
 if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
