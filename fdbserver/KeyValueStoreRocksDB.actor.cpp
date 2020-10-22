@@ -55,7 +55,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		explicit Writer(DB& db, UID id) : db(db), id(id) {}
 
-		~Writer() {
+		~Writer() override {
 			if (db) {
 				delete db;
 			}
@@ -88,6 +88,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
 			} else {
+				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
 				a.done.send(Void());
 			}
 		}
@@ -131,8 +132,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
 				if (!s.ok()) {
 					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+				} else {
+					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
 				}
 			}
+			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
 	};
