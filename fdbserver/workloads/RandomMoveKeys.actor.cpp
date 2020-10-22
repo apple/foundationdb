@@ -132,7 +132,9 @@ struct MoveKeysWorkload : TestWorkload {
 
 		try {
 			state Promise<Void> signal;
-			wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false, relocateShardInterval.pairID ) );
+			state DDEnabledState ddEnabledState;
+			wait(moveKeys(cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false,
+			              relocateShardInterval.pairID, &ddEnabledState));
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {
