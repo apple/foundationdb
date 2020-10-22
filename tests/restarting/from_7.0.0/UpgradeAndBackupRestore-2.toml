@@ -50,7 +50,7 @@ clearAfterTest=false
 
     [[test.workload]]
     testName = 'RestoreBackup'
-    tag=default
+    tag = 'default'
 
 [[test]]
 testTitle = 'CheckCycles'
