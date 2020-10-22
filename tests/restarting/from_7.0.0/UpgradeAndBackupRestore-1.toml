@@ -2,6 +2,7 @@
 testTitle = 'SubmitBackup'
 simBackupAgents= 'BackupToFile'
 clearAfterTest = false
+runConsistencyCheck=false
 
     [[test.workload]]
     testName = 'SubmitBackup'
