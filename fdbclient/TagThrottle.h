@@ -74,9 +74,9 @@ public:
 		const uint8_t *end = data + size;
 		while(data < end) {
 			uint8_t len = *(data++);
-			data += len;
 			// Tags are already deduplicated
 			const auto& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
+			data += len;
 			bytes += tag.size();
 		}
 
