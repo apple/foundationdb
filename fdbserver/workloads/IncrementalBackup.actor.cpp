@@ -19,14 +19,16 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/Arena.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct IncrementalBackupWorkload : TestWorkload {
 
@@ -36,8 +38,13 @@ struct IncrementalBackupWorkload : TestWorkload {
 	bool submitOnly;
 	bool restoreOnly;
 	bool waitForBackup;
+	int waitRetries;
 	bool stopBackup;
 	bool checkBeginVersion;
+	bool manualBackupAgentStart;
+
+	double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
+	std::vector<Future<Void>> agentFutures;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
@@ -45,8 +52,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 		submitOnly = getOption(options, LiteralStringRef("submitOnly"), false);
 		restoreOnly = getOption(options, LiteralStringRef("restoreOnly"), false);
 		waitForBackup = getOption(options, LiteralStringRef("waitForBackup"), false);
+		waitRetries = getOption(options, LiteralStringRef("waitRetries"), -1);
 		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
+		manualBackupAgentStart = getOption(options, LiteralStringRef("manualBackupAgentStart"), false);
 	}
 
 	std::string description() const override { return "IncrementalBackup"; }
@@ -81,16 +90,29 @@ struct IncrementalBackupWorkload : TestWorkload {
 					wait(tr.onError(e));
 				}
 			}
-			// Wait for backup container to be created and avoid race condition
-			TraceEvent("IBackupWaitContainer");
 			loop {
+				// Wait for backup container to be created and avoid race condition
+				TraceEvent("IBackupWaitContainer");
 				wait(success(
 				    self->backupAgent.waitBackup(cx, self->tag.toString(), false, &backupContainer, &backupUID)));
+				if (!backupContainer.isValid()) {
+					TraceEvent("IBackupCheckListContainersAttempt");
+					state std::vector<std::string> containers =
+						wait(IBackupContainer::listContainers(self->backupDir.toString()));
+					TraceEvent("IBackupCheckListContainersSuccess")
+						.detail("Size", containers.size())
+						.detail("First", containers.front());
+					if (containers.size()) {
+						backupContainer = IBackupContainer::openContainer(containers.front());
+					}
+				}
 				state bool e = wait(backupContainer->exists());
 				if (e) break;
 				wait(delay(5.0));
 			}
+			state int tries = 0;
 			loop {
+				tries++;
 				BackupDescription desc = wait(backupContainer->describeBackup(true));
 				TraceEvent("IBackupVersionGate")
 				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
@@ -99,14 +121,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 				    .detail("TargetVersion", v);
 				if (!desc.contiguousLogEnd.present()) continue;
 				if (desc.contiguousLogEnd.get() >= v) break;
+				if (self->waitRetries != -1 && tries > self->waitRetries) break;
 				// Avoid spamming requests with a delay
 				wait(delay(5.0));
 			}
 		}
 		if (self->stopBackup) {
 			try {
+				TraceEvent("IBackupDiscontinueBackup");
 				wait(self->backupAgent.discontinueBackup(cx, self->tag));
 			} catch (Error& e) {
+				TraceEvent("IBackupDiscontinueBackupException").error(e);
 				if (e.code() != error_code_backup_unneeded) {
 					throw;
 				}
@@ -132,6 +157,24 @@ struct IncrementalBackupWorkload : TestWorkload {
 			TraceEvent("IBackupSubmitSuccess");
 		}
 		if (self->restoreOnly) {
+			if (self->manualBackupAgentStart) {
+				state Transaction clearTr(cx);
+				// Clear Relevant System Keys
+				loop {
+					try {
+						clearTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						clearTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						clearTr.clear(fileBackupPrefixRange);
+						wait(clearTr.commit());
+						break;
+					} catch (Error& e) {
+						wait(clearTr.onError(e));
+					}
+				}
+				TraceEvent("IBackupRunBackupAgent");
+				self->agentFutures.push_back(
+				    self->backupAgent.run(cx, &self->backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+			}
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
 			state Version beginVersion = invalidVersion;
@@ -165,11 +208,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 					}
 				}
 			}
+			TraceEvent("IBackupStartListContainersAttempt");
+			state std::vector<std::string> containers =
+			    wait(IBackupContainer::listContainers(self->backupDir.toString()));
+			TraceEvent("IBackupStartListContainersSuccess")
+			    .detail("Size", containers.size())
+			    .detail("First", containers.front());
+			state Key backupURL = Key(containers.front());
 			TraceEvent("IBackupRestoreAttempt")
 				.detail("BeginVersion", beginVersion);
-			wait(
-			    success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), Key(backupContainer->getURL()),
-			                                      true, invalidVersion, true, normalKeys, Key(), Key(), true, true, beginVersion)));
+			wait(success(self->backupAgent.restore(cx, cx, Key(self->tag.toString()), backupURL, true, invalidVersion,
+			                                       true, normalKeys, Key(), Key(), true, true, beginVersion)));
 			TraceEvent("IBackupRestoreSuccess");
 		}
 		return Void();
