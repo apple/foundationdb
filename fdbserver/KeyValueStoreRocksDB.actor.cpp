@@ -117,6 +117,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
+			if (db == nullptr) {
+				a.done.send(Void());
+				return;
+			}
 			auto s = db->Close();
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
@@ -124,7 +128,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
-				rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				if (!s.ok()) {
+					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+				}
 			}
 			a.done.send(Void());
 		}
