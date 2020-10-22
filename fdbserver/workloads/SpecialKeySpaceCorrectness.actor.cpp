@@ -807,6 +807,50 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				wait(tx->onError(e));
 			}
 		}
+		// test consistencycheck which only used by ConsistencyCheck Workload
+		{
+			try {
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> val1 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
+				state bool ccSuspendSetting =
+				    val1.present() ? BinaryReader::fromStringRef<bool>(val1.get(), Unversioned()) : false;
+				Optional<Value> val2 =
+				    wait(tx->get(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")));
+				ASSERT(ccSuspendSetting ? val2.present() : !val2.present());
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				if (ccSuspendSetting)
+					tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"));
+				else
+					tx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
+				wait(tx->commit());
+				// check the system key is set/clear
+				tx->reset();
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> val3 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
+				bool ccSuspendSetting2 =
+				    val3.present() ? BinaryReader::fromStringRef<bool>(val3.get(), Unversioned()) : false;
+				ASSERT(ccSuspendSetting == !ccSuspendSetting2);
+				tx->reset();
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) throw;
+				wait(tx->onError(e));
+			}
+		}
+		// make sure we enable consistencycheck by the end
+		{
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					if (e.code() == error_code_actor_cancelled) throw;
+					wait(tx->onError(e));
+				}
+			}
+		}
 		return Void();
 	}
 };
