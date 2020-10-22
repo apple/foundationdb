@@ -1213,6 +1213,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	static void addTestCases() {
+		// this group passes on its own.
+		// TestGet + TestSet passes.
+
 		testCases.push_back(std::bind(&TestSetVersion::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestGet::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestGetKey::runTest, ph::_1, ph::_2, ph::_3));
@@ -1223,6 +1226,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		testCases.push_back(std::bind(&TestGetAddressesForKey::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestAddReadConflictRange::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestAtomicOp::runTest, ph::_1, ph::_2, ph::_3));
+
+		// all below passes
 		testCases.push_back(std::bind(&TestSet::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestClear0::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestClear1::runTest, ph::_1, ph::_2, ph::_3));
