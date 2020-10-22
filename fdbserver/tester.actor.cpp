@@ -464,6 +464,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 			checkReq = req;
 			if (!checkResult.present()) {
 				try {
+					TraceEvent("TestChecking", workIface.id()).detail("Workload", workload->description());
 					bool check = wait( timeoutError( workload->check(cx), workload->getCheckTimeout() ) );
 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
@@ -475,6 +476,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 						.detail("Workload", workload->description());
 					//ok = false;
 				}
+				TraceEvent("TestCheckComplete", workIface.id()).detail("Workload", workload->description());
 			}
 
 			sendResult( checkReq, checkResult );
