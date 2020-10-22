@@ -70,6 +70,8 @@ class AsyncTaskThread {
 		}
 	}
 
+	static const double meanDelay;
+
 public:
 	AsyncTaskThread() : thread([this] { run(this); }) {}
 
@@ -77,8 +79,7 @@ public:
 	auto execAsync(const F& func, TaskPriority priority = TaskPriority::DefaultOnMainThread)
 	    -> Future<decltype(func())> {
 		if (g_network->isSimulated()) {
-			// TODO: Add some random delay
-			return func();
+			return map(delayJittered(meanDelay), [func](Void _) { return func(); });
 		}
 		Promise<decltype(func())> promise;
 		addTask([&promise, &func, priority] {
