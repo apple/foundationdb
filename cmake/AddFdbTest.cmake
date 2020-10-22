@@ -202,6 +202,7 @@ function(stage_correctness_package)
     endforeach()
   endforeach()
   list(APPEND package_files ${STAGE_OUT_DIR}/bin/fdbserver
+                            ${STAGE_OUT_DIR}/bin/coverage.fdbserver.xml
                             ${STAGE_OUT_DIR}/bin/TestHarness.exe
                             ${STAGE_OUT_DIR}/bin/TraceLogHelper.dll
                             ${STAGE_OUT_DIR}/CMakeCache.txt
@@ -210,10 +211,12 @@ function(stage_correctness_package)
     OUTPUT ${package_files}
     DEPENDS ${CMAKE_BINARY_DIR}/CMakeCache.txt
             ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
             ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
             ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+                                     ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
                                      ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
                                      ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
                                      ${STAGE_OUT_DIR}/bin
