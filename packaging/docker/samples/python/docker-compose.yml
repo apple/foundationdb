@@ -55,6 +55,7 @@ services:
       context: app
       args:
         FDB_VERSION: ${FDB_VERSION}
+        FDB_ADDITIONAL_VERSIONS: ${FDB_ADDITIONAL_VERSIONS}
     ports:
       - 5000:5000/tcp
     environment:
