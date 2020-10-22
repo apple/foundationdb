@@ -248,7 +248,7 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 }
 
 // Get an IBackupContainer based on a container URL string
-Reference<IBackupContainer> IBackupContainer::openContainer(std::string url) {
+Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	Reference<IBackupContainer>& r = m_cache[url];
@@ -338,7 +338,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 	}
 }
 
-Future<std::vector<std::string>> IBackupContainer::listContainers(std::string baseURL) {
+Future<std::vector<std::string>> IBackupContainer::listContainers(const std::string& baseURL) {
 	return listContainers_impl(baseURL);
 }
 

@@ -32,7 +32,7 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	// All backup data goes into a single bucket
 	std::string m_bucket;
 
-	std::string dataPath(const std::string path);
+	std::string dataPath(const std::string& path);
 
 	// Get the path of the backups's index entry
 	std::string indexEntry();
@@ -40,7 +40,7 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	friend class BackupContainerS3BlobStoreImpl;
 
 public:
-	BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, std::string name,
+	BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, const std::string& name,
 	                           const BlobStoreEndpoint::ParametersT& params);
 
 	void addref() override;
@@ -48,15 +48,15 @@ public:
 
 	static std::string getURLFormat();
 
-	Future<Reference<IAsyncFile>> readFile(std::string path) final;
+	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
 
-	static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, std::string bucket);
+	static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, const std::string& bucket);
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
 
-	Future<Void> deleteFile(std::string path) final;
+	Future<Void> deleteFile(const std::string& path) final;
 
-	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const&)> pathFilter) final;
+	Future<FilesAndSizesT> listFiles(const std::string& path, std::function<bool(std::string const&)> pathFilter) final;
 
 	Future<Void> create() final;
 

@@ -120,7 +120,7 @@ public:
 const std::string BackupContainerS3BlobStoreImpl::DATAFOLDER = "data";
 const std::string BackupContainerS3BlobStoreImpl::INDEXFOLDER = "backups";
 
-std::string BackupContainerS3BlobStore::dataPath(const std::string path) {
+std::string BackupContainerS3BlobStore::dataPath(const std::string& path) {
 	return BackupContainerS3BlobStoreImpl::DATAFOLDER + "/" + m_name + "/" + path;
 }
 
@@ -129,7 +129,7 @@ std::string BackupContainerS3BlobStore::indexEntry() {
 	return BackupContainerS3BlobStoreImpl::INDEXFOLDER + "/" + m_name;
 }
 
-BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, std::string name,
+BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, const std::string& name,
                                                        const BlobStoreEndpoint::ParametersT& params)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
 
@@ -158,7 +158,7 @@ std::string BackupContainerS3BlobStore::getURLFormat() {
 	return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
 }
 
-Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(std::string path) {
+Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	return Reference<IAsyncFile>(new AsyncFileReadAheadCache(
 	    Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
 	    m_bstore->knobs.read_block_size, m_bstore->knobs.read_ahead_blocks, m_bstore->knobs.concurrent_reads_per_file,
@@ -166,7 +166,7 @@ Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(std::string p
 }
 
 Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<BlobStoreEndpoint> bstore,
-                                                                      std::string bucket) {
+                                                                      const std::string& bucket) {
 	return BackupContainerS3BlobStoreImpl::listURLs(bstore, bucket);
 }
 
@@ -175,12 +175,12 @@ Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::
 	    path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
 }
 
-Future<Void> BackupContainerS3BlobStore::deleteFile(std::string path) {
+Future<Void> BackupContainerS3BlobStore::deleteFile(const std::string& path) {
 	return m_bstore->deleteObject(m_bucket, dataPath(path));
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerS3BlobStore::listFiles(
-    std::string path, std::function<bool(std::string const&)> pathFilter) {
+    const std::string& path, std::function<bool(std::string const&)> pathFilter) {
 	return BackupContainerS3BlobStoreImpl::listFiles(Reference<BackupContainerS3BlobStore>::addRef(this), path,
 	                                                 pathFilter);
 }

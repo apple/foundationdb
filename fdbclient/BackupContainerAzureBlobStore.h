@@ -50,14 +50,14 @@ public:
 
 	Future<bool> exists() override;
 
-	Future<Reference<IAsyncFile>> readFile(std::string fileName) override;
+	Future<Reference<IAsyncFile>> readFile(const std::string& fileName) override;
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& fileName) override;
 
-	Future<FilesAndSizesT> listFiles(std::string path = "",
+	Future<FilesAndSizesT> listFiles(const std::string& path = "",
 	                                 std::function<bool(std::string const&)> folderPathFilter = nullptr) override;
 
-	Future<Void> deleteFile(std::string fileName) override;
+	Future<Void> deleteFile(const std::string& fileName) override;
 
 	Future<Void> deleteContainer(int* pNumDeleted) override;
 };

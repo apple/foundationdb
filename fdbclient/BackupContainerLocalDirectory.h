@@ -32,22 +32,22 @@ public:
 
 	static std::string getURLFormat();
 
-	BackupContainerLocalDirectory(std::string url);
+	BackupContainerLocalDirectory(const std::string& url);
 
-	static Future<std::vector<std::string>> listURLs(std::string url);
+	static Future<std::vector<std::string>> listURLs(const std::string& url);
 
 	Future<Void> create() final;
 
 	// The container exists if the folder it resides in exists
 	Future<bool> exists() final;
 
-	Future<Reference<IAsyncFile>> readFile(std::string path) final;
+	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
 
-	Future<Void> deleteFile(std::string path) final;
+	Future<Void> deleteFile(const std::string& path) final;
 
-	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const&)>) final;
+	Future<FilesAndSizesT> listFiles(const std::string& path, std::function<bool(std::string const&)>) final;
 
 	Future<Void> deleteContainer(int* pNumDeleted) final;
 

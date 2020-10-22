@@ -734,7 +734,7 @@ std::string BackupContainerFileSystem::snapshotFolderString(Version snapshotBegi
 	return format("kvranges/snapshot.%018" PRId64, snapshotBeginVersion);
 }
 
-Version BackupContainerFileSystem::extractSnapshotBeginVersion(std::string path) {
+Version BackupContainerFileSystem::extractSnapshotBeginVersion(const std::string& path) {
 	Version snapshotBeginVersion;
 	if (sscanf(path.c_str(), "kvranges/snapshot.%018" SCNd64, &snapshotBeginVersion) == 1) {
 		return snapshotBeginVersion;
@@ -776,7 +776,7 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version
 	                 format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
 }
 
-std::string BackupContainerFileSystem::fileNameOnly(std::string path) {
+std::string BackupContainerFileSystem::fileNameOnly(const std::string& path) {
 	// Find the last forward slash position, defaulting to 0 if not found
 	int pos = path.find_last_of('/');
 	if (pos == std::string::npos) {
@@ -790,7 +790,7 @@ std::string BackupContainerFileSystem::fileNameOnly(std::string path) {
 	return path.substr(pos + 1);
 }
 
-bool BackupContainerFileSystem::pathToRangeFile(RangeFile& out, std::string path, int64_t size) {
+bool BackupContainerFileSystem::pathToRangeFile(RangeFile& out, const std::string& path, int64_t size) {
 	std::string name = fileNameOnly(path);
 	RangeFile f;
 	f.fileName = path;
@@ -804,7 +804,7 @@ bool BackupContainerFileSystem::pathToRangeFile(RangeFile& out, std::string path
 	return false;
 }
 
-bool BackupContainerFileSystem::pathToLogFile(LogFile& out, std::string path, int64_t size) {
+bool BackupContainerFileSystem::pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
 	std::string name = fileNameOnly(path);
 	LogFile f;
 	f.fileName = path;
@@ -824,7 +824,7 @@ bool BackupContainerFileSystem::pathToLogFile(LogFile& out, std::string path, in
 	return false;
 }
 
-bool BackupContainerFileSystem::pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, std::string path) {
+bool BackupContainerFileSystem::pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path) {
 	std::string name = fileNameOnly(path);
 	KeyspaceSnapshotFile f;
 	f.fileName = path;
@@ -1264,7 +1264,7 @@ Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeF
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file);
 }
 
-Optional<RestorableFileSet> BackupContainerFileSystem::getRestoreSetFromLogs(std::vector<LogFile> logs,
+Optional<RestorableFileSet> BackupContainerFileSystem::getRestoreSetFromLogs(const std::vector<LogFile>& logs,
                                                                              Version targetVersion,
                                                                              RestorableFileSet restorable) {
 	Version end = logs.begin()->endVersion;
@@ -1276,7 +1276,6 @@ Optional<RestorableFileSet> BackupContainerFileSystem::getRestoreSetFromLogs(std
 	}
 	return Optional<RestorableFileSet>();
 }
-
 
 Future<Optional<RestorableFileSet>> BackupContainerFileSystem::getRestoreSet(Version targetVersion,
                                                                              VectorRef<KeyRangeRef> keyRangesFilter,

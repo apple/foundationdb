@@ -91,7 +91,7 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 	return "file://</path/to/base/dir/>";
 }
 
-BackupContainerLocalDirectory::BackupContainerLocalDirectory(std::string url) {
+BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url) {
 	std::string path;
 	if (url.find("file://") != 0) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -121,7 +121,7 @@ BackupContainerLocalDirectory::BackupContainerLocalDirectory(std::string url) {
 	m_path = path;
 }
 
-Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(std::string url) {
+Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const std::string& url) {
 	std::string path;
 	if (url.find("file://") != 0) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -164,7 +164,7 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 	return directoryExists(m_path);
 }
 
-Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(std::string path) {
+Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 	// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
 	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
@@ -226,13 +226,13 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });
 }
 
-Future<Void> BackupContainerLocalDirectory::deleteFile(std::string path) {
+Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {
 	::deleteFile(joinPath(m_path, path));
 	return Void();
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerLocalDirectory::listFiles(
-    std::string path, std::function<bool(std::string const&)>) {
+    const std::string& path, std::function<bool(std::string const&)>) {
 	return listFiles_impl(path, m_path);
 }
 

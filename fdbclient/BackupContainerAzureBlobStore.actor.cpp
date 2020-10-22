@@ -247,7 +247,7 @@ Future<bool> BackupContainerAzureBlobStore::exists() {
 	});
 }
 
-Future<Reference<IAsyncFile>> BackupContainerAzureBlobStore::readFile(std::string fileName) {
+Future<Reference<IAsyncFile>> BackupContainerAzureBlobStore::readFile(const std::string& fileName) {
 	return BackupContainerAzureBlobStoreImpl::readFile(this, fileName);
 }
 
@@ -256,7 +256,7 @@ Future<Reference<IBackupFile>> BackupContainerAzureBlobStore::writeFile(const st
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore::listFiles(
-    std::string path, std::function<bool(std::string const&)> folderPathFilter) {
+    const std::string& path, std::function<bool(std::string const&)> folderPathFilter) {
 	return asyncTaskThread.execAsync([client = this->client.get(), containerName = this->containerName, path = path,
 	                                  folderPathFilter = folderPathFilter] {
 		FilesAndSizesT result;
@@ -265,7 +265,7 @@ Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerAzureBlobStore:
 	});
 }
 
-Future<Void> BackupContainerAzureBlobStore::deleteFile(std::string fileName) {
+Future<Void> BackupContainerAzureBlobStore::deleteFile(const std::string& fileName) {
 	return asyncTaskThread.execAsync(
 	    [containerName = this->containerName, fileName = fileName, client = client.get()]() {
 		    client->delete_blob(containerName, fileName).wait();

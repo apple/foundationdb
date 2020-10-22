@@ -103,17 +103,17 @@ public:
 	// Although not required, an implementation can avoid traversing unwanted subfolders
 	// by calling folderPathFilter(absoluteFolderPath) and checking for a false return value.
 	using FilesAndSizesT = std::vector<std::pair<std::string, int64_t>>;
-	virtual Future<FilesAndSizesT> listFiles(std::string path = "",
+	virtual Future<FilesAndSizesT> listFiles(const std::string& path = "",
 	                                         std::function<bool(std::string const&)> folderPathFilter = nullptr) = 0;
 
 	// Open a file for read by fileName
-	Future<Reference<IAsyncFile>> readFile(std::string fileName) override = 0;
+	Future<Reference<IAsyncFile>> readFile(const std::string& fileName) override = 0;
 
 	// Open a file for write by fileName
 	virtual Future<Reference<IBackupFile>> writeFile(const std::string& fileName) = 0;
 
 	// Delete a file
-	virtual Future<Void> deleteFile(std::string fileName) = 0;
+	virtual Future<Void> deleteFile(const std::string& fileName) = 0;
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.
@@ -134,7 +134,7 @@ public:
 	static std::string snapshotFolderString(Version snapshotBeginVersion);
 
 	// Extract the snapshot begin version from a path
-	static Version extractSnapshotBeginVersion(std::string path);
+	static Version extractSnapshotBeginVersion(const std::string& path);
 
 	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current
 	// settings.
@@ -150,13 +150,13 @@ public:
 
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
 	// failing to find those, the whole string.
-	static std::string fileNameOnly(std::string path);
+	static std::string fileNameOnly(const std::string& path);
 
-	static bool pathToRangeFile(RangeFile& out, std::string path, int64_t size);
+	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size);
 
-	static bool pathToLogFile(LogFile& out, std::string path, int64_t size);
+	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size);
 
-	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, std::string path);
+	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path);
 
 	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
 	    KeyspaceSnapshotFile snapshot);
@@ -233,7 +233,7 @@ public:
 
 	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final;
 
-	static Optional<RestorableFileSet> getRestoreSetFromLogs(std::vector<LogFile> logs, Version targetVersion,
+	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs, Version targetVersion,
 	                                                         RestorableFileSet restorable);
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, VectorRef<KeyRangeRef> keyRangesFilter,
@@ -241,7 +241,7 @@ public:
 
 private:
 	struct VersionProperty {
-		VersionProperty(Reference<BackupContainerFileSystem> bc, std::string name)
+		VersionProperty(Reference<BackupContainerFileSystem> bc, const std::string& name)
 		  : bc(bc), path("properties/" + name) {}
 		Reference<BackupContainerFileSystem> bc;
 		std::string path;
