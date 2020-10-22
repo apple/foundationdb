@@ -1,6 +1,7 @@
 testTitle=SecondCycleTest
 simBackupAgents=BackupToFile
 clearAfterTest=false
+runConsistencyCheck=false
 
     testName=Cycle
     nodeCount = 30000

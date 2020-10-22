@@ -8,6 +8,7 @@ clearAfterTest = false
 
 testTitle=FirstCycleTest
 clearAfterTest=false
+runConsistencyCheck = false
 
     testName=Cycle
     nodeCount = 30000
