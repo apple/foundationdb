@@ -46,7 +46,7 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                 .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "failed", KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
 	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "lock", singleKeyRange(LiteralStringRef("dbLocked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck", singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };

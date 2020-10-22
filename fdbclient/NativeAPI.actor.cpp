@@ -948,7 +948,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
 		registerSpecialKeySpaceModule(
 			SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
-			std::make_unique<LockDatabaseImpl>(singleKeyRange(LiteralStringRef("dbLocked"))
+			std::make_unique<LockDatabaseImpl>(singleKeyRange(LiteralStringRef("db_locked"))
 					.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
