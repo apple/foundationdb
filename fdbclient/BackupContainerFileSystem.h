@@ -119,27 +119,6 @@ public:
 	// updated with the count of deleted files so that progress can be seen.
 	Future<Void> deleteContainer(int* pNumDeleted) override = 0;
 
-	// Creates a 2-level path (x/y) where v should go such that x/y/* contains (10^smallestBucket) possible versions
-	static std::string versionFolderString(Version v, int smallestBucket);
-
-	// This useful for comparing version folder strings regardless of where their "/" dividers are, as it is possible
-	// that division points would change in the future.
-	static std::string cleanFolderString(std::string f);
-
-	// The innermost folder covers 100 seconds (1e8 versions) During a full speed backup it is possible though very
-	// unlikely write about 10,000 snapshot range files during that time.
-	static std::string old_rangeVersionFolderString(Version v);
-
-	// Get the root folder for a snapshot's data based on its begin version
-	static std::string snapshotFolderString(Version snapshotBeginVersion);
-
-	// Extract the snapshot begin version from a path
-	static Version extractSnapshotBeginVersion(const std::string& path);
-
-	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current
-	// settings.
-	static std::string logVersionFolderString(Version v, bool partitioned);
-
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) final;
 
 	Future<Reference<IBackupFile>> writeTaggedLogFile(Version beginVersion, Version endVersion, int blockSize,
@@ -147,16 +126,6 @@ public:
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion, int snapshotFileCount,
 	                                              Version fileVersion, int blockSize) override;
-
-	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
-	// failing to find those, the whole string.
-	static std::string fileNameOnly(const std::string& path);
-
-	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size);
-
-	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size);
-
-	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path);
 
 	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
 	    KeyspaceSnapshotFile snapshot);
@@ -168,11 +137,6 @@ public:
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
 	Future<std::vector<LogFile>> listLogFiles(Version beginVersion, Version targetVersion, bool partitioned);
-
-	// List range files, unsorted, which contain data at or between beginVersion and endVersion
-	// NOTE: This reads the range file folder schema from FDB 6.0.15 and earlier and is provided for backward
-	// compatibility
-	Future<std::vector<RangeFile>> old_listRangeFiles(Version beginVersion, Version endVersion);
 
 	// List range files, unsorted, which contain data at or between beginVersion and endVersion
 	// Note: The contents of each top level snapshot.N folder do not necessarily constitute a valid snapshot
@@ -188,14 +152,6 @@ public:
 
 	Future<BackupFileList> dumpFileList(Version begin, Version end) override;
 
-	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char* name, Error e);
-
-	// Computes the continuous end version for non-partitioned mutation logs up to
-	// the "targetVersion". If "outLogs" is not nullptr, it will be updated with
-	// continuous log files. "*end" is updated with the continuous end version.
-	static void computeRestoreEndVersion(const std::vector<LogFile>& logs, std::vector<LogFile>* outLogs, Version* end,
-	                                     Version targetVersion);
-
 	// Uses the virtual methods to describe the backup contents
 	Future<BackupDescription> describeBackup(bool deepScan, Version logStartVersionOverride) final;
 
@@ -203,38 +159,7 @@ public:
 	Future<Void> expireData(Version expireEndVersion, bool force, ExpireProgress* progress,
 	                        Version restorableBeginVersion) final;
 
-	// For a list of log files specified by their indices (of the same tag),
-	// returns if they are continous in the range [begin, end]. If "tags" is not
-	// nullptr, then it will be populated with [begin, end] -> tags, where next
-	// pair's begin <= previous pair's end + 1. On return, the last pair's end
-	// version (inclusive) gives the continuous range from begin.
-	static bool isContinuous(const std::vector<LogFile>& files, const std::vector<int>& indices, Version begin,
-	                         Version end, std::map<std::pair<Version, Version>, int>* tags);
-
-	// Returns true if logs are continuous in the range [begin, end].
-	// "files" should be pre-sorted according to version order.
-	static bool isPartitionedLogsContinuous(const std::vector<LogFile>& files, Version begin, Version end);
-
-	// Returns log files that are not duplicated, or subset of another log.
-	// If a log file's progress is not saved, a new log file will be generated
-	// with the same begin version. So we can have a file that contains a subset
-	// of contents in another log file.
-	// PRE-CONDITION: logs are already sorted by (tagId, beginVersion, endVersion).
-	static std::vector<LogFile> filterDuplicates(const std::vector<LogFile>& logs);
-
-	// Analyze partitioned logs and set contiguousLogEnd for "desc" if larger
-	// than the "scanBegin" version.
-	static void updatePartitionedLogsContinuousEnd(BackupDescription* desc, const std::vector<LogFile>& logs,
-	                                               const Version scanBegin, const Version scanEnd);
-
-	// Returns the end version such that [begin, end] is continuous.
-	// "logs" should be already sorted.
-	static Version getPartitionedLogsContinuousEndVersion(const std::vector<LogFile>& logs, Version begin);
-
 	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final;
-
-	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs, Version targetVersion,
-	                                                         RestorableFileSet restorable);
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion, VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                  bool logsOnly, Version beginVersion) final;
@@ -250,7 +175,6 @@ private:
 		Future<Void> clear();
 	};
 
-public:
 	// To avoid the need to scan the underyling filesystem in many cases, some important version boundaries are stored
 	// in named files. These versions also indicate what version ranges are known to be deleted or partially deleted.
 	//
@@ -265,11 +189,14 @@ public:
 	VersionProperty logEndVersion();
 	VersionProperty expiredEndVersion();
 	VersionProperty unreliableEndVersion();
-
-	// Backup log types
-	static constexpr Version NON_PARTITIONED_MUTATION_LOG = 0;
-	static constexpr Version PARTITIONED_MUTATION_LOG = 1;
 	VersionProperty logType();
+
+	// List range files, unsorted, which contain data at or between beginVersion and endVersion
+	// NOTE: This reads the range file folder schema from FDB 6.0.15 and earlier and is provided for backward
+	// compatibility
+	Future<std::vector<RangeFile>> old_listRangeFiles(Version beginVersion, Version endVersion);
+
+	friend class BackupContainerFileSystemImpl;
 };
 
 #endif
