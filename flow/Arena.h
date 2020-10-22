@@ -562,7 +562,7 @@ public:
 		memcpy(dst, data, length);
 		return dst + length;
 	}
-
+	
 	std::vector<StringRef> splitAny(StringRef sep) const {
 		StringRef r = *this;
 		std::vector<StringRef> tokens;

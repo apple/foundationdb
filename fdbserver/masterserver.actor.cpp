@@ -1277,6 +1277,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", RecoveryStatus::fully_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
+			.detail("FullyRecoveredAtVersion", self->version)
 			.trackLatest("MasterRecoveryState");
 
 			TraceEvent("MasterRecoveryGenerations", self->dbgid)
@@ -1701,6 +1702,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.detail("StoreType", self->configuration.storageServerStoreType)
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
+
+	TraceEvent("MasterRecoveryAvailable", self->dbgid)
+		.detail("AvailableAtVersion", self->version)
+		.trackLatest("MasterRecoveryAvailable");
 
 	if( self->resolvers.size() > 1 )
 		self->addActor.send( resolutionBalancing(self) );

@@ -420,6 +420,18 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(e.code() == error_code_special_keys_cross_module_clear);
 			tx->reset();
 		}
+		// base key of the end key selector not in (\xff\xff, \xff\xff\xff), throw key_outside_legal_range()
+		try {
+			const KeySelector startKeySelector = KeySelectorRef(LiteralStringRef("\xff\xff/test"), true, -200);
+			const KeySelector endKeySelector = KeySelectorRef(LiteralStringRef("test"), true, -10);
+			Standalone<RangeResultRef> result =
+			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) throw;
+			ASSERT(e.code() == error_code_key_outside_legal_range);
+			tx->reset();
+		}
 
 		return Void();
 	}

@@ -199,6 +199,9 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
                restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.txt
+               restarting/from_7.0.0/UpgradeAndBackupRestore-2.txt)
+  add_fdb_test(
     TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
                restarting/to_6.3.5/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)

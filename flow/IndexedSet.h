@@ -503,6 +503,8 @@ public:
 	Map(Map&& r) noexcept : set(std::move(r.set)) {}
 	void operator=(Map&& r) noexcept { set = std::move(r.set); }
 
+	Future<Void> clearAsync();
+
 private:
 	Map( Map<Key,Value,Pair> const& ); // unimplemented
 	void operator=( Map<Key,Value,Pair> const& ); // unimplemented
@@ -1309,6 +1311,11 @@ Future<Void> IndexedSet<T, Metric>::eraseAsync(typename IndexedSet<T,Metric>::it
 	erase(begin, end, toFree);
 
 	return uncancellable(ISFreeNodes(toFree, false));
+}
+
+template <class Key, class Value, class Pair, class Metric>
+Future<Void> Map<Key, Value, Pair, Metric>::clearAsync() {
+	return set.eraseAsync(set.begin(), set.end());
 }
 
 #endif

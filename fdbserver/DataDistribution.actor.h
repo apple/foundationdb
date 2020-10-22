@@ -211,21 +211,54 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Optional<Key> initHealthyZoneValue;
 };
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
-                                           PromiseStream<RelocateShard> output,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId);
+struct ShardMetrics {
+	StorageMetrics metrics;
+	double lastLowBandwidthStartTime;
+	int shardCount;
+
+	bool operator==(ShardMetrics const& rhs) const {
+		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
+		       shardCount == rhs.shardCount;
+	}
+
+	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
+	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
+};
+
+struct ShardTrackedData {
+	Future<Void> trackShard;
+	Future<Void> trackBytes;
+	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+};
+
+ACTOR Future<Void> dataDistributionTracker(
+	Reference<InitialDataDistribution> initData,
+	Database cx,
+	PromiseStream<RelocateShard> output,
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+	PromiseStream<GetMetricsRequest> getShardMetrics,
+	PromiseStream<GetMetricsListRequest> getShardMetricsList,
+	FutureStream<Promise<int64_t>> getAverageShardBytes,
+	Promise<Void> readyToStart,
+	Reference<AsyncVar<bool>> zeroHealthyTeams,
+	UID distributorId,
+	KeyRangeMap<ShardTrackedData>* shards);
 
 ACTOR Future<Void> dataDistributionQueue(
-    Database cx, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input,
-    PromiseStream<GetMetricsRequest> getShardMetrics, Reference<AsyncVar<bool>> processingUnhealthy,
-    vector<TeamCollectionInterface> teamCollection, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-    MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes, UID distributorId, int teamSize,
-    int singleRegionTeamSize, double* lastLimited, const DDEnabledState* ddEnabledState);
+	Database cx,
+	PromiseStream<RelocateShard> output,
+	FutureStream<RelocateShard> input,
+	PromiseStream<GetMetricsRequest> getShardMetrics,
+	Reference<AsyncVar<bool>> processingUnhealthy,
+	vector<TeamCollectionInterface> teamCollection,
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+	MoveKeysLock lock,
+	PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	UID distributorId,
+	int teamSize,
+	int singleRegionTeamSize,
+	double* lastLimited,
+	const DDEnabledState* ddEnabledState);
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

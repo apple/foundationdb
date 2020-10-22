@@ -95,7 +95,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 
 	template <class T>
 	vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
-		vector<T> result(teams.size());
+		vector<T> result;
 
 		for (const auto& team : teams) {
 			vector<T> newItems = func(*team);

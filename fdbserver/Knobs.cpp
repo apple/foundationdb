@@ -348,7 +348,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( COMMIT_TRANSACTION_BATCH_COUNT_MAX,                   32768 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_COUNT_MAX = 1000; // Do NOT increase this number beyond 32768, as CommitIds only budget 2 bytes for storing transaction id within each batch
 	init( COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT,              8LL << 30 ); if (randomize && BUGGIFY) COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT = deterministicRandom()->randomInt64(100LL << 20,  8LL << 30);
 	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                   0.5 );
-	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,          10.0 );
+	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,           5.0 );
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );
@@ -368,12 +368,17 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( REQUIRED_MIN_RECOVERY_DURATION,                       0.080 ); if( shortRecoveryDuration ) REQUIRED_MIN_RECOVERY_DURATION = 0.01;
 	init( ALWAYS_CAUSAL_READ_RISKY,                             false );
 	init( MAX_COMMIT_UPDATES,                                    2000 ); if( randomize && BUGGIFY ) MAX_COMMIT_UPDATES = 1;
-	init( MIN_PROXY_COMPUTE,                                    0.001 );
 	init( MAX_PROXY_COMPUTE,                                      2.0 );
+	init( MAX_COMPUTE_PER_OPERATION,                              0.1 );
 	init( PROXY_COMPUTE_BUCKETS,                                20000 );
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 	init( REPORT_TRANSACTION_COST_ESTIMATION_DELAY,               0.1 );
+
+	init( RESET_MASTER_BATCHES,                                   200 );
+	init( RESET_RESOLVER_BATCHES,                                 200 );
+	init( RESET_MASTER_DELAY,                                   300.0 );
+	init( RESET_RESOLVER_DELAY,                                 300.0 );
 
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
@@ -548,7 +553,6 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
-	init( STORAGE_COMMIT_PIPELINE_BYTES_PER_YIELD,            100000 );
 	init( STORAGE_DURABILITY_LAG_REJECT_THRESHOLD,              0.25 );
 	init( STORAGE_DURABILITY_LAG_MIN_RATE,                       0.1 );
 	init( STORAGE_COMMIT_INTERVAL,                               0.5 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_INTERVAL = 2.0;
