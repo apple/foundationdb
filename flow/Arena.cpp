@@ -36,31 +36,31 @@
 namespace {
 #if VALGRIND
 void allow_access(ArenaBlock* b) {
-	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE && b) {
+	if (valgrindPrecise() && b) {
 		VALGRIND_MAKE_MEM_DEFINED(b, ArenaBlock::TINY_HEADER);
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
 		VALGRIND_MAKE_MEM_DEFINED(b, headerSize);
 	}
 }
 void disallow_access(ArenaBlock* b) {
-	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE && b) {
+	if (valgrindPrecise() && b) {
 		int headerSize = b->isTiny() ? ArenaBlock::TINY_HEADER : sizeof(ArenaBlock);
 		VALGRIND_MAKE_MEM_NOACCESS(b, headerSize);
 	}
 }
 void make_no_access(void* addr, size_t size) {
-	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+	if (valgrindPrecise()) {
 		VALGRIND_MAKE_MEM_NOACCESS(addr, size);
 	}
 }
 void make_defined(void* addr, size_t size) {
-	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
+	if (valgrindPrecise()) {
 		VALGRIND_MAKE_MEM_DEFINED(addr, size);
 	}
 }
 void make_undefined(void* addr, size_t size) {
-	if (FLOW_KNOBS && FLOW_KNOBS->VALGRIND_PRECISE) {
-		make_undefined(addr, size);
+	if (valgrindPrecise()) {
+		VALGRIND_MAKE_MEM_UNDEFINED(addr, size);
 	}
 }
 #else

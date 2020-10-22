@@ -35,6 +35,7 @@
 #if VALGRIND
 #include <drd.h>
 #include <memcheck.h>
+bool valgrindPrecise();
 #endif
 
 #include "flow/Hash3.h"
