@@ -242,7 +242,9 @@ std::string IBackupContainer::lastOpenError;
 
 std::vector<std::string> IBackupContainer::getURLFormats() {
 	return {
+#ifdef BUILD_AZURE_BACKUP
 		BackupContainerAzureBlobStore::getURLFormat(),
+#endif
 		BackupContainerLocalDirectory::getURLFormat(),
 		BackupContainerS3BlobStore::getURLFormat(),
 	};
@@ -271,9 +273,13 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			for (auto c : resource)
 				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/') throw backup_invalid_url();
 			r = Reference<IBackupContainer>(new BackupContainerS3BlobStore(bstore, resource, backupParams));
-		} else if (u.startsWith(LiteralStringRef("http"))) {
+		}
+#ifdef BUILD_AZURE_BACKUP
+		else if (u.startsWith(LiteralStringRef("http"))) {
 			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore());
-		} else {
+		}
+#endif
+		else {
 			lastOpenError = "invalid URL prefix";
 			throw backup_invalid_url();
 		}

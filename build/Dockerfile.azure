@@ -1,5 +1,0 @@
-FROM foundationdb/foundationdb-dev:0.11.4
-
-USER root
-
-RUN yum install -y libcurl-devel libuuid-devel openssl-devel

@@ -8,8 +8,6 @@ set(FDBCLIENT_SRCS
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
-  BackupContainerAzureBlobStore.actor.cpp
-  BackupContainerAzureBlobStore.h
   BackupContainerFileSystem.actor.cpp
   BackupContainerFileSystem.h
   BackupContainerLocalDirectory.actor.cpp
@@ -102,35 +100,46 @@ set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
-configure_file(azurestorage.cmake azurestorage-download/CMakeLists.txt)
+set(BUILD_AZURE_BACKUP OFF CACHE BOOL "Build Azure backup client")
+if(BUILD_AZURE_BACKUP)
+  add_compile_definitions(BUILD_AZURE_BACKUP)
+  set(FDBCLIENT_SRCS
+    ${FDBCLIENT_SRCS}
+    BackupContainerAzureBlobStore.actor.cpp
+    BackupContainerAzureBlobStore.h)
 
-execute_process(
-  COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-  RESULT_VARIABLE results
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
-)
+  configure_file(azurestorage.cmake azurestorage-download/CMakeLists.txt)
 
-if(results)
-  message(FATAL_ERROR "Configuration step for AzureStorage has Failed. ${results}")
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+    RESULT_VARIABLE results
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
+  )
+
+  if(results)
+    message(FATAL_ERROR "Configuration step for AzureStorage has Failed. ${results}")
+  endif()
+
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} --build . --config Release
+    RESULT_VARIABLE results
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
+  )
+
+  if(results)
+    message(FATAL_ERROR "Build step for AzureStorage has Failed. ${results}")
+  endif()
+
+  add_subdirectory(
+    ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-src
+    ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-build
+  )
 endif()
-
-execute_process(
-  COMMAND ${CMAKE_COMMAND} --build . --config Release
-  RESULT_VARIABLE results
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
-)
-
-if(results)
-  message(FATAL_ERROR "Build step for AzureStorage has Failed. ${results}")
-endif()
-
-add_subdirectory(
-  ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-src
-  ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-build
-  #EXCLUDE_FROM_ALL
-)
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
-#target_include_directories(fdbclient PRIVATE /home/tclinkenbeard/Azure/azure-storage-cpplite/include)
-target_link_libraries(fdbclient PUBLIC fdbrpc curl uuid azure-storage-lite)
+if(BUILD_AZURE_BACKUP)
+  target_link_libraries(fdbclient PUBLIC fdbrpc curl uuid azure-storage-lite)
+else()
+  target_link_libraries(fdbclient PUBLIC fdbrpc)
+endif()
