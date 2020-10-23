@@ -631,8 +631,6 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	int highestUtilizationTeam;
 
 	AsyncTrigger printDetailedTeamsInfo;
-	double lastTeamCollectionInfoSnapshotTime;
-	double lastTeamCollectionInfoLoggingTriggeredTime;
 
 	void resetLocalitySet() {
 		storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
@@ -773,13 +771,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall")
 					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace)
 					    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
-					if (now() - self->lastTeamCollectionInfoLoggingTriggeredTime >
-					    // It's meaningless to trigger the logging again if the snapshot is stale
-					    SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
-						// Trigger teams info print
-						self->printDetailedTeamsInfo.trigger();
-						self->lastTeamCollectionInfoLoggingTriggeredTime = now();
-					}
+					self->printDetailedTeamsInfo.trigger();
 				}
 			}
 
@@ -2586,8 +2578,8 @@ ACTOR Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 
 }
 
 // Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
-// task on the run loop. This function is very expensive to call due to the data it needs to copy. Use with caution.
-ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std::string tcIdString) {
+// task on the run loop.
+ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 	state DatabaseConfiguration configuration;
 	state std::map<UID, Reference<TCServerInfo>> server_info;
 	state std::map<UID, ServerStatus> server_status;
@@ -2599,90 +2591,99 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 	// state std::vector<Reference<LocalityRecord>> machineLocalityMapRecordArray;
 	state int traceEventsPrinted = 0;
 	state std::vector<const UID*> serverIDs;
+	state double lastPrintTime;
 	loop {
 		wait(self->printDetailedTeamsInfo.onTrigger());
+		if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
+			continue;
+		}
+		lastPrintTime = now();
 
 		traceEventsPrinted = 0;
-		if (now() - self->lastTeamCollectionInfoSnapshotTime >= SERVER_KNOBS->DD_TEAMS_INFO_SNAPSHOT_REFRESH_INTERVAL) {
-			// Refresh state snapshot
-			self->lastTeamCollectionInfoSnapshotTime = now();
 
-			configuration = self->configuration;
-			server_info = self->server_info;
-			teams = self->teams;
-			machine_info = self->machine_info;
-			machineTeams = self->machineTeams;
-			// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
-			// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
-			// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
-			std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
-			serverIDs = _uids;
+		double snapshotStart = now();
 
-			auto const& keys = self->server_status.getKeys();
-			for (auto const& key : keys) {
-				server_status.emplace(key, self->server_status.get(key));
-			}
+		configuration = self->configuration;
+		server_info = self->server_info;
+		teams = self->teams;
+		machine_info = self->machine_info;
+		machineTeams = self->machineTeams;
+		// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
+		// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
+		// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
+		std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
+		serverIDs = _uids;
+
+		auto const& keys = self->server_status.getKeys();
+		for (auto const& key : keys) {
+			server_status.emplace(key, self->server_status.get(key));
 		}
 
+		TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
+		    .detail("SnapshotSpeed", now() - snapshotStart)
+		    .detail("Primary", self->primary);
+
 		// Print to TraceEvents
-		TraceEvent("DDConfig")
+		TraceEvent("DDConfig", self->distributorId)
 		    .detail("StorageTeamSize", configuration.storageTeamSize)
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
-		    .detail("TeamCollectionID", tcIdString);
+		    .detail("Primary", self->primary);
 
-		TraceEvent("ServerInfo").detail("Size", server_info.size()).detail("TeamCollectionID", tcIdString);
-		state int i = 0;
+		TraceEvent("ServerInfo", self->distributorId)
+		    .detail("Size", server_info.size())
+		    .detail("Primary", self->primary);
+		state int i;
 		state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
-		for (; i < server_info.size(); i++) {
-			TraceEvent("ServerInfo")
+		for (i = 0; i < server_info.size(); i++) {
+			TraceEvent("ServerInfo", self->distributorId)
 			    .detail("ServerInfoIndex", i)
 			    .detail("ServerID", server->first.toString())
 			    .detail("ServerTeamOwned", server->second->teams.size())
 			    .detail("MachineID", server->second->machine->machineID.contents().toString())
-			    .detail("TeamCollectionID", tcIdString);
+			    .detail("Primary", self->primary);
 			server++;
 			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
 
-		i = 0;
 		server = server_info.begin();
-		for (; i < server_info.size(); i++) {
+		for (i = 0; i < server_info.size(); i++) {
 			const UID& uid = server->first;
-			TraceEvent("ServerStatus", uid)
+			TraceEvent("ServerStatus", self->distributorId)
+			    .detail("ServerUID", uid)
 			    .detail("Healthy", !server_status.at(uid).isUnhealthy())
 			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 			    .detail("MachineTeamSize",
 			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
-			    .detail("TeamCollectionID", tcIdString);
+			    .detail("Primary", self->primary);
 			server++;
 			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
 
-		i = 0;
-		TraceEvent("ServerTeamInfo").detail("Size", teams.size()).detail("TeamCollectionID", tcIdString);
-		for (; i < teams.size(); i++) {
+		TraceEvent("ServerTeamInfo", self->distributorId).detail("Size", teams.size()).detail("Primary", self->primary);
+		for (i = 0; i < teams.size(); i++) {
 			const auto& team = teams[i];
-			TraceEvent("ServerTeamInfo")
+			TraceEvent("ServerTeamInfo", self->distributorId)
 			    .detail("TeamIndex", i)
 			    .detail("Healthy", team->isHealthy())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr())
-			    .detail("TeamCollectionID", tcIdString);
+			    .detail("Primary", self->primary);
 			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
 
-		i = 0;
-		TraceEvent("MachineInfo").detail("Size", machine_info.size()).detail("TeamCollectionID", tcIdString);
+		TraceEvent("MachineInfo", self->distributorId)
+		    .detail("Size", machine_info.size())
+		    .detail("Primary", self->primary);
 		state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
 		state bool isMachineHealthy = false;
-		for (; i < machine_info.size(); i++) {
+		for (i = 0; i < machine_info.size(); i++) {
 			Reference<TCMachineInfo> _machine = machine->second;
 			if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
 			    _machine->serversOnMachine.empty()) {
@@ -2697,68 +2698,67 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self, std:
 			}
 
 			isMachineHealthy = false;
-			TraceEvent("MachineInfo")
+			TraceEvent("MachineInfo", self->distributorId)
 			    .detail("MachineInfoIndex", i)
 			    .detail("Healthy", isMachineHealthy)
 			    .detail("MachineID", machine->first.contents().toString())
 			    .detail("MachineTeamOwned", machine->second->machineTeams.size())
 			    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
 			    .detail("ServersID", machine->second->getServersIDStr())
-			    .detail("TeamCollectionID", tcIdString);
+			    .detail("Primary", self->primary);
 			machine++;
 			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
 
-		i = 0;
-		TraceEvent("MachineTeamInfo").detail("Size", machineTeams.size()).detail("TeamCollectionID", tcIdString);
-		for (; i < machineTeams.size(); i++) {
+		TraceEvent("MachineTeamInfo", self->distributorId)
+		    .detail("Size", machineTeams.size())
+		    .detail("Primary", self->primary);
+		for (i = 0; i < machineTeams.size(); i++) {
 			const auto& team = machineTeams[i];
-			TraceEvent("MachineTeamInfo")
+			TraceEvent("MachineTeamInfo", self->distributorId)
 			    .detail("TeamIndex", i)
 			    .detail("MachineIDs", team->getMachineIDsStr())
 			    .detail("ServerTeams", team->serverTeams.size())
-			    .detail("TeamCollectionID", tcIdString);
+			    .detail("Primary", self->primary);
 			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 				wait(yield());
 			}
 		}
 
 		// TODO: re-enable the following logging or remove them.
-		// i = 0;
-		// TraceEvent("LocalityRecordKeyName")
+		// TraceEvent("LocalityRecordKeyName", self->distributorId)
 		//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
-		//     .detail("TeamCollectionID", tcIdString);
-		// for (; i < internedLocalityRecordKeyNameStrings.size(); i++) {
-		// 	TraceEvent("LocalityRecordKeyIndexName")
+		//     .detail("Primary", self->primary);
+		// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
+		// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
 		// 	    .detail("KeyIndex", i)
 		// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
-		// 	    .detail("TeamCollectionID", tcIdString);
+		// 	    .detail("Primary", self->primary);
 		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 		// 		wait(yield());
 		// 	}
 		// }
 
-		// i = 0;
-		// TraceEvent("MachineLocalityMap")
+		// TraceEvent("MachineLocalityMap", self->distributorId)
 		//     .detail("Size", machineLocalityMapEntryArraySize)
-		//     .detail("TeamCollectionID", tcIdString);
-		// for (; i < serverIDs.size(); i++) {
+		//     .detail("Primary", self->primary);
+		// for (i = 0; i < serverIDs.size(); i++) {
 		// 	const auto& serverID = serverIDs[i];
 		// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
 		// 	if (record.isValid()) {
-		// 		TraceEvent("MachineLocalityMap")
+		// 		TraceEvent("MachineLocalityMap", self->distributorId)
 		// 		    .detail("LocalityIndex", i)
 		// 		    .detail("UID", serverID->toString())
 		// 		    .detail("LocalityRecord", record->toString())
-		// 		    .detail("TeamCollectionID", tcIdString);
+		// 		    .detail("Primary", self->primary);
 		// 	} else {
-		// 		TraceEvent("MachineLocalityMap")
+		// 		TraceEvent("MachineLocalityMap", self->distributorId)
 		// 		    .detail("LocalityIndex", i)
 		// 		    .detail("UID", serverID->toString())
 		// 		    .detail("LocalityRecord", "[NotFound]")
-		// 		    .detail("TeamCollectionID", tcIdString);
+		// 		    .detail("Primary", self->primary);
 		// 	}
 		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 		// 		wait(yield());
@@ -4527,11 +4527,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( remoteTeamCollection, initData, tcis[1], self->dbInfo ), "DDTeamCollectionSecondary", self->ddId, &normalDDQueueErrors() ) );
-				actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection, "DDTeamCollectionSecondary"));
+				actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection));
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( primaryTeamCollection, initData, tcis[0], self->dbInfo ), "DDTeamCollectionPrimary", self->ddId, &normalDDQueueErrors() ) );
-			actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection, "DDTeamCollectionPrimary"));
+			actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			wait( waitForAll( actors ) );
