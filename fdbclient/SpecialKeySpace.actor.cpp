@@ -393,13 +393,34 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	return impl->clear(ryw, key);
 }
 
+bool validateSnakeCaseNaming(const KeyRef& k) {
+	KeyRef key(k);
+	// Remove prefix \xff\xff
+	ASSERT(key.startsWith(specialKeys.begin));
+	key = key.removePrefix(specialKeys.begin);
+	// Suffix can be \xff\xff or \x00 in single key range
+	if (key.endsWith(specialKeys.begin))
+		key = key.removeSuffix(specialKeys.end);
+	else if (key.endsWith(LiteralStringRef("\x00")))
+		key = key.removeSuffix(LiteralStringRef("\x00"));
+	for (const char& c : key.toString()) {
+		// only small letters, numbers, '/', '_' is allowed
+		ASSERT((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '/' || c == '_');
+	}
+	return true;
+}
+
 void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
                                        const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl) {
 	// module boundary check
-	if (module == SpecialKeySpace::MODULE::TESTONLY)
+	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
-	else
+	}
+	else {
 		ASSERT(moduleToBoundary.at(module).contains(kr));
+		ASSERT(validateSnakeCaseNaming(kr.begin) &&
+		       validateSnakeCaseNaming(kr.end)); // validate keys follow snake case naming style
+	}
 	// make sure the registered range is not overlapping with existing ones
 	// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
 	for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
