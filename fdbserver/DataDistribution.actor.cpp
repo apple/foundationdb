@@ -3258,7 +3258,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					if(logTeamEvents) {
 						TraceEvent("ServerTeamHealthNotReady", self->distributorId)
 						    .detail("HealthyServerTeamCount", self->healthyTeamCount)
-						    .detail("ServgetTeamIDerTeamID", team->getTeamID());
+						    .detail("ServerTeamID", team->getTeamID());
 					}
 				}
 			}
