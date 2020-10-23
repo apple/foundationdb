@@ -1237,14 +1237,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			ASSERT(value.present());
 
 			Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-			std::string versionString = value.get().toString();
-
-			size_t index = 0;
-			size_t nextIndex = 0;
-			while(nextIndex != versionString.npos) {
-				nextIndex = versionString.find(';', index);
-				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString.substr(index, nextIndex-index)));
-				index = nextIndex + 1;
+			std::vector<StringRef> supportedVersionsStrings = value.get().splitAny(LiteralStringRef(";"));
+			for (StringRef versionString: supportedVersionsStrings) {
+				supportedVersions.push_back_deep(supportedVersions.arena(), ClientVersionRef(versionString));
 			}
 
 			ASSERT(supportedVersions.size() > 0);
@@ -4006,7 +4001,6 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit) {
-	state Future<Void> clientTimeout = delay(5.0);
 	loop {
 		choose {
 			when(wait(cx->onMasterProxiesChanged())) {}
@@ -4018,7 +4012,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 				}
 				return rep.get().storageMetricsList;
 			}
-			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
 }

@@ -487,6 +487,7 @@ struct RolesInfo {
 
 			obj["data_lag"] = getLagObject(versionLag);
 			obj["durability_lag"] = getLagObject(version - durableVersion);
+			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
 			if(busiestReadTag.size()) {

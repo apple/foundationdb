@@ -35,8 +35,10 @@ void TagSet::addTag(TransactionTagRef tag) {
 		throw too_many_tags();
 	}
 
-	auto result = tags.insert(TransactionTagRef(arena, tag));
-	if(result.second) {
+	TransactionTagRef tagRef(arena, tag);
+	auto it = find(tags.begin(), tags.end(), tagRef);
+	if (it == tags.end()) {
+		tags.push_back(std::move(tagRef));
 		bytes += tag.size();
 	}
 }

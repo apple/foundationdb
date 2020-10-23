@@ -175,8 +175,11 @@ public:
 	}
 
 	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
-		vector<StorageServerInterface> v(servers.size());
-		for (const auto& server : servers) v.push_back(server->lastKnownInterface);
+		vector<StorageServerInterface> v;
+		v.reserve(servers.size());
+		for (const auto& server : servers) {
+			v.push_back(server->lastKnownInterface);
+		}
 		return v;
 	}
 	int size() const override {
@@ -3898,13 +3901,17 @@ ACTOR Future<Void> storageServerTracker(
 			}
 		}
 	} catch( Error &e ) {
-		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet())
-			errorOut.sendError(e);
+		state Error err = e;
 		TraceEvent("StorageServerTrackerCancelled", self->distributorId)
 		    .suppressFor(1.0)
 		    .detail("Primary", self->primary)
-		    .detail("Server", server->id);
-		throw;
+		    .detail("Server", server->id)
+		    .error(e, /*includeCancelled*/ true);
+		if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
+			errorOut.sendError(e);
+			wait(delay(0)); // Check for cancellation, since errorOut.sendError(e) could delete self
+		}
+		throw err;
 	}
 }
 
@@ -4654,6 +4661,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			zeroHealthyTeams.push_back(Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ));
 			int storageTeamSize = configuration.storageTeamSize;
 
+			// Stored outside of data distribution tracker to avoid slow tasks
+			// when tracker is cancelled
+			state KeyRangeMap<ShardTrackedData> shards;
+
 			vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
@@ -4667,8 +4678,16 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getShardMetricsList, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId ), "DDTracker", self->ddId, &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+			actors.push_back(reportErrorsExcept(
+			    dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics,
+			                            getShardMetricsList, getAverageShardBytes.getFuture(), readyToStart,
+			                            anyZeroHealthyTeams, self->ddId, &shards),
+			    "DDTracker", self->ddId, &normalDDQueueErrors()));
+			actors.push_back(reportErrorsExcept(
+			    dataDistributionQueue(cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis,
+			                          shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId,
+			                          storageTeamSize, configuration.storageTeamSize, &lastLimited),
+			    "DDQueue", self->ddId, &normalDDQueueErrors()));
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = Reference<DDTeamCollection>( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
@@ -4693,8 +4712,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
-			if( e.code() != error_code_movekeys_conflict )
-				throw err;
+			wait(shards.clearAsync());
+			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
 			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
 			if( ddEnabled )

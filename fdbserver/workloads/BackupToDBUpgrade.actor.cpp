@@ -148,6 +148,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status

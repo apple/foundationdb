@@ -207,6 +207,26 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Optional<Key> initHealthyZoneValue;
 };
 
+struct ShardMetrics {
+	StorageMetrics metrics;
+	double lastLowBandwidthStartTime;
+	int shardCount;
+
+	bool operator==(ShardMetrics const& rhs) const {
+		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
+		       shardCount == rhs.shardCount;
+	}
+
+	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
+	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
+};
+
+struct ShardTrackedData {
+	Future<Void> trackShard;
+	Future<Void> trackBytes;
+	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
+};
+
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
@@ -217,7 +237,8 @@ Future<Void> dataDistributionTracker(
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
 	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
-	UID const& distributorId);
+	UID const& distributorId,
+	KeyRangeMap<ShardTrackedData>* const& shards);
 
 Future<Void> dataDistributionQueue(
 	Database const& cx,

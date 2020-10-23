@@ -82,6 +82,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
+	init( PING_LOGGING_INTERVAL,                               3.0 );
+	init( PING_SAMPLE_AMOUNT,                                  100 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
