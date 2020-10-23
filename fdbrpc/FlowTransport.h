@@ -20,10 +20,6 @@
 
 #ifndef FLOW_TRANSPORT_H
 #define FLOW_TRANSPORT_H
-#include "flow/ProtocolVersion.h"
-#include "flow/serialize.h"
-#include <cstdint>
-#include <memory>
 #pragma once
 
 #include <algorithm>
@@ -31,6 +27,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/ContinuousSample.h"
 
