@@ -4154,6 +4154,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	state Reference<InitialDataDistribution> initData;
 	state MoveKeysLock lock;
 	loop {
+		// Stored outside of data distribution tracker to avoid slow tasks
+		// when tracker is cancelled
+		state KeyRangeMap<ShardTrackedData> shards;
+		// Must outlive shards!
+		state Future<Void> dataDistributionTrackerFuture;
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4297,10 +4302,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			zeroHealthyTeams.push_back(Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ));
 			int storageTeamSize = configuration.storageTeamSize;
 
-			// Stored outside of data distribution tracker to avoid slow tasks
-			// when tracker is cancelled
-			state KeyRangeMap<ShardTrackedData> shards;
-
 			vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
@@ -4313,13 +4314,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
 
-			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back(
+			actors.push_back(pollMoveKeysLock(cx, lock));
+			dataDistributionTrackerFuture =
 			    reportErrorsExcept(dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure,
 			                                               getShardMetrics, getAverageShardBytes.getFuture(),
 			                                               readyToStart, anyZeroHealthyTeams, self->ddId, &shards),
-			                       "DDTracker", self->ddId, &normalDDQueueErrors()));
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+			                       "DDTracker", self->ddId, &normalDDQueueErrors())
+			        actors.push_back(dataDistributionTrackerFuture);
+			actors.push_back(reportErrorsExcept(
+			    dataDistributionQueue(cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis,
+			                          shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId,
+			                          storageTeamSize, configuration.storageTeamSize, &lastLimited),
+			    "DDQueue", self->ddId, &normalDDQueueErrors()));
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			Reference<DDTeamCollection> primaryTeamCollection( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
@@ -4340,6 +4346,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 		catch( Error &e ) {
 			state Error err = e;
 			wait(shards.clearAsync());
+			dataDistributionTrackerFuture.cancel();
 			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
 			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
