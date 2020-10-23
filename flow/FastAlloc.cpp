@@ -24,8 +24,10 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/crc32c.h"
 #include "flow/flow.h"
 
+#include <atomic>
 #include <cstdint>
 #include <unordered_map>
 
@@ -40,6 +42,10 @@
 #include <linux/mman.h>
 #endif
 
+#ifdef __FreeBSD__
+#include <sys/mman.h>
+#endif
+
 #define FAST_ALLOCATOR_DEBUG 0
 
 #ifdef _MSC_VER
@@ -47,8 +53,13 @@
 #pragma warning (disable: 4073)
 #pragma init_seg(lib)
 #define INIT_SEG
+#elif defined(__INTEL_COMPILER)
+// intel compiler ignored INIT_SEG for thread local variables
+#define INIT_SEG
 #elif defined(__GNUG__)
 #ifdef __linux__
+#define INIT_SEG __attribute__ ((init_priority (1000)))
+#elif defined(__FreeBSD__)
 #define INIT_SEG __attribute__ ((init_priority (1000)))
 #elif defined(__APPLE__)
 #pragma message "init_priority is not supported on this platform; will this be a problem?"
@@ -77,9 +88,9 @@ void* FastAllocator<Size>::freelist = nullptr;
 typedef void (*ThreadInitFunction)();
 
 ThreadInitFunction threadInitFunction = 0;  // See ThreadCleanup.cpp in the C binding
-void setFastAllocatorThreadInitFunction( ThreadInitFunction f ) { 
+void setFastAllocatorThreadInitFunction(ThreadInitFunction f) {
 	ASSERT( !threadInitFunction );
-	threadInitFunction = f; 
+	threadInitFunction = f;
 }
 
 std::atomic<int64_t> g_hugeArenaMemory(0);
@@ -143,9 +154,9 @@ void recordAllocation( void *ptr, size_t size ) {
 #error Instrumentation not supported on this platform
 #endif
 
-		uint32_t a = 0, b = 0;
+		uint32_t a = 0;
 		if( nptrs > 0 ) {
-			hashlittle2( buffer, nptrs * sizeof(void *), &a, &b );
+			a = crc32c_append( 0xfdbeefdb, buffer, nptrs * sizeof(void *));
 		}
 
 		double countDelta = std::max(1.0, ((double)SAMPLE_BYTES) / size);
@@ -211,28 +222,32 @@ struct FastAllocator<Size>::GlobalData {
 	CRITICAL_SECTION mutex;
 	std::vector<void*> magazines;   // These magazines are always exactly magazine_size ("full")
 	std::vector<std::pair<int, void*>> partial_magazines;  // Magazines that are not "full" and their counts.  Only created by releaseThreadMagazines().
-	long long totalMemory;
+	std::atomic<long long> totalMemory;
 	long long partialMagazineUnallocatedMemory;
-	long long activeThreads;
-	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) { 
+	std::atomic<long long> activeThreads;
+	GlobalData() : totalMemory(0), partialMagazineUnallocatedMemory(0), activeThreads(0) {
 		InitializeCriticalSection(&mutex);
 	}
 };
 
 template <int Size>
 long long FastAllocator<Size>::getTotalMemory() {
-	return globalData()->totalMemory;
+	return globalData()->totalMemory.load();
 }
 
 // This does not include memory held by various threads that's available for allocation
 template <int Size>
 long long FastAllocator<Size>::getApproximateMemoryUnused() {
-	return globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
+	EnterCriticalSection(&globalData()->mutex);
+	long long unused =
+	    globalData()->magazines.size() * magazine_size * Size + globalData()->partialMagazineUnallocatedMemory;
+	LeaveCriticalSection(&globalData()->mutex);
+	return unused;
 }
 
 template <int Size>
 long long FastAllocator<Size>::getActiveThreads() {
-	return globalData()->activeThreads;
+	return globalData()->activeThreads.load();
 }
 
 #if FAST_ALLOCATOR_DEBUG
@@ -259,6 +274,10 @@ void *FastAllocator<Size>::allocate() {
 	if(!threadInitialized) {
 		initThread();
 	}
+
+#ifdef USE_GPERFTOOLS
+	return malloc(Size);
+#endif
 
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
@@ -302,6 +321,10 @@ void FastAllocator<Size>::release(void *ptr) {
 	if(!threadInitialized) {
 		initThread();
 	}
+
+#ifdef USE_GPERFTOOLS
+	return free(ptr);
+#endif
 
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
@@ -393,9 +416,7 @@ void FastAllocator<Size>::initThread() {
 		threadInitFunction();
 	}
 
-	EnterCriticalSection(&globalData()->mutex);
-	++globalData()->activeThreads;
-	LeaveCriticalSection(&globalData()->mutex);
+	globalData()->activeThreads.fetch_add(1);
 
 	threadData.freelist = nullptr;
 	threadData.alternate = nullptr;
@@ -424,7 +445,7 @@ void FastAllocator<Size>::getMagazine() {
 		threadData.count = p.first;
 		return;
 	}
-	globalData()->totalMemory += magazine_size*Size;
+	globalData()->totalMemory.fetch_add(magazine_size * Size);
 	LeaveCriticalSection(&globalData()->mutex);
 
 	// Allocate a new page of data from the system allocator
@@ -436,8 +457,9 @@ void FastAllocator<Size>::getMagazine() {
 #if FAST_ALLOCATOR_DEBUG
 #ifdef WIN32
 	static int alt = 0; alt++;
-	block = (void**)VirtualAllocEx( GetCurrentProcess(), 
-									(void*)( ((getSizeCode(Size)<<11) + alt) * magazine_size*Size), magazine_size*Size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE );
+	block =
+	    (void**)VirtualAllocEx(GetCurrentProcess(), (void*)(((getSizeCode(Size) << 11) + alt) * magazine_size * Size),
+	                           magazine_size * Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #else
 	static int alt = 0; alt++;
 	void* desiredBlock = (void*)( ((getSizeCode(Size)<<11) + alt) * magazine_size*Size);
@@ -461,7 +483,7 @@ void FastAllocator<Size>::getMagazine() {
 		block[i*PSize+1] = block[i*PSize] = &block[(i+1)*PSize];
 		check( &block[i*PSize], false );
 	}
-		
+
 	block[(magazine_size-1)*PSize+1] = block[(magazine_size-1)*PSize] = nullptr;
 	check( &block[(magazine_size-1)*PSize], false );
 	threadData.freelist = block;
@@ -491,7 +513,7 @@ void FastAllocator<Size>::releaseThreadMagazines() {
 				globalData()->magazines.push_back(thr.alternate);
 			}
 		}
-		--globalData()->activeThreads;
+		globalData()->activeThreads.fetch_add(-1);
 		LeaveCriticalSection(&globalData()->mutex);
 
 		thr.count = 0;
@@ -512,6 +534,7 @@ void releaseAllThreadMagazines() {
 	FastAllocator<2048>::releaseThreadMagazines();
 	FastAllocator<4096>::releaseThreadMagazines();
 	FastAllocator<8192>::releaseThreadMagazines();
+	FastAllocator<16384>::releaseThreadMagazines();
 }
 
 int64_t getTotalUnusedAllocatedMemory() {
@@ -528,6 +551,7 @@ int64_t getTotalUnusedAllocatedMemory() {
 	unusedMemory += FastAllocator<2048>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<4096>::getApproximateMemoryUnused();
 	unusedMemory += FastAllocator<8192>::getApproximateMemoryUnused();
+	unusedMemory += FastAllocator<16384>::getApproximateMemoryUnused();
 
 	return unusedMemory;
 }
@@ -543,4 +567,4 @@ template class FastAllocator<1024>;
 template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
-
+template class FastAllocator<16384>;

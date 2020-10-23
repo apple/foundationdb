@@ -130,21 +130,20 @@ function(strip_debug_symbols target)
   list(APPEND strip_command -o "${out_file}")
   add_custom_command(OUTPUT "${out_file}"
     COMMAND ${strip_command} $<TARGET_FILE:${target}>
+    DEPENDS ${target}
     COMMENT "Stripping symbols from ${target}")
   add_custom_target(strip_only_${target} DEPENDS ${out_file})
   if(is_exec AND NOT APPLE)
     add_custom_command(OUTPUT "${out_file}.debug"
+      DEPENDS strip_only_${target}
       COMMAND objcopy --verbose --only-keep-debug $<TARGET_FILE:${target}> "${out_file}.debug"
       COMMAND objcopy --verbose --add-gnu-debuglink="${out_file}.debug" "${out_file}"
-      DEPENDS ${out_file}
       COMMENT "Copy debug symbols to ${out_name}.debug")
-    list(APPEND out_files "${out_file}.debug")
-    add_custom_target(strip_${target} DEPENDS "${out_file}.debug")
+    add_custom_target(strip_${target} DEPENDS  "${out_file}.debug")
   else()
     add_custom_target(strip_${target})
+    add_dependencies(strip_${target} strip_only_${target})
   endif()
-  add_dependencies(strip_${target} strip_only_${target})
-  add_dependencies(strip_${target} ${target})
   add_dependencies(strip_targets strip_${target})
 endfunction()
 
@@ -152,7 +151,7 @@ function(add_flow_target)
   set(options EXECUTABLE STATIC_LIBRARY
     DYNAMIC_LIBRARY)
   set(oneValueArgs NAME)
-  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_WITHOUT_WAIT_WARNING ADDL_SRCS)
+  set(multiValueArgs SRCS COVERAGE_FILTER_OUT DISABLE_ACTOR_DIAGNOSTICS ADDL_SRCS)
   cmake_parse_arguments(AFT "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(NOT AFT_NAME)
     message(FATAL_ERROR "add_flow_target requires option NAME")
@@ -161,10 +160,11 @@ function(add_flow_target)
     message(FATAL_ERROR "No sources provided")
   endif()
   if(OPEN_FOR_IDE)
-    set(sources ${AFT_SRCS} ${AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING} ${AFT_ADDL_SRCS})
+    # Intentionally omit ${AFT_DISABLE_ACTOR_DIAGNOSTICS} since we don't want diagnostics
+    set(sources ${AFT_SRCS} ${AFT_ADDL_SRCS})
     add_library(${AFT_NAME} OBJECT ${sources})
   else()
-    foreach(src IN LISTS AFT_SRCS AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
+    foreach(src IN LISTS AFT_SRCS AFT_DISABLE_ACTOR_DIAGNOSTICS)
       set(actor_compiler_flags "")
       if(${src} MATCHES ".*\\.actor\\.(h|cpp)")
         list(APPEND actors ${src})
@@ -174,9 +174,9 @@ function(add_flow_target)
         else()
           string(REPLACE ".actor.cpp" ".actor.g.cpp" generated ${src})
         endif()
-        foreach(s IN LISTS AFT_DISABLE_ACTOR_WITHOUT_WAIT_WARNING)
+        foreach(s IN LISTS AFT_DISABLE_ACTOR_DIAGNOSTICS)
           if("${s}" STREQUAL "${src}")
-            list(APPEND actor_compiler_flags "--disable-actor-without-wait-warning")
+            list(APPEND actor_compiler_flags "--disable-diagnostics")
             break()
           endif()
         endforeach()
@@ -185,12 +185,12 @@ function(add_flow_target)
         if(WIN32)
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND $<TARGET_FILE:actorcompiler> "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags}
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" ${actor_exe}
             COMMENT "Compile actor: ${src}")
         else()
           add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${generated}"
             COMMAND ${MONO_EXECUTABLE} ${actor_exe} "${CMAKE_CURRENT_SOURCE_DIR}/${src}" "${CMAKE_CURRENT_BINARY_DIR}/${generated}" ${actor_compiler_flags} > /dev/null
-            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}"
+            DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${src}" ${actor_exe}
             COMMENT "Compile actor: ${src}")
         endif()
       else()
@@ -237,5 +237,4 @@ function(add_flow_target)
       strip_debug_symbols(${AFT_NAME})
     endif()
   endif()
-  target_include_directories(${AFT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()

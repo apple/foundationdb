@@ -37,21 +37,34 @@ struct MasterInterface {
 	RequestStream< struct TLogRejoinRequest > tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new master
 	RequestStream< struct ChangeCoordinatorsRequest > changeCoordinators;
 	RequestStream< struct GetCommitVersionRequest > getCommitVersion;
+	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 
 	NetworkAddress address() const { return changeCoordinators.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return changeCoordinators.getEndpoint().addresses; }
 
 	UID id() const { return changeCoordinators.getEndpoint().token; }
 	template <class Archive>
 	void serialize(Archive& ar) {
 		if constexpr (!is_fb_function<Archive>) {
-                ASSERT( ar.protocolVersion().isValid() );
-        }
-		serializer(ar, locality, waitFailure, tlogRejoin, changeCoordinators, getCommitVersion);
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, locality, waitFailure);
+		if( Archive::isDeserializing ) {
+			tlogRejoin = RequestStream< struct TLogRejoinRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(1) );
+			changeCoordinators = RequestStream< struct ChangeCoordinatorsRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(2) );
+			getCommitVersion = RequestStream< struct GetCommitVersionRequest >( waitFailure.getEndpoint().getAdjustedEndpoint(3) );
+			notifyBackupWorkerDone = RequestStream<struct BackupWorkerDoneRequest>( waitFailure.getEndpoint().getAdjustedEndpoint(4) );
+		}
 	}
 
 	void initEndpoints() {
-		getCommitVersion.getEndpoint( TaskPriority::GetConsistentReadVersion );
-		tlogRejoin.getEndpoint( TaskPriority::MasterTLogRejoin );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(tlogRejoin.getReceiver(TaskPriority::MasterTLogRejoin));
+		streams.push_back(changeCoordinators.getReceiver());
+		streams.push_back(getCommitVersion.getReceiver(TaskPriority::GetConsistentReadVersion));
+		streams.push_back(notifyBackupWorkerDone.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
 	}
 };
 
@@ -154,6 +167,21 @@ struct GetCommitVersionRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requestNum, mostRecentProcessedRequestNum, requestingProxy, reply);
+	}
+};
+
+struct BackupWorkerDoneRequest {
+	constexpr static FileIdentifier file_identifier = 8736351;
+	UID workerUID;
+	LogEpoch backupEpoch;
+	ReplyPromise<Void> reply;
+
+	BackupWorkerDoneRequest() : workerUID(), backupEpoch(-1) {}
+	BackupWorkerDoneRequest(UID id, LogEpoch epoch) : workerUID(id), backupEpoch(epoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, workerUID, backupEpoch, reply);
 	}
 };
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ######################################################
 #
 # FoundationDB Binding Test Script
@@ -25,7 +25,8 @@ BREAKONERROR="${BREAKONERROR:-0}"
 RUNSCRIPTS="${RUNSCRIPTS:-1}"
 RUNTESTS="${RUNTESTS:-1}"
 RANDOMTEST="${RANDOMTEST:-0}"
-BINDINGTESTS="${BINDINGTESTS:-python python3 java java_async ruby go flow}"
+# BINDINGTESTS="${BINDINGTESTS:-python python3 java java_async ruby go flow}"
+BINDINGTESTS="${BINDINGTESTS:-python python3 java java_async go flow}"
 LOGLEVEL="${LOGLEVEL:-INFO}"
 _BINDINGTESTS=(${BINDINGTESTS})
 DISABLEDTESTS=()
@@ -186,7 +187,7 @@ function runScriptedTest()
 	else
 		local test="${1}"
 
-		if ! runCommand "Scripting ${test} ..."  'python' '-u' "${TESTFILE}" "${test}" --test-name scripted --logging-level "${LOGLEVEL}"
+		if ! runCommand "Scripting ${test} ..."  'python3' '-u' "${TESTFILE}" "${test}" --test-name scripted --logging-level "${LOGLEVEL}"
 		then
 			let status="${status} + 1"
 		fi
@@ -211,25 +212,25 @@ function runTest()
 		fi
 
 		# API
-		if ([[ "${TESTINDEX}" -eq 0 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) && ! runCommand "   ${TESTTYPES[0]}" 'python' '-u' "${TESTFILE}" "${test}" --test-name api --compare --num-ops "${OPERATIONS}" --logging-level "${LOGLEVEL}"
+		if ([[ "${TESTINDEX}" -eq 0 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) && ! runCommand "   ${TESTTYPES[0]}" 'python3' '-u' "${TESTFILE}" "${test}" --test-name api --compare --num-ops "${OPERATIONS}" --logging-level "${LOGLEVEL}"
 		then
 			let status="${status} + 1"
 		fi
 
 		# Concurrent API
-		if ([[ "${TESTINDEX}" -eq 1 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) &&  ! runCommand "   ${TESTTYPES[1]}" 'python' '-u' "${TESTFILE}" "${test}" --test-name api --concurrency "${CONCURRENCY}" --num-ops "${OPERATIONS}" --logging-level "${LOGLEVEL}"
+		if ([[ "${TESTINDEX}" -eq 1 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) &&  ! runCommand "   ${TESTTYPES[1]}" 'python3' '-u' "${TESTFILE}" "${test}" --test-name api --concurrency "${CONCURRENCY}" --num-ops "${OPERATIONS}" --logging-level "${LOGLEVEL}"
 		then
 			let status="${status} + 1"
 		fi
 
 		# Directory
-		if ([[ "${TESTINDEX}" -eq 2 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) &&  ! runCommand "   ${TESTTYPES[2]}" 'python' '-u' "${TESTFILE}" "${test}" --test-name directory --compare --num-ops "${OPERATIONS}" --logging-level "${LOGLEVEL}"
+		if ([[ "${TESTINDEX}" -eq 2 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) &&  ! runCommand "   ${TESTTYPES[2]}" 'python3' '-u' "${TESTFILE}" "${test}" --test-name directory --compare --num-ops "${OPERATIONS}" --logging-level "${LOGLEVEL}"
 		then
 			let status="${status} + 1"
 		fi
 
 		# Directory HCA
-		if ([[ "${TESTINDEX}" -eq 3 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) &&  ! runCommand "   ${TESTTYPES[3]}" 'python' '-u' "${TESTFILE}" "${test}" --test-name directory_hca --concurrency "${CONCURRENCY}"  --num-ops "${HCAOPERATIONS}" --logging-level "${LOGLEVEL}"
+		if ([[ "${TESTINDEX}" -eq 3 ]] || [[ "${TESTINDEX}" -eq "${TESTTOTAL}" ]]) && ([[ "${BREAKONERROR}" -eq 0 ]] || [[ "${status}" -eq 0 ]]) &&  ! runCommand "   ${TESTTYPES[3]}" 'python3' '-u' "${TESTFILE}" "${test}" --test-name directory_hca --concurrency "${CONCURRENCY}"  --num-ops "${HCAOPERATIONS}" --logging-level "${LOGLEVEL}"
 		then
 			let status="${status} + 1"
 		fi

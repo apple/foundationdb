@@ -51,8 +51,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 
@@ -135,7 +133,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 620
+  #define FDB_API_VERSION 630
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -197,7 +195,7 @@ The FoundationDB client library performs most tasks on a singleton thread (which
 
    Must be called after :func:`fdb_setup_network()` before any asynchronous functions in this API can be expected to complete. Unless your program is entirely event-driven based on results of asynchronous functions in this API and has no event loop of its own, you will want to invoke this function on an auxiliary thread (which it is your responsibility to create).
 
-   This function will not return until :func:`fdb_stop_network()` is called by you or a serious error occurs. You must not invoke :func:`fdb_run_network()` concurrently or reentrantly while it is already running.
+   This function will not return until :func:`fdb_stop_network()` is called by you or a serious error occurs. It is not possible to run more than one network thread, and the network thread cannot be restarted once it has been stopped. This means that once ``fdb_run_network`` has been called, it is not legal to call it again for the lifetime of the running program.
 
 .. function:: fdb_error_t fdb_stop_network()
 
@@ -476,6 +474,12 @@ Applications must provide error handling and an appropriate retry loop around th
    ``snapshot``
       |snapshot|
 
+.. function:: FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length)
+   Returns an estimated byte size of the key range.
+   .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
+
+   |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
    Resolves a :ref:`key selector <key-selectors>` against the keys in the database snapshot represented by ``transaction``.
@@ -696,8 +700,6 @@ Applications must provide error handling and an appropriate retry loop around th
     |atomic-versionstamps-1|
 
     |atomic-versionstamps-2|
-
-    |atomic-set-versionstamped-key-2|
 
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 

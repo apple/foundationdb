@@ -11,26 +11,27 @@ endif()
 ################################################################################
 # SSL
 ################################################################################
+include(CheckSymbolExists)
 
-set(DISABLE_TLS OFF CACHE BOOL "Don't try to find LibreSSL and always build without TLS support")
+set(DISABLE_TLS OFF CACHE BOOL "Don't try to find OpenSSL and always build without TLS support")
 if(DISABLE_TLS)
   set(WITH_TLS OFF)
 else()
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL)
-  if(NOT OPENSSL_FOUND)
-    set(LIBRESSL_USE_STATIC_LIBS TRUE)
-    find_package(LibreSSL)
-		if (LIBRESSL_FOUND)
-			add_library(OpenSSL::SSL ALIAS LibreSSL)
-		endif()
-  endif()
-	if(OPENSSL_FOUND OR LIBRESSL_FOUND)
-    set(WITH_TLS ON)
-    add_compile_options(-DHAVE_OPENSSL)
+  if(OPENSSL_FOUND)
+    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+    check_symbol_exists("OPENSSL_INIT_NO_ATEXIT" "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
+    if(OPENSSL_HAS_NO_ATEXIT)
+      set(WITH_TLS ON)
+      add_compile_options(-DHAVE_OPENSSL)
+    else()
+      message(WARNING "An OpenSSL version was found, but it doesn't support OPENSSL_INIT_NO_ATEXIT - Will compile without TLS Support")
+      set(WITH_TLS OFF)
+    endif()
   else()
-    message(STATUS "Neither OpenSSL nor LibreSSL were found - Will compile without TLS Support")
-    message(STATUS "You can set OPENSSL_ROOT_DIR or LibreSSL_ROOT to the LibreSSL install directory to help cmake find it")
+    message(STATUS "OpenSSL was not found - Will compile without TLS Support")
+    message(STATUS "You can set OPENSSL_ROOT_DIR to help cmake find it")
     set(WITH_TLS OFF)
   endif()
   if(WIN32)
@@ -46,7 +47,8 @@ endif()
 set(WITH_JAVA OFF)
 find_package(JNI 1.8)
 find_package(Java 1.8 COMPONENTS Development)
-if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND)
+# leave FreeBSD JVM compat for later
+if(JNI_FOUND AND Java_FOUND AND Java_Development_FOUND AND NOT (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"))
   set(WITH_JAVA ON)
   include(UseJava)
   enable_language(Java)
@@ -70,8 +72,8 @@ endif()
 # Pip
 ################################################################################
 
-find_package(Virtualenv)
-if (Virtualenv_FOUND)
+find_package(Python3 COMPONENTS Interpreter)
+if (Python3_Interpreter_FOUND)
   set(WITH_DOCUMENTATION ON)
 else()
   set(WITH_DOCUMENTATION OFF)
@@ -100,6 +102,21 @@ if(GEM_EXECUTABLE)
   set(WITH_RUBY ON)
 endif()
 
+################################################################################
+# RocksDB
+################################################################################
+
+set(SSD_ROCKSDB_EXPERIMENTAL OFF CACHE BOOL "Build with experimental RocksDB support")
+# RocksDB is currently enabled by default for GCC but does not build with the latest
+# Clang.
+if (SSD_ROCKSDB_EXPERIMENTAL OR GCC)
+  set(WITH_ROCKSDB_EXPERIMENTAL ON)
+else()
+  set(WITH_ROCKSDB_EXPERIMENTAL OFF)
+endif()
+
+################################################################################
+
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
 
@@ -115,6 +132,7 @@ function(print_components)
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Bindings (depends on Python):   ${WITH_PYTHON}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
+  message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
   message(STATUS "=========================================")
 endfunction()
 

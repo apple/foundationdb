@@ -302,7 +302,7 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 namespace unit_tests {
 
 TEST_CASE("flow/FlatBuffers/variant") {
-	using V = boost::variant<int, double, Nested2>;
+	using V = std::variant<int, double, Nested2>;
 	V v1;
 	V v2;
 	Arena arena;
@@ -313,21 +313,21 @@ TEST_CASE("flow/FlatBuffers/variant") {
 	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<int>(v1) == boost::get<int>(v2));
+	ASSERT(std::get<int>(v1) == std::get<int>(v2));
 
 	v1 = 1.0;
 	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<double>(v1) == boost::get<double>(v2));
+	ASSERT(std::get<double>(v1) == std::get<double>(v2));
 
 	v1 = Nested2{ 1, { "abc", "def" }, 2 };
 	out = save_members(context, FileIdentifier{}, v1);
 	// print_buffer(out, arena.get_size(out));
 	load_members(out, context, v2);
-	ASSERT(boost::get<Nested2>(v1).a == boost::get<Nested2>(v2).a);
-	ASSERT(boost::get<Nested2>(v1).b == boost::get<Nested2>(v2).b);
-	ASSERT(boost::get<Nested2>(v1).c == boost::get<Nested2>(v2).c);
+	ASSERT(std::get<Nested2>(v1).a == std::get<Nested2>(v2).a);
+	ASSERT(std::get<Nested2>(v1).b == std::get<Nested2>(v2).b);
+	ASSERT(std::get<Nested2>(v1).c == std::get<Nested2>(v2).c);
 	return Void();
 }
 
@@ -347,6 +347,16 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 
 } // namespace unit_tests
 
+template <>
+struct string_serialized_traits<Void> : std::true_type {
+	int32_t getSize(const Void& item) const { return 0; }
+	uint32_t save(uint8_t* out, const Void& t) const { return 0; }
+	template <class Context>
+	uint32_t load(const uint8_t* data, Void& t, Context& context) {
+		return 0;
+	}
+};
+
 namespace unit_tests {
 
 struct Y1 {
@@ -360,7 +370,7 @@ struct Y1 {
 
 struct Y2 {
 	int a;
-	boost::variant<int> b;
+	std::variant<int> b;
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
@@ -470,21 +480,21 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 }
 
 TEST_CASE("/flow/FlatBuffers/Standalone") {
-	Standalone<VectorRef<StringRef>> vecIn;
+	std::vector<Standalone<StringRef>> vecIn;
 	auto numElements = deterministicRandom()->randomInt(1, 20);
-	for (int i = 0; i < numElements; ++i) {
-		auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
-		vecIn.push_back(vecIn.arena(), StringRef(vecIn.arena(), str));
+    for (int i = 0; i < numElements; ++i) {
+        auto str = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 30));
+		vecIn.push_back(Standalone<StringRef>(str));
 	}
-	Standalone<StringRef> value = ObjectWriter::toValue(vecIn, Unversioned());
-	ArenaObjectReader reader(value.arena(), value, Unversioned());
-	VectorRef<Standalone<StringRef>> vecOut;
+    Standalone<StringRef> value = ObjectWriter::toValue(vecIn, Unversioned());
+    ArenaObjectReader reader(value.arena(), value, Unversioned());
+	std::vector<Standalone<StringRef>> vecOut;
 	reader.deserialize(vecOut);
-	ASSERT(vecOut.size() == vecIn.size());
-	for (int i = 0; i < vecOut.size(); ++i) {
-		ASSERT(vecOut[i] == vecIn[i]);
-	}
-	return Void();
+    ASSERT(vecOut.size() == vecIn.size());
+    for (int i = 0; i < vecOut.size(); ++i) {
+        ASSERT(vecOut[i] == vecIn[i]);
+    }
+    return Void();
 }
 
 // Meant to be run with valgrind or asan, to catch heap buffer overflows
@@ -496,6 +506,59 @@ TEST_CASE("/flow/FlatBuffers/Void") {
 	ObjectReader rd(buffer.get(), Unversioned());
 	Void x;
 	rd.deserialize(x);
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<StringRef>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<StringRef> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<std::vector<Void>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<std::vector<Void>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg = ObjectWriter::toValue(std::vector<VectorRef<Void>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<VectorRef<Void>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg =
+	    ObjectWriter::toValue(std::vector<VectorRef<Void, VecSerStrategy::String>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<VectorRef<Void, VecSerStrategy::String>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
 	return Void();
 }
 

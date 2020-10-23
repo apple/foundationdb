@@ -32,12 +32,55 @@ void forceLinkFlowTests() {}
 
 using std::vector;
 
+constexpr int firstLine = __LINE__;
+TEST_CASE("/flow/actorcompiler/lineNumbers") {
+	loop {
+		try {
+			ASSERT(__LINE__ == firstLine + 4);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 6);
+			throw success();
+		} catch (Error& e) {
+			ASSERT(__LINE__ == firstLine + 9);
+			wait(Future<Void>(Void()));
+			ASSERT(__LINE__ == firstLine + 11);
+		}
+		break;
+	}
+	ASSERT(LiteralStringRef(__FILE__).endsWith(LiteralStringRef("FlowTests.actor.cpp")));
+	return Void();
+}
+
+TEST_CASE("/flow/buggifiedDelay") {
+	if (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0) {
+		return Void();
+	}
+	loop {
+		state double x = deterministicRandom()->random01();
+		state int last = 0;
+		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+			*last = 1;
+			return Void();
+		});
+		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+			*last = 2;
+			return Void();
+		});
+		wait(f1 && f2);
+		if (last == 1) {
+			TEST(true); // Delays can become ready out of order
+			return Void();
+		}
+	}
+}
+
 template <class T, class Func, class ErrFunc, class CallbackType>
 class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
 	Func func;
 	ErrFunc errFunc;
 
 	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
+	virtual void fire(T && t) { CallbackType::remove(); func(std::move(t)); delete this; }
 	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
 
 public:
@@ -71,7 +114,7 @@ void onReady(FutureStream<T>&& f, Func&& func, ErrFunc&& errFunc) {
 ACTOR static void emptyVoidActor() {
 }
 
-ACTOR static Future<Void> emptyActor() {
+ACTOR [[flow_allow_discard]] static Future<Void> emptyActor() {
 	return Void();
 }
 
@@ -202,6 +245,7 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	virtual Future< Reference<class IAsyncFile> > open(std::string filename, int64_t flags, int64_t mode) { return IAsyncFileSystem::filesystem()->open(filename,flags,mode); }
 	virtual Future< Void > deleteFile(std::string filename, bool mustBeDurable) { return IAsyncFileSystem::filesystem()->deleteFile(filename,mustBeDurable); }
 	virtual void run() { return baseNetwork->run(); }
+	virtual bool checkRunnable() { return baseNetwork->checkRunnable(); }
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total)  { return baseNetwork->getDiskBytes(directory,free,total); }
 	virtual bool isAddressOnThisHost(NetworkAddress const& addr) { return baseNetwork->isAddressOnThisHost(addr); }
 	virtual const TLSConfig& getTLSConfig() {
@@ -1215,6 +1259,89 @@ TEST_CASE("/fdbrpc/flow/wait_expression_after_cancel")
 	return Void();
 }
 
+// Tests for https://github.com/apple/foundationdb/issues/1226
+
+template <class>
+struct ShouldNotGoIntoClassContextStack;
+
+ACTOR static Future<Void> shouldNotHaveFriends();
+
+class Foo1 {
+public:
+	explicit Foo1(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo1* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo1::fooActor(Foo1* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class [[nodiscard]] Foo2 {
+public:
+	explicit Foo2(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo2 * self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo2::fooActor(Foo2* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+class alignas(4) Foo3 {
+public:
+	explicit Foo3(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo3* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo3::fooActor(Foo3* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Super {};
+
+class Foo4 : Super {
+public:
+	explicit Foo4(int x) : x(x) {}
+	Future<int> foo() { return fooActor(this); }
+	ACTOR static Future<int> fooActor(Foo4* self);
+
+private:
+	int x;
+};
+ACTOR Future<int> Foo4::fooActor(Foo4* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+struct Outer {
+	class Foo5 : Super {
+	public:
+		explicit Foo5(int x) : x(x) {}
+		Future<int> foo() { return fooActor(this); }
+		ACTOR static Future<int> fooActor(Foo5* self);
+
+	private:
+		int x;
+	};
+};
+ACTOR Future<int> Outer::Foo5::fooActor(Outer::Foo5* self) {
+	wait(Future<Void>());
+	return self->x;
+}
+
+ACTOR static Future<Void> shouldNotHaveFriends2();
+
 // Meant to be run with -fsanitize=undefined
 TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	deterministicRandom()->randomInt(std::numeric_limits<int>::min(), 0);
@@ -1234,5 +1361,107 @@ TEST_CASE("/flow/DeterministicRandom/SignedOverflow") {
 	ASSERT(deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::max() - 1,
 	                                          std::numeric_limits<int64_t>::max()) ==
 	       std::numeric_limits<int64_t>::max() - 1);
+	return Void();
+}
+
+struct Tracker {
+	int copied;
+	bool moved;
+	Tracker(int copied = 0) : moved(false), copied(copied) {}
+	Tracker(Tracker&& other) : Tracker(other.copied) {
+		ASSERT(!other.moved);
+		other.moved = true;
+	}
+	Tracker& operator=(Tracker&& other) {
+		ASSERT(!other.moved);
+		other.moved = true;
+		this->moved = false;
+		this->copied = other.copied;
+		return *this;
+	}
+	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(const Tracker& other) {
+		ASSERT(!other.moved);
+		this->moved = false;
+		this->copied = other.copied + 1;
+		return *this;
+	}
+	~Tracker() = default;
+
+	ACTOR static Future<Void> listen(FutureStream<Tracker> stream) {
+		Tracker movedTracker = waitNext(stream);
+		ASSERT(!movedTracker.moved);
+		ASSERT(movedTracker.copied == 0);
+		return Void();
+	}
+};
+
+TEST_CASE("/flow/flow/PromiseStream/move") {
+	state PromiseStream<Tracker> stream;
+	state Future<Void> listener;
+	{
+		// This tests the case when a callback is added before
+		// a movable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		stream.send(Tracker{});
+		wait(listener);
+	}
+
+	{
+		// This tests the case when a callback is added before
+		// a unmovable value is sent
+		listener = Tracker::listen(stream.getFuture());
+		Tracker namedTracker;
+		stream.send(namedTracker);
+		wait(listener);
+	}
+	{
+		// This tests the case when no callback is added until
+		// after a movable value is sent
+		stream.send(Tracker{});
+		stream.send(Tracker{});
+		{
+			state Tracker movedTracker = waitNext(stream.getFuture());
+			ASSERT(!movedTracker.moved);
+			ASSERT(movedTracker.copied == 0);
+		}
+		{
+			Tracker movedTracker = waitNext(stream.getFuture());
+			ASSERT(!movedTracker.moved);
+			ASSERT(movedTracker.copied == 0);
+		}
+	}
+	{
+		// This tests the case when no callback is added until
+		// after an unmovable value is sent
+		Tracker namedTracker1;
+		Tracker namedTracker2;
+		stream.send(namedTracker1);
+		stream.send(namedTracker2);
+		{
+			state Tracker copiedTracker = waitNext(stream.getFuture());
+			ASSERT(!copiedTracker.moved);
+			// must copy onto queue
+			ASSERT(copiedTracker.copied == 1);
+		}
+		{
+			Tracker copiedTracker = waitNext(stream.getFuture());
+			ASSERT(!copiedTracker.moved);
+			// must copy onto queue
+			ASSERT(copiedTracker.copied == 1);
+		}
+	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/flow/PromiseStream/move2") {
+	PromiseStream<Tracker> stream;
+	stream.send(Tracker{});
+	Tracker tracker = waitNext(stream.getFuture());
+	Tracker movedTracker = std::move(tracker);
+	ASSERT(tracker.moved);
+	ASSERT(!movedTracker.moved);
+	ASSERT(movedTracker.copied == 0);
 	return Void();
 }

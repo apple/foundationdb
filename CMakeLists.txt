@@ -16,9 +16,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
 project(foundationdb
-  VERSION 6.2.28
+  VERSION 6.3.10
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)
@@ -29,17 +29,22 @@ if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
 endif()
 
+set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
-    "MinSizeRel" "RelWithDebInfo")
+  if (OPEN_FOR_IDE)
+    message(STATUS "Defaulting build type to 'Debug' for OPEN_FOR_IDE")
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build" FORCE)
+  else()
+    message(STATUS "Setting build type to 'Release' as none was specified")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+      "MinSizeRel" "RelWithDebInfo")
+  endif()
 endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-
-set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
 
 ################################################################################
 # Packages used for bindings
@@ -75,42 +80,10 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 # Version information
 ################################################################################
 
-if(NOT WIN32)
-  add_custom_target(version_file ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/versions.target)
-  execute_process(
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_version.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
-    OUTPUT_VARIABLE FDB_VERSION_WNL)
-  execute_process(
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_package_name.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
-    OUTPUT_VARIABLE FDB_PACKAGE_NAME_WNL)
-  string(STRIP "${FDB_VERSION_WNL}" FDB_VERSION_TARGET_FILE)
-  string(STRIP "${FDB_PACKAGE_NAME_WNL}" FDB_PACKAGE_NAME_TARGET_FILE)
-endif()
-
-set(USE_VERSIONS_TARGET OFF CACHE BOOL "Use the deprecated versions.target file")
-if(USE_VERSIONS_TARGET)
-  if (WIN32)
-    message(FATAL_ERROR "USE_VERSION_TARGET us not supported on Windows")
-  endif()
-  set(FDB_VERSION ${FDB_VERION_TARGET_FILE})
-  set(FDB_PACKAGE_NAME ${FDB_PACKAGE_NAME_TARGET_FILE})
-  set(FDB_VERSION_PLAIN ${FDB_VERSION})
-else()
-  set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
-  set(FDB_VERSION ${PROJECT_VERSION})
-  set(FDB_VERSION_PLAIN ${FDB_VERSION})
-  if(NOT WIN32)
-    # we need to assert that the cmake version is in sync with the target version
-    if(NOT (FDB_VERSION STREQUAL FDB_VERSION_TARGET_FILE))
-      message(SEND_ERROR "The project version in cmake is set to ${FDB_VERSION},\
- but versions.target has it at ${FDB_VERSION_TARGET_FILE}")
-    endif()
-    if(NOT (FDB_PACKAGE_NAME STREQUAL FDB_PACKAGE_NAME_TARGET_FILE))
-      message(SEND_ERROR "The package name in cmake is set to ${FDB_PACKAGE_NAME},\
- but versions.target has it set to ${FDB_PACKAGE_NAME_TARGET_FILE}")
-    endif()
-  endif()
-endif()
+set(FDB_PACKAGE_NAME "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+set(FDB_VERSION ${PROJECT_VERSION})
+set(FDB_VERSION_PLAIN ${FDB_VERSION})
+configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_SOURCE_DIR}/versions.target)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -173,6 +146,10 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 # components
 ################################################################################
 
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  include_directories(/usr/local/include)
+endif()
+
 include(CompileBoost)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
@@ -184,20 +161,24 @@ if(NOT WIN32)
 else()
   add_subdirectory(fdbservice)
 endif()
+add_subdirectory(fdbbackup)
+add_subdirectory(contrib)
+add_subdirectory(tests)
 if(WITH_PYTHON)
   add_subdirectory(bindings)
 endif()
-add_subdirectory(fdbbackup)
-add_subdirectory(tests)
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
-add_subdirectory(monitoring)
 
 if(WIN32)
   add_subdirectory(packaging/msi)
 else()
   include(CPack)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  add_link_options(-lexecinfo)
 endif()
 
 ################################################################################

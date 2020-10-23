@@ -82,61 +82,53 @@ struct RelocateData {
 };
 
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
-public:
 	vector<Reference<IDataDistributionTeam>> teams;
-	vector<UID> tempServerIDs;
 
-	ParallelTCInfo() { }
-
-	void addTeam(Reference<IDataDistributionTeam> team) {
-		teams.push_back(team);
-	}
-
-	void clear() {
-		teams.clear();
-	}
-
-	int64_t sum(std::function<int64_t(Reference<IDataDistributionTeam>)> func) {
+	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result += func(*it);
+		for (const auto& team : teams) {
+			result += func(*team);
 		}
 		return result;
 	}
 
-	template<class T>
-	vector<T> collect(std::function < vector<T>(Reference<IDataDistributionTeam>)> func) {
+	template <class T>
+	vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
 		vector<T> result;
 
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			vector<T> newItems = func(*it);
+		for (const auto& team : teams) {
+			vector<T> newItems = func(*team);
 			result.insert(result.end(), newItems.begin(), newItems.end());
 		}
 		return result;
 	}
 
-	bool any(std::function<bool(Reference<IDataDistributionTeam>)> func) {
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			if (func(*it)) {
+	bool any(std::function<bool(IDataDistributionTeam const&)> func) const {
+		for (const auto& team : teams) {
+			if (func(*team)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	bool all(std::function<bool(Reference<IDataDistributionTeam>)> func) {
-		return !any([func](Reference<IDataDistributionTeam> team) {
-			return !func(team);
-		});
+public:
+	ParallelTCInfo() = default;
+
+	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
+
+	void clear() { teams.clear(); }
+
+	bool all(std::function<bool(IDataDistributionTeam const&)> func) const {
+		return !any([func](IDataDistributionTeam const& team) { return !func(team); });
 	}
 
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() {
-		return collect<StorageServerInterface>([](Reference<IDataDistributionTeam> team) {
-			return team->getLastKnownServerInterfaces();
-		});
+	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
+		return collect<StorageServerInterface>(
+		    [](IDataDistributionTeam const& team) { return team.getLastKnownServerInterfaces(); });
 	}
 
-	virtual int size() {
+	int size() const override {
 		int totalSize = 0;
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			totalSize += (*it)->size();
@@ -144,93 +136,85 @@ public:
 		return totalSize;
 	}
 
-	virtual vector<UID> const& getServerIDs() {
+	vector<UID> const& getServerIDs() const override {
+		static vector<UID> tempServerIDs;
 		tempServerIDs.clear();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			vector<UID> const& childIDs = (*it)->getServerIDs();
+		for (const auto& team : teams) {
+			vector<UID> const &childIDs = team->getServerIDs();
 			tempServerIDs.insert(tempServerIDs.end(), childIDs.begin(), childIDs.end());
 		}
 		return tempServerIDs;
 	}
 
-	virtual void addDataInFlightToTeam(int64_t delta) {
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			(*it)->addDataInFlightToTeam(delta);
+	void addDataInFlightToTeam(int64_t delta) override {
+		for (auto& team : teams) {
+			team->addDataInFlightToTeam(delta);
 		}
 	}
 
-	virtual int64_t getDataInFlightToTeam() {
-		return sum([](Reference<IDataDistributionTeam> team) {
-			return team->getDataInFlightToTeam();
+	int64_t getDataInFlightToTeam() const override {
+		return sum([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
+	}
+
+	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
+		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+			return team.getLoadBytes(includeInFlight, inflightPenalty);
 		});
 	}
 
-	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0 ) {
-		return sum([includeInFlight, inflightPenalty](Reference<IDataDistributionTeam> team) {
-			return team->getLoadBytes(includeInFlight, inflightPenalty);
-		});
-	}
-
-	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) {
+	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinAvailableSpace(includeInFlight));
+		for (const auto& team : teams) {
+			result = std::min(result, team->getMinAvailableSpace(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) {
+	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override {
 		double result = std::numeric_limits<double>::max();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			result = std::min(result, (*it)->getMinAvailableSpaceRatio(includeInFlight));
+		for (const auto& team : teams) {
+			result = std::min(result, team->getMinAvailableSpaceRatio(includeInFlight));
 		}
 		return result;
 	}
 
-	virtual bool hasHealthyAvailableSpace(double minRatio) {
-		return all([minRatio](Reference<IDataDistributionTeam> team) {
-			return team->hasHealthyAvailableSpace(minRatio);
-		});
+	bool hasHealthyAvailableSpace(double minRatio) const {
+		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
 		vector<Future<Void>> futures;
 
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			futures.push_back((*it)->updateStorageMetrics());
+		for (auto& team : teams) {
+			futures.push_back(team->updateStorageMetrics());
 		}
 		return waitForAll(futures);
 	}
 
-	virtual bool isOptimal() {
-		return all([](Reference<IDataDistributionTeam> team) {
-			return team->isOptimal();
-		});
+	bool isOptimal() const override {
+		return all([](IDataDistributionTeam const& team) { return team.isOptimal(); });
 	}
 
-	virtual bool isWrongConfiguration() {
-		return any([](Reference<IDataDistributionTeam> team) {
-			return team->isWrongConfiguration();
-		});
+	bool isWrongConfiguration() const override {
+		return any([](IDataDistributionTeam const& team) { return team.isWrongConfiguration(); });
 	}
-	virtual void setWrongConfiguration(bool wrongConfiguration) {
+	void setWrongConfiguration(bool wrongConfiguration) override {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setWrongConfiguration(wrongConfiguration);
 		}
 	}
 
-	virtual bool isHealthy() {
-		return all([](Reference<IDataDistributionTeam> team) {
-			return team->isHealthy();
-		});
+	bool isHealthy() const override {
+		return all([](IDataDistributionTeam const& team) { return team.isHealthy(); });
 	}
 
-	virtual void setHealthy(bool h) {
+	void setHealthy(bool h) override {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setHealthy(h);
 		}
 	}
-	virtual int getPriority() {
+
+	int getPriority() const override {
 		int priority = 0;
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			priority = std::max(priority, (*it)->getPriority());
@@ -238,7 +222,7 @@ public:
 		return priority;
 	}
 
-	virtual void setPriority(int p) {
+	void setPriority(int p) override {
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			(*it)->setPriority(p);
 		}
@@ -246,7 +230,7 @@ public:
 	virtual void addref() { ReferenceCounted<ParallelTCInfo>::addref(); }
 	virtual void delref() { ReferenceCounted<ParallelTCInfo>::delref(); }
 
-	virtual void addServers(const std::vector<UID>& servers) {
+	void addServers(const std::vector<UID>& servers) override {
 		ASSERT(!teams.empty());
 		teams[0]->addServers(servers);
 	}
@@ -297,6 +281,7 @@ int getWorkFactor( RelocateData const& relocation, int singleRegionTeamSize ) {
 
 // Data movement's resource control: Do not overload source servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
+// This ensure source servers will not be overloaded.
 bool canLaunch( RelocateData & relocation, int teamSize, int singleRegionTeamSize, std::map<UID, Busyness> & busymap,
 		std::vector<RelocateData> cancellableRelocations ) {
 	// assert this has not already been launched
@@ -364,7 +349,7 @@ struct DDQueueData {
 	int teamSize;
 	int singleRegionTeamSize;
 
-	std::map<UID, Busyness> busymap;
+	std::map<UID, Busyness> busymap; // UID is serverID
 
 	KeyRangeMap< RelocateData > queueMap;
 	std::set<RelocateData, std::greater<RelocateData>> fetchingSourcesQueue;
@@ -373,7 +358,8 @@ struct DDQueueData {
 	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>> queue; //Key UID is serverID, value is the serverID's set of RelocateData to relocate
 
 	KeyRangeMap< RelocateData > inFlight;
-	KeyRangeActorMap inFlightActors; //Key: RelocatData, Value: Actor to move the data
+	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
+	KeyRangeActorMap inFlightActors;
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -535,7 +521,7 @@ struct DDQueueData {
 
 		// FIXME: is the merge case needed
 		if( input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD ) {
-			wait( delay( 0.5, decrementPriority(decrementPriority(TaskPriority::DataDistribution )) ) );
+			wait( delay( 0.5, TaskPriority::DataDistributionVeryLow ) );
 		} else {
 			wait( delay( 0.0001, TaskPriority::DataDistributionLaunch ) );
 		}
@@ -547,6 +533,8 @@ struct DDQueueData {
 			servers.clear();
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			try {
+				state Standalone<RangeResultRef> UIDtoTagMap = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY ) );
+				ASSERT( !UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY );
 				Standalone<RangeResultRef> keyServersEntries  = wait(
 					tr.getRange( lastLessOrEqual( keyServersKey( input.keys.begin ) ),
 						firstGreaterOrEqual( keyServersKey( input.keys.end ) ), SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS ) );
@@ -554,7 +542,7 @@ struct DDQueueData {
 				if(keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for( int shard = 0; shard < keyServersEntries.size(); shard++ ) {
 						vector<UID> src, dest;
-						decodeKeyServersValue( keyServersEntries[shard].value, src, dest );
+						decodeKeyServersValue( UIDtoTagMap, keyServersEntries[shard].value, src, dest );
 						ASSERT( src.size() );
 						for( int i = 0; i < src.size(); i++ ) {
 							servers.insert( src[i] );
@@ -781,6 +769,9 @@ struct DDQueueData {
 		launchQueuedWork( combined );
 	}
 
+	// For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
+	// with rd. If there exist, cancel them by cancel their actors and reduce the src servers' busyness of those
+	// canceled inflight relocateData Launch the relocation for the rd.
 	void launchQueuedWork( std::set<RelocateData, std::greater<RelocateData>> combined ) {
 		int startedHere = 0;
 		double startTime = now();
@@ -789,6 +780,7 @@ struct DDQueueData {
 		for(; it != combined.end(); it++ ) {
 			RelocateData rd( *it );
 
+			// Check if there is an inflight shard that is overlapped with the queued relocateShard (rd)
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges( rd.keys );
 			for(auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
@@ -820,7 +812,8 @@ struct DDQueueData {
 			}
 
 			// Data movement avoids overloading source servers in moving data.
-			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the queue
+			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
+			// queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 			if( !canLaunch( rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations ) ) {
 				//logRelocation( rd, "SkippingQueuedRelocation" );
@@ -863,6 +856,7 @@ struct DDQueueData {
 				launch( rrs, busymap, singleRegionTeamSize );
 				activeRelocations++;
 				startRelocation(rrs.priority, rrs.healthPriority);
+				// Start the actor that relocates data in the rrs.keys
 				inFlightActors.insert( rrs.keys, dataDistributionRelocator( this, rrs ) );
 			}
 
@@ -931,6 +925,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				allHealthy = true;
 				anyWithSource = false;
 				bestTeams.clear();
+				// Get team from teamCollections in diffrent DCs and find the best one
 				while( tciIndex < self->teamCollections.size() ) {
 					double inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_HEALTHY;
 					if(rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY || rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_UNHEALTHY;
@@ -939,6 +934,9 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					auto req = GetTeamRequest(rd.wantsNewServers, rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, true, false, inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
+					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
+					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
+					// when the remote DC is just brought up.
 					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					// If a DC has no healthy team, we stop checking the other DCs until
 					// the unhealthy DC is healthy again or is excluded.
@@ -955,7 +953,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					if(bestTeam.second) {
 						anyWithSource = true;
 					}
-					
+
 					bestTeams.push_back(std::make_pair(bestTeam.first.get(), bestTeam.second));
 					tciIndex++;
 				}
@@ -983,8 +981,10 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
 
 				if (allHealthy && anyWithSource && !bestTeams[i].second) {
-					// When all teams in bestTeams[i] do not hold the shard
-					// We randomly choose a server in bestTeams[i] as the shard's destination and
+					// When all servers in bestTeams[i] do not hold the shard (!bestTeams[i].second), it indicates
+					// the bestTeams[i] is in a new DC where data has not been replicated to.
+					// To move data (specified in RelocateShard) to bestTeams[i] in the new DC AND reduce data movement
+					// across DC, we randomly choose a server in bestTeams[i] as the shard's destination, and
 					// move the shard to the randomly chosen server (in the remote DC), which will later
 					// propogate its data to the servers in the same team. This saves data movement bandwidth across DC
 					int idx = deterministicRandom()->randomInt(0, serverIds.size());
@@ -1042,7 +1042,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
-			// Move keys from source to destination by chaning the serverKeyList and keyServerList system keys
+			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
 			state Future<Void> doMoveKeys = moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, dataMovementComplete, &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock, self->teamCollections.size() > 1, relocateShardInterval.pairID );
 			state Future<Void> pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch );
 			try {
@@ -1212,6 +1212,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 	loop {
+		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
 		traceEvent.suppressFor(5.0)
@@ -1247,15 +1248,15 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> randomTeam = wait(brokenPromiseToNever(
+				std::pair<Optional<Reference<IDataDistributionTeam>>,bool> _randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, true, false))));
-				
+				randomTeam = _randomTeam;
 				traceEvent.detail("DestTeam", printable(randomTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
 				if (randomTeam.first.present()) {
-					state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> loadedTeam =
+					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> loadedTeam =
 						wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
 							GetTeamRequest(true, true, false, true))));
 
@@ -1309,7 +1310,9 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
+
 	loop {
+		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
 		traceEvent.suppressFor(5.0)
@@ -1345,15 +1348,15 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> randomTeam = wait(brokenPromiseToNever(
+				std::pair<Optional<Reference<IDataDistributionTeam>>,bool> _randomTeam = wait(brokenPromiseToNever(
 				    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, false, false, true))));
-
+				randomTeam = _randomTeam;
 				traceEvent.detail("SourceTeam", printable(randomTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){
 					return team->getDesc();
 				})));
 
 				if (randomTeam.first.present()) {
-					state std::pair<Optional<Reference<IDataDistributionTeam>>,bool> unloadedTeam = wait(brokenPromiseToNever(
+					std::pair<Optional<Reference<IDataDistributionTeam>>,bool> unloadedTeam = wait(brokenPromiseToNever(
 					    self->teamCollections[teamCollectionIndex].getTeam.getReply(GetTeamRequest(true, true, true, false))));
 
 					traceEvent.detail("DestTeam", printable(unloadedTeam.first.map<std::string>([](const Reference<IDataDistributionTeam>& team){

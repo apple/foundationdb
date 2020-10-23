@@ -38,7 +38,8 @@ with open(args.input) as f:
 result = []
 
 for cmd in cmds:
-    cmd['command'] = cmd['command'].replace(' -DNO_INTELLISENSE ', ' ')
+    additional_flags = ['-Wno-unknown-attributes']
+    cmd['command'] = cmd['command'].replace(' -DNO_INTELLISENSE ', ' {} '.format(' '.join(additional_flags)))
     if cmd['file'].endswith('actor.g.cpp'):
         # here we need to rewrite the rule
         cmd['command'] = actorCommand(cmd['command'], args.builddir, args.srcdir)

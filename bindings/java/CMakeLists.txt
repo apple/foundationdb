@@ -22,6 +22,8 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/directory/NoSuchDirectoryException.java
   src/main/com/apple/foundationdb/directory/package-info.java
   src/main/com/apple/foundationdb/directory/PathUtil.java
+  src/main/com/apple/foundationdb/DirectBufferIterator.java
+  src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
@@ -56,6 +58,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/testing/Promise.java
   src/main/com/apple/foundationdb/testing/PerfMetric.java
   src/main/com/apple/foundationdb/tuple/ByteArrayUtil.java
+  src/main/com/apple/foundationdb/tuple/FastByteComparisons.java
   src/main/com/apple/foundationdb/tuple/IterableComparator.java
   src/main/com/apple/foundationdb/tuple/package-info.java
   src/main/com/apple/foundationdb/tuple/StringUtil.java
@@ -139,7 +142,7 @@ set_target_properties(java_workloads PROPERTIES
 target_link_libraries(java_workloads PUBLIC fdb_c ${JNI_LIBRARIES})
 target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
 
-set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8")
+set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8" "-XDignore.symbol.file")
 set(CMAKE_JNI_TARGET TRUE)
 
 # build a manifest file
@@ -169,8 +172,6 @@ file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
 add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${MANIFEST_FILE})
 add_dependencies(fdb-java fdb_java_options fdb_java)
-add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
-add_dependencies(foundationdb-tests fdb_java_options)
 
 # TODO[mpilman]: The java RPM will require some more effort (mostly on debian). However,
 # most people will use the fat-jar, so it is not clear how high this priority is.
@@ -237,6 +238,16 @@ if(NOT OPEN_FOR_IDE)
     WORKING_DIRECTORY ${unpack_dir}
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
     COMMENT "Build ${target_jar}")
+  add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
+  add_dependencies(foundationdb-tests fdb_java_options)
+  set(tests_jar ${jar_destination}/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}-tests.jar)
+  add_custom_command(OUTPUT ${tests_jar}
+    COMMAND ${CMAKE_COMMAND} -E copy foundationdb-tests.jar "${tests_jar}"
+    WORKING_DIRECTORY .
+    DEPENDS foundationdb-tests
+    COMMENT "Build ${tests_jar}")
+  add_custom_target(fdb-java-tests ALL DEPENDS ${tests_jar})
+  add_dependencies(fdb-java-tests foundationdb-tests)
   add_custom_target(fat-jar ALL DEPENDS ${target_jar})
   add_dependencies(fat-jar fdb-java)
   add_dependencies(fat-jar copy_lib)

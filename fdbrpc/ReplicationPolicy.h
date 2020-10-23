@@ -238,6 +238,7 @@ protected:
 
 template <class Ar>
 void serializeReplicationPolicy(Ar& ar, Reference<IReplicationPolicy>& policy) {
+	//To change this serialization, ProtocolVersion::ReplicationPolicy must be updated, and downgrades need to be considered
 	if (Ar::isDeserializing) {
 		StringRef name;
 		serializer(ar, name);

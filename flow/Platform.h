@@ -22,7 +22,7 @@
 #define FLOW_PLATFORM_H
 #pragma once
 
-#if (defined(__linux__) || defined(__APPLE__))
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define __unixish__ 1
 #endif
 
@@ -135,9 +135,6 @@ do { \
 #include <functional>
 #endif
 
-// fake<T>() is for use in decltype expressions only - there is no implementation
-template <class T> T fake();
-
 // g++ requires that non-dependent names have to be looked up at
 // template definition, which makes circular dependencies a royal
 // pain. (For whatever it's worth, g++ appears to be adhering to spec
@@ -156,13 +153,13 @@ inline static T& makeDependent(T& value) { return value; }
 #define THREAD_FUNC static void __cdecl
 #define THREAD_FUNC_RETURN void
 #define THREAD_HANDLE void *
-THREAD_HANDLE startThread(void (func) (void *), void *arg);
+THREAD_HANDLE startThread(void (func) (void *), void *arg, int stackSize = 0);
 #define THREAD_RETURN return
 #elif defined(__unixish__)
 #define THREAD_FUNC static void *
 #define THREAD_FUNC_RETURN void *
 #define THREAD_HANDLE pthread_t
-THREAD_HANDLE startThread(void *(func) (void *), void *arg);
+THREAD_HANDLE startThread(void *(func) (void *), void *arg, int stackSize = 0);
 #define THREAD_RETURN return NULL
 #else
 #error How do I start a new thread on this platform?
@@ -171,6 +168,8 @@ THREAD_HANDLE startThread(void *(func) (void *), void *arg);
 #if defined(_WIN32)
 #define DYNAMIC_LIB_EXT ".dll"
 #elif defined(__linux)
+#define DYNAMIC_LIB_EXT ".so"
+#elif defined(__FreeBSD__)
 #define DYNAMIC_LIB_EXT ".so"
 #elif defined(__APPLE__)
 #define DYNAMIC_LIB_EXT ".dylib"
@@ -388,6 +387,11 @@ size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
+// Avoid in production code: not atomic, not fast, not reliable in all environments
+int eraseDirectoryRecursive(std::string const& directory);
+
+bool isHwCrcSupported();
+
 } // namespace platform
 
 #ifdef __linux__
@@ -401,13 +405,40 @@ dev_t getDeviceId(std::string path);
 #endif
 
 #ifdef __linux__
+#ifndef __aarch64__
 #include <x86intrin.h>
+#else
+#include "sse2neon.h"
+#endif
 #include <features.h>
 #include <sys/stat.h>
 #endif
 
+#if defined(__APPLE__)
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
-#ifdef __APPLE__
+#if !(__has_builtin(__rdtsc))
+inline static uint64_t timestampCounter() {
+	uint64_t lo, hi;
+	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
+	return( lo | (hi << 32) );
+}
+#else
+#define timestampCounter() __rdtsc()
+#endif
+#elif defined(__aarch64__)
+// aarch64 does not have rdtsc counter
+// Use cntvct_el0 virtual counter instead
+inline static uint64_t timestampCounter() {
+    uint64_t timer;
+    asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
+    return timer;
+}
+#else
+// all other platforms including Linux x86_64
+#define timestampCounter() __rdtsc()
+#endif
+
+#ifdef __FreeBSD__
 #if !(__has_builtin(__rdtsc))
 inline static uint64_t __rdtsc() {
 	uint64_t lo, hi;
@@ -428,7 +459,9 @@ inline static int64_t interlockedExchangeAdd64(volatile int64_t *a, int64_t b) {
 inline static int64_t interlockedExchange64(volatile int64_t *a, int64_t b) { return _InterlockedExchange64(a, b); }
 inline static int64_t interlockedOr64(volatile int64_t *a, int64_t b) { return _InterlockedOr64(a, b); }
 #elif defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
+#ifndef __aarch64__
 #include <xmmintrin.h>
+#endif
 inline static int32_t interlockedIncrement(volatile int32_t *a) { return __sync_add_and_fetch(a, 1); }
 inline static int64_t interlockedIncrement64(volatile int64_t *a) { return __sync_add_and_fetch(a, 1); }
 inline static int32_t interlockedDecrement(volatile int32_t *a) { return __sync_add_and_fetch(a, -1); }
@@ -526,6 +559,8 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 #if (!defined(_ISOC11_SOURCE)) // old libc versions
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
+#elif defined(__FreeBSD__)
+inline static void aligned_free(void* ptr) { free(ptr); }
 #elif defined(__APPLE__)
 #if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
@@ -586,6 +621,11 @@ inline static int clz( uint32_t value ) {
 #include <boost/config.hpp>
 // The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
 
+// These return thread local counts
+int64_t getNumProfilesDeferred();
+int64_t getNumProfilesOverflowed();
+int64_t getNumProfilesCaptured();
+
 #else
 #define EXTERNC
 #endif // __cplusplus
@@ -609,7 +649,7 @@ EXTERNC void flushAndExit(int exitCode);
 void platformInit();
 
 void registerCrashHandler();
-void setupSlowTaskProfiler();
+void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()
@@ -648,6 +688,36 @@ inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
 inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
 inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
+#endif
+
+// CRC32C
+#ifdef __aarch64__
+// aarch64
+#include <inttypes.h>
+static inline uint32_t hwCrc32cU8(unsigned int crc, unsigned char v) {
+    uint32_t ret;
+    asm volatile("crc32cb %w[r], %w[c], %w[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
+    return ret;
+}
+static inline uint32_t hwCrc32cU32(unsigned int crc, unsigned int v) {
+    uint32_t ret;
+    asm volatile("crc32cw %w[r], %w[c], %w[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
+    return ret;
+}
+static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
+    uint64_t ret;
+    asm volatile("crc32cx %w[r], %w[c], %x[v]":[r]"=r"(ret):[c]"r"(crc),[v]"r"(v));
+    return ret;
+}
+#else
+// Intel
+#define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
+#define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
+#define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
+#endif
+
+#ifdef __aarch64__
+#define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 
 #endif /* FLOW_PLATFORM_H */

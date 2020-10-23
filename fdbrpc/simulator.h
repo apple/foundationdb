@@ -67,13 +67,16 @@ public:
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
 
+		UID uid;
+
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
-					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
-			: name(name), locality(locality), startingClass(startingClass),
-			  addresses(addresses), address(addresses.address), dataFolder(dataFolder),
-			  network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
-			  rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-			  fault_injection_r(0), machine(0), cleared(false) {}
+		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
+		  : name(name), locality(locality), startingClass(startingClass), addresses(addresses),
+		    address(addresses.address), dataFolder(dataFolder), network(net), coordinationFolder(coordinationFolder),
+		    failed(false), excluded(false), cpuTicks(0), rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
+		    fault_injection_r(0), machine(0), cleared(false) {
+			uid = deterministicRandom()->randomUniqueID();
+		}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
@@ -81,6 +84,12 @@ public:
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }
+		std::string getReliableInfo() {
+			std::stringstream ss;
+			ss << "failed:" << failed << " fault_injection_p1:" << fault_injection_p1
+			   << " fault_injection_p2:" << fault_injection_p2;
+			return ss.str();
+		}
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
@@ -98,6 +107,8 @@ public:
 				case ProcessClass::ClusterControllerClass: return false;
 				case ProcessClass::DataDistributorClass: return false;
 				case ProcessClass::RatekeeperClass: return false;
+				case ProcessClass::StorageCacheClass: return false;
+				case ProcessClass::BackupClass: return false;
 				default: return false;
 			}
 		}

@@ -28,6 +28,7 @@
 	#define GENERICACTORS_ACTOR_H
 
 #include <list>
+#include <utility>
 
 #include "flow/flow.h"
 #include "flow/Knobs.h"
@@ -251,10 +252,9 @@ void uncancellable(Future<T> what, Promise<T> result)
 	}
 }
 
-//Waits for a future to complete and cannot be cancelled
-ACTOR template<class T>
-Future<T> uncancellable(Future<T> what)
-{
+// Waits for a future to complete and cannot be cancelled
+ACTOR template <class T>
+[[flow_allow_discard]] Future<T> uncancellable(Future<T> what) {
 	Promise<T> resultPromise;
 	Future<T> result = resultPromise.getFuture();
 
@@ -283,6 +283,7 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 	return Void();
 }
 
+// Assign the future value of what to out
 template<class T>
 Future<Void> store(T &out, Future<T> what) {
 	return map(what, [&out](T const &v) { out = v; return Void(); });
@@ -299,9 +300,8 @@ Future<Void> storeOrThrow(T &out, Future<Optional<T>> what, Error e = key_not_fo
 }
 
 //Waits for a future to be ready, and then applies an asynchronous function to it.
-ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
-Future<U> mapAsync(Future<T> what, F actorFunc)
-{
+ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
+Future<U> mapAsync(Future<T> what, F actorFunc) {
 	T val = wait(what);
 	U ret = wait(actorFunc(val));
 	return ret;
@@ -312,14 +312,14 @@ template<class T, class F>
 std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
 {
 	std::vector<std::invoke_result_t<F, T>> ret;
-	for(auto f : what)
-		ret.push_back(mapAsync( f, actorFunc ));
+	ret.reserve(what.size());
+	for (const auto& f : what) ret.push_back(mapAsync(f, actorFunc));
 	return ret;
 }
 
 //maps a stream with an asynchronous function
-ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
-Future<Void> mapAsync( FutureStream<T> input, F actorFunc, PromiseStream<U> output ) {
+ACTOR template <class T, class F, class U = decltype(std::declval<F>()(std::declval<T>()).getValue())>
+Future<Void> mapAsync(FutureStream<T> input, F actorFunc, PromiseStream<U> output) {
 	state Deque<Future<U>> futures;
 
 	loop {
@@ -371,8 +371,8 @@ template<class T, class F>
 std::vector<Future<std::invoke_result_t<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
 {
 	std::vector<Future<std::invoke_result_t<F, T>>> ret;
-	for(auto f : what)
-		ret.push_back(map( f, func ));
+	ret.reserve(what.size());
+	for (const auto& f : what) ret.push_back(map(f, func));
 	return ret;
 }
 
@@ -400,15 +400,7 @@ Future<Void> map( FutureStream<T> input, F func, PromiseStream<std::invoke_resul
 }
 
 //Returns if the future returns true, otherwise waits forever.
-ACTOR static Future<Void> returnIfTrue( Future<bool> f )
-{
-	bool b = wait( f );
-	if ( b ) {
-		return Void();
-	}
-	wait( Never() );
-	throw internal_error();
-}
+ACTOR Future<Void> returnIfTrue( Future<bool> f );
 
 //Returns if the future, when waited on and then evaluated with the predicate, returns true, otherwise waits forever
 template<class T, class F>
@@ -593,6 +585,7 @@ public:
 	}
 	std::vector<K> getKeys() {
 		std::vector<K> keys;
+		keys.reserve(items.size());
 		for(auto i = items.begin(); i != items.end(); ++i)
 			keys.push_back( i->first );
 		return keys;
@@ -620,11 +613,11 @@ protected:
 		Promise<Void> noDestroy = trigger;  // The send(Void()) or even V::operator= could cause destroyOnCancel,
 			                                // which could undo the change to i.value here.  Keeping the promise reference count >= 2
 			                                // prevents destroyOnCancel from erasing anything from the map.
-
-		if (v == defaultValue)
+		if (v == defaultValue) {
 			items.erase(k);
-		else
+		} else {
 			i.value = v;
+		}
 
 		trigger.send(Void());
 	}
@@ -766,17 +759,15 @@ private:
 	}
 };
 
-ACTOR template <class T> Future<Void> asyncDeserialize( Reference<AsyncVar<Standalone<StringRef>>> input, Reference<AsyncVar<Optional<T>>> output, bool useObjSerializer ) {
+ACTOR template <class T>
+Future<Void> asyncDeserialize(Reference<AsyncVar<Standalone<StringRef>>> input,
+                              Reference<AsyncVar<Optional<T>>> output) {
 	loop {
 		if (input->get().size()) {
-			if (useObjSerializer) {
-				ObjectReader reader(input->get().begin(), IncludeVersion());
-				T res;
-				reader.deserialize(res);
-				output->set(res);
-			} else {
-				output->set( BinaryReader::fromStringRef<T>( input->get(), IncludeVersion() ) );
-			}
+			ObjectReader reader(input->get().begin(), IncludeVersion());
+			T res;
+			reader.deserialize(res);
+			output->set(res);
 		} else
 			output->set( Optional<T>() );
 		wait( input->onChange() );
@@ -791,8 +782,8 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
-ACTOR template <class T> 
-Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+ACTOR template <class T>
+Future<Void> delayedAsyncVar(Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time) {
 	try {
 		loop {
 			wait( delay( time ) );
@@ -805,8 +796,8 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
-ACTOR template <class T> 
-Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+ACTOR template <class T>
+Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 	wait( delay( time ) );
 	var->set( val );
 	return Void();
@@ -870,7 +861,7 @@ Future<T> ioTimeoutError( Future<T> what, double time ) {
 	Future<Void> end = lowPriorityDelay( time );
 	choose {
 		when( T t = wait( what ) ) { return t; }
-		when( wait( end ) ) { 
+		when(wait(end)) {
 			Error err = io_timeout();
 			if(g_network->isSimulated()) {
 				err = err.asInjectedFault();
@@ -897,6 +888,7 @@ Future<Void> streamHelper( PromiseStream<T> output, PromiseStream<Error> errors,
 template <class T>
 Future<Void> makeStream( const std::vector<Future<T>>& futures, PromiseStream<T>& stream, PromiseStream<Error>& errors ) {
 	std::vector<Future<Void>> forwarders;
+	forwarders.reserve(futures.size());
 	for(int f=0; f<futures.size(); f++)
 		forwarders.push_back( streamHelper( stream, errors, futures[f] ) );
 	return cancelOnly(forwarders);
@@ -1018,30 +1010,7 @@ Future<Void> waitForAny( std::vector<Future<T>> const& results ) {
 	return quorum( results, 1 );
 }
 
-ACTOR static Future<bool> shortCircuitAny( std::vector<Future<bool>> f )
-{
-	std::vector<Future<Void>> sc;
-	for(Future<bool> fut : f) {
-		sc.push_back(returnIfTrue(fut));
-	}
-
-	choose {
-		when( wait( waitForAll( f ) ) ) {
-			// Handle a possible race condition? If the _last_ term to
-			// be evaluated triggers the waitForAll before bubbling
-			// out of the returnIfTrue quorum
-			for ( auto fut : f ) {
-				if ( fut.get() ) {
-					return true;
-				}
-			}
-			return false;
-		}
-		when( wait( waitForAny( sc ) ) ) {
-			return true;
-		}
-	}
-}
+ACTOR Future<bool> shortCircuitAny( std::vector<Future<bool>> f );
 
 ACTOR template <class T>
 Future<std::vector<T>> getAll( std::vector<Future<T>> input ) {
@@ -1049,6 +1018,7 @@ Future<std::vector<T>> getAll( std::vector<Future<T>> input ) {
 	wait( quorum( input, input.size() ) );
 
 	std::vector<T> output;
+	output.reserve(input.size());
 	for(int i=0; i<input.size(); i++)
 		output.push_back( input[i].get() );
 	return output;
@@ -1059,6 +1029,12 @@ Future<std::vector<T>> appendAll( std::vector<Future<std::vector<T>>> input ) {
 	wait( quorum( input, input.size() ) );
 
 	std::vector<T> output;
+	size_t sz = 0;
+	for (const auto& f : input) {
+		sz += f.get().size();
+	}
+	output.reserve(sz);
+
 	for(int i=0; i<input.size(); i++) {
 		auto const& r = input[i].get();
 		output.insert( output.end(), r.begin(), r.end() );
@@ -1178,16 +1154,7 @@ Future<T> orYield( Future<T> f ) {
 		return f;
 }
 
-static Future<Void> orYield( Future<Void> f ) {
-	if(f.isReady()) {
-		if(f.isError())
-			return tagError<Void>(yield(), f.getError());
-		else
-			return yield();
-	}
-	else
-		return f;
-}
+Future<Void> orYield( Future<Void> f );
 
 ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 	choose {
@@ -1199,7 +1166,7 @@ ACTOR template <class T> Future<T> chooseActor( Future<T> lhs, Future<T> rhs ) {
 // set && set -> set
 // error && x -> error
 // all others -> unset
-static Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rhs ) {
+inline Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rhs ) {
 	if(lhs.isReady()) {
 		if(lhs.isError()) return lhs;
 		else return rhs;
@@ -1209,10 +1176,7 @@ static Future<Void> operator &&( Future<Void> const& lhs, Future<Void> const& rh
 		else return lhs;
 	}
 
-	std::vector<Future<Void>> v;
-	v.push_back( lhs );
-	v.push_back( rhs );
-	return waitForAll(v);
+	return waitForAll(std::vector<Future<Void>>{ lhs, rhs });
 }
 
 // error || unset -> error
@@ -1400,8 +1364,7 @@ struct NotifiedInt {
 	NotifiedInt( int64_t val = 0 ) : val(val) {}
 
 	Future<Void> whenAtLeast( int64_t limit ) {
-		if (val >= limit) 
-			return Void();
+		if (val >= limit) return Void();
 		Promise<Void> p;
 		waiting.push( std::make_pair(limit,p) );
 		return p.getFuture();
@@ -1578,7 +1541,7 @@ struct YieldedFutureActor : SAV<Void>, ActorCallback<YieldedFutureActor, 1, Void
 	}
 };
 
-static Future<Void> yieldedFuture(Future<Void> f) {
+inline Future<Void> yieldedFuture(Future<Void> f) {
 	if (f.isReady())
 		return yield();
 	else
@@ -1668,8 +1631,7 @@ public:
 			return futures[0];
 
 		Future<Void> f = waitForAll(futures);
-		futures = std::vector<Future<Void>>();
-		futures.push_back(f);
+		futures = std::vector<Future<Void>>{ f };
 		return f;
 	}
 
@@ -1847,6 +1809,7 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	}
 	return Void();
 }
+
 
 #include "flow/unactorcompiler.h"
 

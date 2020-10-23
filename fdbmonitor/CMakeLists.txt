@@ -4,11 +4,11 @@ add_executable(fdbmonitor ${FDBMONITOR_SRCS})
 strip_debug_symbols(fdbmonitor)
 assert_no_version_h(fdbmonitor)
 if(UNIX AND NOT APPLE)
-    target_link_libraries(fdbmonitor rt)
+    target_link_libraries(fdbmonitor PRIVATE rt)
 endif()
 # FIXME: This include directory is an ugly hack. We probably want to fix this
 # as soon as we get rid of the old build system
-target_include_directories(fdbmonitor PRIVATE ${CMAKE_BINARY_DIR}/fdbclient)
+target_link_libraries(fdbmonitor PUBLIC Threads::Threads)
 
 if(GENERATE_DEBUG_PACKAGES)
   fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)

@@ -28,14 +28,13 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/FailureMonitorClient.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using namespace std;
@@ -360,6 +359,7 @@ ACTOR Future<Void> pingDatabase( Database cx ) {
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			Optional<Value> v = wait( tr.get( StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString() ) ) );
 			tr.makeSelfConflicting();
 			wait( tr.commit() );
@@ -376,7 +376,8 @@ ACTOR Future<Void> testDatabaseLiveness( Database cx, double databasePingDelay, 
 	loop {
 		try {
 			state double start = now();
-			TraceEvent(("PingingDatabaseLiveness_" + context).c_str());
+			auto traceMsg = "PingingDatabaseLiveness_" + context;
+			TraceEvent(traceMsg.c_str());
 			wait( timeoutError( pingDatabase( cx ), databasePingDelay ) );
 			double pingTime = now() - start;
 			ASSERT( pingTime > 0 );
@@ -517,7 +518,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
 			throw test_specification_invalid();
 		}
-		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay);
+		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay) || traceRole(Role::TESTER, workIface.id());
 		work.reply.send(workIface);
 		replied = true;
 
@@ -526,7 +527,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 		}
 
 		wait(test);
-		
+
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
 		if (!replied) {
@@ -695,10 +696,13 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
 		TraceEvent("CheckingResults");
+
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
+
 		for(int i= 0; i < workloads.size(); i++)
 			checks.push_back(workloads[i].check.template getReplyUnlessFailedFor<CheckReply>(waitForFailureTime, 0));
 		wait( waitForAll( checks ) );
+
 		throwIfError(checks, "CheckFailedForWorkload" + printable(spec.title));
 
 		for(int i = 0; i < checks.size(); i++) {
@@ -1014,10 +1018,40 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	return result;
 }
 
+ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
+                                       LocalityData locality,
+                                       Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	// Initially most of the serverDBInfo is not known, but we know our locality right away
+	ServerDBInfo localInfo;
+	localInfo.myLocality = locality;
+	dbInfo->set(localInfo);
+
+	loop {
+		GetServerDBInfoRequest req;
+		req.knownServerInfoID = dbInfo->get().id;
+
+		choose {
+			when( ServerDBInfo _localInfo = wait( ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().getServerDBInfo.getReply( req ) ) : Never() ) ) {
+				ServerDBInfo localInfo = _localInfo;
+				TraceEvent("GotServerDBInfoChange").detail("ChangeID", localInfo.id).detail("MasterID", localInfo.master.id())
+				.detail("RatekeeperID", localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
+				.detail("DataDistributorID", localInfo.distributor.present() ? localInfo.distributor.get().id() : UID());
+
+				localInfo.myLocality = locality;
+				dbInfo->set(localInfo);
+			}
+			when( wait( ccInterface->onChange() ) ) {
+				if(ccInterface->get().present())
+					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().getPrimaryAddress());
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
-	state Future<Void> ccMonitor = monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), dbInfo );  // FIXME: locality
+	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
 
 	state bool useDB = false;
 	state bool waitForQuiescenceBegin = false;
@@ -1085,15 +1119,18 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
+		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
+		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
 	}
 
-	printf("\n%d tests passed; %d tests failed, waiting for DD to end...\n\n", passCount, failCount);
-	
+	printf("\n%d tests passed; %d tests failed.\n", passCount, failCount);
+
 	//If the database was deleted during the workload we need to recreate the database
 	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
+			printf("Waiting for DD to end...\n");
 			try {
 				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
 				     (databasePingDelay == 0.0 ? Never()
@@ -1104,6 +1141,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			}
 		}
 	}
+	printf("\n");
 
 	return Void();
 }
@@ -1148,7 +1186,6 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	vector<Future<Void>> actors;
 	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
 	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
-	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"FailureMonitorClient") );
 
 	if(whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
@@ -1185,7 +1222,7 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	if (at == TEST_HERE) {
 		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
 		vector<TesterInterface> iTesters(1);
-		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
+		actors.push_back( reportErrors(monitorServerDBInfo( cc, LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
 		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );
 		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration, locality );
 	} else {

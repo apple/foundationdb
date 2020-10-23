@@ -25,6 +25,7 @@
 #include "flow/Platform.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <stdint.h>
 
@@ -45,6 +46,7 @@ protected:
 	std::map<std::string, int*> int_knobs;
 	std::map<std::string, std::string*> string_knobs;
 	std::map<std::string, bool*> bool_knobs;
+	std::set<std::string> explicitlySetKnobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -67,10 +69,14 @@ public:
 	double HUGE_ARENA_LOGGING_BYTES;
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
-	//slow task profiling
-	double SLOWTASK_PROFILING_INTERVAL;
+	//run loop profiling
+	double RUN_LOOP_PROFILING_INTERVAL;
+	double SLOWTASK_PROFILING_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_MAX_LOG_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_BACKOFF;
+	double SATURATION_PROFILING_LOG_INTERVAL;
+	double SATURATION_PROFILING_MAX_LOG_INTERVAL;
+	double SATURATION_PROFILING_LOG_BACKOFF;
 
 	//connectionMonitor
 	double CONNECTION_MONITOR_LOOP_TIME;
@@ -89,7 +95,7 @@ public:
 	double RECONNECTION_RESET_TIME;
 	double ALWAYS_ACCEPT_DELAY;
 	int ACCEPT_BATCH_SIZE;
-	int USE_OBJECT_SERIALIZER;
+	double INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING;
 	double PING_LOGGING_INTERVAL;
 	int PING_SAMPLE_AMOUNT;
 
@@ -98,7 +104,18 @@ public:
 	double TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT;
 	int TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS;
 	int TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS;
-	
+	int TLS_CLIENT_HANDSHAKE_THREADS;
+	int TLS_SERVER_HANDSHAKE_THREADS;
+	int TLS_HANDSHAKE_THREAD_STACKSIZE;
+	int TLS_MALLOC_ARENA_MAX;
+	int TLS_HANDSHAKE_LIMIT;
+
+	int NETWORK_TEST_CLIENT_COUNT;
+	int NETWORK_TEST_REPLY_SIZE;
+	int NETWORK_TEST_REQUEST_COUNT;
+	int NETWORK_TEST_REQUEST_SIZE;
+	bool NETWORK_TEST_SCRIPT_MODE;
+
 	//AsyncFileCached
 	int64_t PAGE_CACHE_4K;
 	int64_t PAGE_CACHE_64K;
@@ -111,6 +128,7 @@ public:
 	double PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION;
 	double TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY;
 	int TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT;
+	int PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT;
 
 	//AsyncFileEIO
 	int EIO_MAX_PARALLELISM;
@@ -141,6 +159,7 @@ public:
 	double SLOW_LOOP_SAMPLING_RATE;
 	int64_t TSC_YIELD_TIME;
 	int64_t REACTOR_FLAGS;
+	double MIN_LOGGED_PRIORITY_BUSY_FRACTION;
 	int CERT_FILE_MAX_SIZE;
 
 	//Network
@@ -150,8 +169,8 @@ public:
 	int MAX_PACKET_SEND_BYTES;
 	int MIN_PACKET_BUFFER_BYTES;
 	int MIN_PACKET_BUFFER_FREE_BYTES;
-	int UNRESTRICTED_HANDSHAKE_LIMIT;
-	int BOUNDED_HANDSHAKE_LIMIT;
+	int FLOW_TCP_NODELAY;
+	int FLOW_TCP_QUICKACK;
 
 	//Sim2
 	//FIMXE: more parameters could be factored out
@@ -213,8 +232,22 @@ public:
 	double FUTURE_VERSION_BACKOFF_GROWTH;
 	int LOAD_BALANCE_MAX_BAD_OPTIONS;
 	bool LOAD_BALANCE_PENALTY_IS_BAD;
+	double BASIC_LOAD_BALANCE_UPDATE_RATE;
+	double BASIC_LOAD_BALANCE_MAX_CHANGE;
+	double BASIC_LOAD_BALANCE_MAX_PROB;
+	int BASIC_LOAD_BALANCE_BUCKETS;
+	int BASIC_LOAD_BALANCE_COMPUTE_PRECISION;
+	double BASIC_LOAD_BALANCE_MIN_REQUESTS;
+	double BASIC_LOAD_BALANCE_MIN_CPU;
 
-	FlowKnobs(bool randomize = false, bool isSimulated = false);
+	// Health Monitor
+	int FAILURE_DETECTION_DELAY;
+	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
+	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
+	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+
+	FlowKnobs();
+	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
 extern FlowKnobs const* FLOW_KNOBS;

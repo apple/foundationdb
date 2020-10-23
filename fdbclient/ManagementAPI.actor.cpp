@@ -28,6 +28,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
@@ -84,7 +85,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 			StatusObject regionObj;
 			regionObj["regions"] = mv;
-			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion()).toString();
+			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion(ProtocolVersion::withRegionConfiguration())).toString();
 		}
 
 		return out;
@@ -101,18 +102,24 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else if (mode == "ssd-redwood-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
+	} else if (mode == "ssd-rocksdb-experimental") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
+		storeType = KeyValueStoreType::SSD_ROCKSDB_V1;
 	} else if (mode == "memory" || mode == "memory-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType= KeyValueStoreType::MEMORY;
 	} else if (mode == "memory-1") {
 		logType = KeyValueStoreType::MEMORY;
 		storeType= KeyValueStoreType::MEMORY;
+	} else if (mode == "memory-radixtree-beta") {
+		logType = KeyValueStoreType::SSD_BTREE_V2;
+		storeType= KeyValueStoreType::MEMORY_RADIXTREE;
 	}
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 
 	if (storeType.present()) {
-		out[p+"log_engine"] = format("%d", logType.get());
-		out[p+"storage_engine"] = format("%d", storeType.get());
+		out[p+"log_engine"] = format("%d", logType.get().storeType());
+		out[p+"storage_engine"] = format("%d", KeyValueStoreType::StoreType(storeType.get()));
 		return out;
 	}
 
@@ -168,11 +175,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
 
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		out[p+"storage_replication_policy"] = policyWriter.toValue().toString();
 
-		policyWriter = BinaryWriter(IncludeVersion());
+		policyWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toValue().toString();
 		return out;
@@ -208,7 +215,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	if (remoteRedundancySpecified) {
 		out[p+"remote_log_replicas"] = remote_log_replicas;
 
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
 		out[p+"remote_log_policy"] = policyWriter.toValue().toString();
 		return out;
@@ -238,7 +245,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	if(!outConf.count(p + "storage_replication_policy") && outConf.count(p + "storage_replicas")) {
 		int storageCount = stoi(outConf[p + "storage_replicas"]);
 		Reference<IReplicationPolicy> storagePolicy = Reference<IReplicationPolicy>(new PolicyAcross(storageCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, storagePolicy);
 		outConf[p+"storage_replication_policy"] = policyWriter.toValue().toString();
 	}
@@ -246,7 +253,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 	if(!outConf.count(p + "log_replication_policy") && outConf.count(p + "log_replicas")) {
 		int logCount = stoi(outConf[p + "log_replicas"]);
 		Reference<IReplicationPolicy> logPolicy = Reference<IReplicationPolicy>(new PolicyAcross(logCount, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		BinaryWriter policyWriter(IncludeVersion());
+		BinaryWriter policyWriter(IncludeVersion(ProtocolVersion::withReplicationPolicy()));
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toValue().toString();
 	}
@@ -492,7 +499,6 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 					}
 				}
 			}
-
 			if (creating) {
 				tr.setOption( FDBTransactionOptions::INITIALIZE_NEW_DATABASE );
 				tr.addReadConflictRange( singleKeyRange( initIdKey ) );
@@ -511,8 +517,9 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 				            MutationRef::SetVersionstampedValue);
 			}
 
-			for (auto i = m.begin(); i != m.end(); ++i)
+			for (auto i = m.begin(); i != m.end(); ++i) {
 				tr.set( StringRef(i->first), StringRef(i->second) );
+			}
 
 			tr.addReadConflictRange( singleKeyRange(moveKeysLockOwnerKey) );
 			tr.set( moveKeysLockOwnerKey, versionKey );
@@ -983,7 +990,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
 					auto addresses = g_simulator.getProcessByAddress(desiredCoordinators[i])->addresses;
-					
+
 					g_simulator.protectedAddresses.insert(addresses.address);
 					if(addresses.secondaryAddress.present()) {
 						g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
@@ -1153,11 +1160,26 @@ struct AutoQuorumChange : IQuorumChange {
 		return chosen;
 	}
 
+	// Select a desired set of workers such that
+	// (1) the number of workers at each locality type (e.g., dcid) <= desiredCount; and
+	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute workers.
 	void addDesiredWorkers(vector<NetworkAddress>& chosen, const vector<ProcessData>& workers, int desiredCount, const std::set<AddressExclusion>& excluded) {
 		vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
 		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) { return (data.processClass == ProcessClass::CoordinatorClass); });
+
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("CandidateWorkers", remainingWorkers.size());
+		for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators")
+			    .detail("Worker", worker->processClass.toString())
+			    .detail("Address", worker->address.toString())
+			    .detail("Locality", worker->locality.toString());
+		}
+		TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excluded.size());
+		for (auto& excludedAddr : excluded) {
+			TraceEvent(SevDebug, "AutoSelectCoordinators").detail("ExcludedAddress", excludedAddr.toString());
+		}
 
 		std::map<StringRef, int> maxCounts;
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
@@ -1183,6 +1205,12 @@ struct AutoQuorumChange : IQuorumChange {
 			bool found = false;
 			for (auto worker = remainingWorkers.begin(); worker != remainingWorkers.end(); worker++) {
 				if(addressExcluded(excluded, worker->address)) {
+					continue;
+				}
+				// Exclude faulty node due to machine assassination
+				if (g_network->isSimulated() && g_simulator.protectedAddresses.count(worker->address) &&
+				    !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
 				bool valid = true;
@@ -1226,7 +1254,7 @@ struct AutoQuorumChange : IQuorumChange {
 };
 Reference<IQuorumChange> autoQuorumChange( int desired ) { return Reference<IQuorumChange>(new AutoQuorumChange(desired)); }
 
-ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers ) {
+ACTOR Future<Void> excludeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
 	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
 	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
@@ -1237,13 +1265,18 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.setOption( FDBTransactionOptions::USE_PROVISIONAL_PROXIES );
+			auto serversVersionKey = failed ? failedServersVersionKey : excludedServersVersionKey;
+			tr.addReadConflictRange( singleKeyRange(serversVersionKey) ); //To conflict with parallel includeServers
+			tr.set( serversVersionKey, excludeVersionKey );
+			for(auto& s : servers) {
+				if (failed) {
+					tr.set( encodeFailedServersKey(s), StringRef() );
+				} else {
+					tr.set( encodeExcludedServersKey(s), StringRef() );
+				}
+			}
 
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) ); //To conflict with parallel includeServers
-			tr.set( excludedServersVersionKey, excludeVersionKey );
-			for(auto& s : servers)
-				tr.set( encodeExcludedServersKey(s), StringRef() );
-
-			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("ExcludeServersCommit").detail("Servers", describe(servers)).detail("ExcludeFailed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1253,12 +1286,9 @@ ACTOR Future<Void> excludeServers( Database cx, vector<AddressExclusion> servers
 	}
 }
 
-ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers ) {
-	state bool includeAll = false;
+ACTOR Future<Void> includeServers(Database cx, vector<AddressExclusion> servers, bool failed) {
 	state Transaction tr(cx);
-	state Key versionKey = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(),Unversioned());
-	state std::string excludeVersionKey = deterministicRandom()->randomUniqueID().toString();
-
+	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
@@ -1268,13 +1298,21 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 
 			// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting and CAUSAL_WRITE_RISKY
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
-			tr.addReadConflictRange( singleKeyRange(excludedServersVersionKey) );
-			tr.set( excludedServersVersionKey, excludeVersionKey );
+			if (failed) {
+				tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
+				tr.set(failedServersVersionKey, versionKey);
+			} else {
+				tr.addReadConflictRange(singleKeyRange(excludedServersVersionKey));
+				tr.set(excludedServersVersionKey, versionKey);
+			}
 
 			for(auto& s : servers ) {
 				if (!s.isValid()) {
-					tr.clear( excludedServersKeys );
-					includeAll = true;
+					if (failed) {
+						tr.clear(failedServersKeys);
+					} else {
+						tr.clear(excludedServersKeys);
+					}
 				} else if (s.isWholeMachine()) {
 					// Eliminate both any ip-level exclusion (1.2.3.4) and any
 					// port-level exclusions (1.2.3.4:5)
@@ -1284,15 +1322,19 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 					//
 					// This is why we now make two clears: first only of the ip
 					// address, the second will delete all ports.
-					auto addr = encodeExcludedServersKey(s);
+					auto addr = failed ? encodeFailedServersKey(s) : encodeExcludedServersKey(s);
 					tr.clear(singleKeyRange(addr));
 					tr.clear(KeyRangeRef(addr + ':', addr + char(':' + 1)));
 				} else {
-					tr.clear( encodeExcludedServersKey(s) );
+					if (failed) {
+						tr.clear(encodeFailedServersKey(s));
+					} else {
+						tr.clear(encodeExcludedServersKey(s));
+					}
 				}
 			}
 
-			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers));
+			TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
 			wait( tr.commit() );
 			return Void();
@@ -1338,8 +1380,10 @@ ACTOR Future<Void> setClass( Database cx, AddressExclusion server, ProcessClass 
 }
 
 ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* tr ) {
-	Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	state Standalone<RangeResultRef> r = wait( tr->getRange( excludedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
 	ASSERT( !r.more && r.size() < CLIENT_KNOBS->TOO_MANY );
+	state Standalone<RangeResultRef> r2 = wait( tr->getRange( failedServersKeys, CLIENT_KNOBS->TOO_MANY ) );
+	ASSERT( !r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY );
 
 	vector<AddressExclusion> exclusions;
 	for(auto i = r.begin(); i != r.end(); ++i) {
@@ -1347,6 +1391,12 @@ ACTOR static Future<vector<AddressExclusion>> getExcludedServers( Transaction* t
 		if (a.isValid())
 			exclusions.push_back( a );
 	}
+	for(auto i = r2.begin(); i != r2.end(); ++i) {
+		auto a = decodeFailedServersKey( i->key );
+		if (a.isValid())
+			exclusions.push_back( a );
+	}
+	uniquify(exclusions);
 	return exclusions;
 }
 
@@ -1389,6 +1439,7 @@ ACTOR Future<Void> printHealthyZone( Database cx ) {
 
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
 	state Transaction tr(cx);
+	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1414,6 +1465,7 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSS
 
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
 	state Transaction tr(cx);
+	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);

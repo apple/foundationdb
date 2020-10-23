@@ -84,6 +84,7 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION (validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
+extern Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit = "");
 extern std::string format(const char* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
@@ -133,8 +134,8 @@ class Never {};
 template <class T>
 class ErrorOr : public ComposedIdentifier<T, 0x1> {
 public:
-	ErrorOr() : error(default_error_or()) {}
-	ErrorOr(Error const& error) : error(error) {}
+	ErrorOr() : ErrorOr(default_error_or()) {}
+	ErrorOr(Error const& error) : error(error) { memset(&value, 0, sizeof(value)); }
 	ErrorOr(const ErrorOr<T>& o) : error(o.error) {
 		if (present()) new (&value) T(o.get());
 	}
@@ -240,13 +241,13 @@ class CachedSerialization {
 public:
 	constexpr static FileIdentifier file_identifier = FileIdentifierFor<T>::value;
 
-	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr, 
+	//FIXME: this code will not work for caching a direct serialization from ObjectWriter, because it adds an ErrorOr,
 	// we should create a separate SerializeType for direct serialization
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
 	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
-	
+
 	const T& read() const { return data; }
 
 	T& mutate() {
@@ -391,6 +392,7 @@ struct SingleCallback {
 	SingleCallback<T> *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T &&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -406,6 +408,7 @@ struct SingleCallback {
 	}
 };
 
+// SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -585,7 +588,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 			if (error.isValid()) throw error;
 			throw internal_error();
 		}
-		auto copy = queue.front();
+		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
 	}
@@ -685,6 +688,11 @@ public:
 		: sav(new SAV<T>(1, 0))
 	{
 		sav->send(presentValue);
+	}
+	Future(T&& presentValue)
+		: sav(new SAV<T>(1, 0))
+	{
+		sav->send(std::move(presentValue));
 	}
 	Future(Never)
 		: sav(new SAV<T>(1, 0))
@@ -786,7 +794,9 @@ public:
 	bool canBeSet() { return sav->canBeSet(); }
 	bool isValid() const { return sav != NULL; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
-	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	Promise(const Promise& rhs) : sav(rhs.sav) {
+		sav->addPromiseRef();
+	}
 	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
@@ -872,20 +882,20 @@ private:
 };
 
 template <class Request>
-decltype(fake<Request>().reply) const& getReplyPromise(Request const& r) { return r.reply; }
-
-
+decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r) {
+	return r.reply;
+}
 
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
-#define REPLY_TYPE(RequestType) decltype( getReplyPromise( fake<RequestType>() ).getFuture().getValue() )
-//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( fake<RequestType>() ).getValue() )
+#define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
+//#define REPLY_TYPE(RequestType) decltype( getReplyFuture( std::declval<RequestType>() ).getValue() )
 #else
 template <class T>
 struct ReplyType {
 	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
 	//   breaks IntelliSense in VS2010; this is a workaround.
-	typedef decltype(fake<T>().reply.getFuture().getValue()) Type;
+	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
 };
 template <class T> class ReplyPromise;
 template <class T>
@@ -906,6 +916,9 @@ public:
 
 	void send(const T& value) const {
 		queue->send(value);
+	}
+	void send(T&& value) const {
+		queue->send(std::move(value));
 	}
 	void sendError(const Error& error) const {
 		queue->sendError(error);
@@ -1005,10 +1018,13 @@ struct ActorCallback : Callback<ValueType> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) {
+	virtual void fire(ValueType const& value) override {
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
-	virtual void error(Error e) {
+	virtual void fire(ValueType && value) override {
+		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
+	}
+	virtual void error(Error e) override {
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };

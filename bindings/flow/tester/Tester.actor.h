@@ -27,6 +27,8 @@
 
 #pragma once
 
+#include <utility>
+
 #include "flow/IDispatched.h"
 #include "bindings/flow/fdb_flow.h"
 #include "bindings/flow/IDirectory.h"
@@ -34,11 +36,11 @@
 #include "bindings/flow/DirectoryLayer.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-#define LOG_ALL 0
-#define LOG_INSTRUCTIONS LOG_ALL || 0
-#define LOG_OPS LOG_ALL || 0
-#define LOG_DIRS LOG_ALL || 0
-#define LOG_ERRORS LOG_ALL || 0
+constexpr bool LOG_ALL = false;
+constexpr bool LOG_INSTRUCTIONS = LOG_ALL || false;
+constexpr bool LOG_OPS = LOG_ALL || false;
+constexpr bool LOG_DIRS = LOG_ALL || false;
+constexpr bool LOG_ERRORS = LOG_ALL || false;
 
 struct FlowTesterData;
 
@@ -57,7 +59,7 @@ struct FlowTesterStack {
 	void push(Future<Standalone<StringRef>> value) {
 		data.push_back(StackItem(index, value));
 	}
-	
+
 	void push(Standalone<StringRef> value) {
 		push(Future<Standalone<StringRef>>(value));
 	}
@@ -86,10 +88,10 @@ struct FlowTesterStack {
 			items.push_back(data.back());
 			data.pop_back();
 			count--;
-		}		
+		}
 		return items;
 	}
-	
+
 	Future<std::vector<FDB::Tuple>> waitAndPop(int count);
 	Future<FDB::Tuple> waitAndPop();
 
@@ -106,7 +108,7 @@ struct FlowTesterStack {
 
 struct InstructionData : public ReferenceCounted<InstructionData> {
 	bool isDatabase;
-	bool isSnapshot;	
+	bool isSnapshot;
 	StringRef instruction;
 	Reference<FDB::Transaction> tr;
 
@@ -153,7 +155,7 @@ struct DirectoryOrSubspace {
 			return "DirectorySubspace";
 		}
 		else if(directory.present()) {
-			return "IDirectory";	
+			return "IDirectory";
 		}
 		else if(subspace.present()) {
 			return "Subspace";
@@ -169,10 +171,10 @@ struct DirectoryTesterData {
 	int directoryListIndex;
 	int directoryErrorIndex;
 
-	Reference<FDB::IDirectory> directory() { 
+	Reference<FDB::IDirectory> directory() {
 		ASSERT(directoryListIndex < directoryList.size());
 		ASSERT(directoryList[directoryListIndex].directory.present());
-		return directoryList[directoryListIndex].directory.get(); 
+		return directoryList[directoryListIndex].directory.get();
 	}
 
 	FDB::Subspace* subspace() {
@@ -220,10 +222,10 @@ struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
 std::string tupleToString(FDB::Tuple const& tuple);
 
 ACTOR template <class F>
-Future<decltype(fake<F>()().getValue())> executeMutation(Reference<InstructionData> instruction, F func) {
+Future<decltype(std::declval<F>()().getValue())> executeMutation(Reference<InstructionData> instruction, F func) {
 	loop {
 		try {
-			state decltype(fake<F>()().getValue()) result = wait(func());
+			state decltype(std::declval<F>()().getValue()) result = wait(func());
 			if(instruction->isDatabase) {
 				wait(instruction->tr->commit());
 			}

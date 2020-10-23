@@ -1,16 +1,33 @@
-set(USE_GPERFTOOLS OFF CACHE BOOL "Use gperfools for profiling")
-set(USE_VALGRIND OFF CACHE BOOL "Compile for valgrind usage")
-set(VALGRIND_ARENA OFF CACHE BOOL "Inform valgrind about arena-allocated memory. Makes valgrind slower but more precise.")
-set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
-set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
-set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
-set(USE_UBSAN OFF CACHE BOOL "Compile with undefined behavior sanitizer")
-set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
-set(USE_LD "DEFAULT" CACHE STRING "The linker to use for building: can be LD (system default, default choice), BFD, GOLD, or LLD")
-set(USE_LIBCXX OFF CACHE BOOL "Use libc++")
-set(USE_CCACHE OFF CACHE BOOL "Use ccache for compilation if available")
-set(RELATIVE_DEBUG_PATHS OFF CACHE BOOL "Use relative file paths in debug info")
-set(STATIC_LINK_LIBCXX ON CACHE BOOL "Statically link libstdcpp/libc++")
+include(CompilerChecks)
+
+env_set(USE_GPERFTOOLS OFF BOOL "Use gperfools for profiling")
+env_set(USE_DTRACE ON BOOL "Enable dtrace probes on supported platforms")
+env_set(USE_VALGRIND OFF BOOL "Compile for valgrind usage")
+env_set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} BOOL "Use valgrind for ctest")
+env_set(VALGRIND_ARENA OFF BOOL "Inform valgrind about arena-allocated memory. Makes valgrind slower but more precise.")
+env_set(ALLOC_INSTRUMENTATION OFF BOOL "Instrument alloc")
+env_set(WITH_UNDODB OFF BOOL "Use rr or undodb")
+env_set(USE_ASAN OFF BOOL "Compile with address sanitizer")
+env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
+env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer")
+env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
+env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
+env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
+env_set(USE_WERROR OFF BOOL "Compile with -Werror. Recommended for local development and CI.")
+default_linker(_use_ld)
+env_set(USE_LD "${_use_ld}" STRING
+  "The linker to use for building: can be LD (system default and same as DEFAULT), BFD, GOLD, or LLD - will be LLD for Clang if available, DEFAULT otherwise")
+use_libcxx(_use_libcxx)
+env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
+static_link_libcxx(_static_link_libcxx)
+env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+
+if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
+  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
+endif()
+if(STATIC_LINK_LIBCXX AND USE_TSAN)
+  message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX doesn't work with tsan")
+endif()
 
 set(rel_debug_paths OFF)
 if(RELATIVE_DEBUG_PATHS)
@@ -45,7 +62,7 @@ if(FDB_RELEASE)
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${CMAKE_BINARY_DIR})
 if (NOT OPEN_FOR_IDE)
   add_definitions(-DNO_INTELLISENSE)
 endif()
@@ -55,11 +72,6 @@ else()
   add_definitions(-DUSE_UCONTEXT)
 endif()
 
-if ((NOT USE_CCACHE) AND (NOT "$ENV{USE_CCACHE}" STREQUAL ""))
-  if (("$ENV{USE_CCACHE}" STREQUAL "ON") OR ("$ENV{USE_CCACHE}" STREQUAL "1") OR ("$ENV{USE_CCACHE}" STREQUAL "YES"))
-    set(USE_CCACHE ON)
-  endif()
-endif()
 if (USE_CCACHE)
   FIND_PROGRAM(CCACHE_FOUND "ccache")
   if(CCACHE_FOUND)
@@ -70,17 +82,21 @@ if (USE_CCACHE)
   endif()
 endif()
 
-if ((NOT USE_LIBCXX) AND (NOT "$ENV{USE_LIBCXX}" STREQUAL ""))
-  string(TOUPPER "$ENV{USE_LIBCXX}" USE_LIBCXXENV)
-  if (("${USE_LIBCXXENV}" STREQUAL "ON") OR ("${USE_LIBCXXENV}" STREQUAL "1") OR ("${USE_LIBCXXENV}" STREQUAL "YES"))
-    set(USE_LIBCXX ON)
-  endif()
-endif()
-
 include(CheckFunctionExists)
 set(CMAKE_REQUIRED_INCLUDES stdlib.h malloc.h)
 set(CMAKE_REQUIRED_LIBRARIES c)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(NOT WIN32)
+  include(CheckIncludeFile)
+  CHECK_INCLUDE_FILE("stdatomic.h" HAS_C11_ATOMICS)
+  if (NOT HAS_C11_ATOMICS)
+    message(FATAL_ERROR "C compiler does not support c11 atomics")
+  endif()
+endif()
 
 if(WIN32)
   # see: https://docs.microsoft.com/en-us/windows/desktop/WinProg/using-the-windows-headers
@@ -97,22 +113,15 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
+  set(ICC NO)
   if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
+    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
     set(GCC YES)
-  endif()
-
-  # Use the linker environmental variable, if specified and valid
-  if ((USE_LD STREQUAL "DEFAULT") AND (NOT "$ENV{USE_LD}" STREQUAL ""))
-    string(TOUPPER "$ENV{USE_LD}" USE_LDENV)
-    if (("${USE_LDENV}" STREQUAL "LD") OR ("${USE_LDENV}" STREQUAL "GOLD") OR ("${USE_LDENV}" STREQUAL "LLD") OR ("${USE_LDENV}" STREQUAL "BFD") OR ("${USE_LDENV}" STREQUAL "DEFAULT"))
-      set(USE_LD "${USE_LDENV}")
-    else()
-      message (FATAL_ERROR "USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!")
-    endif()
   endif()
 
   # check linker flags.
@@ -171,6 +180,15 @@ else()
     set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=undefined ${CMAKE_THREAD_LIBS_INIT}")
   endif()
 
+  if(USE_TSAN)
+    add_compile_options(
+      -fsanitize=thread
+      -DUSE_SANITIZER)
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -fsanitize=thread")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=thread")
+    set(CMAKE_EXE_LINKER_FLAGS    "${CMAKE_EXE_LINKER_FLAGS}    -fsanitize=thread ${CMAKE_THREAD_LIBS_INIT}")
+  endif()
+
   if(PORTABLE_BINARY)
     message(STATUS "Create a more portable binary")
     set(CMAKE_MODULE_LINKER_FLAGS "-static-libstdc++ -static-libgcc ${CMAKE_MODULE_LINKER_FLAGS}")
@@ -192,12 +210,6 @@ else()
   #   -mavx
   #   -msse4.2)
 
-  if ((NOT USE_VALGRIND) AND (NOT "$ENV{USE_VALGRIND}" STREQUAL ""))
-    if (("$ENV{USE_VALGRIND}" STREQUAL "ON") OR ("$ENV{USE_VALGRIND}" STREQUAL "1") OR ("$ENV{USE_VALGRIND}" STREQUAL "YES"))
-      set(USE_VALGRIND ON)
-    endif()
-  endif()
-
   if (USE_VALGRIND)
     add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
   endif()
@@ -206,12 +218,23 @@ else()
   endif()
   if (CLANG)
     add_compile_options()
+    # Clang has link errors unless `atomic` is specifically requested.
+    if(NOT APPLE)
+      #add_link_options(-latomic)
+    endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
       add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
-        add_link_options(-lc++ -lc++abi -Wl,-build-id=sha1)
+        if (STATIC_LINK_LIBCXX)
+          add_link_options(-static-libgcc -nostdlib++  -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic)
+        endif()
+        add_link_options(-stdlib=libc++ -Wl,-build-id=sha1)
       endif()
+    endif()
+    if (OPEN_FOR_IDE)
+      add_compile_options(
+        -Wno-unknown-attributes)
     endif()
     add_compile_options(
       -Wall -Wextra
@@ -228,24 +251,36 @@ else()
       -Wno-sign-compare
       -Wno-tautological-pointer-compare
       -Wno-undefined-var-template
+      -Wno-tautological-pointer-compare
+      -Wredundant-move
+      -Wpessimizing-move
       -Wno-unknown-pragmas
       -Wno-unknown-warning-option
       -Wno-unused-function
       -Wno-unused-local-typedef
       -Wno-unused-parameter
       -Wno-unused-value
+      -Wno-self-assign
       )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
-        -Wno-error=unused-command-line-argument)
+        -Wno-unused-command-line-argument)
     endif()
   endif()
-  if (CMAKE_GENERATOR STREQUAL Xcode)
-  else()
+  if (USE_WERROR)
     add_compile_options(-Werror)
   endif()
-  add_compile_options($<$<BOOL:${GCC}>:-Wno-pragmas>)
+  if (GCC)
+    add_compile_options(-Wno-pragmas)
+
+    # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
+    # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
+    add_compile_options(-Wno-attributes)
+  elseif(ICC)
+    add_compile_options(-wd1879 -wd1011)
+    add_link_options(-static-intel)
+  endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
     -Wno-deprecated
@@ -260,12 +295,18 @@ else()
       -fno-builtin-free)
   endif()
 
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    # Graviton or later
+    # https://github.com/aws/aws-graviton-gettting-started
+    add_compile_options(-march=armv8-a+crc+simd)
+  endif()
+
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
   check_symbol_exists(aligned_alloc stdlib.h HAS_ALIGNED_ALLOC)
   message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
-  if(SUPPORT_DTRACE)
+  if((SUPPORT_DTRACE) AND (USE_DTRACE))
     add_compile_definitions(DTRACE_PROBES)
   endif()
   if(HAS_ALIGNED_ALLOC)
@@ -284,3 +325,4 @@ else()
     endif()
   endif()
 endif()
+

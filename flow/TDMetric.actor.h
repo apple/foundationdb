@@ -28,7 +28,6 @@
         #define FLOW_TDMETRIC_ACTOR_H
 
 #include "flow/flow.h"
-#include "flow/IndexedSet.h"
 #include "flow/network.h"
 #include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
@@ -56,9 +55,21 @@ struct MetricNameRef {
 	int expectedSize() const {
 		return type.expectedSize() + name.expectedSize();
 	}
+
+	inline int compare(MetricNameRef const& r) const {
+		int cmp;
+		if ((cmp = type.compare(r.type))) {
+			return cmp;
+		}
+		if ((cmp = name.compare(r.name))) {
+			return cmp;
+		}
+		return id.compare(r.id);
+	}
 };
 
 extern std::string reduceFilename(std::string const &filename);
+
 inline bool operator < (const MetricNameRef& l, const MetricNameRef& r ) {
 	int cmp = l.type.compare(r.type);
 	if(cmp == 0) {
@@ -329,7 +340,7 @@ struct Descriptor {
 	using fields = std::tuple<>;
 	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
 
-	static StringRef typeName() {{ return LiteralStringRef(""); }}
+	static StringRef typeName() { return LiteralStringRef(""); }
 #endif
 };
 
@@ -1350,10 +1361,11 @@ typedef ContinuousMetric<Standalone<StringRef>> StringMetric;
 //
 template <typename T>
 struct MetricHandle {
-	template<typename ValueType = typename T::ValueType>
-	MetricHandle(StringRef const &name = StringRef(), StringRef const &id = StringRef(), ValueType const &initial = ValueType())
-	  : ref(T::getOrCreateInstance(name, id, true, initial)) {
-	}
+	using ValueType = typename T::ValueType;
+
+	MetricHandle(StringRef const& name = StringRef(), StringRef const& id = StringRef(),
+	             ValueType const& initial = ValueType())
+	  : ref(T::getOrCreateInstance(name, id, true, initial)) {}
 
 	// Initialize this handle to point to a new or existing metric with (name, id).  If a new metric is created then the handle's
 	// current metric's current value will be the new metric's initial value.  This allows Metric handle users to treate their

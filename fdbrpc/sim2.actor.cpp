@@ -26,7 +26,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "flow/Hash3.h"
+#include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/network.h"
@@ -83,21 +83,6 @@ void ISimulator::displayWorkers() const
 	}
 
 	return;
-}
-
-namespace std {
-template<>
-class hash<Endpoint> {
-public:
-	size_t operator()(const Endpoint &s) const
-	{
-		return hashlittle(&s, sizeof(s), 0);
-	}
-};
-}
-
-bool onlyBeforeSimulatorInit() {
-	return g_network->isSimulated() && g_simulator.getAllProcesses().empty();
 }
 
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
@@ -374,7 +359,13 @@ private:
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
 			TEST(true);  // Simulated connection failure
-			TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
+			TraceEvent("ConnectionFailure", dbgid)
+			    .detail("MyAddr", process->address)
+			    .detail("PeerAddr", peerProcess->address)
+			    .detail("PeerIsValid", peer.isValid())
+			    .detail("SendClosed", a > .33)
+			    .detail("RecvClosed", a < .66)
+			    .detail("Explicit", b < .3);
 			if (a < .66 && peer) peer->closeInternal();
 			if (a > .33) closeInternal();
 			// At the moment, we occasionally notice the connection failed immediately.  In principle, this could happen but only after a delay.
@@ -386,7 +377,8 @@ private:
 	ACTOR static Future<Void> trackLeakedConnection( Sim2Conn* self ) {
 		wait( g_simulator.onProcess( self->process ) );
 		if (self->process->address.isPublic()) {
-			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
+			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
+			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 		} else {
 			wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 ) );
 		}
@@ -565,8 +557,7 @@ private:
 		}
 
 		if (randLog) {
-			uint32_t a=0, b=0;
-			hashlittle2( data, read_bytes, &a, &b );
+			uint32_t a = crc32c_append( 0, (const uint8_t*)data, read_bytes );
 			fprintf( randLog, "SFR2 %s %s %s %d %d\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), read_bytes, a );
 		}
 
@@ -581,8 +572,7 @@ private:
 	ACTOR static Future<Void> write_impl( SimpleFile* self, StringRef data, int64_t offset ) {
 		state UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
-			uint32_t a=0, b=0;
-			hashlittle2( data.begin(), data.size(), &a, &b );
+			uint32_t a = crc32c_append( 0, data.begin(), data.size() );
 			fprintf( randLog, "SFW1 %s %s %s %d %d %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), a, data.size(), offset );
 		}
 
@@ -770,7 +760,9 @@ public:
 		seconds = std::max(0.0, seconds);
 		Future<Void> f;
 
-		if(!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 && deterministicRandom()->random01() < 0.25) { //FIXME: why doesnt this work when we are changing machines?
+		if (!currentProcess->rebooting && machine == currentProcess && !currentProcess->shutdownSignal.isSet() &&
+		    FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY*pow(deterministicRandom()->random01(),1000.0);
 		}
 
@@ -868,6 +860,10 @@ public:
 	virtual const TLSConfig& getTLSConfig() {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
+	}
+
+	virtual bool checkRunnable() {
+		return net2->checkRunnable();
 	}
 
 	virtual void stop() {
@@ -1005,16 +1001,10 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> _run(Sim2 *self) {
-		Future<Void> loopFuture = self->runLoop(self);
-		self->net2->run();
-		wait( loopFuture );
-		return Void();
-	}
-
 	// Implement ISimulator interface
 	virtual void run() {
-		_run(this);
+		Future<Void> loopFuture = runLoop(this);
+		net2->run();
 	}
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
@@ -1046,7 +1036,7 @@ public:
 
 		NetworkAddressList addresses;
 		addresses.address = NetworkAddress(ip, port, true, sslEnabled);
-		if(listenPerProcess == 2) {
+		if (listenPerProcess == 2) { // listenPerProcess is only 1 or 2
 			addresses.secondaryAddress = NetworkAddress(ip, port+1, true, false);
 		}
 
@@ -1059,7 +1049,7 @@ public:
 		m->machine = &machine;
 		machine.processes.push_back(m);
 		currentlyRebootingProcesses.erase(addresses.address);
-		m->excluded = g_simulator.isExcluded(addresses.address);
+		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
@@ -1267,12 +1257,26 @@ public:
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
 		if (kt == KillInstantly) {
-			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FailMachine")
+			    .detail("Name", machine->name)
+			    .detail("Address", machine->address)
+			    .detail("ZoneId", machine->locality.zoneId())
+			    .detail("Process", machine->toString())
+			    .detail("Rebooting", machine->rebooting)
+			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+			TraceEvent(SevWarn, "FaultMachine")
+			    .detail("Name", machine->name)
+			    .detail("Address", machine->address)
+			    .detail("ZoneId", machine->locality.zoneId())
+			    .detail("Process", machine->toString())
+			    .detail("Rebooting", machine->rebooting)
+			    .detail("Protected", protectedAddresses.count(machine->address))
+			    .backtrace();
 			should_inject_fault = simulator_should_inject_fault;
 			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
@@ -1307,7 +1311,7 @@ public:
 		}
 	}
 	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
-		TraceEvent("AttemptingKillProcess");
+		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		if (kt < RebootAndDelete ) {
 			killProcess_internal( machine, kt );
 		}
@@ -1587,7 +1591,8 @@ public:
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) {
 		NetworkAddress normalizedAddress(address.ip, address.port, true, address.isTLS());
 		ASSERT( addressMap.count( normalizedAddress ) );
-		return addressMap[ normalizedAddress ];
+		// NOTE: addressMap[normalizedAddress]->address may not equal to normalizedAddress
+		return addressMap[normalizedAddress];
 	}
 
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) {
@@ -1665,10 +1670,6 @@ public:
 				killProcess(t.machine, KillInstantly);
 			}
 
-			//if( this->time > 45.522817 ) {
-			//	printf("foo\n");
-			//}
-
 			if (randLog)
 				fprintf( randLog, "T %f %d %s %" PRId64 "\n", this->time, int(deterministicRandom()->peek() % 10000), t.machine ? t.machine->name : "none", t.stable);
 		}
@@ -1732,7 +1733,16 @@ void startNewSimulator() {
 }
 
 ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
-	TraceEvent("RebootingProcessAttempt").detail("ZoneId", p->locality.zoneId()).detail("KillType", kt).detail("Process", p->toString()).detail("StartingClass", p->startingClass.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).detail("Rebooting", p->rebooting).detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
+	TraceEvent("RebootingProcessAttempt")
+	    .detail("ZoneId", p->locality.zoneId())
+	    .detail("KillType", kt)
+	    .detail("Process", p->toString())
+	    .detail("StartingClass", p->startingClass.toString())
+	    .detail("Failed", p->failed)
+	    .detail("Excluded", p->excluded)
+	    .detail("Cleared", p->cleared)
+	    .detail("Rebooting", p->rebooting)
+	    .detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
 	wait( g_sim2.delay( 0, TaskPriority::DefaultDelay, p ) ); // Switch to the machine in question
 
@@ -1746,7 +1756,16 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 		if( p->rebooting || !p->isReliable() )
 			return;
-		TraceEvent("RebootingProcess").detail("KillType", kt).detail("Address", p->address).detail("ZoneId", p->locality.zoneId()).detail("DataHall", p->locality.dataHallId()).detail("Locality", p->locality.toString()).detail("Failed", p->failed).detail("Excluded", p->excluded).detail("Cleared", p->cleared).backtrace();
+		TraceEvent("RebootingProcess")
+		    .detail("KillType", kt)
+		    .detail("Address", p->address)
+		    .detail("ZoneId", p->locality.zoneId())
+		    .detail("DataHall", p->locality.dataHallId())
+		    .detail("Locality", p->locality.toString())
+		    .detail("Failed", p->failed)
+		    .detail("Excluded", p->excluded)
+		    .detail("Cleared", p->cleared)
+		    .backtrace();
 		p->rebooting = true;
 		if ((kt == ISimulator::RebootAndDelete) || (kt == ISimulator::RebootProcessAndDelete)) {
 			p->cleared = true;

@@ -13,6 +13,8 @@ if(APPLE)
 elseif(WIN32)
   set(platform "windows")
   set(asm_file ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.asm)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set(platform "linux-aarch64")
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
@@ -68,9 +70,7 @@ if(NOT WIN32)
     test/mako/mako.c
     test/mako/mako.h
     test/mako/utils.c
-    test/mako/utils.h
-    test/mako/zipf.c
-    test/mako/zipf.h)
+    test/mako/utils.h)
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)

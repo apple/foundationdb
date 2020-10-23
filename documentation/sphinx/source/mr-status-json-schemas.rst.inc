@@ -29,7 +29,8 @@
                   "resolution",
                   "proxy",
                   "master",
-                  "test"
+                  "test",
+                  "storage_cache"
                ]
             },
             "degraded":true,
@@ -66,6 +67,7 @@
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
+                        "storage_cache",
                         "router",
                         "coordinator"
                      ]
@@ -157,6 +159,13 @@
                   },
                   "commit_latency_bands":{
                      "$map_key=upperBoundOfBand": 1
+                  },
+                  "busiest_read_tag":{
+                     "tag": "",
+                     "fractional_cost": 0.0,
+                     "estimated_cost":{
+                        "hz":0.0
+                     }
                   }
                }
             ],
@@ -303,10 +312,16 @@
          "transactions_per_second_limit":0,
          "batch_released_transactions_per_second":0,
          "released_transactions_per_second":0,
+         "throttled_tags":{
+            "auto":{
+               "count":0
+            },
+            "manual":{
+               "count":0
+            }
+         },
          "limiting_queue_bytes_storage_server":0,
          "worst_queue_bytes_storage_server":0,
-         "limiting_version_lag_storage_server":0,
-         "worst_version_lag_storage_server":0,
          "limiting_data_lag_storage_server":{
             "versions":0,
             "seconds":0.0
@@ -332,7 +347,10 @@
       },
       "degraded_processes":0,
       "database_available":true,
-      "database_locked":false,
+      "database_lock_state":{
+         "locked":true,
+         "lock_uid":"00000000000000000000000000000000" // Only present when database is locked
+      }
       "generation":2,
       "latency_probe":{ // all measurements are based on running sample transactions
          "read_seconds":7, // time to perform a single read
@@ -596,6 +614,7 @@
              "ssd-1",
              "ssd-2",
              "ssd-redwood-experimental",
+             "ssd-rocksdb-experimental",
              "memory"
          ]},
          "coordinators_count":1,
@@ -607,6 +626,7 @@
          "auto_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
+         "backup_worker_enabled":1,
          "proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{

@@ -77,6 +77,9 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
+#ifndef __aarch64__
+#include <cpuid.h>
+#endif
 
 /* Needed for disk capacity */
 #include <sys/statvfs.h>
@@ -101,6 +104,39 @@
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
+#endif
+
+#ifdef __FreeBSD__
+/* Needed for processor affinity */
+#include <sys/sched.h>
+/* Needed for getProcessorTime and setpriority */
+#include <sys/syscall.h>
+/* Needed for setpriority */
+#include <sys/resource.h>
+/* Needed for crash handler */
+#include <sys/signal.h>
+/* Needed for proc info	*/
+#include <sys/user.h>
+/* Needed for vm info  */
+#include <sys/param.h>
+#include <sys/sysctl.h>
+#include <sys/vmmeter.h>
+#include <sys/cpuset.h>
+#include <sys/resource.h>
+/* Needed for sysctl info */
+#include <sys/sysctl.h>
+#include <sys/fcntl.h>
+/* Needed for network info */
+#include <net/if.h>
+#include <net/if_mib.h>
+#include <net/if_var.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netinet/tcp_var.h>
+/* Needed for device info */
+#include <devstat.h>
+#include <kvm.h>
+#include <libutil.h>
 #endif
 
 #ifdef __APPLE__
@@ -202,7 +238,7 @@ double getProcessorTimeThread() {
 		throw platform_error();
 	}
 	return FiletimeAsInt64(ftKernel) / double(1e7) + FiletimeAsInt64(ftUser) / double(1e7);
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	return getProcessorTimeGeneric(RUSAGE_THREAD);
 #elif defined(__APPLE__)
 	/* No RUSAGE_THREAD so we use the lower level interface */
@@ -255,6 +291,29 @@ uint64_t getResidentMemoryUsage() {
 	rssize *= sysconf(_SC_PAGESIZE);
 
 	return rssize;
+#elif defined(__FreeBSD__)
+	uint64_t rssize = 0;
+
+	int status;
+	pid_t ppid = getpid();
+	int pidinfo[4];
+	pidinfo[0] = CTL_KERN;
+	pidinfo[1] = KERN_PROC;
+	pidinfo[2] = KERN_PROC_PID;
+	pidinfo[3] = (int)ppid;
+
+	struct kinfo_proc procstk;
+	size_t len = sizeof(procstk);
+
+	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
+		throw platform_error();
+	}
+
+	rssize = (uint64_t)procstk.ki_rssize;
+
+	return rssize;
 #elif defined(_WIN32)
 	PROCESS_MEMORY_COUNTERS_EX pmc;
 	if(!GetProcessMemoryInfo(GetCurrentProcess(), (PPROCESS_MEMORY_COUNTERS)&pmc, sizeof(pmc))) {
@@ -290,6 +349,29 @@ uint64_t getMemoryUsage() {
 	stat_stream >> vmsize;
 
 	vmsize *= sysconf(_SC_PAGESIZE);
+
+	return vmsize;
+#elif defined(__FreeBSD__)
+	uint64_t vmsize = 0;
+
+	int status;
+	pid_t ppid = getpid();
+	int pidinfo[4];
+	pidinfo[0] = CTL_KERN;
+	pidinfo[1] = KERN_PROC;
+	pidinfo[2] = KERN_PROC_PID;
+	pidinfo[3] = (int)ppid;
+
+	struct kinfo_proc procstk;
+	size_t len = sizeof(procstk);
+
+	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
+		throw platform_error();
+	}
+
+	vmsize = (uint64_t)procstk.ki_size >> PAGE_SHIFT;
 
 	return vmsize;
 #elif defined(_WIN32)
@@ -401,6 +483,52 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	memInfo.committed = memInfo.total - memInfo.available;
+#elif defined(__FreeBSD__)
+	int status;
+
+	u_int page_size;
+	u_int free_count;
+	u_int active_count;
+	u_int inactive_count;
+	u_int wire_count;
+
+	size_t uint_size;
+
+	uint_size = sizeof(page_size);
+
+	status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+	}
+
+	memInfo.total = (int64_t)((free_count + active_count + inactive_count + wire_count) * (u_int64_t)(page_size));
+	memInfo.available = (int64_t)(free_count * (u_int64_t)(page_size));
+	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(_WIN32)
 	MEMORYSTATUSEX mem_status;
 	mem_status.dwLength = sizeof(mem_status);
@@ -455,7 +583,7 @@ Error systemErrorCodeToError() {
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT( platform_error, "getDiskBytes" );
 #if defined(__unixish__)
-#ifdef __linux__
+#if defined (__linux__) || defined (__FreeBSD__)
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
@@ -732,6 +860,196 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	}
 
 	if(!g_network->isSimulated()) TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+}
+
+dev_t getDeviceId(std::string path) {
+	struct stat statInfo;
+
+	while (true) {
+		int returnValue = stat(path.c_str(), &statInfo);
+		if (!returnValue) break;
+
+		if (errno == ENOENT) {
+			path = parentDirectory(path);
+		} else {
+			TraceEvent(SevError, "GetDeviceIdError").detail("Path", path).GetLastError();
+			throw platform_error();
+		}
+	}
+
+	return statInfo.st_dev;
+}
+
+#endif
+
+#if defined(__FreeBSD__)
+void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesReceived,
+					   uint64_t& outSegs, uint64_t& retransSegs) {
+	INJECT_FAULT( platform_error, "getNetworkTraffic" );
+
+	const char* ifa_name = nullptr;
+	try {
+		ifa_name = getInterfaceName(ip);
+	}
+	catch(Error &e) {
+		if(e.code() != error_code_platform_error) {
+			throw;
+		}
+	}
+
+	if (!ifa_name)
+		return;
+
+	struct ifaddrs *interfaces = NULL;
+
+	if (getifaddrs(&interfaces))
+	{
+		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
+		throw platform_error();
+	}
+
+	int if_count, i;
+	int mib[6];
+	size_t ifmiblen;
+	struct ifmibdata ifmd;
+
+	mib[0] = CTL_NET;
+	mib[1] = PF_LINK;
+	mib[2] = NETLINK_GENERIC;
+	mib[3] = IFMIB_IFDATA;
+	mib[4] = IFMIB_IFCOUNT;
+	mib[5] = IFDATA_GENERAL;
+
+	ifmiblen = sizeof(ifmd);
+
+	for (i = 1; i <= if_count; i++)
+	{
+		mib[4] = i;
+
+		sysctl(mib, 6, &ifmd, &ifmiblen, (void *)0, 0);
+
+		if (!strcmp(ifmd.ifmd_name, ifa_name))
+		{
+			bytesSent = ifmd.ifmd_data.ifi_obytes;
+			bytesReceived = ifmd.ifmd_data.ifi_ibytes;
+			break;
+		}
+	}
+
+	freeifaddrs(interfaces);
+
+	struct tcpstat tcpstat;
+	size_t stat_len;
+	stat_len = sizeof(tcpstat);
+	int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, NULL, 0);
+	if (tcpstatus < 0) {
+		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
+		throw platform_error();
+	}
+
+	outSegs = tcpstat.tcps_sndtotal;
+	retransSegs = tcpstat.tcps_sndrexmitpack;
+}
+
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
+	INJECT_FAULT( platform_error, "getMachineLoad" );
+
+	long cur[CPUSTATES], last[CPUSTATES];
+	size_t cur_sz = sizeof cur;
+	int cpustate;
+	long sum;
+
+	memset(last, 0, sizeof last);
+
+	if (sysctlbyname("kern.cp_time", &cur, &cur_sz, NULL, 0) < 0)
+	{
+		TraceEvent(SevError, "GetMachineLoad").GetLastError();
+		throw platform_error();
+	}
+
+	sum = 0;
+	for (cpustate = 0; cpustate < CPUSTATES; cpustate++)
+	{
+		long tmp = cur[cpustate];
+		cur[cpustate] -= last[cpustate];
+		last[cpustate] = tmp;
+		sum += cur[cpustate];
+	}
+
+	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS] + cur[CP_IDLE]);
+
+	idleTime = (uint64_t)(cur[CP_IDLE]);
+
+	//need to add logging here to TraceEvent
+
+}
+
+void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
+	INJECT_FAULT( platform_error, "getDiskStatistics" );
+	currentIOs = 0;
+	busyTicks = 0;
+	reads = 0;
+	writes = 0;
+	writeSectors = 0;
+	readSectors = 0;
+
+	struct stat buf;
+	if (stat(directory.c_str(), &buf)) {
+		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
+		throw platform_error();
+	}
+
+	static struct statinfo dscur;
+	double etime;
+	struct timespec ts;
+	static int num_devices;
+
+	kvm_t *kd = NULL;
+
+	etime = ts.tv_nsec * 1e-6;;
+
+	int dn;
+	u_int64_t total_transfers_read, total_transfers_write;
+	u_int64_t total_blocks_read, total_blocks_write;
+	u_int64_t queue_len;
+	long double ms_per_transaction;
+
+	dscur.dinfo = (struct devinfo *)calloc(1, sizeof(struct devinfo));
+	if (dscur.dinfo == NULL) {
+		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+		throw platform_error();
+	}
+
+	if (devstat_getdevs(kd, &dscur) == -1) {
+		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+		throw platform_error();
+	}
+
+	num_devices = dscur.dinfo->numdevs;
+
+	for (dn = 0; dn < num_devices; dn++)
+	{
+
+		if (devstat_compute_statistics(&dscur.dinfo->devices[dn], NULL, etime,
+		DSM_MS_PER_TRANSACTION, &ms_per_transaction,
+		DSM_TOTAL_TRANSFERS_READ, &total_transfers_read,
+		DSM_TOTAL_TRANSFERS_WRITE, &total_transfers_write,
+		DSM_TOTAL_BLOCKS_READ, &total_blocks_read,
+		DSM_TOTAL_BLOCKS_WRITE, &total_blocks_write,
+		DSM_QUEUE_LENGTH, &queue_len,
+		DSM_NONE) != 0) {
+			TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+			throw platform_error();
+		}
+
+		currentIOs = queue_len;
+		busyTicks = (u_int64_t)ms_per_transaction;
+		reads = total_transfers_read;
+		writes = total_transfers_write;
+		writeSectors = total_blocks_read;
+		readSectors = total_blocks_write;        
+	}
+	
 }
 
 dev_t getDeviceId(std::string path) {
@@ -1276,7 +1594,7 @@ struct OffsetTimer {
 		return offset + count * secondsPerCount;
 	}
 };
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 #define DOUBLETIME(ts) (double(ts.tv_sec) + (ts.tv_nsec * 1e-9))
 #ifndef CLOCK_MONOTONIC_RAW
 #define CLOCK_MONOTONIC_RAW 4 // Confirmed safe to do with glibc >= 2.11 and kernel >= 2.6.28. No promises with older glibc. Older kernel definitely breaks it.
@@ -1341,7 +1659,7 @@ double timer() {
 	GetSystemTimeAsFileTime(&fileTime);
 	static_assert( sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong" );
 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
@@ -1361,7 +1679,7 @@ uint64_t timer_int() {
 	GetSystemTimeAsFileTime(&fileTime);
 	static_assert( sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong" );
 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH);
-#elif defined(__linux__)
+#elif defined(__linux__)  || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return uint64_t(ts.tv_sec) * 1e9 + ts.tv_nsec;
@@ -1411,7 +1729,7 @@ void setMemoryQuota( size_t limit ) {
 	}
 	if (!AssignProcessToJobObject( job, GetCurrentProcess() ))
 		TraceEvent(SevWarn, "FailedToSetMemoryLimit").GetLastError();
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	struct rlimit rlim;
 	if (getrlimit(RLIMIT_AS, &rlim)) {
 		TraceEvent(SevError, "GetMemoryLimit").GetLastError();
@@ -1513,7 +1831,7 @@ static void *allocateInternal(size_t length, bool largePages) {
 		flags |= MAP_HUGETLB;
 
 	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	int flags = MAP_PRIVATE|MAP_ANON;
 
 	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
@@ -1587,6 +1905,11 @@ void setAffinity(int proc) {
 	CPU_ZERO(&set);
 	CPU_SET(proc, &set);
 	sched_setaffinity(0, sizeof(cpu_set_t), &set);
+#elif defined(__FreeBSD__)
+	cpuset_t set;
+	CPU_ZERO(&set);
+	CPU_SET(proc, &set);
+	cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, -1,sizeof(set), &set);
 #endif
 }
 
@@ -1647,7 +1970,7 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 		//renamedFile();
 		return;
 	}
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	if (!rename( fromPath.c_str(), toPath.c_str() )) {
 		//FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable open for the same file
 		//renamedFile();
@@ -1813,7 +2136,7 @@ bool createDirectory( std::string const& directory ) {
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
 	throw e;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
 	do {
 		sep = directory.find_first_of('/', sep + 1);
@@ -1966,8 +2289,7 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 		if (*x == '/')
 			*x = CANONICAL_PATH_SEPARATOR;
 	return nameBuffer;
-#elif (defined(__linux__) || defined(__APPLE__))
-
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	char result[PATH_MAX];
 	// Must resolve links, so first try realpath on the whole thing
 	const char *r = realpath( path.c_str(), result );
@@ -2030,7 +2352,7 @@ std::string getUserHomeDirectory() {
 
 #ifdef _WIN32
 #define FILE_ATTRIBUTE_DATA DWORD
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define FILE_ATTRIBUTE_DATA mode_t
 #else
 #error Port me!
@@ -2039,7 +2361,7 @@ std::string getUserHomeDirectory() {
 bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
 #ifdef _WIN32
 	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
 #else
 	#error Port me!
@@ -2049,7 +2371,7 @@ bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::stri
 bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
 #ifdef _WIN32
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	return S_ISDIR(fileAttributes);
 #else
 	#error Port me!
@@ -2085,7 +2407,7 @@ std::vector<std::string> findFiles( std::string const& directory, std::string co
 		}
 		FindClose(h);
 	}
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	DIR *dip;
 
 	if ((dip = opendir(directory.c_str())) != NULL) {
@@ -2149,7 +2471,7 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 void threadSleep( double seconds ) {
 #ifdef _WIN32
 	Sleep( (DWORD)(seconds * 1e3) );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	struct timespec req, rem;
 
 	req.tv_sec = seconds;
@@ -2197,13 +2519,29 @@ void setCloseOnExec( int fd ) {
 } // namespace platform
 
 #ifdef _WIN32
-THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
-	return (void *)_beginthread(func, 0, arg);
+THREAD_HANDLE startThread(void (*func) (void *), void *arg, int stackSize) {
+	return (void *)_beginthread(func, stackSize, arg);
 }
-#elif (defined(__linux__) || defined(__APPLE__))
-THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+THREAD_HANDLE startThread(void *(*func) (void *), void *arg, int stackSize) {
 	pthread_t t;
-	pthread_create(&t, NULL, func, arg);
+	pthread_attr_t attr;
+
+	pthread_attr_init(&attr);
+	if(stackSize != 0) {
+		if(pthread_attr_setstacksize(&attr, stackSize) != 0) {
+			// If setting the stack size fails the default stack size will be used, so failure to set
+			// the stack size is treated as a warning.
+			// Logging a trace event here is a bit risky because startThread() could be used early
+			// enough that TraceEvent can't be used yet, though currently it is not used with a nonzero
+			// stack size that early in execution.
+			TraceEvent(SevWarnAlways, "StartThreadInvalidStackSize").detail("StackSize", stackSize);
+		};
+	}
+
+	pthread_create(&t, &attr, func, arg);
+	pthread_attr_destroy(&attr);
+
 	return t;
 }
 #else
@@ -2213,7 +2551,7 @@ THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 void waitThread(THREAD_HANDLE thread) {
 #ifdef _WIN32
 	WaitForSingleObject(thread, INFINITE);
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	pthread_join(thread, NULL);
 #else
 	#error Port me!
@@ -2255,7 +2593,7 @@ int64_t fileSize(std::string const& filename) {
 		return 0;
 	else
 		return file_status.st_size;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	struct stat file_status;
 	if(stat(filename.c_str(), &file_status) != 0)
 		return 0;
@@ -2394,7 +2732,7 @@ std::string getDefaultConfigPath() {
 	return _filepath + "\\foundationdb";
 #elif defined(__linux__)
 	return "/etc/foundationdb";
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	return "/usr/local/etc/foundationdb";
 #else
 	#error Port me!
@@ -2515,6 +2853,56 @@ void outOfMemory() {
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
 }
+
+// Because the lambda used with nftw below cannot capture
+int __eraseDirectoryRecurseiveCount;
+
+int eraseDirectoryRecursive(std::string const& dir) {
+	__eraseDirectoryRecurseiveCount = 0;
+#ifdef _WIN32
+	system( ("rd /s /q \"" + dir + "\"").c_str() );
+#elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+	int error =
+		nftw(dir.c_str(),
+			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int {
+				int r = remove(fpath);
+				if(r == 0)
+					++__eraseDirectoryRecurseiveCount;
+				return r;
+			},
+			64, FTW_DEPTH | FTW_PHYS);
+	/* Looks like calling code expects this to continue silently if
+	   the directory we're deleting doesn't exist in the first
+	   place */
+	if (error && errno != ENOENT) {
+		Error e = systemErrorCodeToError();
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		throw e;
+	}
+#else
+#error Port me!
+#endif
+	//INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
+	return __eraseDirectoryRecurseiveCount;
+}
+
+bool isHwCrcSupported()
+{
+#if defined(_WIN32)
+	int info[4];
+	__cpuid(info, 1);
+	return (info[2] & (1 << 20)) != 0;
+#elif defined(__aarch64__)
+	return true; /* force to use crc instructions */
+#elif defined(__unixish__)
+	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
+	__cpuid_count(level, count, eax, ebx, ecx, edx);
+	return ((ecx >> 20) & 1) != 0;
+#else
+	#error Port me!
+#endif
+}
+
 } // namespace platform
 
 extern "C" void criticalError(int exitCode, const char *type, const char *message) {
@@ -2652,7 +3040,7 @@ void* getImageOffset() { return NULL; }
 #endif
 
 bool isLibraryLoaded(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
 
@@ -2668,7 +3056,7 @@ bool isLibraryLoaded(const char* lib_path) {
 }
 
 void* loadLibrary(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
 
@@ -2725,6 +3113,20 @@ std::string exePath() {
 	} else {
 		throw platform_error();
 	}
+#elif defined(__FreeBSD__)
+    char binPath[2048];
+    int mib[4];
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_PATHNAME;
+    mib[3] = -1;
+    size_t len = sizeof(binPath);
+    if (sysctl(mib, 4, binPath, &len, NULL, 0) != 0) {
+        binPath[0] = '\0';
+        return std::string(binPath);
+    } else {
+        throw platform_error();
+    }
 #elif defined(__APPLE__)
 	uint32_t bufSize = 1024;
 	std::unique_ptr<char[]> buf(new char[bufSize]);
@@ -2836,31 +3238,54 @@ extern volatile size_t net2backtraces_offset;
 extern volatile size_t net2backtraces_max;
 extern volatile bool net2backtraces_overflow;
 extern volatile int net2backtraces_count;
-extern std::atomic<int64_t> net2liveness;
-extern volatile thread_local int profilingEnabled;
+extern std::atomic<int64_t> net2RunLoopIterations;
+extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
 
 std::atomic<double> checkThreadTime;
-volatile thread_local bool profileThread = false;
 #endif
 
+volatile thread_local bool profileThread = false;
 volatile thread_local int profilingEnabled = 1;
 
-void setProfilingEnabled(int enabled) {
-	profilingEnabled = enabled;
+volatile thread_local int64_t numProfilesDeferred = 0;
+volatile thread_local int64_t numProfilesOverflowed = 0;
+volatile thread_local int64_t numProfilesCaptured = 0;
+volatile thread_local bool profileRequested = false;
+
+int64_t getNumProfilesDeferred() {
+	return numProfilesDeferred;
+}
+
+int64_t getNumProfilesOverflowed() {
+	return numProfilesOverflowed;
+}
+
+int64_t getNumProfilesCaptured() {
+	return numProfilesCaptured;
 }
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (!profileThread || !profilingEnabled) {
+	if(!profileThread) { 
 		return;
 	}
 
-	net2backtraces_count++;
+	if(!profilingEnabled) {
+		profileRequested = true;
+		++numProfilesDeferred;
+		return;
+	}
+
+	++net2backtraces_count;
+
 	if (!net2backtraces || net2backtraces_max - net2backtraces_offset < 50) {
+		++numProfilesOverflowed;
 		net2backtraces_overflow = true;
 		return;
 	}
+
+	++numProfilesCaptured;
 
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in the signal handler
 	ProfilingSample* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
@@ -2869,8 +3294,7 @@ void profileHandler(int sig) {
 	// We can't get the time from a timer() call because it's not signal safe.
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
-	// SOMEDAY: should we limit the maximum number of frames from
-	// backtrace beyond just available space?
+	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
@@ -2881,33 +3305,84 @@ void profileHandler(int sig) {
 #endif
 }
 
+void setProfilingEnabled(int enabled) { 
+#ifdef __linux__
+	if(profileThread && enabled && !profilingEnabled && profileRequested) {
+		profilingEnabled = true;
+		profileRequested = false;
+		pthread_kill(pthread_self(), SIGPROF);
+	}
+	else {
+		profilingEnabled = enabled;
+	}
+#else
+	// No profiling for other platforms!
+#endif	
+}
+
 void* checkThread(void *arg) {
 #ifdef __linux__
 	pthread_t mainThread = *(pthread_t*)arg;
 	free(arg);
 
-	int64_t lastValue = net2liveness.load();
-	double lastSignal = 0;
-	double logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
+	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
+	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
+
+	double lastSlowTaskSignal = 0;
+	double lastSaturatedSignal = 0;
+
+	const double minSlowTaskLogInterval = std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+	const double minSaturationLogInterval = std::max(FLOW_KNOBS->SATURATION_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+
+	double slowTaskLogInterval = minSlowTaskLogInterval;
+	double saturatedLogInterval = minSaturationLogInterval;
+
 	while(true) {
-		threadSleep(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
-		int64_t currentLiveness = net2liveness.load();
-		if(lastValue == currentLiveness) {
+		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
+
+		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
+		int64_t currentRunLoopSleeps = net2RunLoopSleeps.load();
+
+		bool slowTask = lastRunLoopIterations == currentRunLoopIterations;
+		bool saturated = lastRunLoopSleeps == currentRunLoopSleeps;
+
+		if(slowTask) {
 			double t = timer();
-			if(lastSignal == 0 || t - lastSignal >= logInterval) {
-				if(lastSignal > 0) {
-					logInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * logInterval);
+			if(lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+				if(lastSlowTaskSignal > 0) {
+					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
 				}
 
-				lastSignal = t;
-				checkThreadTime.store(lastSignal);
+				lastSlowTaskSignal = t;
+				checkThreadTime.store(lastSlowTaskSignal);
 				pthread_kill(mainThread, SIGPROF);
 			}
 		}
 		else {
-			lastValue = currentLiveness;
-			lastSignal = 0;
-			logInterval = FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL;
+			lastSlowTaskSignal = 0;
+			lastRunLoopIterations = currentRunLoopIterations;
+			slowTaskLogInterval = minSlowTaskLogInterval;
+		}
+
+		if(saturated) {
+			double t = timer();
+			if(lastSaturatedSignal == 0 || t - lastSaturatedSignal >= saturatedLogInterval) {
+				if(lastSaturatedSignal > 0) {
+					saturatedLogInterval = std::min(FLOW_KNOBS->SATURATION_PROFILING_MAX_LOG_INTERVAL, FLOW_KNOBS->SATURATION_PROFILING_LOG_BACKOFF * saturatedLogInterval);
+				}
+
+				lastSaturatedSignal = t;
+
+				if(!slowTask) {
+					checkThreadTime.store(lastSaturatedSignal);
+					pthread_kill(mainThread, SIGPROF);
+				}
+			}
+		}
+		else {
+			lastSaturatedSignal = 0;
+			lastRunLoopSleeps = currentRunLoopSleeps;
+			saturatedLogInterval = minSaturationLogInterval;
 		}
 	}
 	return NULL;
@@ -2933,10 +3408,10 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 #endif
 
 
-void setupSlowTaskProfiler() {
+void setupRunLoopProfiler() {
 #ifdef __linux__
-	if(FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL > 0) {
-		TraceEvent("StartingSlowTaskProfilingThread").detail("Interval", FLOW_KNOBS->SLOWTASK_PROFILING_INTERVAL);
+	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 		initProfiling();
 		profileThread = true;
 

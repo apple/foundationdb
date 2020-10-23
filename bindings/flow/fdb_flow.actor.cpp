@@ -36,7 +36,7 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(620);
+	API *fdb = FDB::API::selectAPIVersion(630);
 	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr = db->createTransaction();
 
@@ -79,7 +79,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(620);
+	API *fdb = FDB::API::selectAPIVersion(630);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
@@ -132,6 +132,8 @@ namespace FDB {
 													   GetRangeLimits limits = GetRangeLimits(), bool snapshot = false,
 													   bool reverse = false,
 													   FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
+		
+		Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
 
 		void addReadConflictRange(KeyRangeRef const& keys) override;
 		void addReadConflictKey(KeyRef const& key) override;
@@ -344,6 +346,14 @@ namespace FDB {
 
 				return FDBStandalone<RangeResultRef>( f, RangeResultRef( VectorRef<KeyValueRef>( (KeyValueRef*)kv, count ), more ) );
 			} );
+	}
+
+	Future<int64_t> TransactionImpl::getEstimatedRangeSizeBytes(const KeyRange& keys) {
+		return backToFuture<int64_t>(fdb_transaction_get_estimated_range_size_bytes(tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size()), [](Reference<CFuture> f) {
+			int64_t bytes;
+			throw_on_error(fdb_future_get_int64(f->f, &bytes));
+			return bytes;
+		});
 	}
 
 	void TransactionImpl::addReadConflictRange(KeyRangeRef const& keys) {

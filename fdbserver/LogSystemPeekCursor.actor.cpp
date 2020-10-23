@@ -33,8 +33,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInter
 	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
 }
 
-ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag )
-			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), rawLength(rawLength), hasMsg(hasMsg),
+ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag )
+			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageAndTags(message), hasMsg(hasMsg), 
 			  randomID(deterministicRandom()->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), onlySpilled(false), parallelGetMore(false), lastReset(0), slowReplies(0), fastReplies(0), unknownReplies(0), resetCheck(Void())
 {
 	//TraceEvent("SPC_Clone", randomID);
@@ -47,7 +47,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, Lo
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
-	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, rawLength, hasMsg, poppedVersion, tag ) );
+	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag ) );
 }
 
 void ILogSystem::ServerPeekCursor::setProtocolVersion( ProtocolVersion version ) {
@@ -73,7 +73,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		hasMsg = false;
 		return;
 	}
-	if (*(int32_t*)rd.peekBytes(4) == -1) {
+	if (*(int32_t*)rd.peekBytes(4) == VERSION_HEADER) {
 		// A version
 		int32_t dummy;
 		Version ver;
@@ -92,28 +92,29 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		ASSERT(!rd.empty());
 	}
 
-	uint16_t tagCount;
-	rd.checkpoint();
-	rd >> messageLength >> messageVersion.sub >> tagCount;
-	tags = VectorRef<Tag>((Tag*)rd.readBytes(tagCount*sizeof(Tag)), tagCount);
-	rawLength = messageLength + sizeof(messageLength);
-	messageLength -= (sizeof(messageVersion.sub) + sizeof(tagCount) + tagCount*sizeof(Tag));
+	messageAndTags.loadFromArena(&rd, &messageVersion.sub);
+	// Rewind and consume the header so that reader() starts from the message.
+	rd.rewind();
+	rd.readBytes(messageAndTags.getHeaderSize());
 	hasMsg = true;
 	//TraceEvent("SPC_NextMessageB", randomID).detail("MessageVersion", messageVersion.toString());
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessage() {
 	//TraceEvent("SPC_GetMessage", randomID);
-	return StringRef( (uint8_t const*)rd.readBytes(messageLength), messageLength);
+	StringRef message = messageAndTags.getMessageWithoutTags();
+	rd.readBytes(message.size()); // Consumes the message.
+	return message;
 }
 
 StringRef ILogSystem::ServerPeekCursor::getMessageWithTags() {
-	rd.rewind();
-	return StringRef( (uint8_t const*)rd.readBytes(rawLength), rawLength);
+	StringRef rawMessage = messageAndTags.getRawMessage();
+	rd.readBytes(rawMessage.size() - messageAndTags.getHeaderSize()); // Consumes the message.
+	return rawMessage;
 }
 
 VectorRef<Tag> ILogSystem::ServerPeekCursor::getTags() {
-	return tags;
+	return messageAndTags.tags;
 }
 
 void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
@@ -193,11 +194,8 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					self->futureResults.push_back( recordRequestMetrics( self, self->interf->get().interf().peekMessages.getEndpoint().getPrimaryAddress(), self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, self->onlySpilled, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 				}
 				if (self->sequence == std::numeric_limits<decltype(self->sequence)>::max()) {
-					throw timed_out();
+					throw operation_obsolete();
 				}
-			} else if (self->futureResults.size() == 1) {
-				self->randomID = deterministicRandom()->randomUniqueID();
-				self->sequence = 0;
 			} else if (self->futureResults.size() == 0) {
 				return Void();
 			}
@@ -208,7 +206,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ? self->futureResults.front() : Never() ) ) {
 					if(res.begin.get() != expectedBegin) {
-						throw timed_out();
+						throw operation_obsolete();
 					}
 					expectedBegin = res.end;
 					self->futureResults.pop_front();
@@ -236,8 +234,12 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 			if(e.code() == error_code_end_of_stream) {
 				self->end.reset( self->messageVersion.version );
 				return Void();
-			} else if(e.code() == error_code_timed_out) {
-				TraceEvent("PeekCursorTimedOut", self->randomID);
+			} else if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+				TraceEvent("PeekCursorTimedOut", self->randomID).error(e);
+				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
+				// and thus we've likely just wasted 10min.
+				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
+				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete || SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;

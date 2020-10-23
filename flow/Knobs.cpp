@@ -27,7 +27,12 @@ FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
-FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
+FlowKnobs::FlowKnobs() {
+	initialize();
+}
+
+// clang-format off
+void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
@@ -35,17 +40,21 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
 	init( DELAY_JITTER_RANGE,                                  0.2 );
 	init( BUSY_WAIT_THRESHOLD,                                   0 ); // 1e100 == never sleep
-	init( CLIENT_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 1.0;
-	init( SERVER_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 1.0;
+	init( CLIENT_REQUEST_INTERVAL,                             1.0 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 2.0;
+	init( SERVER_REQUEST_INTERVAL,                             1.0 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 2.0;
 
 	init( REACTOR_FLAGS,                                         0 );
 
 	init( DISABLE_ASSERTS,                                       0 );
 	init( QUEUE_MODEL_SMOOTHING_AMOUNT,                        2.0 );
 
-	init( SLOWTASK_PROFILING_INTERVAL,                       0.125 ); // A value of 0 disables SlowTask profiling
+	init( RUN_LOOP_PROFILING_INTERVAL,                       0.125 ); // A value of 0 disables run loop profiling
+	init( SLOWTASK_PROFILING_LOG_INTERVAL,                       0 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
 	init( SLOWTASK_PROFILING_MAX_LOG_INTERVAL,                 1.0 );
 	init( SLOWTASK_PROFILING_LOG_BACKOFF,                      2.0 );
+	init( SATURATION_PROFILING_LOG_INTERVAL,                   0.5 ); // A value of 0 means use RUN_LOOP_PROFILING_INTERVAL
+	init( SATURATION_PROFILING_MAX_LOG_INTERVAL,               5.0 );
+	init( SATURATION_PROFILING_LOG_BACKOFF,                    2.0 );
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
@@ -69,9 +78,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( RECONNECTION_RESET_TIME,                             5.0 );
 	init( ALWAYS_ACCEPT_DELAY,                                15.0 );
 	init( ACCEPT_BATCH_SIZE,                                    10 );
-	init( USE_OBJECT_SERIALIZER,                                 1 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_RESET_DELAY,             5.0 );
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
+	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
+	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
 	init( PING_LOGGING_INTERVAL,                               3.0 );
 	init( PING_SAMPLE_AMOUNT,                                  100 );
 
@@ -79,7 +89,18 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
 	init( TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT,             11.0 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS,               1 );
-	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               0 );
+	init( TLS_CLIENT_CONNECTION_THROTTLE_ATTEMPTS,               1 );
+	init( TLS_CLIENT_HANDSHAKE_THREADS,                          0 );
+	init( TLS_SERVER_HANDSHAKE_THREADS,                       1000 );
+	init( TLS_HANDSHAKE_THREAD_STACKSIZE,                64 * 1024 );
+	init( TLS_MALLOC_ARENA_MAX,                                  6 );
+	init( TLS_HANDSHAKE_LIMIT,                                1000 );
+
+	init( NETWORK_TEST_CLIENT_COUNT,                            30 );
+	init( NETWORK_TEST_REPLY_SIZE,                           600e3 );
+	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
+	init( NETWORK_TEST_REQUEST_SIZE,                             1 );
+	init( NETWORK_TEST_SCRIPT_MODE,                          false );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -120,17 +141,18 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );
 	init( SLOW_LOOP_SAMPLING_RATE,                             0.1 );
 	init( TSC_YIELD_TIME,                                  1000000 );
+	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
 	init( PACKET_WARNING,                                  2LL<<20 );  // 2MB packet warning quietly allows for 1MB system messages
 	init( TIME_OFFSET_LOGGING_INTERVAL,                       60.0 );
-	init( MAX_PACKET_SEND_BYTES,                        256 * 1024 );
+	init( MAX_PACKET_SEND_BYTES,                        128 * 1024 );
 	init( MIN_PACKET_BUFFER_BYTES,                        4 * 1024 );
 	init( MIN_PACKET_BUFFER_FREE_BYTES,                        256 );
-	init( UNRESTRICTED_HANDSHAKE_LIMIT,                         15 );
-	init( BOUNDED_HANDSHAKE_LIMIT,                             400 );
+	init( FLOW_TCP_NODELAY,                                      1 );
+	init( FLOW_TCP_QUICKACK,                                     0 );
 
 	//Sim2
 	init( MIN_OPEN_TIME,                                    0.0002 );
@@ -148,7 +170,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
@@ -191,7 +213,21 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 	init( LOAD_BALANCE_MAX_BAD_OPTIONS,                          1 ); //should be the same as MAX_MACHINES_FALLING_BEHIND
 	init( LOAD_BALANCE_PENALTY_IS_BAD,                        true );
+	init( BASIC_LOAD_BALANCE_UPDATE_RATE,                     10.0 ); //should be longer than the rate we log network metrics
+	init( BASIC_LOAD_BALANCE_MAX_CHANGE,                      0.10 );
+	init( BASIC_LOAD_BALANCE_MAX_PROB,                         2.0 );
+	init( BASIC_LOAD_BALANCE_MIN_REQUESTS,                      20 ); //do not adjust LB probabilities if the proxies are less than releasing less than 20 transactions per second
+	init( BASIC_LOAD_BALANCE_MIN_CPU,                         0.05 ); //do not adjust LB probabilities if the proxies are less than 5% utilized
+	init( BASIC_LOAD_BALANCE_BUCKETS,                           40 ); //proxies bin recent GRV requests into 40 time bins
+	init( BASIC_LOAD_BALANCE_COMPUTE_PRECISION,              10000 ); //determines how much of the LB usage is holding the CPU usage of the proxy
+
+	// Health Monitor
+	init( FAILURE_DETECTION_DELAY,                             4.0 ); if( randomize && BUGGIFY ) FAILURE_DETECTION_DELAY = 1.0;
+	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
+	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
+	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
 }
+// clang-format on
 
 static std::string toLower( std::string const& name ) {
 	std::string lower_name;
@@ -204,6 +240,7 @@ static std::string toLower( std::string const& name ) {
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
+	explicitlySetKnobs.insert(toLower(knob));
 	if (double_knobs.count(knob)) {
 		double v;
 		int n=0;
@@ -254,32 +291,43 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		*string_knobs[knob] = value;
 		return true;
 	}
+	explicitlySetKnobs.erase(toLower(knob)); // don't store knobs that don't exist
 	return false;
 }
 
 void Knobs::initKnob( double& knob, double value, std::string const& name ) {
-	knob = value;
-	double_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		double_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int64_t& knob, int64_t value, std::string const& name ) {
-	knob = value;
-	int64_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int64_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( int& knob, int value, std::string const& name ) {
-	knob = value;
-	int_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		int_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
-	knob = value;
-	string_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		string_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
-	knob = value;
-	bool_knobs[toLower(name)] = &knob;
+	if (!explicitlySetKnobs.count(toLower(name))) {
+		knob = value;
+		bool_knobs[toLower(name)] = &knob;
+	}
 }
 
 void Knobs::trace() {

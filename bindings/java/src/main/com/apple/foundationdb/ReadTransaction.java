@@ -424,6 +424,37 @@ public interface ReadTransaction extends ReadTransactionContext {
 	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
 
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 * Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
+	 * algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
+	 * be sampled and the more accurate its sampled size would be. And due to
+	 * that reason it is recommended to use this API to query against large ranges for accuracy considerations.
+	 * For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
+	 * accurate.
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(byte[] begin, byte[] end);
+
+	/**
+	 * Gets an estimate for the number of bytes stored in the given range.
+	 * Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
+	 * algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
+	 * be sampled and the more accurate its sampled size would be. And due to
+	 * that reason it is recommended to use this API to query against large ranges for accuracy considerations.
+	 * For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
+	 * accurate.
+	 * @param range the range of the keys
+	 *
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	CompletableFuture<Long> getEstimatedRangeSizeBytes(Range range);
+
 	/**
 	 * Returns a set of options that can be set on a {@code Transaction}
 	 *

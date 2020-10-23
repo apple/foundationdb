@@ -131,9 +131,9 @@ set(install_destination_for_log_el6 "var/log/foundationdb")
 set(install_destination_for_log_el7 "var/log/foundationdb")
 set(install_destination_for_log_pm "")
 set(install_destination_for_data_tgz "lib/foundationdb")
-set(install_destination_for_data_deb "var/lib/foundationdb")
-set(install_destination_for_data_el6 "var/lib/foundationdb")
-set(install_destination_for_data_el7 "var/lib/foundationdb")
+set(install_destination_for_data_deb "var/lib/foundationdb/data")
+set(install_destination_for_data_el6 "var/lib/foundationdb/data")
+set(install_destination_for_data_el7 "var/lib/foundationdb/data")
 set(install_destination_for_data_pm "")
 
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -328,9 +328,14 @@ set(CPACK_RPM_SERVER-EL7_USER_FILELIST
   "%config(noreplace) /etc/foundationdb/foundationdb.conf"
   "%attr(0700,foundationdb,foundationdb) /var/log/foundationdb"
   "%attr(0700, foundationdb, foundationdb) /var/lib/foundationdb")
+set(CPACK_RPM_CLIENTS-EL6_USER_FILELIST "%dir /etc/foundationdb")
+set(CPACK_RPM_CLIENTS-EL7_USER_FILELIST "%dir /etc/foundationdb")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/sbin"
   "/usr/share/java"
+  "/usr/lib64/cmake"
+  "/etc/foundationdb"
+  "/usr/lib64/pkgconfig"
   "/usr/lib64/python2.7"
   "/usr/lib64/python2.7/site-packages"
   "/var"
@@ -442,15 +447,9 @@ if(NOT WIN32)
   fdb_install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
     DESTINATION etc
     COMPONENT server)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
-    DESTINATION "usr/lib/foundationdb"
-    COMPONENT server-el6)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
     COMPONENT server-el6)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
-    DESTINATION "usr/lib/foundationdb"
-    COMPONENT server-deb)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
     COMPONENT server-deb)

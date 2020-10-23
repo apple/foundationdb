@@ -18,6 +18,8 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`api-general` contains information on FoundationDB clients applicable across all language bindings.
 
+* :doc:`transaction-tagging` contains information about using transaction tags in your client code to enable targeted transaction throttling.
+
 * :doc:`api-version-upgrade-guide` contains information about upgrading client code to a new API version.
 
 * :doc:`known-limitations` describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.
@@ -34,5 +36,6 @@ FoundationDB supports language bindings for application development using the or
     data-modeling
     client-testing
     api-general
+    transaction-tagging
     known-limitations
     api-version-upgrade-guide

@@ -27,7 +27,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include "fdbrpc/IAsyncFile.h"
-#include "rapidxml/rapidxml.hpp"
+#include "fdbclient/rapidxml/rapidxml.hpp"
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
@@ -58,7 +58,7 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	connect_timeout = CLIENT_KNOBS->BLOBSTORE_CONNECT_TIMEOUT;
 	max_connection_life = CLIENT_KNOBS->BLOBSTORE_MAX_CONNECTION_LIFE;
 	request_tries = CLIENT_KNOBS->BLOBSTORE_REQUEST_TRIES;
-	request_timeout = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT;
+	request_timeout_min = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT_MIN;
 	requests_per_second = CLIENT_KNOBS->BLOBSTORE_REQUESTS_PER_SECOND;
 	concurrent_requests = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS;
 	list_requests_per_second = CLIENT_KNOBS->BLOBSTORE_LIST_REQUESTS_PER_SECOND;
@@ -85,7 +85,9 @@ bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(connect_timeout, cto);
 	TRY_PARAM(max_connection_life, mcl);
 	TRY_PARAM(request_tries, rt);
-	TRY_PARAM(request_timeout, rto);
+	TRY_PARAM(request_timeout_min, rtom);
+	// TODO: For backward compatibility because request_timeout was renamed to request_timeout_min
+	if(name == LiteralStringRef("request_timeout") || name == LiteralStringRef("rto")) { request_timeout_min = value; return true; }
 	TRY_PARAM(requests_per_second, rps);
 	TRY_PARAM(list_requests_per_second, lrps);
 	TRY_PARAM(write_requests_per_second, wrps);
@@ -117,7 +119,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(connect_timeout, cto);
 	_CHECK_PARAM(max_connection_life, mcl);
 	_CHECK_PARAM(request_tries, rt);
-	_CHECK_PARAM(request_timeout, rto);
+	_CHECK_PARAM(request_timeout_min, rto);
 	_CHECK_PARAM(requests_per_second, rps);
 	_CHECK_PARAM(list_requests_per_second, lrps);
 	_CHECK_PARAM(write_requests_per_second, wrps);
@@ -320,11 +322,11 @@ Future<Void> BlobStoreEndpoint::deleteObject(std::string const &bucket, std::str
 	return deleteObject_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string prefix, int *pNumDeleted) {
+ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string prefix, int *pNumDeleted, int64_t *pBytesDeleted) {
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
 	// Start a recursive parallel listing which will send results to resultStream as they are received
-	state Future<Void> done = b->listBucketStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
-	// Wrap done in an actor which will send end_of_stream since listBucketStream() does not (so that many calls can write to the same stream)
+	state Future<Void> done = b->listObjectsStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
+	// Wrap done in an actor which will send end_of_stream since listObjectsStream() does not (so that many calls can write to the same stream)
 	done = map(done, [=](Void) {
 		resultStream.sendError(end_of_stream());
 		return Void();
@@ -341,10 +343,13 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 
 				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
 					for(auto &object : list.objects) {
-						int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
-						deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
-							if(pNumDeletedCopy != nullptr)
-								++*pNumDeletedCopy;
+						deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [=](Void) -> Void {
+							if(pNumDeleted != nullptr) {
+								++*pNumDeleted;
+							}
+							if(pBytesDeleted != nullptr) {
+								*pBytesDeleted += object.size;
+							}
 							return Void();
 						}));
 					}
@@ -370,8 +375,8 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std::string prefix, int *pNumDeleted) {
-	return deleteRecursively_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted);
+Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std::string prefix, int *pNumDeleted, int64_t *pBytesDeleted) {
+	return deleteRecursively_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted, pBytesDeleted);
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
@@ -549,6 +554,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		fieldValue.append(kv.second);
 	}
 
+	// For requests with content to upload, the request timeout should be at least twice the amount of time
+	// it would take to upload the content given the upload bandwidth and concurrency limits.
+	int bandwidthThisRequest = 1 + bstore->knobs.max_send_bytes_per_second / bstore->knobs.concurrent_uploads;
+	int contentUploadSeconds = contentLen / bandwidthThisRequest;
+	state int requestTimeout = std::max(bstore->knobs.request_timeout_min, 3 * contentUploadSeconds);
+
 	wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
@@ -590,7 +601,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			bstore->setAuthHeaders(verb, resource, headers);
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
-			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), requestTimeout));
 			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we received the "Connection: close" header.
@@ -704,7 +715,7 @@ Future<Reference<HTTP::Response>> BlobStoreEndpoint::doRequest(std::string const
 	return doRequest_impl(Reference<BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }
 
-ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
+ACTOR Future<Void> listObjectsStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
 	// Request 1000 keys at a time, the maximum allowed
 	state std::string resource = "/";
 	resource.append(bucket);
@@ -783,7 +794,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 						if(maxDepth > 0) {
 							// If there is no recurse filter or the filter returns true then start listing the subfolder
 							if(!recurseFilter || recurseFilter(prefix)) {
-								subLists.push_back(bstore->listBucketStream(bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
+								subLists.push_back(bstore->listObjectsStream(bucket, results, prefix, delimiter, maxDepth - 1, recurseFilter));
 							}
 							// Since prefix will not be in the final listResult below we have to set lastFile here in case it's greater than the last object
 							lastFile = prefix;
@@ -830,14 +841,14 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
-	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth, recurseFilter);
+Future<Void> BlobStoreEndpoint::listObjectsStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
+	return listObjectsStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth, recurseFilter);
 }
 
-ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
+ACTOR Future<BlobStoreEndpoint::ListResult> listObjects_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
 	state BlobStoreEndpoint::ListResult results;
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
+	state Future<Void> done = bstore->listObjectsStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
 	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same stream
 	done = map(done, [=](Void) {
 		resultStream.sendError(end_of_stream());
@@ -866,8 +877,75 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 	return results;
 }
 
-Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
-	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
+Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listObjects(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
+	return listObjects_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
+}
+
+ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<BlobStoreEndpoint> bstore) {
+	state std::string resource = "/?marker=";
+	state std::string lastName;
+	state bool more = true;
+	state std::vector<std::string> buckets;
+
+	while(more) {
+		wait(bstore->concurrentLists.take());
+		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
+
+		HTTP::Headers headers;
+		state std::string fullResource = resource + HTTP::urlEncode(lastName);
+		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, NULL, 0, {200}));
+		listReleaser.release();
+
+		try {
+			xml_document<> doc;
+
+			// Copy content because rapidxml will modify it during parse
+			std::string content = r->content;
+			doc.parse<0>((char *)content.c_str());
+
+			// There should be exactly one node
+			xml_node<> *result = doc.first_node();
+			if(result == nullptr || strcmp(result->name(), "ListAllMyBucketsResult") != 0) {
+				throw http_bad_response();
+			}
+
+			more = false;
+			xml_node<> *truncated = result->first_node("IsTruncated");
+			if(truncated != nullptr && strcmp(truncated->value(), "true") == 0) {
+				more = true;
+			}
+
+			xml_node<> *bucketsNode = result->first_node("Buckets");
+			if(bucketsNode != nullptr) {
+				xml_node<> *bucketNode = bucketsNode->first_node("Bucket");
+				while(bucketNode != nullptr) {
+					xml_node<> *nameNode = bucketNode->first_node("Name");
+					if(nameNode == nullptr) {
+						throw http_bad_response();
+					}
+					const char *name = nameNode->value();
+					buckets.push_back(name);
+
+					bucketNode = bucketNode->next_sibling("Bucket");
+				}
+			}
+
+			if(more) {
+				lastName = buckets.back();
+			}
+
+		} catch(Error &e) {
+			if(e.code() != error_code_actor_cancelled)
+				TraceEvent(SevWarn, "BlobStoreEndpointListBucketResultParseError").error(e).suppressFor(60).detail("Resource", fullResource);
+			throw http_bad_response();
+		}
+	}
+
+	return buckets;
+}
+
+Future<std::vector<std::string>> BlobStoreEndpoint::listBuckets() {
+	return listBuckets_impl(Reference<BlobStoreEndpoint>::addRef(this));
 }
 
 std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
@@ -901,7 +979,6 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 	date = dateBuf;
 
 	std::string msg;
-	StringRef x;
 	msg.append(verb);
 	msg.append("\n");
 	auto contentMD5 = headers.find("Content-MD5");
@@ -980,7 +1057,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 
 ACTOR Future<Void> writeEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string content) {
 	state UnsentPacketQueue packets;
-	PacketWriter pw(packets.getWriteBuffer(), NULL, Unversioned());
+	PacketWriter pw(packets.getWriteBuffer(content.size()), NULL, Unversioned());
 	pw.serializeBytes(content);
 	if(content.size() > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
@@ -1103,7 +1180,7 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstor
 
 	std::string resource = format("/%s/%s?uploadId=%s", bucket.c_str(), object.c_str(), uploadID.c_str());
 	HTTP::Headers headers;
-	PacketWriter pw(part_list.getWriteBuffer(), NULL, Unversioned());
+	PacketWriter pw(part_list.getWriteBuffer(manifest.size()), NULL, Unversioned());
 	pw.serializeBytes(manifest);
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), {200}));
 	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then the next retry

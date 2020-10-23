@@ -31,8 +31,10 @@ bindings/ruby/lib/fdboptions.rb
 bindings/ruby/fdb.gemspec
 fdbclient/vexillographer/obj/
 fdbrpc/hgVersion*.h
+fdbrpc/SourceVersion*.h
 fdbrpc/libeio/config.h
 flow/hgVersion*.h
+flow/SourceVersion*.h
 generated.mk
 versions.h
 packaging/msi/FDBInstaller.wix*
@@ -79,6 +81,11 @@ compile_commands.json
 flow/actorcompiler/obj
 flow/coveragetool/obj
 
+# IDE indexing (commonly used tools)
+/compile_commands.json
+/.ccls-cache
+/.clangd
+
 # Temporary and user configuration files
 *~
 *.orig
@@ -87,5 +94,4 @@ flow/coveragetool/obj
 .envrc
 .DS_Store
 temp/
-/compile_commands.json
-/.ccls-cache
+/versions.target

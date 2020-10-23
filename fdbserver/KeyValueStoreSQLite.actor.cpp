@@ -20,7 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -1440,7 +1440,7 @@ struct ThreadSafeCounter {
 	ThreadSafeCounter() : counter(0) {}
 	void operator ++() { interlockedIncrement64(&counter); }
 	void operator --() { interlockedDecrement64(&counter); }
-	operator const int64_t() const { return counter; }
+	operator int64_t() const { return counter; }
 };
 
 class KeyValueStoreSQLite : public IKeyValueStore {
@@ -1858,13 +1858,15 @@ private:
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {
 		try {
 			wait( self->readThreads->getError() || self->writeThread->getError() );
+			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
+
+			self->readThreads->stop(e);
+			self->writeThread->stop(e);
 		}
 
-		self->readThreads->stop();
-		self->writeThread->stop();
 		return Void();
 	}
 

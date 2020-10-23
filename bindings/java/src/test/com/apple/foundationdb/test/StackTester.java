@@ -206,6 +206,11 @@ public class StackTester {
 				CompletableFuture<byte[]> f = inst.readTcx.read(readTr -> readTr.get((byte[])params.get(0)));
 				inst.push(f);
 			}
+			else if (op == StackOperation.GET_ESTIMATED_RANGE_SIZE) {
+				List<Object> params = inst.popParams(2).join();
+				Long size = inst.readTr.getEstimatedRangeSizeBytes((byte[])params.get(0), (byte[])params.get(1)).join();
+				inst.push("GOT_ESTIMATED_RANGE_SIZE".getBytes());
+			}
 			else if(op == StackOperation.GET_RANGE) {
 				List<Object> params = inst.popParams(5).join();
 
@@ -547,18 +552,15 @@ public class StackTester {
 
 		@Override
 		void executeOperations() {
-			KeySelector begin = nextKey;
 			while(true) {
-				Transaction t = db.createTransaction();
-				List<KeyValue> keyValues = t.getRange(begin, endKey/*, 1000*/).asList().join();
-				t.close();
+				List<KeyValue> keyValues = db.read(readTr -> readTr.getRange(nextKey, endKey/*, 1000*/).asList().join());
 				if(keyValues.size() == 0) {
 					break;
 				}
 				//System.out.println(" * Got " + keyValues.size() + " instructions");
 
 				for(KeyValue next : keyValues) {
-					begin = KeySelector.firstGreaterThan(next.getKey());
+					nextKey = KeySelector.firstGreaterThan(next.getKey());
 					processOp(next.getValue());
 					instructionIndex++;
 				}
@@ -647,9 +649,10 @@ public class StackTester {
 					}
 				}
 				catch(FDBException e) {
-					Transaction tr = db.createTransaction();
-					tr.onError(e).join();
-					return false;
+					try(Transaction tr = db.createTransaction()) {
+						tr.onError(e).join();
+						return false;
+					}
 				}
 			}
 		}

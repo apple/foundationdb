@@ -1,8 +1,11 @@
 set(FDBSERVER_SRCS
   ApplyMetadataMutation.h
   ApplyMetadataMutation.cpp
+  BackupInterface.h
+  BackupProgress.actor.cpp
+  BackupProgress.actor.h
+  BackupWorker.actor.cpp
   ClusterController.actor.cpp
-  ClusterRecruitmentInterface.h
   ConflictSet.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
@@ -26,6 +29,7 @@ set(FDBSERVER_SRCS
   IVersionedStore.h
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
+  KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
@@ -49,6 +53,7 @@ set(FDBSERVER_SRCS
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
   OldTLogServer_6_0.actor.cpp
+  OldTLogServer_6_2.actor.cpp
   Orderer.actor.h
   pubsub.actor.cpp
   pubsub.h
@@ -57,16 +62,30 @@ set(FDBSERVER_SRCS
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
-  Restore.actor.cpp
-  RestoreInterface.h
+  RestoreCommon.actor.h
+  RestoreCommon.actor.cpp
+  RestoreUtil.h
+  RestoreUtil.actor.cpp
+  RestoreRoleCommon.actor.h
+  RestoreRoleCommon.actor.cpp
+  RestoreController.actor.h
+  RestoreController.actor.cpp
+  RestoreApplier.actor.h
+  RestoreApplier.actor.cpp
+  RestoreLoader.actor.h
+  RestoreLoader.actor.cpp
+  RestoreWorker.actor.h
+  RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  ServerDBInfo.actor.h
   ServerDBInfo.h
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
   Status.actor.cpp
   Status.h
+  StorageCache.actor.cpp
   StorageMetrics.actor.h
   StorageMetrics.h
   storageserver.actor.cpp
@@ -91,11 +110,14 @@ set(FDBSERVER_SRCS
   workloads/AsyncFileRead.actor.cpp
   workloads/AsyncFileWrite.actor.cpp
   workloads/AtomicOps.actor.cpp
+  workloads/ReadHotDetection.actor.cpp
   workloads/AtomicOpsApiCorrectness.actor.cpp
   workloads/AtomicRestore.actor.cpp
   workloads/AtomicSwitchover.actor.cpp
   workloads/BackgroundSelectors.actor.cpp
   workloads/BackupCorrectness.actor.cpp
+  workloads/BackupAndParallelRestoreCorrectness.actor.cpp
+  workloads/ParallelRestore.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
@@ -111,11 +133,13 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/DataDistributionMetrics.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
+  workloads/Downgrade.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
@@ -140,6 +164,7 @@ set(FDBSERVER_SRCS
   workloads/MetricLogging.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
+  workloads/PopulateTPCC.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
   workloads/RandomClogging.actor.cpp
@@ -147,6 +172,7 @@ set(FDBSERVER_SRCS
   workloads/RandomSelector.actor.cpp
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
+  workloads/ReportConflictingKeys.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
@@ -157,15 +183,19 @@ set(FDBSERVER_SRCS
   workloads/Sideband.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
+  workloads/SpecialKeySpaceCorrectness.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
   workloads/ThreadSafety.actor.cpp
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
+  workloads/TPCC.actor.cpp
+  workloads/TPCCWorkload.h
   workloads/DifferentClustersSameRV.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
@@ -193,7 +223,8 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
-  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
+
+# CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
@@ -208,6 +239,7 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
+
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c

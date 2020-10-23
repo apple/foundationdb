@@ -25,11 +25,13 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
 #include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/Smoother.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -43,7 +45,75 @@ private:
 };
 
 typedef MultiInterface<ReferencedInterface<StorageServerInterface>> LocationInfo;
-typedef MultiInterface<MasterProxyInterface> ProxyInfo;
+typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+
+class ClientTagThrottleData : NonCopyable {
+private:
+	double tpsRate;
+	double expiration;
+	double lastCheck;
+	bool rateSet = false;
+
+	Smoother smoothRate;
+	Smoother smoothReleased;
+
+public:
+	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
+	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()), smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW), 
+	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) 
+	{
+		ASSERT(tpsRate >= 0);
+		smoothRate.reset(tpsRate);
+	}
+
+	void update(ClientTagThrottleLimits const& limits) {
+		ASSERT(limits.tpsRate >= 0);
+		this->tpsRate = limits.tpsRate;
+
+		if(!rateSet || expired()) {
+			rateSet = true;
+			smoothRate.reset(limits.tpsRate);
+		}
+		else {
+			smoothRate.setTotal(limits.tpsRate);
+		}
+
+		expiration = limits.expiration;
+	}
+
+	void addReleased(int released) {
+		smoothReleased.addDelta(released);
+	}
+
+	bool expired() {
+		return expiration <= now();
+	}
+
+	void updateChecked() {
+		lastCheck = now();
+	}
+
+	bool canRecheck() {
+		return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL;
+	}
+
+	double throttleDuration() {
+		if(expiration <= now()) {
+			return 0.0;
+		}
+
+		double capacity = (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
+		if(capacity >= 1) {
+			return 0.0;
+		}
+
+		if(tpsRate == 0) {
+			return std::max(0.0, expiration - now());
+		}
+
+		return std::min(expiration - now(), capacity / tpsRate);
+	}
+};
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -67,8 +137,10 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
+	bool sampleReadTags();
+
+	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies, bool useGrvProxies = false);
+	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies, bool useGrvProxies = false);
 	Future<Void> onMasterProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
@@ -114,20 +186,31 @@ public:
 
 	explicit DatabaseContext( const Error &err );
 
+	void expireThrottles();
+
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
 	AsyncTrigger masterProxiesChangeTrigger;
 	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
+	Reference<ProxyInfo> grvProxies;
 	bool provisional;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
 
+	struct VersionRequest {
+		Promise<GetReadVersionReply> reply;
+		TagSet tags;
+		Optional<UID> debugID;
+
+		VersionRequest(TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>()) : tags(tags), debugID(debugID) {}
+	};
+
 	// Transaction start request batching
 	struct VersionBatcher {
-		PromiseStream< std::pair< Promise<GetReadVersionReply>, Optional<UID> > > stream;
+		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
 	std::map<uint32_t, VersionBatcher> versionBatcher;
@@ -157,9 +240,12 @@ public:
 	UID dbId;
 	bool internal; // Only contexts created through the C client and fdbcli are non-internal
 
+	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
+
 	CounterCollection cc;
 
 	Counter transactionReadVersions;
+	Counter transactionReadVersionsThrottled;
 	Counter transactionReadVersionsCompleted;
 	Counter transactionReadVersionBatches;
 	Counter transactionBatchReadVersions;
@@ -194,6 +280,7 @@ public:
 	Counter transactionsMaybeCommitted;
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
+	Counter transactionsThrottled;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -203,6 +290,7 @@ public:
 	int snapshotRywEnabled;
 
 	Future<Void> logger;
+	Future<Void> throttleExpirer;
 
 	TaskPriority taskID;
 
@@ -227,6 +315,13 @@ public:
 	double detailedHealthMetricsLastUpdated;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
+
+	std::vector<std::unique_ptr<SpecialKeyRangeBaseImpl>> specialKeySpaceModules;
+	std::unique_ptr<SpecialKeySpace> specialKeySpace;
+	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, std::unique_ptr<SpecialKeyRangeBaseImpl> impl);
+
+	static bool debugUseTags;
+	static const std::vector<std::string> debugTransactionTagChoices; 
 };
 
 #endif

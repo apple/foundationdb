@@ -24,7 +24,6 @@
 .. |max-retry-delay-database-option| replace:: :meth:`Database.options.set_transaction_max_retry_delay`
 .. |transaction-size-limit-database-option| replace:: :func:`Database.options.set_transaction_size_limit`
 .. |causal-read-risky-database-option| replace:: :meth:`Database.options.set_transaction_causal_read_risky`
-.. |include-port-in-address-database-option| replace:: :meth:`Database.options.set_transaction_include_port_in_address`
 .. |snapshot-ryw-enable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-database-option| replace:: :meth:`Database.options.set_snapshot_ryw_disable`
 .. |transaction-logging-max-field-length-database-option| replace:: :meth:`Database.options.set_transaction_logging_max_field_length`
@@ -37,7 +36,6 @@
 .. |snapshot-ryw-enable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_enable`
 .. |snapshot-ryw-disable-transaction-option| replace:: :meth:`Transaction.options.set_snapshot_ryw_disable`
 .. |causal-read-risky-transaction-option| replace:: :meth:`Transaction.options.set_causal_read_risky`
-.. |include-port-in-address-transaction-option| replace:: :meth:`Transaction.options.set_include_port_in_address`
 .. |transaction-logging-max-field-length-transaction-option| replace:: :meth:`Transaction.options.set_transaction_logging_max_field_length`
 .. |lazy-iterator-object| replace:: :class:`Enumerator`
 .. |key-meth| replace:: :meth:`Subspace.key`
@@ -95,7 +93,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 620
+    FDB.api_version 630
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database
@@ -127,6 +125,10 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
     .. method:: FDB.options.set_trace_format(format) -> nil
 
        |option-trace-format-blurb|
+
+    .. method:: FDB.options.set_trace_clock_source(source) -> nil
+
+       |option-trace-clock-source-blurb|
 
     .. method:: FDB.options.set_disable_multi_version_client_api() -> nil
 
@@ -392,10 +394,6 @@ Database options
 
     |option-db-causal-read-risky-blurb|
 
-.. method:: Database.options.set_transaction_include_port_in_address() -> nil
-
-    |option-db-include-port-in-address-blurb|
-
 .. method:: Database.options.set_transaction_logging_max_field_length(size_limit) -> nil
 
     |option-db-tr-transaction-logging-max-field-length-blurb|
@@ -521,7 +519,7 @@ Snapshot reads
 
     Like :meth:`Transaction.get_range_start_with`, but as a snapshot read.
 
-.. method:: Transaction.snapshot.get_read_version() -> Version
+.. method:: Transaction.snapshot.get_read_version() -> Int64Future
 
     Identical to :meth:`Transaction.get_read_version` (since snapshot and strictly serializable reads use the same read version).
 
@@ -629,8 +627,6 @@ In each of the methods below, ``param`` should be a string appropriately packed 
 
     |atomic-versionstamps-2|
 
-    |atomic-set-versionstamped-key-2|
-
     .. warning :: |atomic-versionstamps-tuple-warning-key|
 
 .. method:: Transaction.set_versionstamped_value(key, param) -> nil
@@ -730,7 +726,7 @@ Most applications should use the read version that FoundationDB determines autom
 
     |infrequent| Sets the database version that the transaction will read from the database.  The database cannot guarantee causal consistency if this method is used (the transaction's reads will be causally consistent only if the provided read version has that property).
 
-.. method:: Transaction.get_read_version() -> Version
+.. method:: Transaction.get_read_version() -> Int64Future
 
     |infrequent| Returns the transaction's read version.
 
@@ -744,6 +740,11 @@ Most applications should use the read version that FoundationDB determines autom
 
 Transaction misc functions
 --------------------------
+
+.. method:: Transaction.get_estimated_range_size_bytes(begin_key, end_key)
+
+    Get the estimated byte size of the given key range. Returns a :class:`Int64Future`.
+    .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
 
 .. method:: Transaction.get_approximate_size() -> Int64Future
 
@@ -777,10 +778,6 @@ Transaction options
 .. method:: Transaction.options.set_causal_read_risky() -> nil
 
     |option-causal-read-risky-blurb|
-
-.. method:: Transaction.options.set_include_port_in_address() -> nil
-
-    |option-include-port-in-address-blurb|
 
 .. method:: Transaction.options.set_causal_write_risky() -> nil
 
@@ -959,7 +956,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
     An implementation quirk of :class:`Value` is that it will never evaluate to ``false``, even if its value is ``nil``. It is important to use ``if value.nil?`` rather than ``if ~value`` when checking to see if a key was not present in the database.
 
-.. class:: Version
+.. class:: Int64Future
 
     This type is a future :class:`Integer` object. Objects of this type respond to the same methods as objects of type :class:`Integer`, and may be passed to any method that expects a :class:`Integer`.
 
@@ -974,6 +971,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
     .. method:: FutureNil.wait() -> nil
 
         For a :class:`FutureNil` object returned by :meth:`Transaction.commit` or :meth:`Transaction.on_error`, you must call :meth:`FutureNil.wait`, which will return ``nil`` if the operation succeeds or raise an :exc:`FDB::Error` if an error occurred. Failure to call :meth:`FutureNil.wait` on a returned :class:`FutureNil` object means that any potential errors raised by the asynchronous operation that returned the object *will not be seen*, and represents a significant error in your code.
+
 
 .. _ruby streaming mode:
 

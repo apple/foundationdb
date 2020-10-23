@@ -133,15 +133,19 @@ struct DatabaseConfiguration {
 	}
 
 	//Killing an entire datacenter counts as killing one zone in modes that support it
-	int32_t maxZoneFailuresTolerated() const {
+	int32_t maxZoneFailuresTolerated(int fullyReplicatedRegions, bool forAvailability) const {
 		int worstSatellite = regions.size() ? std::numeric_limits<int>::max() : 0;
+		int regionsWithNonNegativePriority = 0;
 		for(auto& r : regions) {
+			if(r.priority >= 0) {
+				regionsWithNonNegativePriority++;
+			}
 			worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
 			if(r.satelliteTLogUsableDcsFallback > 0) {
 				worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
 			}
 		}
-		if(usableRegions > 1 && worstSatellite > 0) {
+		if(usableRegions > 1 && fullyReplicatedRegions > 1 && worstSatellite > 0 && (!forAvailability || regionsWithNonNegativePriority > 1)) {
 			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1), storageTeamSize - 1);
 		} else if(worstSatellite > 0) {
 			return std::min(tLogReplicationFactor + worstSatellite - 2 - tLogWriteAntiQuorum, storageTeamSize - 1);
@@ -178,13 +182,16 @@ struct DatabaseConfiguration {
 	int32_t remoteTLogReplicationFactor;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 
+	// Backup Workers
+	bool backupWorkerEnabled;
+
 	//Data centers
 	int32_t usableRegions;
 	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
 	// Excluded servers (no state should be here)
-	bool isExcludedServer( NetworkAddress ) const;
+	bool isExcludedServer( NetworkAddressList ) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 
 	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
@@ -215,13 +222,7 @@ struct DatabaseConfiguration {
 		}
 	}
 
-	void fromKeyValues( Standalone<VectorRef<KeyValueRef>> rawConfig ) {
-		resetInternal();
-		this->rawConfiguration = rawConfig;
-		for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
-			setInternal(c->key, c->value);
-		setDefaultReplicationPolicy();
-	}
+	void fromKeyValues(Standalone<VectorRef<KeyValueRef>> rawConfig);
 
 private:
 	Optional< std::map<std::string, std::string> > mutableConfiguration;  // If present, rawConfiguration is not valid
@@ -233,6 +234,9 @@ private:
 	bool setInternal( KeyRef key, ValueRef value );
 	void resetInternal();
 	void setDefaultReplicationPolicy();
+
+	/// Check if the key is overridden by either mutableConfiguration or rawConfiguration
+	bool isOverridden(std::string key) const;
 };
 
 #endif

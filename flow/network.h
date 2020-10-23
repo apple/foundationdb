@@ -35,6 +35,7 @@
 
 enum class TaskPriority {
 	Max = 1000000,
+	RunLoop = 30000,
 	ASIOReactor = 20001,
 	RunCycleFunction = 20000,
 	FlushTrace = 10500,
@@ -84,11 +85,19 @@ enum class TaskPriority {
 	MoveKeys = 3550,
 	DataDistributionLaunch = 3530,
 	Ratekeeper = 3510,
-	DataDistribution = 3500,
+	DataDistribution = 3502,
+	DataDistributionLow = 3501,
+	DataDistributionVeryLow = 3500,
 	DiskWrite = 3010,
 	UpdateStorage = 3000,
+	CompactCache = 2900,
 	TLogSpilledPeekReply = 2800,
 	FetchKeys = 2500,
+	RestoreApplierWriteDB = 2310,
+	RestoreApplierReceiveMutations = 2300,
+	RestoreLoaderFinishVersionBatch = 2220,
+	RestoreLoaderSendMutations = 2210,
+	RestoreLoaderLoadFiles = 2200,
 	Low = 2000,
 
 	Min = 1000,
@@ -118,12 +127,6 @@ struct IPAddress {
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,
 	              "IPAddressStore must be std::array<uint8_t, 16>");
 
-private:
-	struct IsV6Visitor : boost::static_visitor<> {
-		bool result = false;
-		void operator() (const IPAddressStore&) { result = true; }
-		void operator() (const uint32_t&) { result = false; }
-	};
 public:
 	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
 	// only the first 32bits are relevant and rest are initialized to
@@ -132,18 +135,14 @@ public:
 	explicit IPAddress(const IPAddressStore& v6addr) : addr(v6addr) {}
 	explicit IPAddress(uint32_t v4addr) : addr(v4addr) {}
 
-	bool isV6() const {
-		IsV6Visitor visitor;
-		boost::apply_visitor(visitor, addr);
-		return visitor.result;
-	}
+	bool isV6() const { return std::holds_alternative<IPAddressStore>(addr); }
 	bool isV4() const { return !isV6(); }
 	bool isValid() const;
 
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
-	uint32_t toV4() const { return boost::get<uint32_t>(addr); }
-	const IPAddressStore& toV6() const { return boost::get<IPAddressStore>(addr); }
+	uint32_t toV4() const { return std::get<uint32_t>(addr); }
+	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string str);
@@ -184,7 +183,7 @@ public:
 	}
 
 private:
-	boost::variant<uint32_t, IPAddressStore> addr;
+	std::variant<uint32_t, IPAddressStore> addr;
 };
 
 template<>
@@ -227,7 +226,19 @@ struct NetworkAddress {
 	bool isTLS() const { return (flags & FLAG_TLS) != 0; }
 	bool isV6() const { return ip.isV6(); }
 
-	static NetworkAddress parse( std::string const& );
+	size_t hash() const {
+		size_t result = 0;
+		if (ip.isV6()) {
+			uint16_t* ptr = (uint16_t*)ip.toV6().data();
+			result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
+		} else {
+			result = ip.toV4();
+		}
+		return (result << 16) + port;
+	}
+
+	static NetworkAddress parse(std::string const&); // May throw connection_string_invalid
+	static Optional<NetworkAddress> parseOptional(std::string const&);
 	static std::vector<NetworkAddress> parseList( std::string const& );
 	std::string toString() const;
 
@@ -261,14 +272,7 @@ namespace std
 	{
 		size_t operator()(const NetworkAddress& na) const
 		{
-			size_t result = 0;
-			if (na.ip.isV6()) {
-				uint16_t* ptr = (uint16_t*)na.ip.toV6().data();
-				result = ((size_t)ptr[5] << 32) | ((size_t)ptr[6] << 16) | ptr[7];
-			} else {
-				result = na.ip.toV4();
-			}
-			return (result << 16) + na.port;
+			return na.hash();
 		}
 	};
 }
@@ -316,21 +320,35 @@ struct NetworkMetrics {
 	enum { SLOW_EVENT_BINS = 16 };
 	uint64_t countSlowEvents[SLOW_EVENT_BINS] = {};
 
-	enum { PRIORITY_BINS = 9 };
-	TaskPriority priorityBins[PRIORITY_BINS] = {};
-	bool priorityBlocked[PRIORITY_BINS] = {};
-	double priorityBlockedDuration[PRIORITY_BINS] = {};
-	double priorityMaxBlockedDuration[PRIORITY_BINS] = {};
-	double priorityTimer[PRIORITY_BINS] = {};
-	double windowedPriorityTimer[PRIORITY_BINS] = {};
-
 	double secSquaredSubmit = 0;
 	double secSquaredDiskStall = 0;
 
-	NetworkMetrics() {}
+	struct PriorityStats {
+		TaskPriority priority;
+
+		bool active = false;
+		double duration = 0;
+		double timer = 0;
+		double windowedTimer = 0;
+		double maxDuration = 0;
+
+		PriorityStats(TaskPriority priority) : priority(priority) {}
+	};
+
+	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
+	double lastRunLoopBusyness;
+	std::vector<struct PriorityStats> starvationTrackers;
+
+	static const std::vector<int> starvationBins;
+
+	NetworkMetrics() : lastRunLoopBusyness(0) {
+		for(int priority : starvationBins) {
+			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
+		}
+	}
 };
 
-struct BoundedFlowLock;
+struct FlowLock;
 
 struct NetworkInfo {
 	NetworkMetrics metrics;
@@ -339,7 +357,7 @@ struct NetworkInfo {
 	double lastAlternativesFailureSkipDelay = 0;
 
 	std::map<std::pair<IPAddress, uint16_t>, std::pair<int,double>> serverTLSConnectionThrottler;
-	BoundedFlowLock* handshakeLock;
+	FlowLock *handshakeLock;
 
 	NetworkInfo();
 };
@@ -487,8 +505,9 @@ public:
 	virtual void initMetrics() {}
 	// Metrics must be initialized after FlowTransport::createInstance has been called
 
-	virtual void initTLS() {}
 	// TLS must be initialized before using the network
+	enum ETLSInitState { NONE = 0, CONFIG = 1, CONNECT = 2, LISTEN = 3};
+	virtual void initTLS(ETLSInitState targetState = CONFIG) {}
 
 	virtual const TLSConfig& getTLSConfig() = 0;
 	// Return the TLS Configuration
@@ -498,6 +517,9 @@ public:
 
 	virtual bool isAddressOnThisHost( NetworkAddress const& addr ) = 0;
 	// Returns true if it is reasonably certain that a connection to the given address would be a fast loopback connection
+
+	// If the network has not been run and this function has not been previously called, returns true. Otherwise, returns false.
+	virtual bool checkRunnable() = 0;
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

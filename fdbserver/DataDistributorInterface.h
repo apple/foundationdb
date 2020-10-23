@@ -23,6 +23,7 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/FDBTypes.h"
 
 struct DataDistributorInterface {
 	constexpr static FileIdentifier file_identifier = 12383874;
@@ -30,6 +31,8 @@ struct DataDistributorInterface {
 	RequestStream<struct HaltDataDistributorRequest> haltDataDistributor;
 	struct LocalityData locality;
 	RequestStream<struct DistributorSnapRequest> distributorSnapReq;
+	RequestStream<struct DistributorExclusionSafetyCheckRequest> distributorExclCheckReq;
+	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l) : locality(l) {}
@@ -46,7 +49,7 @@ struct DataDistributorInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltDataDistributor, locality, distributorSnapReq);
+		serializer(ar, waitFailure, haltDataDistributor, locality, distributorSnapReq, distributorExclCheckReq, dataDistributorMetrics);
 	}
 };
 
@@ -61,6 +64,33 @@ struct HaltDataDistributorRequest {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct GetDataDistributorMetricsReply {
+	constexpr static FileIdentifier file_identifier = 1284337;
+	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
+
+	GetDataDistributorMetricsReply() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar,storageMetricsList);
+	}
+};
+
+struct GetDataDistributorMetricsRequest {
+	constexpr static FileIdentifier file_identifier = 1059267;
+	KeyRange keys;
+	int shardLimit;
+	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
+
+	GetDataDistributorMetricsRequest() {}
+	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+
+	template<class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, shardLimit, reply);
 	}
 };
 
@@ -79,6 +109,35 @@ struct DistributorSnapRequest
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+	}
+};
+
+struct DistributorExclusionSafetyCheckReply
+{
+	constexpr static FileIdentifier file_identifier = 382104712;
+	bool safe;
+
+	DistributorExclusionSafetyCheckReply() : safe(false) {}
+	explicit DistributorExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct DistributorExclusionSafetyCheckRequest
+{
+	constexpr static FileIdentifier file_identifier = 5830931;
+	vector<AddressExclusion> exclusions;
+	ReplyPromise<DistributorExclusionSafetyCheckReply> reply;
+
+	DistributorExclusionSafetyCheckRequest() {}
+	explicit DistributorExclusionSafetyCheckRequest(vector<AddressExclusion> exclusions) : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, exclusions, reply);
 	}
 };
 
