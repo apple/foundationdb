@@ -23,8 +23,6 @@
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
-#include "flow/ProtocolVersion.h"
-#include "flow/Tracing.h"
 #include <cctype>
 #include <fstream>
 #include <iterator>
@@ -62,6 +60,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"

@@ -89,20 +89,6 @@ class Int64Future : public Future {
   Int64Future(FDBFuture* f) : Future(f) {}
 };
 
-class UInt64Future : public Future {
- public:
-   // Call this function instead of fdb_future_get_uint64 when using the
-   // UInt64Future type. It's behavior is identical to fdb_future_get_uint64.
-  fdb_error_t get(uint64_t* out);
-  UInt64Future(FDBFuture* f) : Future(f) {}
-  
- private:
-  // why can only Transaction class access this?
-  // friend class Transaction;
-  // UInt64Future(FDBFuture* f) : Future(f) {}
-};
-
-
 class KeyFuture : public Future {
  public:
    // Call this function instead of fdb_future_get_key when using the KeyFuture
@@ -160,8 +146,6 @@ class EmptyFuture : public Future {
   friend class Transaction;
   EmptyFuture(FDBFuture* f) : Future(f) {}
 };
-
-UInt64Future get_server_protocol(char* clusterFile);
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
 // Handles cleanup of memory, removing the need to call

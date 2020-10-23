@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -27,11 +26,7 @@
 #include "flow/network.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/ThreadHelper.actor.h"
 #include "flow/UnitTest.h"
-
-#include <cstdint>
-#include <ostream>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include <cinttypes>
 #include <cstdint>
 #include <fstream>
 #include <ostream>

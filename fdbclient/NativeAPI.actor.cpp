@@ -4175,14 +4175,12 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 
 	state vector<Future<ProtocolInfoReply>> coordProtocols;
 	coordProtocols.reserve(coord.clientLeaderServers.size());
-	std::cout << "SENDING COORD PROTOCOL REQUEST" << std::endl;
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
 			{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
 		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 	}
 
-	wait(delay(2.0));
 	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5));
 
 	std::unordered_map<uint64_t, int> protocolCount;
@@ -4199,7 +4197,7 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 }
 
 ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	// let client know if server is present but before this feature is introduced
+	// TODO: let client know if server is present but before this feature is introduced
 	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
 	return protocolVersion.version();
 }
