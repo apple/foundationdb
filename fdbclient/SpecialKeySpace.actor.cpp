@@ -415,8 +415,7 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, SpecialKe
 	// module boundary check
 	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
-	}
-	else {
+	} else {
 		ASSERT(moduleToBoundary.at(module).contains(kr));
 		ASSERT(validateSnakeCaseNaming(kr.begin) &&
 		       validateSnakeCaseNaming(kr.end)); // validate keys follow snake case naming style
