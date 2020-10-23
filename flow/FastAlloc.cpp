@@ -304,7 +304,7 @@ void *FastAllocator<Size>::allocate() {
 
 #if VALGRIND
 	if (valgrindPrecise()) {
-		return malloc(Size);
+		return aligned_alloc(Size, Size);
 	}
 #endif
 
@@ -357,7 +357,7 @@ void FastAllocator<Size>::release(void *ptr) {
 
 #if VALGRIND
 	if (valgrindPrecise()) {
-		return free(ptr);
+		return aligned_free(ptr);
 	}
 #endif
 
