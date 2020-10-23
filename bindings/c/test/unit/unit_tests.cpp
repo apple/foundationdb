@@ -1544,7 +1544,6 @@ TEST_CASE("fdb_get_server_protocol") {
 
   fdb_future_block_until_ready(protocolFuture);
   fdb_future_get_uint64(protocolFuture, &out);
-  std::cout << "PROTOCOL: " << out << std::endl;
   fdb_future_destroy(protocolFuture);
 }
 
