@@ -21,9 +21,9 @@
 #ifndef __ASYNC_TASK_THREAD_H__
 #define __ASYNC_TASK_THREAD_H__
 
-#include <future>
 #include <thread>
 #include <memory>
+#include <mutex>
 
 #include "flow/network.h"
 #include "flow/ThreadHelper.actor.h"
@@ -55,18 +55,20 @@ public:
 
 class AsyncTaskThread {
 	ThreadSafeQueue<std::shared_ptr<IAsyncTask>> queue;
-	std::promise<void> wakeUp;
+	std::condition_variable cv;
+	std::mutex m;
 	std::thread thread;
 
 	static void run(AsyncTaskThread* self) {
 		while (true) {
-			if (self->queue.canSleep()) {
-				self->wakeUp.get_future().get();
-				self->wakeUp = {};
-			}
-			std::shared_ptr<IAsyncTask> task = self->queue.pop().get();
-			if (task->isTerminate()) {
-				return;
+			std::shared_ptr<IAsyncTask> task;
+			{
+				std::unique_lock<std::mutex> lk(self->m);
+				self->cv.wait(lk, [self] { return !self->queue.canSleep(); });
+				task = self->queue.pop().get();
+				if (task->isTerminate()) {
+					return;
+				}
 			}
 			(*task)();
 		}
@@ -74,8 +76,13 @@ class AsyncTaskThread {
 
 	template <class F>
 	void addTask(const F& func) {
-		if (queue.push(std::make_shared<AsyncTask<F>>(func))) {
-			wakeUp.set_value();
+		bool wakeUp = false;
+		{
+			std::lock_guard<std::mutex> g(m);
+			wakeUp = queue.push(std::make_shared<AsyncTask<F>>(func));
+		}
+		if (wakeUp) {
+			cv.notify_one();
 		}
 	}
 
@@ -85,8 +92,13 @@ public:
 	AsyncTaskThread() : thread([this] { run(this); }) {}
 
 	~AsyncTaskThread() {
-		if (queue.push(std::make_shared<TerminateTask>())) {
-			wakeUp.set_value();
+		bool wakeUp = false;
+		{
+			std::lock_guard<std::mutex> g(m);
+			wakeUp = queue.push(std::make_shared<TerminateTask>());
+		}
+		if (wakeUp) {
+			cv.notify_one();
 		}
 		// Warning: This destructor can hang if a task hangs, so it is
 		// up to the caller to prevent tasks from hanging indefinitely
