@@ -6,7 +6,7 @@ Release Notes
 
 6.2.28
 ======
-* Log detailed team collection information on trigger. `(PR #3912) <https://github.com/apple/foundationdb/pull/3912>`_
+* Log detailed team collection information when median available space ratio of all teams is too low. `(PR #3912) <https://github.com/apple/foundationdb/pull/3912>`_
 
 
 6.2.27

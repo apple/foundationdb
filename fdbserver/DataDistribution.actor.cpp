@@ -768,9 +768,10 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 				}
 				if (self->medianAvailableSpace < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
-					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall")
+					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", self->distributorId)
 					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace)
-					    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO);
+					    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
+					    .detail("Primary", self->primary);
 					self->printDetailedTeamsInfo.trigger();
 				}
 			}
@@ -2591,7 +2592,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 	// state std::vector<Reference<LocalityRecord>> machineLocalityMapRecordArray;
 	state int traceEventsPrinted = 0;
 	state std::vector<const UID*> serverIDs;
-	state double lastPrintTime;
+	state double lastPrintTime = 0;
 	loop {
 		wait(self->printDetailedTeamsInfo.onTrigger());
 		if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
