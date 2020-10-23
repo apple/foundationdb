@@ -22,9 +22,13 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const double AsyncTaskThread::meanDelay = 0.01;
-
 namespace {
+
+class TerminateTask final : public IAsyncTask {
+public:
+	void operator()() override { ASSERT(false); }
+	bool isTerminate() const { return true; }
+};
 
 ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, int* sum, int count) {
 	state int i = 0;
@@ -38,6 +42,39 @@ ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, int* 
 }
 
 } // namespace
+
+const double AsyncTaskThread::meanDelay = 0.01;
+
+AsyncTaskThread::AsyncTaskThread() : thread([this] { run(this); }) {}
+
+AsyncTaskThread::~AsyncTaskThread() {
+	bool wakeUp = false;
+	{
+		std::lock_guard<std::mutex> g(m);
+		wakeUp = queue.push(std::make_shared<TerminateTask>());
+	}
+	if (wakeUp) {
+		cv.notify_one();
+	}
+	// Warning: This destructor can hang if a task hangs, so it is
+	// up to the caller to prevent tasks from hanging indefinitely
+	thread.join();
+}
+
+void AsyncTaskThread::run(AsyncTaskThread* self) {
+	while (true) {
+		std::shared_ptr<IAsyncTask> task;
+		{
+			std::unique_lock<std::mutex> lk(self->m);
+			self->cv.wait(lk, [self] { return !self->queue.canSleep(); });
+			task = self->queue.pop().get();
+			if (task->isTerminate()) {
+				return;
+			}
+		}
+		(*task)();
+	}
+}
 
 TEST_CASE("/asynctaskthread/add") {
 	state int sum = 0;

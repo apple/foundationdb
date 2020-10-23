@@ -36,12 +36,6 @@ public:
 	virtual bool isTerminate() const = 0;
 };
 
-class TerminateTask final : public IAsyncTask {
-public:
-	void operator()() override { ASSERT(false); }
-	bool isTerminate() const { return true; }
-};
-
 template <class F>
 class AsyncTask final : public IAsyncTask {
 	F func;
@@ -59,20 +53,7 @@ class AsyncTaskThread {
 	std::mutex m;
 	std::thread thread;
 
-	static void run(AsyncTaskThread* self) {
-		while (true) {
-			std::shared_ptr<IAsyncTask> task;
-			{
-				std::unique_lock<std::mutex> lk(self->m);
-				self->cv.wait(lk, [self] { return !self->queue.canSleep(); });
-				task = self->queue.pop().get();
-				if (task->isTerminate()) {
-					return;
-				}
-			}
-			(*task)();
-		}
-	}
+	static void run(AsyncTaskThread* self);
 
 	template <class F>
 	void addTask(const F& func) {
@@ -89,21 +70,11 @@ class AsyncTaskThread {
 	static const double meanDelay;
 
 public:
-	AsyncTaskThread() : thread([this] { run(this); }) {}
+	AsyncTaskThread();
 
-	~AsyncTaskThread() {
-		bool wakeUp = false;
-		{
-			std::lock_guard<std::mutex> g(m);
-			wakeUp = queue.push(std::make_shared<TerminateTask>());
-		}
-		if (wakeUp) {
-			cv.notify_one();
-		}
-		// Warning: This destructor can hang if a task hangs, so it is
-		// up to the caller to prevent tasks from hanging indefinitely
-		thread.join();
-	}
+	// Warning: This destructor can hang if a task hangs, so it is
+	// up to the caller to prevent tasks from hanging indefinitely
+	~AsyncTaskThread();
 
 	template <class F>
 	auto execAsync(const F& func, TaskPriority priority = TaskPriority::DefaultOnMainThread)
