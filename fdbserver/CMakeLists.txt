@@ -223,8 +223,7 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
-
-# CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
+  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
