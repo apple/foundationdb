@@ -265,7 +265,6 @@ endif()
 target_link_libraries(fdbserver PRIVATE toml11_target)
 
 if (GPERFTOOLS_FOUND)
-  add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
