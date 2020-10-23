@@ -4319,8 +4319,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			    reportErrorsExcept(dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure,
 			                                               getShardMetrics, getAverageShardBytes.getFuture(),
 			                                               readyToStart, anyZeroHealthyTeams, self->ddId, &shards),
-			                       "DDTracker", self->ddId, &normalDDQueueErrors())
-			        actors.push_back(dataDistributionTrackerFuture);
+			                       "DDTracker", self->ddId, &normalDDQueueErrors());
+			actors.push_back(dataDistributionTrackerFuture);
 			actors.push_back(reportErrorsExcept(
 			    dataDistributionQueue(cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis,
 			                          shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId,
