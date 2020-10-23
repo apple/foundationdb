@@ -223,6 +223,11 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
+
+# CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
+  # statically, so find the static library here.
+  find_library(lz4_STATIC_LIBRARIES
+    NAMES liblz4.a REQUIRED)
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -243,7 +248,7 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
