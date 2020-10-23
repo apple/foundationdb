@@ -203,7 +203,7 @@ public:
 		}
 	}
 
-	UID getTeamID() override { return id; }
+	std::string getTeamID() override { return id.shortString(); }
 
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() {
 		vector<StorageServerInterface> v;
@@ -1362,7 +1362,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			    .detail("Healthy", team->isHealthy())
 			    .detail("TeamSize", team->size())
 			    .detail("MemberIDs", team->getServerIDsStr())
-			    .detail("TeamID", team->getTeamID().shortString());
+			    .detail("TeamID", team->getTeamID());
 		}
 	}
 
@@ -2491,7 +2491,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				TraceEvent("ServerTeamRemoved")
 				    .detail("Primary", primary)
 				    .detail("TeamServerIDs", teams[t]->getServerIDsStr())
-				    .detail("TeamID", teams[t]->getTeamID().shortString());
+				    .detail("TeamID", teams[t]->getTeamID());
 				// removeTeam also needs to remove the team from the machine team info.
 				removeTeam(teams[t]);
 				t--;
@@ -2958,7 +2958,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 
 			TraceEvent("ServerTeamRemover", self->distributorId)
 			    .detail("ServerTeamToRemove", st->getServerIDsStr())
-			    .detail("ServerTeamID", st->getTeamID().shortString())
+			    .detail("ServerTeamID", st->getTeamID())
 			    .detail("NumProcessTeamsOnTheServerTeam", maxNumProcessTeams)
 			    .detail("CurrentServerTeams", self->teams.size())
 			    .detail("DesiredServerTeams", desiredServerTeams);
@@ -2988,7 +2988,7 @@ ACTOR Future<Void> zeroServerLeftLogger_impl(DDTeamCollection* self, Reference<T
 	for (auto const& shard : shards) {
 		sizes.emplace_back(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(shard))));
 		TraceEvent(SevWarnAlways, "DDShardLost", self->distributorId)
-		    .detail("ServerTeamID", team->getTeamID().shortString())
+		    .detail("ServerTeamID", team->getTeamID())
 		    .detail("ShardBegin", shard.begin)
 		    .detail("ShardEnd", shard.end);
 	}
@@ -3258,7 +3258,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					if(logTeamEvents) {
 						TraceEvent("ServerTeamHealthNotReady", self->distributorId)
 						    .detail("HealthyServerTeamCount", self->healthyTeamCount)
-						    .detail("ServerTeamID", team->getTeamID().shortString());
+						    .detail("ServgetTeamIDerTeamID", team->getTeamID());
 					}
 				}
 			}

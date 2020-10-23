@@ -254,7 +254,14 @@ public:
 		teams[0]->addServers(servers);
 	}
 
-	UID getTeamID() override { return id; }
+	std::string getTeamID() override {
+		std::string id;
+		for (int i = 0; i < teams.size(); i++) {
+			auto const& team = teams[i];
+			id += (i == teams.size() - 1) ? team->getTeamID() : format("%s, ", team->getTeamID().c_str());
+		}
+		return id;
+	}
 };
 
 struct Busyness {

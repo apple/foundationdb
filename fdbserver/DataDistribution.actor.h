@@ -59,11 +59,11 @@ struct IDataDistributionTeam {
 	virtual bool isWrongConfiguration() = 0;
 	virtual void setWrongConfiguration(bool) = 0;
 	virtual void addServers(const vector<UID> &servers) = 0;
-	virtual UID getTeamID() = 0;
+	virtual std::string getTeamID() = 0;
 
 	std::string getDesc() {
 		const auto& servers = getLastKnownServerInterfaces();
-		std::string s = format("TeamID:%s", getTeamID().shortString().c_str());
+		std::string s = format("TeamID:%s", getTeamID().c_str());
 		s += format("Size %d; ", servers.size());
 		for(int i=0; i<servers.size(); i++) {
 			if (i) s += ", ";
