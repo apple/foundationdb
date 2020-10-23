@@ -39,7 +39,7 @@ testTitle = 'Backup'
     testName = 'BackupToBlob'
     backupAfter = 0.0
     backupTag = 'default'
-    backupURL = 'http://0.0.0.0:10000'
+    backupURL = 'azure://0.0.0.0:10000'
     
     [[test.workload]]
     testName = 'RandomClogging'
@@ -72,7 +72,7 @@ clearAfterTest = 'false'
     testName = 'RestoreFromBlob'
     restoreAfter = 0.0
     backupTag = 'default'
-    backupURL = 'http://0.0.0.0:10000'
+    backupURL = 'azure://0.0.0.0:10000'
 
     [[test.workload]]
     testName = 'RandomClogging'

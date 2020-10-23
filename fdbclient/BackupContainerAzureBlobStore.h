@@ -61,6 +61,8 @@ public:
 
 	Future<Void> deleteContainer(int* pNumDeleted) override;
 
+	static Future<std::vector<std::string>> listURLs(const std::string& baseURL);
+
 	static std::string getURLFormat();
 };
 

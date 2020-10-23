@@ -275,7 +275,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			r = Reference<IBackupContainer>(new BackupContainerS3BlobStore(bstore, resource, backupParams));
 		}
 #ifdef BUILD_AZURE_BACKUP
-		else if (u.startsWith(LiteralStringRef("http"))) {
+		else if (u.startsWith(LiteralStringRef("azure://"))) {
 			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore());
 		}
 #endif
@@ -326,7 +326,15 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 
 			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
 			return results;
-		} else {
+		}
+		// TODO: Enable this when Azure backups are ready
+		/*
+		else if (u.startsWith(LiteralStringRef("azure://"))) {
+		    std::vector<std::string> results = wait(BackupContainerAzureBlobStore::listURLs(baseURL));
+		    return results;
+		}
+		*/
+		else {
 			IBackupContainer::lastOpenError = "invalid URL prefix";
 			throw backup_invalid_url();
 		}
