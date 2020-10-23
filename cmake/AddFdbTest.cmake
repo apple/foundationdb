@@ -159,7 +159,7 @@ endif()
 # - OUT_DIR the directory where files will be staged
 # - CONTEXT the type of correctness package being built (e.g. 'valgrind correctness')
 function(stage_correctness_package)
-  set(oneValueArgs OUT_DIR CONTEXT)
+  set(oneValueArgs OUT_DIR CONTEXT OUT_FILES)
   cmake_parse_arguments(STAGE "" "${oneValueArgs}" "" "${ARGN}")
   file(MAKE_DIRECTORY ${STAGE_OUT_DIR}/bin)
   string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
@@ -202,6 +202,7 @@ function(stage_correctness_package)
     endforeach()
   endforeach()
   list(APPEND package_files ${STAGE_OUT_DIR}/bin/fdbserver
+                            ${STAGE_OUT_DIR}/bin/coverage.fdbserver.xml
                             ${STAGE_OUT_DIR}/bin/TestHarness.exe
                             ${STAGE_OUT_DIR}/bin/TraceLogHelper.dll
                             ${STAGE_OUT_DIR}/CMakeCache.txt
@@ -210,17 +211,21 @@ function(stage_correctness_package)
     OUTPUT ${package_files}
     DEPENDS ${CMAKE_BINARY_DIR}/CMakeCache.txt
             ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+            ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
             ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
             ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
+                                     ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
                                      ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
                                      ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
                                      ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"
     )
   list(APPEND package_files ${test_files} ${external_files})
-  set(package_files ${package_files} PARENT_SCOPE)
+  if(STAGE_OUT_FILES)
+    set(${STAGE_OUT_FILES} ${package_files} PARENT_SCOPE)
+  endif()
 endfunction()
 
 function(create_correctness_package)
@@ -228,7 +233,7 @@ function(create_correctness_package)
     return()
   endif()
   set(out_dir "${CMAKE_BINARY_DIR}/correctness")
-  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness")
+  stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files)
   set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
@@ -255,7 +260,7 @@ function(create_valgrind_correctness_package)
   endif()
   if(USE_VALGRIND)
     set(out_dir "${CMAKE_BINARY_DIR}/valgrind_correctness")
-    stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness")
+    stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files)
     set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}

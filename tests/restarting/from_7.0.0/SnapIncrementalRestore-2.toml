@@ -1,5 +1,3 @@
-buggify = false
-
 [[test]]
 testTitle = 'RestoreBackup'
 simBackupAgents = 'BackupToFile'
@@ -10,6 +8,7 @@ clearAfterTest = false
     tag = 'default'
     restoreOnly = true
     checkBeginVersion = true
+    manualBackupAgentStart = true
 
 [[test]]
 testTitle = 'VerifyCycleAndAtomics'

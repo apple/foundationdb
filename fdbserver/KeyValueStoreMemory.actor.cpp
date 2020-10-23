@@ -63,9 +63,7 @@ public:
 	// IKeyValueStore
 	KeyValueStoreType getType() const override { return type; }
 
-	virtual bool canPipelineCommits() const override { return false; }
-
-	std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
+	virtual std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
 
 	int64_t getAvailableSize() const {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue

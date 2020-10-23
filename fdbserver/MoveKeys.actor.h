@@ -37,6 +37,20 @@ struct MoveKeysLock {
 	void serialize(Ar& ar) { serializer(ar, prevOwner, myOwner, prevWrite); }
 };
 
+class DDEnabledState {
+	// in-memory flag to disable DD
+	bool ddEnabled = true;
+	UID ddEnabledStatusUID;
+
+public:
+	// checks if DD is enabled/disable transiently
+	bool isDDEnabled() const;
+
+	// transiently enable(true) or disable(false) the DD. If the process
+	// restarts, the state will be forgotten.
+	bool setDDEnabled(bool status, UID snapUID);
+};
+
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
 // has been executed by a different locker since takeMoveKeysLock(), as calling
 // takeMoveKeysLock() updates "moveKeysLockOwnerKey" to a random UID.
@@ -44,13 +58,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
-Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock);
-
-bool isDDEnabled();
-// checks if the in-memory DDEnabled flag is set
-
-bool setDDEnabled(bool status, UID snapUID);
-// sets the in-memory DDEnabled flag
+Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
 
 void seedShardServers(
 	Arena& trArena,
@@ -63,7 +71,8 @@ ACTOR Future<Void> moveKeys(Database occ, KeyRange keys, vector<UID> destination
                             MoveKeysLock lock, Promise<Void> dataMovementComplete,
                             FlowLock* startMoveKeysParallelismLock, FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
-                            UID relocationIntervalId); // for logging only
+                            UID relocationIntervalId, // for logging only
+                            const DDEnabledState* ddEnabledState);
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,
 // for restarting the remainder, and for not otherwise cancelling it before
@@ -74,7 +83,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 // Returns a Version in which the storage server is in the database
 // This doesn't need to be called for the "seed" storage servers (see seedShardServers above)
 
-ACTOR Future<Void> removeStorageServer(Database cx, UID serverID, MoveKeysLock lock);
+ACTOR Future<Void> removeStorageServer(Database cx, UID serverID, MoveKeysLock lock,
+                                       const DDEnabledState* ddEnabledState);
 // Removes the given storage server permanently from the database.  It must already
 // have no shards assigned to it.  The storage server MUST NOT be added again after this
 // (though a new storage server with a new unique ID may be recruited from the same fdbserver).
@@ -82,7 +92,8 @@ ACTOR Future<Void> removeStorageServer(Database cx, UID serverID, MoveKeysLock l
 ACTOR Future<bool> canRemoveStorageServer(Transaction* tr, UID serverID);
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
-ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock);
+ACTOR Future<Void> removeKeysFromFailedServer(Database cx, UID serverID, MoveKeysLock lock,
+                                              const DDEnabledState* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
 

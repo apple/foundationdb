@@ -152,11 +152,10 @@ struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
 };
 
 struct StorageServerDisk {
-	explicit StorageServerDisk( struct StorageServer* data, IKeyValueStore* storage ) : data(data), storage(storage), _canPipelineCommits(storage->canPipelineCommits()) {}
+	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
 	void makeNewStorageServerDurable();
-	// Asyncronously move data from mutation log into SE's commit buffer for next commit.
-	Future<bool> asyncPrepareVersionsForCommit(Version desiredOldestVersion, Future<Void> durable, Future<Void>durableMinDelay);
+	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
 	void makeVersionDurable( Version version );
 	Future<bool> restoreDurableState();
 
@@ -179,15 +178,12 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
-	
-	bool canPipelineCommits() const {return _canPipelineCommits;}
-	void set(KeyValueRef kv) { storage->set(kv);}
-	void clear(KeyRangeRef kr) { storage->clear(kr);}
 
 private:
 	struct StorageServer* data;
 	IKeyValueStore* storage;
-	const bool _canPipelineCommits;
+
+	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
 	ACTOR static Future<Key> readFirstKey( IKeyValueStore* storage, KeyRangeRef range ) {
 		Standalone<RangeResultRef> r = wait( storage->readRange( range, 1 ) );
@@ -3091,67 +3087,79 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		wait( delay(0, TaskPriority::UpdateStorage) );
 
 		state Promise<Void> durableInProgress;
+		data->durableInProgress = durableInProgress.getFuture();
 
-		state Version desiredOldestVersion = data->desiredOldestVersion.get();
+		state Version startOldestVersion = data->storageVersion();
+		state Version newOldestVersion = data->storageVersion();
+		state Version desiredVersion = data->desiredOldestVersion.get();
+		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
-		state Future<Void> durableMinDelay = Void();
-		state Future<Void> durable = Void();
-
-		state int64_t ssCommitQuotaBytes;
-		state Version pendingCommitVersion;
-		state int64_t bytesWritten = 0;
-		state bool finalCommit = false;
-		state bool done = false;
+		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		loop {
-			// Keep making data from mutation log durable, until no data left whose version is <= desiredOldestVersion
-			pendingCommitVersion = data->storageVersion();
-			ssCommitQuotaBytes = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
-			durableInProgress.reset();
-			data->durableInProgress = durableInProgress.getFuture();
-			durable = data->storage.commit(); // Commit data up to(inclusive) version pendingCommitVersion
-			durableMinDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
-			if (finalCommit) {
-				wait(durable && durableMinDelay);
-				done = true;
-			} else {
-				// Move data start from pendingCommitVersion+1 to SE's commit buffer.
-				bool _finalCommit = wait(data->storage.asyncPrepareVersionsForCommit(desiredOldestVersion, durable, durableMinDelay));
-				finalCommit = _finalCommit;
-			}
-			debug_advanceMinCommittedVersion( data->thisServerID, pendingCommitVersion );
-
-			if(pendingCommitVersion > data->rebootAfterDurableVersion) {
-				TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("PendingCommitVersion", pendingCommitVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
-				// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
-				// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
-				// Otherwise, in the race situation when storage server receives both reboot and
-				// brokenPromise of durableInProgress, the worker of the storage server will die.
-				// We will eventually end up with no worker for storage server role.
-				// The data distributor's buildTeam() will get stuck in building a team
-				durableInProgress.sendError(please_reboot());
-				throw please_reboot();
-			}
-
-			durableInProgress.send(Void());
-			wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
-
-			// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
-			// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
-			// because otherwise the latest version of mutableData might be partially loaded.
-			wait( data->durableVersionLock.take() );
-			data->popVersion( data->durableVersion.get() + 1 );
-
-			// Update durableVersion to pendingCommitVersion, which has been committed.
-			while (!changeDurableVersion( data, pendingCommitVersion )) {
-				if(g_network->check_yield(TaskPriority::UpdateStorage)) {
-					data->durableVersionLock.release();
-					wait(delay(0, TaskPriority::UpdateStorage));
-					wait( data->durableVersionLock.take() );
-				}
-			}
-			data->durableVersionLock.release();
+			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
+			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
+			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
+			// immediately (without waiting) but asynchronously frees memory.
+			Future<Void> finishedForgetting =
+			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
+			data->oldestVersion.set(newOldestVersion);
+			wait(finishedForgetting);
+			wait(yield(TaskPriority::UpdateStorage));
 			if (done) break;
 		}
+
+		// Set the new durable version as part of the outstanding change set, before commit
+		if (startOldestVersion != newOldestVersion) data->storage.makeVersionDurable(newOldestVersion);
+
+		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
+		state Future<Void> durable = data->storage.commit();
+		state Future<Void> durableDelay = Void();
+
+		if (bytesLeft > 0) {
+			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
+		}
+
+		wait(durable);
+
+		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
+
+		if (newOldestVersion > data->rebootAfterDurableVersion) {
+			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
+			    .detail("NewOldestVersion", newOldestVersion)
+			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
+			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
+			// Otherwise, in the race situation when storage server receives both reboot and
+			// brokenPromise of durableInProgress, the worker of the storage server will die.
+			// We will eventually end up with no worker for storage server role.
+			// The data distributor's buildTeam() will get stuck in building a team
+			durableInProgress.sendError(please_reboot());
+			throw please_reboot();
+		}
+
+		durableInProgress.send(Void());
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
+		                                             // down, so delay to check for cancellation
+
+		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
+		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
+		// changeDurableVersion, because otherwise the latest version of mutableData might be partially loaded.
+		wait(data->durableVersionLock.take());
+		data->popVersion(data->durableVersion.get() + 1);
+
+		while (!changeDurableVersion(data, newOldestVersion)) {
+			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
+				data->durableVersionLock.release();
+				wait(delay(0, TaskPriority::UpdateStorage));
+				wait(data->durableVersionLock.take());
+			}
+		}
+
+		data->durableVersionLock.release();
+
+		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
+
+		wait(durableDelay);
 	}
 }
 
@@ -3224,101 +3232,37 @@ void StorageServerDisk::writeMutation( MutationRef mutation ) {
 		ASSERT(false);
 }
 
-ACTOR Future<int64_t> asyncWriteMutationsToCommitBuffer(StorageServer* data, VectorRef<MutationRef> mutations, Version debugVersion, const char* debugContext, int64_t ssCommitQuotaBytes) {
-	state int bytesWritten = 0;
-	state int i = 0;
-	for (;i < mutations.size(); i++) {
-		const auto& m = mutations[i];
+void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion,
+                                       const char* debugContext) {
+	for (const auto& m : mutations) {
 		DEBUG_MUTATION(debugContext, debugVersion, m).detail("UID", data->thisServerID);
 		if (m.type == MutationRef::SetValue) {
-			data->storage.set(KeyValueRef(m.param1, m.param2));
+			storage->set(KeyValueRef(m.param1, m.param2));
 		} else if (m.type == MutationRef::ClearRange) {
-			data->storage.clear(KeyRangeRef(m.param1, m.param2));
-		}
-		auto mutationBytes = mvccStorageBytes(m);
-		bytesWritten += mutationBytes;
-		ssCommitQuotaBytes -= mutationBytes;
-		if (data->storage.canPipelineCommits() && bytesWritten >= SERVER_KNOBS->STORAGE_COMMIT_PIPELINE_BYTES_PER_YIELD) {
-			bytesWritten = 0;
-			wait(yield());
+			storage->clear(KeyRangeRef(m.param1, m.param2));
 		}
 	}
-	return ssCommitQuotaBytes;
 }
 
-ACTOR Future<bool> asyncPrepareVersionsForCommit_impl(StorageServerDisk* self, StorageServer* data, Version desiredOldestVersion, Future<Void> durable, Future<Void>durableMinDelay) {
-	state int64_t ssCommitQuotaBytes = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
-	state bool finalCommit = false;
-	state Version startOldestVersion = data->storageVersion();
-	state Version newOldestVersion = data->storageVersion();
-	state SignalableActorCollection forgetter;
-	loop {
-		// While committing previously written data, keep writting new data from later versions until
-		//    1.) commit is done, or
-		//    2.) ssCommitQuotaBytes <= 0, or
-		//    3.) no data in mutation log to write.
-		if (!data->storage.canPipelineCommits()) {
-			// Don't write version data while a commit is going on if the storage engine does not support pipelining
-			wait(durable && durableMinDelay);
-		}
-		state Future<Void> stopEarly = data->storage.canPipelineCommits() ? (durable && durableMinDelay) : Never();
-		// Apply mutations from the mutationLog
-		auto u = data->getMutationLog().upper_bound(newOldestVersion);
-		if (u != data->getMutationLog().end() && u->first <= desiredOldestVersion) {
-			VerUpdateRef const& v = u->second;
-			newOldestVersion = v.version;
-			ASSERT( newOldestVersion > data->storageVersion() && newOldestVersion <= desiredOldestVersion );
-			// TODO(alexmiller): Update to version tracking.
-			DEBUG_KEY_RANGE("asyncPrepareVersionsForCommit", newOldestVersion, KeyRangeRef());
-			int64_t _ssCommitQuotaBytes = wait(asyncWriteMutationsToCommitBuffer(data, v.mutations, newOldestVersion, "asyncPrepareVersionsForCommit", ssCommitQuotaBytes));
-			ssCommitQuotaBytes = _ssCommitQuotaBytes;
+bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion,
+                                                    int64_t& bytesLeft) {
+	if (bytesLeft <= 0) return true;
 
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
-			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			forgetter.add(data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage ));
-			data->oldestVersion.set( newOldestVersion );
-			if (ssCommitQuotaBytes <= 0) {
-				// No quota left. Wait for previous commit to finish.
-				wait(durable && durableMinDelay);
-				break;
-			}
-			if (stopEarly.isReady()) {
-				// Previous commit is done.
-				if (stopEarly.isError()) {
-					throw stopEarly.getError();
-				}
-				break;
-			}
-		} else {
-			// Since there is no data in mutation log, in order to make progress,
-			// advance it to desiredOldestVersion directly
-			newOldestVersion = desiredOldestVersion;
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
-			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			forgetter.add(data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage ));
-			data->oldestVersion.set( newOldestVersion );
-
-			// No more data in mutation log can be written.
-			finalCommit = true;
-
-			// Wait the previously written data to be committed
-			wait(durable && durableMinDelay);
-
-			break;
-		}
+	// Apply mutations from the mutationLog
+	auto u = data->getMutationLog().upper_bound(prevStorageVersion);
+	if (u != data->getMutationLog().end() && u->first <= newStorageVersion) {
+		VerUpdateRef const& v = u->second;
+		ASSERT(v.version > prevStorageVersion && v.version <= newStorageVersion);
+		// TODO(alexmiller): Update to version tracking.
+		DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
+		writeMutations(v.mutations, v.version, "makeVersionDurable");
+		for (const auto& m : v.mutations) bytesLeft -= mvccStorageBytes(m);
+		prevStorageVersion = v.version;
+		return false;
+	} else {
+		prevStorageVersion = newStorageVersion;
+		return true;
 	}
-	if (newOldestVersion > startOldestVersion){
-		// Set the new durable version as part of the outstanding change set, before commit
-		data->storage.makeVersionDurable( newOldestVersion );
-	}
-	debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
-
-	wait(forgetter.signal());
-	return finalCommit;
-}
-
-Future<bool> StorageServerDisk::asyncPrepareVersionsForCommit(Version desiredOldestVersion, Future<Void> durable, Future<Void>durableMinDelay) {
-	return asyncPrepareVersionsForCommit_impl(this, data, desiredOldestVersion, durable, durableMinDelay);
 }
 
 // Update data->storage to persist the changes from (data->storageVersion(),version]
@@ -4059,7 +4003,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(self->db->get().client.commitProxies));
+		state Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(self->db->get().client.commitProxies, false));
 		choose {
 			when(GetStorageServerRejoinInfoReply _rep =
 			         wait(commitProxies->size()
