@@ -22,6 +22,7 @@
 #define FDBCLIENT_BACKUP_CONTAINER_S3_BLOBSTORE_H
 #pragma once
 
+#include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 
 class BackupContainerS3BlobStore final : public BackupContainerFileSystem,

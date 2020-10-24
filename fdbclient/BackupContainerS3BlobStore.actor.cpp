@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/AsyncFileBlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
-
+#include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class BackupContainerS3BlobStoreImpl {

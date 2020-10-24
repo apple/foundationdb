@@ -18,10 +18,15 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbclient/FDBTypes.h"
+#include "fdbclient/JsonBuilder.h"
+#include "flow/UnitTest.h"
+
+#include <algorithm>
+#include <cinttypes>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

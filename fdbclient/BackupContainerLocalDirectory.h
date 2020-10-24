@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "flow/flow.h"
 
 class BackupContainerLocalDirectory : public BackupContainerFileSystem,
                                       ReferenceCounted<BackupContainerLocalDirectory> {

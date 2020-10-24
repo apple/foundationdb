@@ -22,6 +22,7 @@
 #define FDBCLIENT_BACKUP_CONTAINER_AZURE_BLOBSTORE_H
 #pragma once
 
+#include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 
 #include "storage_credential.h"
