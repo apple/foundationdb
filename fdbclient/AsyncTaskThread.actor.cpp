@@ -27,7 +27,7 @@ namespace {
 class TerminateTask final : public IAsyncTask {
 public:
 	void operator()() override { ASSERT(false); }
-	bool isTerminate() const { return true; }
+	bool isTerminate() const override { return true; }
 };
 
 ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread, int* sum, int count) {
@@ -56,8 +56,6 @@ AsyncTaskThread::~AsyncTaskThread() {
 	if (wakeUp) {
 		cv.notify_one();
 	}
-	// Warning: This destructor can hang if a task hangs, so it is
-	// up to the caller to prevent tasks from hanging indefinitely
 	thread.join();
 }
 
