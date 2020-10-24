@@ -276,7 +276,11 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 		}
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith(LiteralStringRef("azure://"))) {
-			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore());
+			u.eat(LiteralStringRef("azure://"));
+			auto address = NetworkAddress::parse(u.eat(LiteralStringRef("/")).toString());
+			auto containerName = u.eat(LiteralStringRef("/")).toString();
+			auto accountName = u.eat(LiteralStringRef("/")).toString();
+			r = Reference<IBackupContainer>(new BackupContainerAzureBlobStore(address, containerName, accountName));
 		}
 #endif
 		else {

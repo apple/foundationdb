@@ -213,18 +213,17 @@ Future<bool> BackupContainerAzureBlobStore::blobExists(const std::string& fileNa
 	    });
 }
 
-BackupContainerAzureBlobStore::BackupContainerAzureBlobStore() : containerName("test_container") {
-	// std::string account_name = std::getenv("AZURE_TESTACCOUNT");
-	// std::string account_key = std::getenv("AZURE_TESTKEY");
-	// bool use_https = true;
+BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const NetworkAddress& address,
+                                                             const std::string& accountName,
+                                                             const std::string& containerName)
+  : containerName(containerName) {
+	std::string accountKey = std::getenv("AZURE_KEY");
 
-	// auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(account_name, account_key);
-	// auto storage_account =
-	//    std::make_shared<azure::storage_lite::storage_account>(account_name, credential, use_https);
+	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
+	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
+	    accountName, credential, false, format("http://%s/%s", address.toString().c_str(), accountName.c_str()));
 
-	auto storage_account = azure::storage_lite::storage_account::development_storage_account();
-
-	client = std::make_unique<AzureClient>(storage_account, 1);
+	client = std::make_unique<AzureClient>(storageAccount, 1);
 }
 
 void BackupContainerAzureBlobStore::addref() {
@@ -283,5 +282,5 @@ Future<std::vector<std::string>> BackupContainerAzureBlobStore::listURLs(const s
 }
 
 std::string BackupContainerAzureBlobStore::getURLFormat() {
-	return "azure://<ip>:<port>/<accountname>/<path_to_file>";
+	return "azure://<ip>:<port>/<accountname>/<container>/<path_to_file>";
 }
