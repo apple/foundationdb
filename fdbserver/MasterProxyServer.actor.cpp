@@ -120,7 +120,12 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			reply = Never();
 			*outTransactionRate = rep.transactionRate;
 			*outBatchTransactionRate = rep.batchTransactionRate;
-			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			TraceEvent("MasterProxyTxRate", myID)
+			    .detail("RKID", db->get().ratekeeper.get().id())
+			    .detail("RateAllowed", rep.transactionRate)
+			    .detail("BatchRateAllowed", rep.batchTransactionRate)
+			    .detail("Lease", rep.leaseDuration)
+			    .detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
@@ -1306,6 +1311,11 @@ ACTOR static Future<Void> transactionStarter(
 
 		normalRateInfo.reset(elapsed);
 		batchRateInfo.reset(elapsed);
+
+		TraceEvent("MasterProxyTxLimit", proxy.id())
+		    .detail("RKID", db->get().ratekeeper.get().id())
+		    .detail("Limit", normalRateInfo.limit)
+		    .detail("BatchLimit", batchRateInfo.limit);
 
 		int transactionsStarted[2] = {0,0};
 		int systemTransactionsStarted[2] = {0,0};
