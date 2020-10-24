@@ -69,20 +69,12 @@ public:
 		std::string containerName;
 		std::string blobName;
 		int64_t m_cursor{ 0 };
+		// Ideally this buffer should not be a string, but
+		// the Azure SDK only supports/tests uploading to append
+		// blobs from a stringstream.
 		std::string buffer;
 
 		static constexpr size_t bufferLimit = 1 << 20;
-
-		// From https://tuttlem.github.io/2014/08/18/getting-istream-to-work-off-a-byte-array.html:
-		class MemStream : public std::istream {
-			class MemBuf : public std::basic_streambuf<char> {
-			public:
-				MemBuf(const uint8_t* p, size_t l) { setg((char*)p, (char*)p, (char*)p + l); }
-			} buffer;
-
-		public:
-			MemStream(const uint8_t* p, size_t l) : std::istream(&buffer), buffer(p, l) { rdbuf(&buffer); }
-		};
 
 	public:
 		WriteFile(AsyncTaskThread& asyncTaskThread, const std::string& containerName, const std::string& blobName,
@@ -112,10 +104,11 @@ public:
 			return Void();
 		}
 		Future<Void> sync() override {
+			auto movedBuffer = std::move(buffer);
+			buffer.clear();
 			return asyncTaskThread.execAsync([client = this->client, containerName = this->containerName,
-			                                  blobName = this->blobName, buffer = std::move(this->buffer)] {
-				// MemStream memStream(buffer.data(), buffer.size());
-				std::istringstream iss(buffer);
+			                                  blobName = this->blobName, buffer = std::move(movedBuffer)] {
+				std::istringstream iss(std::move(buffer));
 				auto resp = client->append_block_from_stream(containerName, blobName, iss).get();
 				return Void();
 			});
