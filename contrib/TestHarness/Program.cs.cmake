@@ -89,7 +89,7 @@ namespace SummarizeTest
 
                         bool useValgind = args.Length > 6 && args[6].ToLower() == "true";
                         int maxTries = (args.Length > 7) ? int.Parse(args[7]) : 3;
-                        return Run(args[2], args[3], args[4], args[5], null, runDir, null, useValgind, maxTries);
+                        return Run(args[2], args[3], args[4], args[5], null, runDir, null, "", useValgind, maxTries);
                     }
                     catch(Exception e)
                     {
@@ -139,9 +139,10 @@ namespace SummarizeTest
                     try
                     {
                         string oldBinaryFolder = (args.Length > 1)  ? args[1] : Path.Combine("/opt", "joshua", "global_data", "oldBinaries");
-                        bool useValgrind = args.Length > 2 && args[2].ToLower() == "true";
-                        int maxTries = (args.Length > 3) ? int.Parse(args[3]) : 3;
-                        return Run(Path.Combine("bin", BINARY), "", "tests", "summary.xml", "error.xml", "tmp", oldBinaryFolder, useValgrind, maxTries, true, Path.Combine("/app", "deploy", "runtime", ".tls_5_1", PLUGIN));
+                        string fdbVersion = (args.Length > 2) ? args[2] : "";
+                        bool useValgrind = args.Length > 3 && args[3].ToLower() == "true";
+                        int maxTries = (args.Length > 4) ? int.Parse(args[4]) : 3;
+                        return Run(Path.Combine("bin", BINARY), "", "tests", "summary.xml", "error.xml", "tmp", oldBinaryFolder, fdbVersion, useValgrind, maxTries, true, Path.Combine("/app", "deploy", "runtime", ".tls_5_1", PLUGIN));
                     }
                     catch(Exception e)
                     {
@@ -213,7 +214,7 @@ namespace SummarizeTest
             return ((System.Collections.IStructuralComparable)version1).CompareTo(version2, System.Collections.Generic.Comparer<int>.Default) >= 0;
         }
 
-        static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "")
+        static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, string fdbVersion, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "")
         {
             int seed = random.Next(1000000000);
             bool buggify = random.NextDouble() < buggifyOnRatio;
@@ -264,6 +265,7 @@ namespace SummarizeTest
                     uniqueFiles = uniqueFileSet.ToArray();
                     testFile = random.Choice(uniqueFiles);
                     string oldBinaryVersionLowerBound = "0.0.0";
+                    string oldBinaryVersionUpperBound = (fdbVersion == "") ? "99.99.99" : fdbVersion;
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
                     if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
@@ -272,7 +274,8 @@ namespace SummarizeTest
                     string[] currentBinary = { fdbserverName };
                     IEnumerable<string> oldBinaries = Array.FindAll(
                                                          Directory.GetFiles(oldBinaryFolder),
-                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound));
+                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound) &&
+                                                              versionGreaterThanOrEqual(oldBinaryVersionUpperBound, Path.GetFileName(x).Split('-').Last()));
                     oldBinaries = oldBinaries.Concat(currentBinary);
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
                 }
@@ -1396,6 +1399,7 @@ namespace SummarizeTest
                     Path.Combine(outputDir, "errors.txt"),
                     runDir,
                     oldBinaryDir,
+                    "",
                     useValgrind,
                     maxTries);
             }
