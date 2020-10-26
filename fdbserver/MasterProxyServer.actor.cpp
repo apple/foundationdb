@@ -63,6 +63,8 @@ struct ProxyStats {
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
 	Version lastCommitVersionAssigned;
+	double transactionRateAllowed, batchTransactionRateAllowed;
+	double transactionLimit, batchTransactionLimit;
 
 	LatencySample commitLatencySample;
 	LatencySample grvLatencySample;
@@ -84,12 +86,19 @@ struct ProxyStats {
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
+		// The rate at which the limit(budget) is allowed to grow.
+		specialCounter(cc, "NormalTransactionRateAllowed", [this]() { return this->transactionRateAllowed; });
+		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
+		specialCounter(cc, "NormalTransactionLimit", [this]() { return this->transactionLimit; });
+		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };
 
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, double* outTransactionRate,
-						   double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply) {
+ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount,
+                           int64_t* inBatchTransactionCount, double* outTransactionRate,
+                           double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply,
+                           GetHealthMetricsReply* detailedHealthMetricsReply, ProxyStats* stats) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -120,12 +129,14 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			reply = Never();
 			*outTransactionRate = rep.transactionRate;
 			*outBatchTransactionRate = rep.batchTransactionRate;
-			TraceEvent("MasterProxyTxRate", myID)
-			    .detail("RKID", db->get().ratekeeper.get().id())
-			    .detail("RateAllowed", rep.transactionRate)
-			    .detail("BatchRateAllowed", rep.batchTransactionRate)
-			    .detail("Lease", rep.leaseDuration)
-			    .detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			stats->transactionRateAllowed = rep.transactionRate;
+			stats->batchTransactionRateAllowed = rep.batchTransactionRate;
+			// TraceEvent("MasterProxyTxRate", myID)
+			//     .detail("RKID", db->get().ratekeeper.get().id())
+			//     .detail("RateAllowed", rep.transactionRate)
+			//     .detail("BatchRateAllowed", rep.batchTransactionRate)
+			//     .detail("Lease", rep.leaseDuration)
+			//     .detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
@@ -1263,13 +1274,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture, std::
 	return Void();
 }
 
-ACTOR static Future<Void> transactionStarter(
-	MasterProxyInterface proxy,
-	Reference<AsyncVar<ServerDBInfo>> db,
-	PromiseStream<Future<Void>> addActor,
-	ProxyCommitData* commitData, GetHealthMetricsReply* healthMetricsReply,
-	GetHealthMetricsReply* detailedHealthMetricsReply)
-{
+ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Reference<AsyncVar<ServerDBInfo>> db,
+                                             PromiseStream<Future<Void>> addActor, ProxyCommitData* commitData,
+                                             GetHealthMetricsReply* healthMetricsReply,
+                                             GetHealthMetricsReply* detailedHealthMetricsReply, ProxyStats* stats) {
 	state double lastGRVTime = 0;
 	state PromiseStream<Void> GRVTimer;
 	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
@@ -1285,7 +1293,8 @@ ACTOR static Future<Void> transactionStarter(
 	state vector<MasterProxyInterface> otherProxies;
 
 	state PromiseStream<double> replyTimes;
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate, &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate,
+	                      &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply, stats));
 	addActor.send(queueTransactionStartRequests(&systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
 
 	// Get a list of the other proxies that go together with us
@@ -1312,10 +1321,8 @@ ACTOR static Future<Void> transactionStarter(
 		normalRateInfo.reset(elapsed);
 		batchRateInfo.reset(elapsed);
 
-		TraceEvent("MasterProxyTxLimit", proxy.id())
-		    .detail("RKID", db->get().ratekeeper.get().id())
-		    .detail("Limit", normalRateInfo.limit)
-		    .detail("BatchLimit", batchRateInfo.limit);
+		stats->transactionLimit = normalRateInfo.limit;
+		stats->batchTransactionLimit = batchRateInfo.limit;
 
 		int transactionsStarted[2] = {0,0};
 		int systemTransactionsStarted[2] = {0,0};
@@ -1757,7 +1764,8 @@ ACTOR Future<Void> masterProxyServerCore(
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData));
-	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply, &detailedHealthMetricsReply));
+	addActor.send(transactionStarter(proxy, commitData.db, addActor, &commitData, &healthMetricsReply,
+	                                 &detailedHealthMetricsReply, &commitData.stats));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(healthMetricsRequestServer(proxy, &healthMetricsReply, &detailedHealthMetricsReply));
