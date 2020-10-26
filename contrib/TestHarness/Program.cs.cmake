@@ -1522,7 +1522,7 @@ namespace SummarizeTest
             Console.WriteLine("  TestHarness auto [temp/runDir] [directory] [shareDir] <useValgrind> <maxTries>");
             Console.WriteLine("  TestHarness remote [queue folder] [root foundation folder] [duration in hours] [amount of tests] [all/fast/<test_path>] [scope]");
             Console.WriteLine("  TestHarness extract-errors [summary-file] [error-summary-file]");
-            Console.WriteLine("  TestHarness joshua-run <useValgrind> <maxTries>");
+            Console.WriteLine("  TestHarness joshua-run [oldBinaryDir] [fdbVersion] <useValgrind> <maxTries>");
             VersionInfo();
             return 1;
         }
