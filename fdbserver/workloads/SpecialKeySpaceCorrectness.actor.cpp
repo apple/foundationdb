@@ -753,7 +753,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					TraceEvent(SevDebug, "EmptyWorkerListInSetClassTest");
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
 			}
 		}
@@ -769,7 +768,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "DatabaseLockFailure").error(e);
-				if (e.code() == error_code_actor_cancelled) throw;
 				// In case commit_unknown_result is thrown by buggify, we may try to lock more than once
 				// The second lock commit will throw special_keys_api_failure error
 				if (e.code() == error_code_special_keys_api_failure) {
@@ -815,8 +813,52 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
 				ASSERT(e.code() != error_code_database_locked);
-				if (e.code() == error_code_actor_cancelled) throw;
 				wait(tx->onError(e));
+			}
+		}
+		// test consistencycheck which only used by ConsistencyCheck Workload
+		// Note: we have exclusive ownership of fdbShouldConsistencyCheckBeSuspended,
+		// no existing workloads can modify the key
+		{
+			try {
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> val1 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
+				state bool ccSuspendSetting =
+				    val1.present() ? BinaryReader::fromStringRef<bool>(val1.get(), Unversioned()) : false;
+				Optional<Value> val2 =
+				    wait(tx->get(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")));
+				// Make sure the read result from special key consistency with the system key
+				ASSERT(ccSuspendSetting ? val2.present() : !val2.present());
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				// Make sure by default, consistencycheck is enabled
+				ASSERT(!ccSuspendSetting);
+				// Disable consistencycheck
+				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
+				wait(tx->commit());
+				tx->reset();
+				// Read system key to make sure it is disabled
+				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> val3 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
+				bool ccSuspendSetting2 =
+				    val3.present() ? BinaryReader::fromStringRef<bool>(val3.get(), Unversioned()) : false;
+				ASSERT(ccSuspendSetting2);
+				tx->reset();
+			} catch (Error& e) {
+				wait(tx->onError(e));
+			}
+		}
+		// make sure we enable consistencycheck by the end
+		{
+			loop {
+				try {
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"));
+					wait(tx->commit());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					wait(tx->onError(e));
+				}
 			}
 		}
 		return Void();
