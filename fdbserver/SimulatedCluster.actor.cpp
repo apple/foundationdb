@@ -1413,7 +1413,13 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	checkTestConf(testFile, extraDB, minimumReplication, minimumRegions, configureLocked, logAntiQuorum, startIncompatibleProcess);
 	g_simulator.hasDiffProtocolProcess = startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
-	state ProtocolVersion protocolVersion = startIncompatibleProcess ? ProtocolVersion(currentProtocolVersion.version()+1) : currentProtocolVersion;
+
+	state ProtocolVersion protocolVersion = currentProtocolVersion;
+	if(startIncompatibleProcess) {
+		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
+		uint64_t minAddToMakeIncompatible = ProtocolVersion::compatibleProtocolVersionMask & ~(ProtocolVersion::compatibleProtocolVersionMask-1);
+		protocolVersion = ProtocolVersion(currentProtocolVersion.version() + minAddToMakeIncompatible);
+	}
 
 	// TODO (IPv6) Use IPv6?
 	wait(g_simulator.onProcess(
