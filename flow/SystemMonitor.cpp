@@ -163,6 +163,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			}
 
 			for (auto const& itr : loggedDurations) {
+				// PriorityBusyX measures the amount of time spent busy at exactly priority X
 				n.detail(format("PriorityBusy%d", itr.first).c_str(), itr.second);
 			}
 
@@ -174,6 +175,9 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 					itr.windowedTimer = now();
 				}
 
+				// PriorityStarvedBelowX: how much of the elapsed time we were running tasks at a priority at or above X
+				// PriorityMaxStarvedBelowX: The longest single span of time that you were starved below that priority,
+				// which could tell you if you are doing work in bursts.
 				n.detail(format("PriorityStarvedBelow%d", itr.priority).c_str(), std::min(currentStats.elapsed, itr.duration));
 				n.detail(format("PriorityMaxStarvedBelow%d", itr.priority).c_str(), itr.maxDuration);
 

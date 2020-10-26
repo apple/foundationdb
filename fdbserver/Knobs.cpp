@@ -378,6 +378,11 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PROXY_COMPUTE_GROWTH_RATE,                             0.01 );
 	init( TXN_STATE_SEND_AMOUNT,                                    4 );
 
+	init( RESET_MASTER_BATCHES,                                   200 );
+	init( RESET_RESOLVER_BATCHES,                                 200 );
+	init( RESET_MASTER_DELAY,                                   300.0 );
+	init( RESET_RESOLVER_DELAY,                                 300.0 );
+
 	// Master Server
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.

@@ -418,7 +418,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			for (size_t j = 0; j < key_size; ++j)
 				skey.append(1, (char) deterministicRandom()->randomInt(0, 256));
 
-			return Key(skey);
+			// 15% (= 20% * 75%) of the time generating keys after \xff\xff to test special keys code
+			if (deterministicRandom()->random01() < 0.2)
+				return Key(skey).withPrefix(specialKeys.begin);
+			else
+				return Key(skey);
 		}
 
 		static Value makeValue() {
@@ -667,7 +671,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.begin <= keysel2.getKey() &&
+			                         keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_range_limits_invalid, ExceptionContract::possibleButRequiredIf(limit < 0)),
@@ -705,7 +710,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			keysel2 = makeKeySel();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && keysel2.getKey() <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(keysel1.getKey()) && specialKeys.begin <= keysel2.getKey() &&
+			                         keysel2.getKey() <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_range_limits_invalid,
@@ -755,7 +761,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					limit = deterministicRandom()->randomInt(0, INT_MAX)+1;
 			}
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -795,7 +801,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key2 = makeKey();
 			limits = makeRangeLimits();
 
-			bool isSpecialKeyRange = specialKeys.contains(key1) && key2 <= specialKeys.end;
+			bool isSpecialKeyRange = specialKeys.contains(key1) && specialKeys.begin <= key2 && key2 <= specialKeys.end;
 
 			contract = {
 				std::make_pair(error_code_inverted_range, ExceptionContract::requiredIf(key1 > key2)),
@@ -1135,6 +1141,13 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				op = deterministicRandom()->randomInt(minval, maxval+1);
 			}
 			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
+				op = -1;
+			
+			// do not test the option since it's already used by the workload
+			if (op == FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED)
+				op = -1;
+			// disable for now(see issue#3934, pr#3930)
+			if (op == FDBTransactionOptions::CHECK_WRITES_ENABLE)
 				op = -1;
 
 			double orv = deterministicRandom()->random01();
