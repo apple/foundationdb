@@ -6,11 +6,15 @@ Release Notes
 
 6.2.28
 ======
+
 * During snapshot, prevent slow tasks on transaction logs by yielding while processing ignored pop requests. `(PR #3883) <https://github.com/apple/foundationdb/pull/3883>`_
+* Log detailed team collection information when median available space ratio of all teams is too low. `(PR #3912) <https://github.com/apple/foundationdb/pull/3912>`_
 
 6.2.27
 ======
+
 * For clusters with a large number of shards, avoid slow tasks in the data distributor by adding yields to the shard map destruction. `(PR #3834) <https://github.com/apple/foundationdb/pull/3834>`_
+* Reset the network connection between a proxy and master or resolvers if the proxy is too far behind in processing transactions. `(PR #3891) <https://github.com/apple/foundationdb/pull/3891>`_
 
 6.2.26
 ======
