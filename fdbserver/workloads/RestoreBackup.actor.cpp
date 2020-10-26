@@ -101,10 +101,10 @@ struct RestoreBackupWorkload final : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
+		self->agentFuture = self->backupAgent.run(cx, &self->backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
-		self->agentFuture = self->backupAgent.run(cx, &self->backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 		wait(success(self->backupAgent.restore(cx, cx, self->tag, Key(self->backupContainer->getURL()), true,
 		                                       ::invalidVersion, true)));
 		return Void();
