@@ -597,7 +597,7 @@ struct TraverseMessageTypes : Context {
 		// we don't need to check for recursion here because the next call
 		// to operator() will do that and we don't generate a vtable for the
 		// vector-like type itself
-		T t;
+		T t{};
 		(*this)(t);
 	}
 
@@ -612,7 +612,7 @@ struct TraverseMessageTypes : Context {
 private:
 	template <class T, class... Ts>
 	void union_helper(pack<T, Ts...>) {
-		T t;
+		T t{};
 		(*this)(t);
 		union_helper(pack<Ts...>{});
 	}
