@@ -48,6 +48,7 @@ static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 
 constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
 constexpr UID WLTOKEN_PING_PACKET(-1, 1);
+constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
 
 class EndpointMap : NonCopyable {

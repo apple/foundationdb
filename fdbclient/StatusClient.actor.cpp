@@ -28,6 +28,7 @@
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include <cstdint>
 
 json_spirit::mValue readJSONStrictly(const std::string &s) {
 	json_spirit::mValue val;
@@ -320,7 +321,10 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 				coordStatus["reachable"] = false;
 			}
 			if (coordProtocols[i].isReady()) {
-				coordStatus["protocol"] = coordProtocols[i].get().version.version();
+				uint64_t protocolVersionInt = coordProtocols[i].get().version.version();
+				std::stringstream hexSs;
+				hexSs << std::hex << std::setw(2*sizeof(protocolVersionInt)) << std::setfill('0') << protocolVersionInt;
+				coordStatus["protocol"] = hexSs.str();
 			}
 			coordsStatus.push_back(coordStatus);
 		}

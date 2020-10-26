@@ -787,7 +787,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             {
                "reachable":true,
                "address":"127.0.0.1:4701",
-               "protocol": 1142507688261910528
+               "protocol": "0fdb00b070010001"
             }
          ],
          "quorum_reachable":true

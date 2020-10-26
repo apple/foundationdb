@@ -254,6 +254,4 @@ inline bool Endpoint::isLocal() const {
 	return addresses.address == localAddrs.address || (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }
 
-const int PACKET_LEN_WIDTH = sizeof(uint32_t);
-
 #endif
