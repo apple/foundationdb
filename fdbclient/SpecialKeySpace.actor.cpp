@@ -46,7 +46,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                 .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "failed", KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
 	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "lock", singleKeyRange(LiteralStringRef("dbLocked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "consistencycheck", singleKeyRange(LiteralStringRef("consistency_check_suspended"))
+	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -391,13 +393,33 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	return impl->clear(ryw, key);
 }
 
+bool validateSnakeCaseNaming(const KeyRef& k) {
+	KeyRef key(k);
+	// Remove prefix \xff\xff
+	ASSERT(key.startsWith(specialKeys.begin));
+	key = key.removePrefix(specialKeys.begin);
+	// Suffix can be \xff\xff or \x00 in single key range
+	if (key.endsWith(specialKeys.begin))
+		key = key.removeSuffix(specialKeys.end);
+	else if (key.endsWith(LiteralStringRef("\x00")))
+		key = key.removeSuffix(LiteralStringRef("\x00"));
+	for (const char& c : key.toString()) {
+		// only small letters, numbers, '/', '_' is allowed
+		ASSERT((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '/' || c == '_');
+	}
+	return true;
+}
+
 void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
                                        const KeyRangeRef& kr, SpecialKeyRangeReadImpl* impl) {
 	// module boundary check
-	if (module == SpecialKeySpace::MODULE::TESTONLY)
+	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
-	else
+	} else {
 		ASSERT(moduleToBoundary.at(module).contains(kr));
+		ASSERT(validateSnakeCaseNaming(kr.begin) &&
+		       validateSnakeCaseNaming(kr.end)); // validate keys follow snake case naming style
+	}
 	// make sure the registered range is not overlapping with existing ones
 	// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
 	for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
@@ -1123,8 +1145,7 @@ Future<Standalone<RangeResultRef>> ProcessClassSourceRangeImpl::getRange(ReadYou
 	return getProcessClassSourceActor(ryw, getKeyRange().begin, kr);
 }
 
-ACTOR Future<Standalone<RangeResultRef>> getLockedKeyActor(ReadYourWritesTransaction* ryw,
-                                                           KeyRangeRef kr) {
+ACTOR Future<Standalone<RangeResultRef>> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
 	Standalone<RangeResultRef> result;
@@ -1137,7 +1158,7 @@ ACTOR Future<Standalone<RangeResultRef>> getLockedKeyActor(ReadYourWritesTransac
 LockDatabaseImpl::LockDatabaseImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 Future<Standalone<RangeResultRef>> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
-	// sigle key range, the queried range should always be the same as the underlying range
+	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	auto lockEntry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")];
 	if (!ryw->readYourWritesDisabled() && lockEntry.first) {
@@ -1191,4 +1212,45 @@ Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction
 	} else {
 		return unlockDatabaseCommitActor(ryw);
 	}
+}
+
+ACTOR Future<Standalone<RangeResultRef>> getConsistencyCheckKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	Optional<Value> val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
+	bool ccSuspendSetting = val.present() ? BinaryReader::fromStringRef<bool>(val.get(), Unversioned()) : false;
+	Standalone<RangeResultRef> result;
+	if (ccSuspendSetting) {
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, ValueRef()));
+	}
+	return result;
+}
+
+ConsistencyCheckImpl::ConsistencyCheckImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> ConsistencyCheckImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                  KeyRangeRef kr) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")];
+	if (!ryw->readYourWritesDisabled() && entry.first) {
+		// ryw enabled and we have written to the special key
+		Standalone<RangeResultRef> result;
+		if (entry.second.present()) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, entry.second.get()));
+		}
+		return result;
+	} else {
+		return getConsistencyCheckKeyActor(ryw, kr);
+	}
+}
+
+Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto entry =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")].second;
+	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().set(fdbShouldConsistencyCheckBeSuspended,
+	                          BinaryWriter::toValue(entry.present(), Unversioned()));
+	return Optional<std::string>();
 }

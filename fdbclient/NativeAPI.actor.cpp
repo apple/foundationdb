@@ -577,13 +577,6 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 							containedRangesBegin = ranges.begin().range().begin;
 						}
 						for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-							// We probably don't want to do the code below? Otherwise we would never
-							// fetch the corresponding storages - which would give us a different semantics
-							//if (containedRangesEnd > iter->range().begin) {
-							//	self->locationCache.insert(
-							//	    KeyRangeRef{ containedRangesEnd, iter->range().begin },
-							//	    Reference<LocationInfo>{ new LocationInfo{ cacheInterfaces, true } });
-							//}
 							containedRangesEnd = iter->range().end;
 							if (iter->value() && !iter->value()->hasCaches) {
 								iter->value() = addCaches(iter->value(), cacheInterfaces);
@@ -592,7 +585,8 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 						auto iter = self->locationCache.rangeContaining(begin);
 						if (iter->value() && !iter->value()->hasCaches) {
 							if (end>=iter->range().end) {
-								self->locationCache.insert(KeyRangeRef{ begin, iter->range().end },
+								Key endCopy = iter->range().end; // Copy because insertion invalidates iterator
+								self->locationCache.insert(KeyRangeRef{ begin, endCopy },
 														   addCaches(iter->value(), cacheInterfaces));
 							} else {
 								self->locationCache.insert(KeyRangeRef{ begin, end },
@@ -601,7 +595,8 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 						}
 						iter = self->locationCache.rangeContainingKeyBefore(end);
 						if (iter->value() && !iter->value()->hasCaches) {
-							self->locationCache.insert(KeyRangeRef{iter->range().begin, end}, addCaches(iter->value(), cacheInterfaces));
+							Key beginCopy = iter->range().begin; // Copy because insertion invalidates iterator
+							self->locationCache.insert(KeyRangeRef{beginCopy, end}, addCaches(iter->value(), cacheInterfaces));
 						}
 					}
 				}
@@ -934,7 +929,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<ExclusionInProgressRangeImpl>(
-		        KeyRangeRef(LiteralStringRef("inProgressExclusion/"), LiteralStringRef("inProgressExclusion0"))
+		        KeyRangeRef(LiteralStringRef("in_progress_exclusion/"), LiteralStringRef("in_progress_exclusion0"))
 				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::CONFIGURATION, SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -948,8 +943,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
 		registerSpecialKeySpaceModule(
 			SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
-			std::make_unique<LockDatabaseImpl>(singleKeyRange(LiteralStringRef("dbLocked"))
+			std::make_unique<LockDatabaseImpl>(singleKeyRange(LiteralStringRef("db_locked"))
 					.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ConsistencyCheckImpl>(
+		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
