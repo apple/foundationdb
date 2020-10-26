@@ -4,7 +4,7 @@ RUN yum install -y centos-release-scl scl-utils
 RUN rpmkeys --import "http://pool.sks-keyservers.net/pks/lookup?op=get&search=0x3fa7e0328081bff6a14da29aa6a19b38d3d831ef"
 RUN	curl https://download.mono-project.com/repo/centos7-stable.repo | tee /etc/yum.repos.d/mono-centos7-stable.repo
 RUN yum install -y curl rpm-build wget git unzip devtoolset-8 devtoolset-8-libubsan-devel devtoolset-8-valgrind-devel \
-	rh-ruby26 go-toolset-7 rh-git218 rh-python36-devel java-11-openjdk-devel.x86_64 mono-devel dos2unix
+	rh-ruby26 go-toolset-7 rh-git218 rh-python36-devel java-11-openjdk-devel.x86_64 mono-devel dos2unix dpkg rh-python36
 
 # install Ninja
 RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip -o ninja.zip &&\
@@ -61,7 +61,6 @@ RUN cd /opt/ &&\
     tar -xjf boost_1_72_0.tar.bz2 &&\
     rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0/libs
 
-RUN yum -y install rh-python36
 
 # Install CCACHE
 RUN cd /tmp && curl -L https://github.com/ccache/ccache/releases/download/v4.0/ccache-4.0.tar.gz > ccache.tar.gz &&\
