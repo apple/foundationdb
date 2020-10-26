@@ -80,6 +80,29 @@ thread_local bool FastAllocator<Size>::threadInitialized = false;
 #ifdef VALGRIND
 template<int Size>
 unsigned long FastAllocator<Size>::vLock = 1;
+
+// valgrindPrecise controls some extra instrumentation that causes valgrind to run more slowly but give better
+// diagnostics. Set the environment variable FDB_VALGRIND_PRECISE to enable. valgrindPrecise must never change the
+// behavior of the program itself, so when you find a memory error in simulation without valgrindPrecise enabled, you
+// can rerun it with FDB_VALGRIND_PRECISE set, make yourself a coffee, and come back to a nicer diagnostic (you probably
+// want to pass --track-origins=yes to valgrind as well!)
+//
+// Currently valgrindPrecise replaces FastAllocator::allocate with malloc, and FastAllocator::release with free.
+// This improves diagnostics for fast-allocated memory. The main thing it improves is the case where you free a buffer
+// and then allocate a buffer again - with FastAllocator you'll get the same buffer back, and so uses of the freed
+// pointer either won't be noticed or will be counted as use of uninitialized memory instead of use after free.
+//
+// valgrindPrecise also enables extra instrumentation for Arenas, so you can
+// catch things like buffer overflows in arena-allocated memory more easily
+// (valgrind otherwise wouldn't know that memory used for Arena bookkeeping
+// should only be accessed within certain Arena routines.) Unfortunately the
+// current Arena contract requires some allocations to be adjacent, so we can't
+// insert redzones between arena allocations, but we can at least catch buffer
+// overflows if it's the most recently allocated memory from an Arena.
+bool valgrindPrecise() {
+	static bool result = std::getenv("FDB_VALGRIND_PRECISE");
+	return result;
+}
 #endif
 
 template<int Size>
@@ -279,6 +302,12 @@ void *FastAllocator<Size>::allocate() {
 	return malloc(Size);
 #endif
 
+#if VALGRIND
+	if (valgrindPrecise()) {
+		return aligned_alloc(Size, Size);
+	}
+#endif
+
 #if FASTALLOC_THREAD_SAFE
 	ThreadData& thr = threadData;
 	if (!thr.freelist) {
@@ -324,6 +353,12 @@ void FastAllocator<Size>::release(void *ptr) {
 
 #ifdef USE_GPERFTOOLS
 	return free(ptr);
+#endif
+
+#if VALGRIND
+	if (valgrindPrecise()) {
+		return aligned_free(ptr);
+	}
 #endif
 
 #if FASTALLOC_THREAD_SAFE
