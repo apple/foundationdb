@@ -1,2 +1,2 @@
 add_subdirectory(async)
-add_subdirectory(transport)
+add_subdirectory(rpc)

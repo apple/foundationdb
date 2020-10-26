@@ -56,7 +56,7 @@ ACTOR Future<Void> waitInt() {
 
  See `waitInt.actor.cpp` for more details.
 
-### `state` variable
+### `state` d variable
 
 As the `ACTOR` function will be transpiled into several complicated classes, the variable scope will be affected, and is different from standard C++ function variables. If a variable is defined as `state`, then it is accessible within the *whole* actor, no matter where it is defined. However, its value will be the default value before the first assignment. On the other hand, a variable that is defined without `state` will have limited scope, i.e. between its definition and the `wait` call after it.
 
@@ -94,6 +94,10 @@ ACTOR Future<Void> state_2() {
 ```
 
 See `state.actor.cpp` for more details.
+
+#### Variable declarations in control blocks
+
+It is important to remember that, if `wait`, or other `ACTOR` commands are used in the control block, then the variables should be `state` decorated. The reason is that, the `ACTOR` compiler would compile the code into different functions inside a class. In this case, the variable scope needs to be class-wide, thus `state` is necessary. Such examples can be seen in the latter part of this article.
 
 #### Add $\lambda$ functions to `ACTOR`
 
@@ -289,6 +293,18 @@ ACTOR Future<Void> catchException() {
 
 See `exception.actor.cpp` for more details.
 
+### `template`d  `ACTOR`s
+
+`ACTOR`s can be `template`d for meta-programming.  To allow `ACTOR`s being transpiled properly, the keyword `ACTOR` must be placed before `template`, e.g.
+
+```C++
+ACTOR
+template <typename T>
+Future<T> coroutine();
+```
+
+An example can be found in `reportLatency.actor.cpp`.
+
 ## `Promise` and `Future`
 
 `Promise`s and `Future`s play central roles of an asynchronous system. `Promise`s are used to claim a resource, that might not be immediately available, can be `wait`ed through a `Future` object. 
@@ -392,3 +408,83 @@ ACTOR Future<Void> loopForPromise() {
 ```
 
 See `stream.actor.cpp` for more details.
+
+## Generic `ACTOR`s in `flow/genericactors.actor.h`
+
+Plenty of handful `ACTOR`s are defined in `flow/genericactors.actor.h` .
+
+### `AsyncVar` and `AsyncTrigger`
+
+`AsyncVar` and `AsyncTrigger`, defined in `flow/genericactors.actor.h`, are useful when monitoring value changes:
+
+* `AsyncVar` will hold a variable. Change of the variable, or calling `trigger` method, would cause an event being triggered.
+* `AsyncTrigger` will hold a `Void` object (note that `Void` , which is different from `void`, *is* an object) so the value is immutable, only `trigger` method is provided.
+
+```C++
+AsyncVar<int> integerTrigger(0);
+AsyncTrigger terminateTrigger;
+
+ACTOR Future<Void> loopFunc() {
+    state int i = 0;
+
+    for (i = 0; i < 10; ++i) {
+        integerTrigger.set(integerTrigger.get() + 1);
+
+        // Yield the control
+        wait(delay(0));
+    }
+
+    terminateTrigger.trigger();
+    return Void();
+}
+
+ACTOR Future<Void> asyncVarLoop() {
+    loop choose {
+        when(wait(integerTrigger.onChange())) {
+            std::cout << "integerTrigger value: " << integerTrigger.get() << std::endl;
+        }
+        when(wait(terminateTrigger.onTrigger())) {
+            std::cout << "terminateTrigger triggered!" << std::endl;
+            break;
+        }
+    };
+
+	return Void();
+}
+```
+
+It is worthy to note again that in function `loopFunc`, since `wait` is called inside the `for` loop, the loop body will be transpiled into several different functions, one before the `wait`, and two after `wait` .  `i` must be decorated with `state` in this case. Also noting that `wait(delay(0))` will cause the current coroutine yield its control.
+
+The full source code can be found in `asyncVar.actor.cpp`.
+
+#### Interpreting the output of the program
+
+The output of the program is somewhat anti-intuition:
+
+```bash
+integerTrigger value: 2
+integerTrigger value: 3
+integerTrigger value: 4
+integerTrigger value: 5
+integerTrigger value: 6
+integerTrigger value: 7
+integerTrigger value: 8
+integerTrigger value: 9
+integerTrigger value: 10
+terminateTrigger triggered!
+```
+
+One might expect the following line of output is missing:
+
+```bash
+integerTrigger value: 1
+```
+
+However, this is actually the *expected* result. Recalling the fact that coroutines are *not* running in parallel. Instead, the running coroutine will not be stopped until it reaches `wait`s, which *yield*s the control to the event machine. With this in mind, revisiting the coroutines in this program:
+
+```C++
+	auto _ = stopAfter(waitForAll<Void>({loopFunc(), asyncVarLoop()}));
+```
+
+The function `loopFunc()` will run, increasing the `integerTrigger`'s value by 1, and yield the control. `asyncVarLoop`() is then started, and `loop` `wait`ing for `integerTrigger` and `terminateTrigger`. Since the event is triggered *before* the `wait`, it is ignored by the `wait`. The first increment is thus not outputted.
+
