@@ -232,7 +232,7 @@ namespace SummarizeTest
               // If the process finished successfully, we call the parameterless WaitForExit to ensure that output buffers get flushed
               process.WaitForExit();
 
-              var match = Regex.Match(output, @"v(\d\.\d\.\d)");
+              var match = Regex.Match(output, @"v(\d+\.\d+\.\d+)");
               if (match.Groups.Count < 1) return "";
               return match.Groups[1].Value;
             }
