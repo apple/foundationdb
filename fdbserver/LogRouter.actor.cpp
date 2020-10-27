@@ -75,20 +75,22 @@ struct LogRouterData {
 
 	UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
-	NotifiedVersion version;
-	NotifiedVersion minPopped;
+	NotifiedVersion version; // The largest version at which the log router has peeked mutations from satellite tLog.
+	NotifiedVersion minPopped; // The minimum version among all tags that has been popped by remote tLogs.
 	Version startVersion;
-	Version minKnownCommittedVersion;
+	Version minKnownCommittedVersion; // The minimum durable version among all LRs.
+	                                  // A LR's durable version is the maximum version of mutations that have been
+	                                  // peeked by remote tLog.
 	Version poppedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
 	bool allowPops;
 	LogSet logSet;
 	bool foundEpochEnd;
-	double waitForVersionTime = 0;
-	double maxWaitForVersionTime = 0;
-	double getMoreTime = 0;
-	double maxGetMoreTime = 0;
+	double waitForVersionTime = 0; // The total amount of time LR waits for remote tLog to peek and pop its data.
+	double maxWaitForVersionTime = 0; // The max one-instance wait time when LR must wait for remote tLog to pop data.
+	double getMoreTime = 0; // The total amount of time LR waits for satellite tLog's data to become available.
+	double maxGetMoreTime = 0; // The max wait time LR spent in a pull-data-request to satellite tLog.
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -98,7 +100,9 @@ struct LogRouterData {
 	std::map<UID, PeekTrackerData> peekTracker;
 
 	CounterCollection cc;
-	Counter getMoreCount, getMoreBlockedCount;
+	Counter getMoreCount; // Increase by 1 when LR tries to pull data from satellite tLog.
+	Counter
+	    getMoreBlockedCount; // Increase by 1 if data is not available when LR tries to pull data from satellite tLog.
 	Future<Void> logger;
 	Reference<EventCacheHolder> eventCacheHolder;
 
@@ -138,7 +142,7 @@ struct LogRouterData {
 
 		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
 
-		specialCounter(cc, "Version", [this](){ return this->version.get(); });
+		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
 		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
@@ -207,8 +211,15 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	// Since one set of log routers is created per generation of transaction logs, the gap caused by epoch end will be within MAX_VERSIONS_IN_FLIGHT of the log routers start version.
 	state double startTime = now();
 	if(self->version.get() < self->startVersion) {
+		// Log router needs to wait for remote tLogs to process data, whose version is less than self->startVersion,
+		// before the log router can pull more data (i.e., data after self->startVersion) from satellite tLog;
+		// This prevents LR from getting OOM due to it pulls too much data from satellite tLog at once;
+		// Note: each commit writes data to both primary tLog and satellite tLog. Satellite tLog can be viewed as
+		//       a part of primary tLogs.
 		if(ver > self->startVersion) {
 			self->version.set(self->startVersion);
+			// Wait for remote tLog to peek and pop from LR,
+			// so that LR's minPopped version can increase to self->startVersion
 			wait(self->minPopped.whenAtLeast(self->version.get()));
 		}
 		self->waitForVersionTime += now() - startTime;
@@ -235,6 +246,7 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 	return Void();
 }
 
+// Log router pull data from satellite tLog
 ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
@@ -256,6 +268,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			state double startTime = now();
 			choose {
 				when(wait( getMoreF ) ) {
+
 					self->getMoreTime += now() - startTime;
 					self->maxGetMoreTime = std::max(self->maxGetMoreTime, now() - startTime);
 					break;
@@ -564,6 +577,7 @@ ACTOR Future<Void> logRouterCore(
 			addActor.send( logRouterPeekMessages( &logRouterData, req ) );
 		}
 		when( TLogPopRequest req = waitNext( interf.popMessages.getFuture() ) ) {
+			// Request from remote tLog to pop data from LR
 			addActor.send( logRouterPop( &logRouterData, req ) );
 		}
 		when (wait(error)) {}

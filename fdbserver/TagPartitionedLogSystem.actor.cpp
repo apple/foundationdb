@@ -160,7 +160,7 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData) :
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	UID dbgid;
 	LogSystemType logSystemType;
-	std::vector<Reference<LogSet>> tLogs;
+	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, logRouter, or remote
 	int expectedLogSets;
 	int logRouterTags;
 	int txsTags;
@@ -168,7 +168,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	int repopulateRegionAntiQuorum;
 	bool stopped;
 	std::set<int8_t> pseudoLocalities;
-	std::map<int8_t, Version> pseudoLocalityPopVersion;
+	std::map<int8_t, Version> pseudoLocalityPopVersion; // first:locality, second:popped version at the locality
 
 	// new members
 	Future<Void> rejoins;
@@ -184,7 +184,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Optional<Version> recoveredAt;
 	Version knownCommittedVersion;
 	LocalityData locality;
-	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
+	std::map<std::pair<UID, Tag>, std::pair<Version, Version>> outstandingPops;
+	// For each currently running popFromLog actor, (logID, tag)->(max popped version, durableKnownCommittedVersion)
+	// Q: why do we need tag and durableKnownCommittedVersion?
 	Optional<PromiseStream<Future<Void>>> addActor;
 	ActorCollection popActors;
 	std::vector<OldLogData> oldLogData;
@@ -245,11 +247,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return pseudoLocalities.count(locality) > 0;
 	}
 
+	// Return the max version that can be popped for the locality;
 	Version popPseudoLocalityTag(int8_t locality, Version upTo) override {
 		ASSERT(isPseudoLocality(locality));
 		auto& localityVersion = pseudoLocalityPopVersion[locality];
 		localityVersion = std::max(localityVersion, upTo);
 		Version minVersion = localityVersion;
+		// Q: Why do we need to use the minimum popped version among all tags?
 		for (const auto& it : pseudoLocalityPopVersion) {
 			minVersion = std::min(minVersion, it.second);
 		}
@@ -1045,6 +1049,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// pop 'tag.locality' type data up to the 'upTo' version
 	virtual void pop( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) {
 		if (upTo <= 0) return;
 		if( tag.locality == tagLocalityRemoteLog) {
@@ -1057,18 +1062,22 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
 					if (prev < upTo)
 						outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, durableKnownCommittedVersion);
-					if (prev == 0)
-						popActors.add( popFromLog( this, log, tag, 1.0 ) ); //< FIXME: knob
+
+					if (prev == 0) {
+						popActors.add(popFromLog(this, log, tag, 1.0)); //< FIXME: knob // TODO: Knobify it
+					}
 				}
 			}
 		}
 	}
 
+	// pop tag from log up to the version defined in self->outstandingPops[].first
 	ACTOR static Future<Void> popFromLog( TagPartitionedLogSystem* self, Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag, double time ) {
 		state Version last = 0;
 		loop {
 			wait( delay(time, TaskPriority::TLogPop) );
 
+			// to: first is upto version, second is durableKnownComittedVersion
 			state std::pair<Version,Version> to = self->outstandingPops[ std::make_pair(log->get().id(),tag) ];
 
 			if (to.first <= last) {

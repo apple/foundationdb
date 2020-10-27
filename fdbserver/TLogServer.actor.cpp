@@ -325,6 +325,7 @@ struct TLogData : NonCopyable {
 	FlowLock concurrentLogRouterReads;
 	FlowLock persistentDataCommitLock;
 
+	// fields used by snapshot based backup and restore: start
 	bool ignorePopRequest;    // ignore pop request from storage servers
 	double ignorePopDeadline; // time until which the ignorePopRequest will be
                               // honored
@@ -336,6 +337,8 @@ struct TLogData : NonCopyable {
 	std::map<Tag, Version> toBePopped; // map of Tag->Version for all the pops
                                        // that came when ignorePopRequest was set
 	Reference<AsyncVar<bool>> degraded;
+	// fields used by snapshot based backup and restore: end
+
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
@@ -559,7 +562,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "PersistentDataDurableVersion", [this](){ return this->persistentDataDurableVersion; });
 		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
 		specialCounter(cc, "QueuePoppedVersion", [this](){ return this->queuePoppedVersion; });
-		specialCounter(cc, "MinPoppedTagVersion", [this](){ return this->minPoppedTagVersion; });
+		specialCounter(cc, "MinPoppedTagVersion",
+		               [this]() { return this->minPoppedTagVersion; }); // Q: why can it be 0 in some trace logs
 		specialCounter(cc, "MinPoppedTagLocality", [this](){ return this->minPoppedTag.locality; });
 		specialCounter(cc, "MinPoppedTagId", [this](){ return this->minPoppedTag.id; });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
@@ -973,9 +977,10 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	return Void();
 }
 
-// This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all CPU resources.
-// For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce latencies for more important
-// work (e.g. commits).
+// This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all
+// CPU resources. For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce
+// latencies for more important work (e.g. commits).
+// Q: Can someone explain what this actor is doing?
 ACTOR Future<Void> updateStorage( TLogData* self ) {
 	while(self->spillOrder.size() && !self->id_data.count(self->spillOrder.front())) {
 		self->spillOrder.pop_front();
@@ -2235,6 +2240,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
+// tLog pull data from LR
 ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
