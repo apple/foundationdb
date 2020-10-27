@@ -53,12 +53,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	template<typename T>
 	void post(Reference<IThreadPool> const & threadPool, T & future) {
-		// if (!g_network->isSimulated()) {
-		// 	threadPool->post(future);
-		// } else {
+		if (!g_network->isSimulated()) {
+			threadPool->post(future);
+		} else {
 			action(*future);
 			delete future;
-		// }
+		}
 	}
 
 	template<typename T>
@@ -179,14 +179,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
 			}
 			db = nullptr;
-		}
-		if (a.deleteOnClose) {
-			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
-				"default", getCFOptions() } };
-			rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+			if (a.deleteOnClose) {
+				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
+					"default", getCFOptions() } };
+				rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+			}
 		}
 		if (proc) {
-			// printf("ERASE %lx\n", this);
 			proc->machine->nonFlowStores.erase(a.path);
 			proc = nullptr;
 		}
@@ -224,109 +223,111 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-		struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction> {
-			Key key;
-			int maxLength;
-			Optional<UID> debugID;
-			ThreadReturnPromise<Optional<Value>> result;
-			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID) : key(key), maxLength(maxLength), debugID(debugID) {};
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
-		};
-		void action(ReadValuePrefixAction& a) {
-			rocksdb::PinnableSlice value;
-			Optional<TraceBatch> traceBatch;
-			if (a.debugID.present()) {
-				traceBatch = { TraceBatch{} };
-				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
-				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
-			}
-			auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
-			if (a.debugID.present()) {
-				traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
-				                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
-				traceBatch.get().dump();
-			}
-			if (s.ok()) {
-				a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
-											  std::min(value.size(), size_t(a.maxLength)))));
-			} else {
-				if (!s.IsNotFound()) {
-					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadValuePrefix").detail("Key", a.key);
-				}
-				a.result.send(Optional<Value>());
-			}
+	struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction> {
+		Key key;
+		int maxLength;
+		Optional<UID> debugID;
+		ThreadReturnPromise<Optional<Value>> result;
+		ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
+		  : key(key), maxLength(maxLength), debugID(debugID){};
+		virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+	};
+	void action(ReadValuePrefixAction& a) {
+		rocksdb::PinnableSlice value;
+		Optional<TraceBatch> traceBatch;
+		if (a.debugID.present()) {
+			traceBatch = { TraceBatch{} };
+			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
+			                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 		}
+		auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+		if (a.debugID.present()) {
+			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
+			                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			traceBatch.get().dump();
+		}
+		if (s.ok()) {
+			a.result.send(Value(StringRef(reinterpret_cast<const uint8_t*>(value.data()),
+			                              std::min(value.size(), size_t(a.maxLength)))));
+		} else {
+			if (!s.IsNotFound()) {
+				TraceEvent(SevError, "RocksDBError")
+				    .detail("Error", s.ToString())
+				    .detail("Method", "ReadValuePrefix")
+				    .detail("Key", a.key);
+			}
+			a.result.send(Optional<Value>());
+		}
+	}
 
-		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
-			KeyRange keys;
-			int rowLimit, byteLimit;
-			ThreadReturnPromise<Standalone<RangeResultRef>> result;
-			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
-		};
-		void action(ReadRangeAction& a) {
-			Standalone<RangeResultRef> result;
-			if (a.rowLimit == 0 || a.byteLimit == 0) {
-				a.result.send(result);
-			}
-			int accumulatedBytes = 0;
-			ASSERT( a.byteLimit > 0 );
-			if(a.rowLimit == 0) {
-				a.result.send(result);
-				return;
-			}
-			rocksdb::Status s;
-			if (a.rowLimit > 0) {
-				rocksdb::ReadOptions options;
-				auto endSlice = toSlice(a.keys.end);
-				options.iterate_upper_bound = &endSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
-				cursor->Seek(toSlice(a.keys.begin));
-				while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end) {
-					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-					if (kv.key >= a.keys.end) break;
-					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
-					// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-					if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
-						break;
-					}
-					cursor->Next();
-				}
-				s = cursor->status();
-			} else {
-				rocksdb::ReadOptions options;
-				auto beginSlice = toSlice(a.keys.begin);
-				options.iterate_lower_bound = &beginSlice;
-				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
-				cursor->SeekForPrev(toSlice(a.keys.end));
-				if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
-					cursor->Prev();
-				}
-				while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin) {
-					KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-					accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-					result.push_back_deep(result.arena(), kv);
-					// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
-					if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
-						break;
-					}
-					cursor->Prev();
-				}
-				s = cursor->status();
-			}
-			auto s = cursor->status();
-			if (!(s.ok() || s.IsNotFound())) {
-				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
-			}
-			result.more =
-			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			if (result.more) {
-			  result.readThrough = result[result.size()-1].key;
-			}
+	struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
+		KeyRange keys;
+		int rowLimit, byteLimit;
+		ThreadReturnPromise<Standalone<RangeResultRef>> result;
+		ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
+		  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
+		virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
+	};
+	void action(ReadRangeAction& a) {
+		Standalone<RangeResultRef> result;
+		if (a.rowLimit == 0 || a.byteLimit == 0) {
 			a.result.send(result);
 		}
-
+		int accumulatedBytes = 0;
+		ASSERT(a.byteLimit > 0);
+		if (a.rowLimit == 0) {
+			a.result.send(result);
+			return;
+		}
+		rocksdb::Status s;
+		if (a.rowLimit > 0) {
+			rocksdb::ReadOptions options;
+			auto endSlice = toSlice(a.keys.end);
+			options.iterate_upper_bound = &endSlice;
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+			cursor->Seek(toSlice(a.keys.begin));
+			while (cursor->Valid() && toStringRef(cursor->key()) < a.keys.end) {
+				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+				result.push_back_deep(result.arena(), kv);
+				// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
+				if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
+					break;
+				}
+				cursor->Next();
+			}
+			s = cursor->status();
+		} else {
+			rocksdb::ReadOptions options;
+			auto beginSlice = toSlice(a.keys.begin);
+			options.iterate_lower_bound = &beginSlice;
+			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
+			cursor->SeekForPrev(toSlice(a.keys.end));
+			if (cursor->Valid() && toStringRef(cursor->key()) == a.keys.end) {
+				cursor->Prev();
+			}
+			while (cursor->Valid() && toStringRef(cursor->key()) >= a.keys.begin) {
+				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+				result.push_back_deep(result.arena(), kv);
+				// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
+				if (result.size() >= -a.rowLimit || accumulatedBytes >= a.byteLimit) {
+					break;
+				}
+				cursor->Prev();
+			}
+			s = cursor->status();
+		}
+		if (!(s.ok() || s.IsNotFound())) {
+			TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "ReadRange");
+		}
+		result.more =
+		    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
+		if (result.more) {
+			result.readThrough = result[result.size() - 1].key;
+		}
+		a.result.send(result);
+	}
 
 	std::unique_ptr<rocksdb::DB> db;
 	ISimulator::ProcessInfo * proc = nullptr;
@@ -348,9 +349,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		readThreads = createGenericThreadPool();
 		if (g_network->isSimulated()) {
 			proc = g_simulator.getCurrentProcess();
-			// mallopt(M_ARENA_MAX, 32);
 			nReaders = 0;
-			// printf("ROCKS: %lx\n", this);
 			proc->machine->nonFlowStores[path] = (IKeyValueStore*)this;
 		} else {
 			writeThread->addThread(new Writer(this));
@@ -377,7 +376,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	void preSimulatedCrashHookForNonFlowStorageEngines() override {
-		printf("TEARDOWN: %lx\n", this);
 		close();
 	}
 
@@ -419,7 +417,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
-		// writeBatch->CompactRange(toSlice(keyRange.begin), toSlice(keyRange.end));
 	}
 
 	Future<Void> commit(bool) override {

@@ -380,15 +380,11 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr, std::vector
 				std::vector<IKeyValueStore*> store_vec;
 				// copy to vector to avoid concurrent modification
 				for(auto store : stores) {
-					printf("RAW PTR: %lx\n", store.second);
 					store_vec.push_back(static_cast<IKeyValueStore*>(store.second));
 				}
 
 				for(IKeyValueStore* store : store_vec) {
-					printf("CAST PTR: %lx\n", store);
-					fflush(stdout);
 					store->preSimulatedCrashHookForNonFlowStorageEngines();
-					ASSERT(false);
 				}
 
 				//Kill all open files, which may cause them to write invalid data.
@@ -755,7 +751,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.desiredTLogCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.masterProxyCount = deterministicRandom()->randomInt(1,7);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
-/*	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
+	int storage_engine_type = deterministicRandom()->randomInt(0, 5);
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -776,11 +772,16 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		TEST(true); // Simulated cluster using radix-tree storage engine
 		set_config("ssd-redwood-experimental");
 		break;
-		}
+	}
+	case 4: {
+		TEST(true); // Simulated cluster using RocksDB storage engine
+		set_config("ssd-rocksdb-experimental");
+		break;
+	}
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
-	}*/
-	set_config("ssd-rocksdb-experimental"); // not really working yet.  uncomment this line, and commment the above switch to test with RocksDB
+	}
+
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {

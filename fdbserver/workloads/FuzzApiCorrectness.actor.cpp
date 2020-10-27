@@ -1142,7 +1142,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
 				op = -1;
-			
+
 			// do not test the option since it's already used by the workload
 			if (op == FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED)
 				op = -1;
@@ -1167,7 +1167,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_invalid_option_value, ExceptionContract::Possible ),
 				std::make_pair( error_code_tag_too_long, ExceptionContract::Possible ),
 				std::make_pair( error_code_too_many_tags, ExceptionContract::Possible ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE || 
+				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE ||
 				                                                                                   (FDBTransactionOptions::Option)op == FDBTransactionOptions::LOG_TRANSACTION) ),
 				std::make_pair( error_code_read_version_already_set, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::INITIALIZE_NEW_DATABASE) )
 			};
@@ -1213,9 +1213,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	static void addTestCases() {
-		// this group passes on its own.
-		// TestGet + TestSet passes.
-
 		testCases.push_back(std::bind(&TestSetVersion::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestGet::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestGetKey::runTest, ph::_1, ph::_2, ph::_3));
@@ -1226,8 +1223,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		testCases.push_back(std::bind(&TestGetAddressesForKey::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestAddReadConflictRange::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestAtomicOp::runTest, ph::_1, ph::_2, ph::_3));
-
-		// all below passes
 		testCases.push_back(std::bind(&TestSet::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestClear0::runTest, ph::_1, ph::_2, ph::_3));
 		testCases.push_back(std::bind(&TestClear1::runTest, ph::_1, ph::_2, ph::_3));

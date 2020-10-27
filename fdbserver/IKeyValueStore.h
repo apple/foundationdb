@@ -67,7 +67,7 @@ public:
 	// RocksDB, since it manages a threadpool outside the simulator, and those threads could continue to write
 	// invalid data after the RocksDB database is reopened.  Most implementations used the default (empty)
 	// implementation of this method, as performing cleanup tasks here significantly reduces the coverage and
-	// accuracy of the siulator.
+	// accuracy of the simulator.
 	virtual void preSimulatedCrashHookForNonFlowStorageEngines() { }
 	/*
 	Concurrency contract
