@@ -281,11 +281,6 @@ namespace HTTP {
 			throw http_bad_response();
 		}
 
-		// If there is actual response content, check the MD5 sum against the Content-MD5 response header
-		if(r->content.size() > 0)
-			if(!r->verifyMD5(false))  // false arg means do not fail if the Content-MD5 header is missing.
-				throw http_bad_response();
-
 		return Void();
 	}
 
