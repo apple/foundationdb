@@ -1142,7 +1142,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 			if(op == FDBTransactionOptions::ACCESS_SYSTEM_KEYS || op == FDBTransactionOptions::READ_SYSTEM_KEYS) //do not test access system keys since the option is actually used by the workload
 				op = -1;
-
+			
 			// do not test the option since it's already used by the workload
 			if (op == FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED)
 				op = -1;
@@ -1167,7 +1167,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_invalid_option_value, ExceptionContract::Possible ),
 				std::make_pair( error_code_tag_too_long, ExceptionContract::Possible ),
 				std::make_pair( error_code_too_many_tags, ExceptionContract::Possible ),
-				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE ||
+				std::make_pair( error_code_client_invalid_operation, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::READ_YOUR_WRITES_DISABLE || 
 				                                                                                   (FDBTransactionOptions::Option)op == FDBTransactionOptions::LOG_TRANSACTION) ),
 				std::make_pair( error_code_read_version_already_set, ExceptionContract::possibleIf((FDBTransactionOptions::Option)op == FDBTransactionOptions::INITIALIZE_NEW_DATABASE) )
 			};

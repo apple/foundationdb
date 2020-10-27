@@ -238,12 +238,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (a.debugID.present()) {
 			traceBatch = { TraceBatch{} };
 			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
-			                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
+			                          "Reader.Before");
 		}
 		auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
 		if (a.debugID.present()) {
 			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
-			                          "Reader.After"); //.detail("TaskID", g_network->getCurrentTask());
+			                          "Reader.After");
 			traceBatch.get().dump();
 		}
 		if (s.ok()) {
