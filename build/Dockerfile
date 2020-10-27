@@ -57,8 +57,8 @@ RUN cd /tmp && curl -L https://www.openssl.org/source/openssl-1.1.1h.tar.gz -o o
  RUN cd /tmp && curl -L https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz > toml.tar.gz &&\
      echo "bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d  toml.tar.gz" > toml-sha256.txt &&\
      sha256sum -c toml-sha256.txt &&\
-     tar xf toml.tar.gz && rm -rf build && mkdir build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -Dtoml11_BUILD_TEST=OFF ../toml11-3.4.0 &&\
-     cmake --build . --target install && cd / && rm -rf tmp/build && rm -rf tmp/toml11-3.4.0
+     tar xf toml.tar.gz && rm -rf build && mkdir build && cd build && scl enable devtoolset-8 -- cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -Dtoml11_BUILD_TEST=OFF ../toml11-3.4.0 &&\
+     scl enable devtoolset-8 -- cmake --build . --target install && cd / && rm -rf tmp/build && rm -rf tmp/toml11-3.4.0
 
 RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.gz -o rocksdb.tar.gz &&\
     echo "d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee  rocksdb.tar.gz" > rocksdb-sha.txt &&\
