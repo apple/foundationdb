@@ -8,7 +8,7 @@ RUN yum install -y yum-utils &&\
     http://opensource.wandisco.com/centos/6/git/x86_64/wandisco-git-release-6-1.noarch.rpm &&\
   yum -y install devtoolset-8-8.1-1.el6 java-1.8.0-openjdk-devel \
     devtoolset-8-gcc-8.3.1 devtoolset-8-gcc-c++-8.3.1 \
-    devtoolset-8-libubsan-devel devtoolset-8-valgrind-devel \
+    devtoolset-8-libubsan-devel devtoolset-8-libasan-devel devtoolset-8-valgrind-devel \
     rh-python36-python-devel rh-ruby24 golang python27 rpm-build \
     mono-core debbuild python-pip dos2unix valgrind-devel ccache \
     distcc wget git lz4 lz4-devel lz4-static &&\
@@ -61,8 +61,8 @@ RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.
 ARG TIMEZONEINFO=America/Los_Angeles
 RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
 
-LABEL version=0.1.18
-ENV DOCKER_IMAGEVER=0.1.18
+LABEL version=0.1.19
+ENV DOCKER_IMAGEVER=0.1.19
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
