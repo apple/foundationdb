@@ -1487,7 +1487,6 @@ RealTimePrinter::RealTimePrinter() : beginTime(Clock::now()), flowBeginTime(g_ne
 // As we always also log the flow time and this is only for
 // human readability, this is good enough for now.
 std::string RealTimePrinter::toString(double now) {
-	ASSERT(flowBeginTime <= now);
 	time_t n = Clock::to_time_t(beginTime + std::chrono::microseconds(std::lround(1e6 * (now - flowBeginTime))));
 	if (g_network->isSimulated()) {
 		// in simulation, the clock is simulated as well. Therefore,
