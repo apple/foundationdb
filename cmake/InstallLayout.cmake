@@ -66,6 +66,22 @@ list(GET FDB_VERSION_LIST 0 FDB_MAJOR)
 list(GET FDB_VERSION_LIST 1 FDB_MINOR)
 list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 
+
+################################################################################
+# Alternatives config
+################################################################################
+
+math(EXPR ALTERNATIVES_PRIORITY "(${PROJECT_VERSION_MAJOR} * 1000) + (${PROJECT_VERSION_MINOR} * 100) + ${PROJECT_VERSION_PATCH}")
+set(script_dir "${PROJECT_BINARY_DIR}/packaging/multiversion/")
+file(MAKE_DIRECTORY "${script_dir}/server" "${script_dir}/clients")
+configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/server/postinst" "${script_dir}/server" @ONLY)
+configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/server/prerm" "${script_dir}/server" @ONLY)
+set(LIB_DIR lib)
+configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients" @ONLY)
+set(LIB_DIR lib64)
+configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/postinst" "${script_dir}/clients/postinst-el7" @ONLY)
+configure_file("${PROJECT_SOURCE_DIR}/packaging/multiversion/clients/prerm" "${script_dir}/clients" @ONLY)
+
 ################################################################################
 # General CPack configuration
 ################################################################################
@@ -199,10 +215,18 @@ set(CPACK_RPM_SERVER-EL7_PRE_UNINSTALL_SCRIPT_FILE
 
 set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
   "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
-#set(CPACK_RPM_java_PACKAGE_REQUIRES
-#  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
-#set(CPACK_RPM_python_PACKAGE_REQUIRES
-#  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
+
+set(CPACK_RPM_SERVER-VERSIONED_POST_INSTALL_SCRIPT_FILE
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst)
+
+set(CPACK_RPM_SERVER-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
+
+set(CPACK_RPM_CLIENTS-VERSIONED_POST_INSTALL_SCRIPT_FILE
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/clients/postinst-el7)
+
+set(CPACK_RPM_CLIENTS-VERSIONED_PRE_UNINSTALL_SCRIPT_FILE
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/clients/prerm)
 
 ################################################################################
 # Configuration for DEB
@@ -232,6 +256,13 @@ set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_CONTROL_EXTRA
   ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postinst
   ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/prerm
   ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postrm)
+
+set(CPACK_DEBIAN_CLIENTS-VERSIONED_PACKAGE_CONTROL_EXTRA
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/clients/postinst
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/clients/prerm)
+set(CPACK_DEBIAN_SERVER-VERSIONED_PACKAGE_CONTROL_EXTRA
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/server/postinst
+  ${CMAKE_BINARY_DIR}/packaging/multiversion/server/prerm)
 
 ################################################################################
 # MacOS configuration

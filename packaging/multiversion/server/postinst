@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+alternatives --install /usr/sbin/fdbserver fdbserver /usr/lib/foundationdb-@PROJECT_VERSION@/sbin/fdbserver @ALTERNATIVES_PRIORITY@ \
+    --slave /usr/sbin/fdbmonitor fdbmonitor /usr/lib/foundationdb-@PROJECT_VERSION@/sbin/fdbmonitor

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+alternatives --remove fdbserver /usr/lib/foundationdb-@PROJECT_VERSION@/sbin/fdbserver
