@@ -2926,7 +2926,7 @@ static class VDSOInitHelper {
 /* Each function is empty and called (via a macro) only in debug mode.
    The arguments are captured by dynamic tools at runtime. */
 
-#if DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0 && !defined(__native_client__) && !__has_feature(thread_sanitizer)
+#if DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL == 0 && !defined(__native_client__)
 
 #if __has_feature(memory_sanitizer)
 #include <sanitizer/msan_interface.h>
