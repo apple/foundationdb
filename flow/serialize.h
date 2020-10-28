@@ -680,6 +680,22 @@ struct SendBuffer {
 	int bytes_unsent() const {
 		return bytes_written - bytes_sent;
 	}
+
+
+	// Return the number of bytes left to send in this chain of buffers.
+	// If there are more than limit bytes remaining, return limit instead.
+	// (This bounds the pointer traversals performed by this method to no
+	// more than the traversals that write() is about to perform.)
+	int unsentBytesInQueue(int limit) const {
+		int bytes = 0;
+
+		for (auto * packet = this; !!packet; packet = packet->next) {
+			bytes += packet->bytes_unsent();
+			if (bytes >= limit) { return limit; }
+		}
+
+		return bytes;
+	}
 };
 
 struct PacketBuffer : SendBuffer {

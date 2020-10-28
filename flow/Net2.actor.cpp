@@ -444,6 +444,16 @@ public:
 		return sent;
 	}
 
+	virtual Future<Void> asyncWrite(SendBuffer const* data, int limit) {
+		boost::system::error_code err;
+		++g_net2->countWrites;
+
+		BindPromise p("N2_WriteProbeError", id);
+		auto f = p.getFuture();
+		boost::asio::async_write(socket, boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), std::move(p) );
+		return f;
+	}
+
 	virtual NetworkAddress getPeerAddress() { return peer_address; }
 
 	virtual UID getDebugID() { return id; }
@@ -774,7 +784,8 @@ public:
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
+		// ssl_sock.async_wait(boost::asio::socket_base::wait_write, std::move(p) );
+		ssl_sock.async_write_some( boost::asio::null_buffers(), std::move(p) );
 		return f;
 	}
 
@@ -783,7 +794,8 @@ public:
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
-		socket.async_read_some( boost::asio::null_buffers(), std::move(p) );
+		// ssl_sock.async_wait(boost::asio::socket_base::wait_read, std::move(p) );
+		ssl_sock.async_read_some( boost::asio::null_buffers(), std::move(p) );
 		return f;
 	}
 
@@ -800,6 +812,7 @@ public:
 				++g_net2->countWouldBlock;
 				return 0;
 			}
+			printf("read error.  closing connection: %s\n", strerror(err.value()));
 			onReadError(err);
 			throw connection_failed();
 		}
@@ -834,12 +847,24 @@ public:
 				++g_net2->countWouldBlock;
 				return 0;
 			}
+			printf("error.  closing connection: %s\n", strerror(err.value()));
 			onWriteError(err);
 			throw connection_failed();
 		}
 
 		ASSERT( sent );  // Make sure data was sent, and also this check will fail if the buffer chain was empty or the limit was not > 0.
 		return sent;
+	}
+
+
+	virtual Future<Void> asyncWrite(SendBuffer const* data, int limit) {
+		boost::system::error_code err;
+		++g_net2->countWrites;
+
+		BindPromise p("N2_WriteProbeError", id);
+		auto f = p.getFuture();
+		boost::asio::async_write(ssl_sock, boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), std::move(p) );
+		return f;
 	}
 
 	virtual NetworkAddress getPeerAddress() { return peer_address; }

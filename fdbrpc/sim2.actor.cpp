@@ -216,18 +216,38 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		return toRead;
 	}
 
+	virtual int write( SendBuffer const* buffer, int limit) {
+		ASSERT(false);
+		return 0;
+	}
+
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
 	// (or may throw an error if the connection dies)
-	virtual int write( SendBuffer const* buffer, int limit) {
+	// bufferOffset tells write_impl to skip bytse at the beginning of the chain of send buffers.  This lets us reimplement the equivalent of
+	// UnsentPacketQueue::sent(), since we don't have one of those here.
+	virtual int write_impl( SendBuffer const* buffer, int bufferOffset, int limit) {
 		rollRandomClose();
 		ASSERT(limit > 0);
 
 		int toSend = 0;
+
+		// fast-forward past the buffers we've already sent.
+		for (; buffer; buffer = buffer->next) {
+			if (bufferOffset < buffer->bytes_unsent()) {
+				break;
+			}
+			bufferOffset -= buffer->bytes_unsent();
+		}
+		// bufferOffset tells us how many bytes to skip in the first remaining buffer.
+
 		if (BUGGIFY) {
-			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
+			toSend = std::min(limit, buffer->bytes_unsent() - bufferOffset);
 		} else {
+			// bytes_unsent() will add bufferOfffset too many bytes the first time through the loop.
+			// can't fixup after the loop, because we might hit limit.
+			toSend = -bufferOffset;
 			for(auto p = buffer; p; p=p->next) {
-				toSend += p->bytes_written - p->bytes_sent;
+				toSend += p->bytes_unsent();
 				if(toSend >= limit) {
 					if(toSend > limit)
 						toSend = limit;
@@ -235,6 +255,7 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 				}
 			}
 		}
+
 		ASSERT(toSend);
 		if (BUGGIFY) toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
@@ -244,13 +265,18 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 
 		int leftToSend = toSend;
 		for(auto p = buffer; p && leftToSend>0; p=p->next) {
-			int ts = std::min(leftToSend, p->bytes_written - p->bytes_sent);
-			peer->recvBuf.insert( peer->recvBuf.end(), p->data + p->bytes_sent, p->data + p->bytes_sent + ts );
+			int ts = std::min(leftToSend, p->bytes_unsent() - bufferOffset);
+			peer->recvBuf.insert( peer->recvBuf.end(), p->data + p->bytes_sent + bufferOffset, p->data + p->bytes_sent + bufferOffset + ts );
 			leftToSend -= ts;
+			bufferOffset = 0;  // only apply bufferOffset the first time through the loop.
 		}
 		ASSERT( leftToSend == 0 );
 		peer->writtenBytes.set( peer->writtenBytes.get() + toSend );
 		return toSend;
+	}
+
+	virtual Future<Void> asyncWrite( SendBuffer const* buffer, int limit) {
+		return whenWritten(this, buffer, limit);
 	}
 
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not
@@ -347,6 +373,25 @@ private:
 					if (e.code() != error_code_broken_promise) throw;
 				}
 				wait( g_simulator.onProcess( self->process ) );
+			}
+		} catch (Error& e) {
+			ASSERT( g_simulator.getCurrentProcess() == self->process );
+			throw;
+		}
+	}
+
+	ACTOR static Future<Void> whenWritten( Sim2Conn* self, SendBuffer const* buffer, int limit) {
+		try {
+			limit = buffer->unsentBytesInQueue(limit);
+			state int bufferOffset = 0;
+			loop {
+				state int sent = self->write_impl(buffer, bufferOffset, limit);
+				limit -= sent;
+				bufferOffset += sent;
+				wait(whenWritable(self));
+				if (limit == 0) {
+					return Void();
+				}
 			}
 		} catch (Error& e) {
 			ASSERT( g_simulator.getCurrentProcess() == self->process );
