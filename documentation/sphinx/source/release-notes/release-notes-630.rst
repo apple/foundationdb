@@ -124,7 +124,8 @@ Fixes from previous versions
 * The 6.3.1 patch release includes all fixes from the patch releases 6.2.21 and 6.2.22. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.3 patch release includes all fixes from the patch release 6.2.23. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.5 patch release includes all fixes from the patch releases 6.2.24 and 6.2.25. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
-* The 6.3.10 patch release includes all fixes from the patch releases 6.2.26 and 6.2.27. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.9 patch release includes all fixes from the patch releases 6.2.26. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.10 patch release includes all fixes from the patch releases 6.2.27. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 
 Fixes only impacting 6.3.0+
 ---------------------------
