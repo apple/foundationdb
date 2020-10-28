@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml.Linq;
 using System.IO;
@@ -147,7 +148,7 @@ namespace SummarizeTest
                     {
                         var xout = new XElement("TestHarnessError",
                             new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                            new XAttribute("ErrorMessage", e.Message));
+                            new XAttribute("ErrorMessage", e.ToString()));
 
                         AppendXmlMessageToSummary("summary.xml", xout, true);
                         throw;
@@ -213,6 +214,30 @@ namespace SummarizeTest
             return ((System.Collections.IStructuralComparable)version1).CompareTo(version2, System.Collections.Generic.Comparer<int>.Default) >= 0;
         }
 
+        static bool versionLessThan(string ver1, string ver2) {
+            return !versionGreaterThanOrEqual(ver1, ver2);
+        }
+
+        static string getFdbserverVersion(string fdbserverName) {
+           using (var process = new System.Diagnostics.Process())
+           {
+              process.StartInfo.UseShellExecute = false;
+              process.StartInfo.RedirectStandardOutput = true;
+              process.StartInfo.FileName = fdbserverName;
+              process.StartInfo.Arguments = "--version";
+              process.StartInfo.RedirectStandardError = true;
+
+              process.Start();
+              var output = process.StandardOutput.ReadToEnd();
+              // If the process finished successfully, we call the parameterless WaitForExit to ensure that output buffers get flushed
+              process.WaitForExit();
+
+              var match = Regex.Match(output, @"v(\d+\.\d+\.\d+)");
+              if (match.Groups.Count < 1) return "";
+              return match.Groups[1].Value;
+            }
+        }
+
         static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "")
         {
             int seed = random.Next(1000000000);
@@ -269,10 +294,12 @@ namespace SummarizeTest
                     {
                         oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
                     }
+                    string oldBinaryVersionUpperBound = getFdbserverVersion(fdbserverName);
                     string[] currentBinary = { fdbserverName };
                     IEnumerable<string> oldBinaries = Array.FindAll(
                                                          Directory.GetFiles(oldBinaryFolder),
-                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound));
+                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
+                                                           && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     oldBinaries = oldBinaries.Concat(currentBinary);
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
                 }
