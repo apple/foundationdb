@@ -311,4 +311,11 @@ if(NOT WIN32)
     DESTINATION "etc/init.d"
     RENAME "foundationdb"
     COMPONENT server-deb)
+  install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
+    DESTINATION "usr/lib/foundationdb-${PROJECT_VERSION}/lib/systemd/system"
+    COMPONENT server-versioned)
+  install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
+    DESTINATION "usr/lib/foundationdb-${PROJECT_VERSION}/etc/init.d"
+    RENAME "foundationdb"
+    COMPONENT server-versioned)
 endif()
