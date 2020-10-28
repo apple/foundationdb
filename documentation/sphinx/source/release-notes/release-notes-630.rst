@@ -65,6 +65,7 @@ Fixes
 * Fix an issue where ``fdbcli --exec 'exclude no_wait ...'`` would incorrectly report that processes can safely be removed from the cluster. [6.3.5] `(PR #3566) <https://github.com/apple/foundationdb/pull/3566>`_
 * Commit latencies could become large because of inaccurate compute estimates. [6.3.9] `(PR #3845) <https://github.com/apple/foundationdb/pull/3845>`_
 * Added a timeout on TLS handshakes to prevent them from hanging indefinitely. [6.3.9] `(PR #3850) <https://github.com/apple/foundationdb/pull/3850>`_
+* Bug fix, blob client did not support authentication key sizes over 64 bytes.  `(PR #3964) <https://github.com/apple/foundationdb/pull/3964>`_
 
 Status
 ------
