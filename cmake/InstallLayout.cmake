@@ -1,6 +1,6 @@
 include(FDBInstall)
 
-fdb_install_packages(TGZ DEB EL6 EL7 PM VERSIONED)
+fdb_install_packages(TGZ DEB EL7 PM VERSIONED)
 fdb_install_dirs(BIN SBIN LIB FDBMONITOR INCLUDE ETC LOG DATA)
 message(STATUS "FDB_INSTALL_DIRS -> ${FDB_INSTALL_DIRS}")
 
@@ -25,9 +25,8 @@ install_destinations(DEB
   ETC etc/foundationdb
   LOG var/log/foundationdb
   DATA var/lib/foundationdb)
-copy_install_destinations(DEB EL6)
-install_destinations(EL6 LIB usr/lib64)
-copy_install_destinations(EL6 EL7)
+copy_install_destinations(DEB EL7)
+install_destinations(EL7 LIB usr/lib64)
 install_destinations(PM
   BIN usr/local/bin
   SBIN usr/local/sbin
@@ -86,21 +85,18 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/packaging/foundationdb.ico)
 set(CPACK_PACKAGE_CONTACT "The FoundationDB Community")
 
-set(CPACK_COMPONENT_SERVER-EL6_DEPENDS clients-el6)
 set(CPACK_COMPONENT_SERVER-EL7_DEPENDS clients-el7)
 set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
 set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
 set(CPACK_COMPONENT_SERVER-PM_DEPENDS clients-pm)
 set(CPACK_COMPONENT_SERVER-VERSIONED_DEPENDS clients-versioned)
 
-set(CPACK_COMPONENT_SERVER-EL6_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-TGZ_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-PM_DISPLAY_NAME "foundationdb-server")
 set(CPACK_COMPONENT_SERVER-VERSIONED_DISPLAY_NAME "foundationdb-server-${PROJECT_VERSION}")
 
-set(CPACK_COMPONENT_CLIENTS-EL6_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-EL7_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-DEB_DISPLAY_NAME "foundationdb-clients")
 set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
@@ -142,23 +138,17 @@ set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}${prerelease_stri
 set(CPACK_RPM_PACKAGE_LICENSE "Apache 2.0")
 
 set(CPACK_RPM_PACKAGE_NAME "foundationdb")
-set(CPACK_RPM_CLIENTS-EL6_PACKAGE_NAME "foundationdb-clients")
 set(CPACK_RPM_CLIENTS-EL7_PACKAGE_NAME "foundationdb-clients")
-set(CPACK_RPM_SERVER-EL6_PACKAGE_NAME "foundationdb-server")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_NAME "foundationdb-server")
 set(CPACK_RPM_SERVER-VERSIONED_PACKAGE_NAME "foundationdb-server-${PROJECT_VERSION}")
 
-set(CPACK_RPM_CLIENTS-EL6_FILE_NAME "${rpm-clients-filename}.el6.x86_64.rpm")
 set(CPACK_RPM_CLIENTS-EL7_FILE_NAME "${rpm-clients-filename}.el7.x86_64.rpm")
 set(CPACK_RPM_CLIENTS-VERSIONED_FILE_NAME "${rpm-clients-filename}.versioned.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_FILE_NAME "${rpm-server-filename}.el6.x86_64.rpm")
 set(CPACK_RPM_SERVER-EL7_FILE_NAME "${rpm-server-filename}.el7.x86_64.rpm")
 set(CPACK_RPM_SERVER-VERSIONED_FILE_NAME "${rpm-server-filename}.versioned.x86_64.rpm")
 
-set(CPACK_RPM_CLIENTS-EL6_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el6-debuginfo.x86_64.rpm")
 set(CPACK_RPM_CLIENTS-EL7_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.el7-debuginfo.x86_64.rpm")
 set(CPACK_RPM_CLIENTS-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-clients-filename}.versioned-debuginfo.x86_64.rpm")
-set(CPACK_RPM_SERVER-EL6_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el6-debuginfo.x86_64.rpm")
 set(CPACK_RPM_SERVER-EL7_DEBUGINFO_FILE_NAME "${rpm-server-filename}.el7-debuginfo.x86_64.rpm")
 set(CPACK_RPM_SERVER-VERSIONED_DEBUGINFO_FILE_NAME "${rpm-server-filename}.versioned-debuginfo.x86_64.rpm")
 
@@ -167,15 +157,10 @@ fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION data
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION log COMPONENT server)
 fdb_install(DIRECTORY "${CMAKE_BINARY_DIR}/packaging/emptydir/" DESTINATION etc COMPONENT clients)
 
-set(CPACK_RPM_SERVER-EL6_USER_FILELIST
-  "%config(noreplace) /etc/foundationdb/foundationdb.conf"
-  "%attr(0700,foundationdb,foundationdb) /var/log/foundationdb"
-  "%attr(0700, foundationdb, foundationdb) /var/lib/foundationdb")
 set(CPACK_RPM_SERVER-EL7_USER_FILELIST
   "%config(noreplace) /etc/foundationdb/foundationdb.conf"
   "%attr(0700,foundationdb,foundationdb) /var/log/foundationdb"
   "%attr(0700, foundationdb, foundationdb) /var/lib/foundationdb")
-set(CPACK_RPM_CLIENTS-EL6_USER_FILELIST "%dir /etc/foundationdb")
 set(CPACK_RPM_CLIENTS-EL7_USER_FILELIST "%dir /etc/foundationdb")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/usr/sbin"
@@ -197,33 +182,21 @@ set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
-set(CPACK_RPM_CLIENTS-EL6_PRE_INSTALL_SCRIPT_FILE
-  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preclients.sh)
 set(CPACK_RPM_clients-el7_PRE_INSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preclients.sh)
 
-set(CPACK_RPM_CLIENTS-EL6_POST_INSTALL_SCRIPT_FILE
-  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postclients.sh)
 set(CPACK_RPM_CLIENTS-EL7_POST_INSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postclients.sh)
 
-set(CPACK_RPM_SERVER-EL6_PRE_INSTALL_SCRIPT_FILE
-  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preserver.sh)
 set(CPACK_RPM_SERVER-EL7_PRE_INSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preserver.sh)
 
-set(CPACK_RPM_SERVER-EL6_POST_INSTALL_SCRIPT_FILE
-  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postserver-el6.sh)
 set(CPACK_RPM_SERVER-EL7_POST_INSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postserver.sh)
 
-set(CPACK_RPM_SERVER-EL6_PRE_UNINSTALL_SCRIPT_FILE
-  ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
 set(CPACK_RPM_SERVER-EL7_PRE_UNINSTALL_SCRIPT_FILE
   ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
 
-set(CPACK_RPM_SERVER-EL6_PACKAGE_REQUIRES
-  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
   "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 #set(CPACK_RPM_java_PACKAGE_REQUIRES
@@ -299,17 +272,10 @@ if(NOT WIN32)
     COMPONENT server)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
     DESTINATION "usr/lib/foundationdb"
-    COMPONENT server-el6)
-  install(FILES ${CMAKE_SOURCE_DIR}/packaging/make_public.py
-    DESTINATION "usr/lib/foundationdb"
     COMPONENT server-deb)
   install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
     DESTINATION "lib/systemd/system"
     COMPONENT server-el7)
-  install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
-    DESTINATION "etc/rc.d/init.d"
-    RENAME "foundationdb"
-    COMPONENT server-el6)
   install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/deb/foundationdb-init
     DESTINATION "etc/init.d"
     RENAME "foundationdb"
