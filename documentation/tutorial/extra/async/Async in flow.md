@@ -2,7 +2,7 @@
 
 ## Introduction
 
-FoundationDB is based on an asynchronous infrastructure named `flow`. `flow` introduced a few keywords to C++, including `ACTOR` and`state`, together with some support functions like `wait` and `delay` for coroutines. In this article, the . The reader is expected to have basic understanding of asynchronous programming.
+FoundationDB is based on an asynchronous infrastructure named `flow`. `flow` introduced a few keywords to C++, including `ACTOR` and`state`, together with some support functions like `wait` and `delay` for coroutines. In this article, the reader is expected to have basic understanding of asynchronous programming.
 
 ## Basics of `flow` `ACTOR` language
 
@@ -487,4 +487,3 @@ However, this is actually the *expected* result. Recalling the fact that corouti
 ```
 
 The function `loopFunc()` will run, increasing the `integerTrigger`'s value by 1, and yield the control. `asyncVarLoop`() is then started, and `loop` `wait`ing for `integerTrigger` and `terminateTrigger`. Since the event is triggered *before* the `wait`, it is ignored by the `wait`. The first increment is thus not outputted.
-
