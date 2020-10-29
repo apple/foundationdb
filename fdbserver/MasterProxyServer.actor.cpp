@@ -116,9 +116,9 @@ struct ProxyStats {
 		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
 		specialCounter(cc, "NormalTransactionLimit", [this]() { return this->transactionLimit; });
 		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
-		specialCounter(cc, "PercentageOfGRVQueueProcessed", [this]() { return this->PercentageOfGRVQueueProcessed; });
+		specialCounter(cc, "PercentageOfGRVQueueProcessed", [this]() { return this->percentageOfGRVQueueProcessed; });
 		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed",
-		               [this]() { return this->PercentageOfBatchGRVQueueProcessed; });
+		               [this]() { return this->percentageOfBatchGRVQueueProcessed; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };
