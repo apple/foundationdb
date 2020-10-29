@@ -74,28 +74,23 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		TraceEvent("DRU_Start");
 	}
 
-	virtual std::string description() {
-		return "BackupToDBUpgrade";
-	}
+	virtual std::string description() const override { return "BackupToDBUpgrade"; }
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _setup(cx, this);
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self, DatabaseBackupAgent* backupAgent, Database cx, Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {

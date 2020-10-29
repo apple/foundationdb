@@ -96,6 +96,7 @@ int commit_transaction(FDBTransaction* transaction) {
 
 	f = fdb_transaction_commit(transaction);
 	fdb_wait_and_handle_error(commit_transaction, f, transaction);
+	fdb_future_destroy(f);
 
 	return FDB_SUCCESS;
 }

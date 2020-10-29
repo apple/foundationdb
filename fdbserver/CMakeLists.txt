@@ -46,7 +46,7 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
-  MasterProxyServer.actor.cpp
+  CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
   MutationTracking.cpp
@@ -87,6 +87,7 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
+  SpanContextMessage.h
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
@@ -181,6 +182,7 @@ set(FDBSERVER_SRCS
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
+  workloads/RestoreBackup.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
@@ -189,12 +191,14 @@ set(FDBSERVER_SRCS
   workloads/SelectorCorrectness.actor.cpp
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
+  workloads/SimpleAtomicAdd.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/SubmitBackup.actor.cpp
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
@@ -258,11 +262,9 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-add_dependencies(fdbserver toml11)
-target_include_directories(fdbserver PRIVATE ${TOML11_INCLUDE_DIR})
+target_link_libraries(fdbserver PRIVATE toml11_target)
 
 if (GPERFTOOLS_FOUND)
-  add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 

@@ -35,18 +35,6 @@ enum BandwidthStatus {
 
 enum ReadBandwidthStatus { ReadBandwidthStatusNormal, ReadBandwidthStatusHigh };
 
-struct ShardMetrics {
-	StorageMetrics metrics;
-	double lastLowBandwidthStartTime;
-	int shardCount;
-
-	bool operator == ( ShardMetrics const& rhs ) const {
-		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime && shardCount == rhs.shardCount;
-	}
-
-	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount) : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
-};
-
 BandwidthStatus getBandwidthStatus( StorageMetrics const& metrics ) {
 	if( metrics.bytesPerKSecond > SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC )
 		return BandwidthStatusHigh;
@@ -81,16 +69,11 @@ ACTOR Future<Void> updateMaxShardSize( Reference<AsyncVar<int64_t>> dbSizeEstima
 	}
 }
 
-struct ShardTrackedData {
-	Future<Void> trackShard;
-	Future<Void> trackBytes;
-	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
-};
 
 struct DataDistributionTracker {
 	Database cx;
 	UID distributorId;
-	KeyRangeMap< ShardTrackedData > shards;
+	KeyRangeMap<ShardTrackedData>& shards;
 	ActorCollection sizeChanges;
 
 	int64_t systemSizeEstimate;
@@ -108,16 +91,19 @@ struct DataDistributionTracker {
 	// Read hot detection
 	PromiseStream<KeyRange> readHotShard;
 
-	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
-		: cx(cx), distributorId( distributorId ), dbSizeEstimate( new AsyncVar<int64_t>() ), systemSizeEstimate(0),
-			maxShardSize( new AsyncVar<Optional<int64_t>>() ),
-			sizeChanges(false), readyToStart(readyToStart), output( output ), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams) {}
+	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart,
+	                        PromiseStream<RelocateShard> const& output,
+	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams, KeyRangeMap<ShardTrackedData>& shards)
+	  : cx(cx), distributorId(distributorId), dbSizeEstimate(new AsyncVar<int64_t>()), systemSizeEstimate(0),
+	    maxShardSize(new AsyncVar<Optional<int64_t>>()), sizeChanges(false), readyToStart(readyToStart), output(output),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams),
+	    shards(shards) {}
 
 	~DataDistributionTracker()
 	{
 		//Cancel all actors so they aren't waiting on sizeChanged broken promise
 		sizeChanges.clear(false);
-		shards.insert( allKeys, ShardTrackedData() );
 	}
 };
 
@@ -363,7 +349,7 @@ ACTOR Future<int64_t> getFirstSize( Reference<AsyncVar<Optional<ShardMetrics>>> 
 ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize ) {
 	state vector<Future<int64_t>> sizes;
 	state vector<Future<int64_t>> systemSizes;
-	for (auto it : self->shards.intersectingRanges(keys) ) {
+	for (auto it : self->shards.intersectingRanges(keys)) {
 		Future<int64_t> thisSize = getFirstSize( it->value().stats );
 		sizes.push_back( thisSize );
 		if(it->range().begin >= systemKeys.begin) {
@@ -722,7 +708,7 @@ ACTOR Future<Void> shardTracker(
 }
 
 void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optional<ShardMetrics> startingMetrics) {
-	auto ranges = self->shards.getAffectedRangesAfterInsertion( keys, ShardTrackedData() );
+	auto ranges = self->shards.getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for(int i=0; i<ranges.size(); i++) {
 		if( !ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin ) {
 			// When starting, key space will be full of "dummy" default contructed entries.
@@ -780,7 +766,7 @@ ACTOR Future<Void> fetchShardMetrics_impl( DataDistributionTracker* self, GetMet
 		loop {
 			Future<Void> onChange;
 			StorageMetrics returnMetrics;
-			for( auto t : self->shards.intersectingRanges( req.keys ) ) {
+			for (auto t : self->shards.intersectingRanges(req.keys)) {
 				auto &stats = t.value().stats;
 				if( !stats->get().present() ) {
 					onChange = stats->onChange();
@@ -815,7 +801,6 @@ ACTOR Future<Void> fetchShardMetrics( DataDistributionTracker* self, GetMetricsR
 	}
 	return Void();
 }
-
 
 ACTOR Future<Void> fetchShardMetricsList_impl( DataDistributionTracker* self, GetMetricsListRequest req ) {
 	try {
@@ -865,19 +850,16 @@ ACTOR Future<Void> fetchShardMetricsList( DataDistributionTracker* self, GetMetr
 	return Void();
 }
 
-ACTOR Future<Void> dataDistributionTracker(
-	Reference<InitialDataDistribution> initData,
-	Database cx,
-	PromiseStream<RelocateShard> output,
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-	PromiseStream<GetMetricsRequest> getShardMetrics,
-	PromiseStream<GetMetricsListRequest> getShardMetricsList,
-	FutureStream<Promise<int64_t>> getAverageShardBytes,
-	Promise<Void> readyToStart,
-	Reference<AsyncVar<bool>> anyZeroHealthyTeams,
-	UID distributorId)
-{
-	state DataDistributionTracker self(cx, distributorId, readyToStart, output, shardsAffectedByTeamFailure, anyZeroHealthyTeams);
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+                                           PromiseStream<RelocateShard> output,
+                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> anyZeroHealthyTeams,
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards) {
+	state DataDistributionTracker self(cx, distributorId, readyToStart, output, shardsAffectedByTeamFailure,
+	                                   anyZeroHealthyTeams, *shards);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	try {
@@ -890,10 +872,10 @@ ACTOR Future<Void> dataDistributionTracker(
 			}
 			when( wait( loggingTrigger ) ) {
 				TraceEvent("DDTrackerStats", self.distributorId)
-					.detail("Shards", self.shards.size())
-					.detail("TotalSizeBytes", self.dbSizeEstimate->get())
-					.detail("SystemSizeBytes", self.systemSizeEstimate)
-					.trackLatest( "DDTrackerStats" );
+				    .detail("Shards", self.shards.size())
+				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
+				    .detail("SystemSizeBytes", self.systemSizeEstimate)
+				    .trackLatest("DDTrackerStats");
 
 				loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 			}

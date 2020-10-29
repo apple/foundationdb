@@ -54,6 +54,7 @@ struct RestoreSysInfo;
 struct RestoreApplierInterface;
 struct RestoreFinishRequest;
 struct RestoreSamplesRequest;
+struct RestoreUpdateRateRequest;
 
 // RestoreSysInfo includes information each (type of) restore roles should know.
 // At this moment, it only include appliers. We keep the name for future extension.
@@ -174,6 +175,7 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 	RequestStream<RestoreVersionBatchRequest> initVersionBatch;
 	RequestStream<RestoreSimpleRequest> collectRestoreRoleInterfaces;
 	RequestStream<RestoreFinishRequest> finishRestore;
+	RequestStream<RestoreUpdateRateRequest> updateRate;
 
 	bool operator==(RestoreWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(RestoreWorkerInterface const& r) const { return id() != r.id(); }
@@ -193,12 +195,13 @@ struct RestoreApplierInterface : RestoreRoleInterface {
 		initVersionBatch.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		collectRestoreRoleInterfaces.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 		finishRestore.getEndpoint(TaskPriority::LoadBalancedEndpoint);
+		updateRate.getEndpoint(TaskPriority::LoadBalancedEndpoint);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, *(RestoreRoleInterface*)this, heartbeat, sendMutationVector, applyToDB, initVersionBatch,
-		           collectRestoreRoleInterfaces, finishRestore);
+		           collectRestoreRoleInterfaces, finishRestore, updateRate);
 	}
 
 	std::string toString() const { return nodeID.toString(); }
@@ -612,6 +615,50 @@ struct RestoreFinishRequest : TimedRequest {
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "RestoreFinishRequest terminate:" << terminate;
+		return ss.str();
+	}
+};
+
+struct RestoreUpdateRateReply : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 13018414;
+
+	UID id;
+	double remainMB; // remaining data in MB to write to DB;
+
+	RestoreUpdateRateReply() = default;
+	explicit RestoreUpdateRateReply(UID id, double remainMB) : id(id), remainMB(remainMB) {}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "RestoreUpdateRateReply NodeID:" << id.toString() << " remainMB:" << remainMB;
+		return ss.str();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, remainMB);
+	}
+};
+
+struct RestoreUpdateRateRequest : TimedRequest {
+	constexpr static FileIdentifier file_identifier = 13018415;
+
+	int batchIndex;
+	double writeMB;
+
+	ReplyPromise<RestoreUpdateRateReply> reply;
+
+	RestoreUpdateRateRequest() = default;
+	explicit RestoreUpdateRateRequest(int batchIndex, double writeMB) : batchIndex(batchIndex), writeMB(writeMB) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, batchIndex, writeMB, reply);
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "RestoreUpdateRateRequest batchIndex:" << batchIndex << " writeMB:" << writeMB;
 		return ss.str();
 	}
 };

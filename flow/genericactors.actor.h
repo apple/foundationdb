@@ -804,7 +804,7 @@ Future<Void> setAfter(Reference<AsyncVar<T>> var, double time, T val) {
 }
 
 ACTOR template <class T>
-Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = NULL ) {
+Future<Void> resetAfter( Reference<AsyncVar<T>> var, double time, T val, int warningLimit = -1, double warningResetDelay = 0, const char* context = nullptr ) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
 	state int resetCount = 0;
@@ -1086,7 +1086,7 @@ Future<T> reportErrorsExcept( Future<T> in, const char* context, UID id, std::se
 
 template <class T>
 Future<T> reportErrors( Future<T> const& in, const char* context, UID id = UID() ) {
-	return reportErrorsExcept(in, context, id, NULL);
+	return reportErrorsExcept(in, context, id, nullptr);
 }
 
 ACTOR template <class T>

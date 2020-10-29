@@ -27,7 +27,7 @@
                   "storage",
                   "transaction",
                   "resolution",
-                  "proxy",
+                  "commit_proxy",
                   "grv_proxy",
                   "master",
                   "test",
@@ -61,7 +61,7 @@
                   "role":{
                      "$enum":[
                         "master",
-                        "proxy",
+                        "commit_proxy",
                         "grv_proxy",
                         "log",
                         "storage",
@@ -446,8 +446,9 @@
          }
       ],
       "recovery_state":{
+         "seconds_since_last_recovered":1,
          "required_resolvers":1,
-         "required_proxies":1,
+         "required_commit_proxies":1,
          "required_grv_proxies":1,
          "name":{ // "fully_recovered" is the healthy state; other states are normal to transition through but not to persist in
             "$enum":[
@@ -633,11 +634,11 @@
                "address":"10.0.4.1"
             }
          ],
-         "auto_proxies":3,
+         "auto_commit_proxies":3,
          "auto_resolvers":1,
          "auto_logs":3,
          "backup_worker_enabled":1,
-         "proxies":5 // this field will be absent if a value has not been explicitly set
+         "commit_proxies":5 // this field will be absent if a value has not been explicitly set
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

@@ -103,12 +103,12 @@ struct CacheRangeInfo : ReferenceCounted<CacheRangeInfo>, NonCopyable {
 		delete adding;
 	}
 
-	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, NULL, NULL); }
-	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, NULL, data); }
-	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), NULL); }
+	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, nullptr, nullptr); }
+	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, nullptr, data); }
+	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), nullptr); }
 
-	bool isReadable() const { return readWrite!=NULL; }
-	bool isAdding() const { return adding!=NULL; }
+	bool isReadable() const { return readWrite!=nullptr; }
+	bool isAdding() const { return adding!=nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
@@ -1763,6 +1763,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 						dbgLastMessageWasProtocol = true;
 						cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
 					}
+					else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
+						SpanContextMessage scm;
+						cloneReader >> scm;
+					}
 					else {
 						MutationRef msg;
 						cloneReader >> msg;
@@ -1834,6 +1838,10 @@ ACTOR Future<Void> pullAsyncData( StorageCacheData *data ) {
 					// TODO should we store the logProtocol?
 					data->logProtocol = reader.protocolVersion();
 					cloneCursor2->setProtocolVersion(data->logProtocol);
+				}
+				else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
+					SpanContextMessage scm;
+					reader >> scm;
 				}
 				else {
 					MutationRef msg;

@@ -40,9 +40,14 @@ struct RandomCloggingWorkload : TestWorkload {
 		swizzleClog = getOption( options, LiteralStringRef("swizzle"), 0 );
 	}
 
-	virtual std::string description() { if (&g_simulator == g_network) return "RandomClogging"; else return "NoRC"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override {
+		if (&g_simulator == g_network)
+			return "RandomClogging";
+		else
+			return "NoRC";
+	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (&g_simulator == g_network && enabled)
 			return timeout( 
 				reportErrors( swizzleClog ? swizzleClogClient(this) : clogClient(this), "RandomCloggingError" ), 
@@ -50,11 +55,8 @@ struct RandomCloggingWorkload : TestWorkload {
 		else
 			return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR void doClog( ISimulator::ProcessInfo* machine, double t, double delay = 0.0 ) {
 		wait(::delay(delay));

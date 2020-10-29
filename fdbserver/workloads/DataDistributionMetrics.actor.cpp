@@ -184,12 +184,12 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		return Void();
 	}
 
-	virtual std::string description() { return "DataDistributionMetrics"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) { return _check(cx, this); }
+	std::string description() const override { return "DataDistributionMetrics"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("NumShards", numShards, true));
 		m.push_back(PerfMetric("AvgBytes", avgBytes, true));
 		m.push_back(commits.getMetric());

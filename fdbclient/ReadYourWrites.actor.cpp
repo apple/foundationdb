@@ -1313,7 +1313,8 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	bool reverse )
 {
 	if (getDatabase()->apiVersionAtLeast(630)) {
-		if (specialKeys.contains(begin.getKey()) && end.getKey() <= specialKeys.end) {
+		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
+		    end.getKey() <= specialKeys.end) {
 			TEST(true); // Special key space get range
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
@@ -1338,7 +1339,7 @@ Future< Standalone<RangeResultRef> > ReadYourWritesTransaction::getRange(
 	if(begin.getKey() > maxKey || end.getKey() > maxKey)
 		return key_outside_legal_range();
 
-	//This optimization prevents NULL operations from being added to the conflict range
+	//This optimization prevents nullptr operations from being added to the conflict range
 	if( limits.isReached() ) {
 		TEST(true); // RYW range read limit 0
 		return Standalone<RangeResultRef>();
@@ -1399,6 +1400,20 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 		return resetPromise.getFuture().getError();
 
 	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()), [](const StorageMetrics& m) { return m.bytes; });
+}
+
+Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(const KeyRange& range,
+                                                                                     int64_t chunkSize) {
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+	if (resetPromise.isSet()) return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if(range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
 }
 
 void ReadYourWritesTransaction::addReadConflictRange( KeyRangeRef const& keys ) {
@@ -2053,9 +2068,6 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 	    case FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES:
 		    validateOptionValue(value, false);
 			options.specialKeySpaceChangeConfiguration = true;
-			// By default, it allows to read system keys
-			// More options will be implicitly enabled if needed when doing set or clear
-			options.readSystemKeys = true;
 			break;
 		default:
 			break;

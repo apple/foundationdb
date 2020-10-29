@@ -136,11 +136,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return "BackupAndParallelRestoreCorrectness"; }
+	std::string description() const override { return "BackupAndParallelRestoreCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) return Void();
 
 		TraceEvent(SevInfo, "BARW_Param").detail("Locked", locked);
@@ -158,11 +158,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		return _start(cx, this);
 	}
 
-	bool hasPrefix() { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
+	bool hasPrefix() const { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
 
-	virtual Future<bool> check(Database const& cx) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
@@ -237,9 +237,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
 					state Reference<IBackupContainer> lastBackupContainer;
 					state UID lastBackupUID;
-					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
+					state EBackupState resultWait = wait(
+					    backupAgent->waitBackup(cx, backupTag.tagName, false, &lastBackupContainer, &lastBackupUID));
 
-					TraceEvent("BARW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName).detail("Result", resultWait);
+					TraceEvent("BARW_DoBackupWaitForRestorable", randomID)
+					    .detail("Tag", backupTag.tagName)
+					    .detail("Result", BackupAgentBase::getStateText(resultWait));
 
 					state bool restorable = false;
 					if (lastBackupContainer) {
@@ -255,23 +258,28 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					}
 
 					TraceEvent("BARW_LastBackupContainer", randomID)
-						.detail("BackupTag", printable(tag))
-						.detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
-						.detail("LastBackupUID", lastBackupUID).detail("WaitStatus", resultWait).detail("Restorable", restorable);
+					    .detail("BackupTag", printable(tag))
+					    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+					    .detail("LastBackupUID", lastBackupUID)
+					    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
+					    .detail("Restorable", restorable);
 
 					// Do not check the backup, if aborted
-					if (resultWait == BackupAgentBase::STATE_ABORTED) {
+					if (resultWait == EBackupState::STATE_ABORTED) {
 					}
 					// Ensure that a backup container was found
 					else if (!lastBackupContainer) {
 						TraceEvent(SevError, "BARW_MissingBackupContainer", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag)).detail("WaitStatus", resultWait);
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n",
-						       printable(tag).c_str(), resultWait);
+						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %s\n",
+						       printable(tag).c_str(), BackupAgentBase::getStateText(resultWait));
 					}
 					// Check that backup is restorable
-					else if(!restorable) {
-						TraceEvent(SevError, "BARW_NotRestorable", randomID).detail("LastBackupUID", lastBackupUID).detail("BackupTag", printable(tag))
-							.detail("BackupFolder", lastBackupContainer->getURL()).detail("WaitStatus", resultWait);
+					else if (!restorable) {
+						TraceEvent(SevError, "BARW_NotRestorable", randomID)
+						    .detail("LastBackupUID", lastBackupUID)
+						    .detail("BackupTag", printable(tag))
+						    .detail("BackupFolder", lastBackupContainer->getURL())
+						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
 						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
 					}
 
@@ -280,7 +288,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					if (startDelay) {
 						TraceEvent("BARW_DoBackupAbortBackup2", randomID)
 						    .detail("Tag", printable(tag))
-						    .detail("WaitStatus", resultWait)
+						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
 						    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
 						    .detail("Restorable", restorable);
 						wait(backupAgent->abortBackup(cx, tag.toString()));
@@ -306,7 +314,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
+		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
 
 		state std::string statusText;
 
@@ -317,7 +325,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_DoBackupComplete", randomID)
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
-		    .detail("StatusValue", statusValue);
+		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
 
 		return Void();
 	}
@@ -468,6 +476,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("RestoreAfter", self->restoreAfter)
 				    .detail("BackupTag", printable(self->backupTag));
+				// start restoring
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
 				BackupDescription desc = wait(container->describeBackup());

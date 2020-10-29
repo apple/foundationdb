@@ -43,11 +43,9 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		extraDB = Database::createDatabase(extraFile, -1);
 	}
 
-	virtual std::string description() {
-		return "AtomicSwitchover";
-	}
+	std::string description() const override { return "AtomicSwitchover"; }
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _setup(cx, this);
@@ -66,18 +64,15 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges, StringRef backupPrefix, Database src, Database dest) {
 		state int rangeIndex;

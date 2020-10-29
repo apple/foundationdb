@@ -314,7 +314,7 @@ typedef enum _ESOArgType {
 } ESOArgType;
 
 //! this option definition must be the last entry in the table
-#define SO_END_OF_OPTIONS   { -1, NULL, SO_NONE }
+#define SO_END_OF_OPTIONS   { -1, nullptr, SO_NONE }
 
 #ifdef _DEBUG
 # ifdef _MSC_VER
@@ -353,9 +353,9 @@ public:
 
     /*! @brief Initialize the class. Init() must be called later. */
     CSimpleOptTempl() 
-        : m_rgShuffleBuf(NULL) 
+        : m_rgShuffleBuf(nullptr) 
     { 
-        Init(0, NULL, NULL, 0); 
+        Init(0, nullptr, nullptr, 0); 
     }
 
     /*! @brief Initialize the class in preparation for use. */
@@ -365,7 +365,7 @@ public:
         const SOption * a_rgOptions, 
         int             a_nFlags = 0
         ) 
-        : m_rgShuffleBuf(NULL) 
+        : m_rgShuffleBuf(nullptr) 
     { 
         Init(argc, argv, a_rgOptions, a_nFlags); 
     }
@@ -471,7 +471,7 @@ public:
 
     /*! @brief Return the argument for the current option where one exists.
 
-        If there is no argument for the option, this will return NULL.
+        If there is no argument for the option, this will return nullptr.
         This function is available only when Next() has returned true.
      */
     inline SOCHAR * OptionArg() const { return m_pszOptionArg; }
@@ -488,7 +488,7 @@ public:
         each time returning the desired number of arguments. Previously
         returned argument pointers are remain valid.
 
-        If an error occurs during processing, NULL will be returned and
+        If an error occurs during processing, nullptr will be returned and
         the error will be available via LastError().
 
         @param n    Number of arguments to return.
@@ -528,7 +528,7 @@ private:
     // Find the '=' character within a string.
     inline SOCHAR * FindEquals(SOCHAR *s) const {
         while (*s && *s != (SOCHAR)'=') ++s;
-        return *s ? s : NULL;
+        return *s ? s : nullptr;
     }
     bool IsEqual(SOCHAR a_cLeft, SOCHAR a_cRight, int a_nArgType) const;
 
@@ -578,13 +578,13 @@ CSimpleOptTempl<SOCHAR>::Init(
     m_nLastError     = SO_SUCCESS;
     m_nOptionIdx     = 0;
     m_nOptionId      = -1;
-    m_pszOptionText  = NULL;
-    m_pszOptionArg   = NULL;
+    m_pszOptionText  = nullptr;
+    m_pszOptionArg   = nullptr;
     m_nNextOption    = (a_nFlags & SO_O_USEALL) ? 0 : 1;
     m_szShort[0]     = (SOCHAR)'-';
     m_szShort[2]     = (SOCHAR)'\0';
     m_nFlags         = a_nFlags;
-    m_pszClump       = NULL;
+    m_pszClump       = nullptr;
 
 #ifdef SO_MAX_ARGS
 	if (m_argc > SO_MAX_ARGS) {
@@ -632,13 +632,13 @@ CSimpleOptTempl<SOCHAR>::Next()
         }
     }
     SO_ASSERT(!m_pszClump || !*m_pszClump);
-    m_pszClump = NULL;
+    m_pszClump = nullptr;
 
     // init for the next option
     m_nOptionIdx    = m_nNextOption;
     m_nOptionId     = -1;
-    m_pszOptionText = NULL;
-    m_pszOptionArg  = NULL;
+    m_pszOptionText = nullptr;
+    m_pszOptionArg  = nullptr;
     m_nLastError    = SO_SUCCESS;
 
     // find the next option
@@ -647,7 +647,7 @@ CSimpleOptTempl<SOCHAR>::Next()
     int nOptIdx = m_nOptionIdx;
     while (nTableIdx < 0 && nOptIdx < m_nLastArg) {
         SOCHAR * pszArg = m_argv[nOptIdx];
-        m_pszOptionArg  = NULL;
+        m_pszOptionArg  = nullptr;
 
         // find this option in the options table
         cFirst = PrepareArg(pszArg);
@@ -826,8 +826,8 @@ CSimpleOptTempl<SOCHAR>::NextClumped()
     // prepare for the next clumped option
     m_szShort[1]    = *m_pszClump++;
     m_nOptionId     = -1;
-    m_pszOptionText = NULL;
-    m_pszOptionArg  = NULL;
+    m_pszOptionText = nullptr;
+    m_pszOptionArg  = nullptr;
     m_nLastError    = SO_SUCCESS;
 
     // lookup this option, ensure that we are using exact matching
@@ -1023,7 +1023,7 @@ CSimpleOptTempl<SOCHAR>::MultiArg(
     // ensure we have enough arguments
     if (m_nNextOption + a_nCount > m_nLastArg) {
         m_nLastError = SO_ARG_MISSING;
-        return NULL;
+        return nullptr;
     }
 
     // our argument array
@@ -1037,7 +1037,7 @@ CSimpleOptTempl<SOCHAR>::MultiArg(
             if (rgpszArg[n][0] == (SOCHAR)'-') {
                 rgpszArg[n][0] = ch;
                 m_nLastError = SO_ARG_INVALID_DATA;
-                return NULL;
+                return nullptr;
             }
             rgpszArg[n][0] = ch;
         }

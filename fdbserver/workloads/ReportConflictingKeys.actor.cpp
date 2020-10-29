@@ -59,7 +59,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		nodeCount = getOption(options, LiteralStringRef("nodeCount"), 100);
 	}
 
-	std::string description() override { return "ReportConflictingKeysWorkload"; }
+	std::string description() const override { return "ReportConflictingKeysWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -83,7 +83,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	}
 
 	// disable the default timeout setting
-	double getCheckTimeout() override { return std::numeric_limits<double>::max(); }
+	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
 
 	// Copied from tester.actor.cpp, added parameter to determine the key's length
 	Key keyForIndex(int n) {

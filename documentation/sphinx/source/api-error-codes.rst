@@ -40,7 +40,7 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | external_client_already_loaded                | 1040| External client has already been loaded                                        |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
-| proxy_memory_limit_exceeded                   | 1042| Proxy commit memory limit exceeded                                             |
+| proxy_memory_limit_exceeded                   | 1042| CommitProxy commit memory limit exceeded                                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | batch_transaction_throttled                   | 1051| Batch GRV request rate limit exceeded                                          |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
@@ -114,7 +114,11 @@ FoundationDB may return the following error codes from API functions. If you nee
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | transaction_read_only                         | 2023| Attempted to commit a transaction specified as read-only                       |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| invalid_cache_eviction_policy                 | 2024| Invalid cache eviction policy, only random and lru are supported               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | network_cannot_be_restarted                   | 2025| Network can only be started once                                               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| blocked_from_network_thread                   | 2026| Detected a deadlock in a callback called from the network thread               |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | incompatible_protocol_version                 | 2100| Incompatible protocol version                                                  |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+

@@ -1,3 +1,6 @@
+set(RUN_JAVA_TESTS ON CACHE BOOL "Run Java unit tests")
+set(RUN_JUNIT_TESTS OFF CACHE BOOL "Compile and run junit tests")
+
 set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/async/AsyncIterable.java
   src/main/com/apple/foundationdb/async/AsyncIterator.java
@@ -29,6 +32,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
+  src/main/com/apple/foundationdb/FutureKeyArray.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
   src/main/com/apple/foundationdb/FutureStrings.java
@@ -44,6 +48,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
+  src/main/com/apple/foundationdb/KeyArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
@@ -101,6 +106,10 @@ set(JAVA_TESTS_SRCS
   src/test/com/apple/foundationdb/test/VersionstampSmokeTest.java
   src/test/com/apple/foundationdb/test/WatchTest.java
   src/test/com/apple/foundationdb/test/WhileTrueTest.java)
+
+set(JAVA_JUNIT_TESTS
+  src/junit/com/apple/foundationdb/tuple/AllTests.java
+  src/junit/com/apple/foundationdb/tuple/ArrayUtilTests.java)
 
 set(GENERATED_JAVA_DIR ${CMAKE_CURRENT_BINARY_DIR}/src/main/com/apple/foundationdb)
 file(MAKE_DIRECTORY ${GENERATED_JAVA_DIR})
@@ -172,12 +181,6 @@ file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
 add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
   OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${CMAKE_PROJECT_VERSION} MANIFEST ${MANIFEST_FILE})
 add_dependencies(fdb-java fdb_java_options fdb_java)
-
-# TODO[mpilman]: The java RPM will require some more effort (mostly on debian). However,
-# most people will use the fat-jar, so it is not clear how high this priority is.
-
-#install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT java)
-#install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT java)
 
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
@@ -252,4 +255,30 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fat-jar fdb-java)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
+
+  if(RUN_JAVA_TESTS)
+    set(enabled ENABLED)
+  else()
+    set(enabled DISABLED)
+  endif()
+  set(TEST_CP ${tests_jar} ${target_jar})
+  message(STATUS "TEST_CP ${TEST_CP}")
+  add_java_test(NAME DirectoryTest CLASS_PATH ${TEST_CP}
+    CLASS com.apple.foundationdb.test.DirectoryTest ${enabled})
+
+  if(RUN_JUNIT_TESTS)
+    file(DOWNLOAD "https://search.maven.org/remotecontent?filepath=junit/junit/4.13/junit-4.13.jar"
+      ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar
+      EXPECTED_HASH SHA256=4b8532f63bdc0e0661507f947eb324a954d1dbac631ad19c8aa9a00feed1d863)
+    file(DOWNLOAD "https://repo1.maven.org/maven2/org/hamcrest/hamcrest-all/1.3/hamcrest-all-1.3.jar"
+      ${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar
+      EXPECTED_HASH SHA256=4877670629ab96f34f5f90ab283125fcd9acb7e683e66319a68be6eb2cca60de)
+    add_jar(fdb-junit SOURCES ${JAVA_JUNIT_TESTS} INCLUDE_JARS fdb-java ${CMAKE_BINARY_DIR}/packages/junit-4.13.jar)
+    get_property(junit_jar_path TARGET fdb-junit PROPERTY JAR_FILE)
+    add_test(NAME junit
+      COMMAND ${Java_JAVA_EXECUTABLE}
+              -cp "${target_jar}:${junit_jar_path}:${CMAKE_BINARY_DIR}/packages/junit-4.13.jar:${CMAKE_BINARY_DIR}/packages/hamcrest-all-1.3.jar"
+              -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+              org.junit.runner.JUnitCore "com.apple.foundationdb.tuple.AllTests")
+  endif()
 endif()

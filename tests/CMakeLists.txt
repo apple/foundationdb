@@ -137,6 +137,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
+  add_fdb_test(TEST_FILES fast/SimpleAtomicAdd.toml)
   add_fdb_test(TEST_FILES fast/SpecialKeySpaceCorrectness.toml)
   add_fdb_test(TEST_FILES fast/SwizzledRollbackSideband.toml)
   add_fdb_test(TEST_FILES fast/SystemRebootTestCycle.toml)
@@ -168,6 +169,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
   add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.toml
+               restarting/from_7.0.0/SnapIncrementalRestore-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.txt
                restarting/from_7.0.0/ConfigureTestRestart-2.txt)
   add_fdb_test(
@@ -194,6 +198,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_5.2.0/ClientTransactionProfilingCorrectness-1.txt
                restarting/from_5.2.0/ClientTransactionProfilingCorrectness-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
+               restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
                restarting/to_6.3.5/CycleTestRestart-2.txt)
@@ -236,7 +243,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.toml)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml)
+  add_fdb_test(TEST_FILES ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml IGNORE)
   # Note that status tests are not deterministic.
   add_fdb_test(TEST_FILES status/invalid_proc_addresses.txt)
   add_fdb_test(TEST_FILES status/local_6_machine_no_replicas_remain.txt)

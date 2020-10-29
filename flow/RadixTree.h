@@ -84,7 +84,7 @@ private:
 
 	struct node {
 		// constructor for all kinds of node (root/internal/leaf)
-		node() : m_is_leaf(0), m_is_inline(0), m_inline_length(0), m_depth(0), key(), arena(), m_parent(NULL) {}
+		node() : m_is_leaf(0), m_is_inline(0), m_inline_length(0), m_depth(0), key(), arena(), m_parent(nullptr) {}
 
 		node(const node&) = delete; // delete
 		node& operator=(const node& other) {
@@ -229,7 +229,7 @@ public:
 	public:
 		node* m_pointee;
 
-		iterator() : m_pointee(NULL) {}
+		iterator() : m_pointee(nullptr) {}
 		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
 		iterator(node* p) : m_pointee(p) {}
 		iterator& operator=(const iterator& r) { m_pointee = r.m_pointee; return *this; }
@@ -250,7 +250,7 @@ public:
 		node* decrement(node* target) const;
 	};
 
-	explicit radix_tree() : m_size(0), m_node(0), inline_keys(0), total_bytes(0), m_root(NULL) {}
+	explicit radix_tree() : m_size(0), m_node(0), inline_keys(0), total_bytes(0), m_root(nullptr) {}
 
 	~radix_tree() {}
 
@@ -284,9 +284,9 @@ public:
 	bool empty() const { return m_size == 0; }
 
 	void clear() {
-		if (m_root != NULL) {
+		if (m_root != nullptr) {
 			delete (internalNode*)m_root;
-			m_root = NULL;
+			m_root = nullptr;
 		}
 		m_size = 0;
 		m_node = 0;
@@ -516,7 +516,7 @@ radix_tree::node* radix_tree::get_child(node* parent, int index) {
 
 radix_tree::node* radix_tree::iterator::increment(node* target) const {
 	radix_tree::node* parent = target->m_parent;
-	if (parent == NULL) return NULL;
+	if (parent == nullptr) return nullptr;
 
 	int index = find_child(parent, target->getFirstByte());
 	ASSERT(index != child_size(parent));
@@ -530,7 +530,7 @@ radix_tree::node* radix_tree::iterator::increment(node* target) const {
 
 radix_tree::node* radix_tree::iterator::decrement(radix_tree::node* target) const {
 	radix_tree::node* parent = target->m_parent;
-	if (parent == NULL) return NULL;
+	if (parent == nullptr) return nullptr;
 
 	int index = find_child(parent, target->getFirstByte());
 	ASSERT(index != child_size(parent));
@@ -552,13 +552,13 @@ bool radix_tree::iterator::operator==(const radix_tree::iterator& lhs) const {
 }
 
 const radix_tree::iterator& radix_tree::iterator::operator++() {
-	if (m_pointee != NULL) // it is undefined behaviour to dereference iterator that is out of bounds...
+	if (m_pointee != nullptr) // it is undefined behaviour to dereference iterator that is out of bounds...
         m_pointee = increment(m_pointee);
     return *this;
 }
 
 const radix_tree::iterator& radix_tree::iterator::operator--() {
-	if (m_pointee != NULL && m_pointee->m_is_leaf) {
+	if (m_pointee != nullptr && m_pointee->m_is_leaf) {
         m_pointee = decrement(m_pointee);
     }
     return *this;
@@ -568,7 +568,7 @@ const radix_tree::iterator& radix_tree::iterator::operator--() {
  * reconstruct the key
  */
 StringRef radix_tree::iterator::getKey(uint8_t* content) const {
-	if (m_pointee == NULL) return StringRef();
+	if (m_pointee == nullptr) return StringRef();
 
 	ASSERT(m_pointee->m_is_leaf);
 	//  memset(content, 0, len);
@@ -578,19 +578,19 @@ StringRef radix_tree::iterator::getKey(uint8_t* content) const {
 	while(true){
 		memcpy(content + pos, node->getKey().begin(), node->getKeySize());
 		node = node->m_parent;
-		if (node == NULL || pos <= 0) break;
+		if (node == nullptr || pos <= 0) break;
 		pos -= node->getKeySize();
 	}
 	return StringRef(content, (m_pointee->m_depth + m_pointee->getKeySize()));
 }
 
 radix_tree::iterator radix_tree::end() const {
-	return iterator(NULL);
+	return iterator(nullptr);
 }
 
 radix_tree::iterator radix_tree::begin() {
-	if (m_root == NULL || m_size == 0)
-		return iterator(NULL);
+	if (m_root == nullptr || m_size == 0)
+		return iterator(nullptr);
 	else {
 		return descend<0>(m_root);
 	}
@@ -598,8 +598,8 @@ radix_tree::iterator radix_tree::begin() {
 
 /////////////////////// lookup //////////////////////////
 radix_tree::iterator radix_tree::find(const StringRef& key) {
-	if (m_root == NULL)
-        return iterator(NULL);
+	if (m_root == nullptr)
+        return iterator(nullptr);
 
     auto node = find_node(key, m_root, 0);
 	StringRef key_sub = radix_substr(key, node->m_depth, (key.size() - node->m_depth));
@@ -652,13 +652,13 @@ radix_tree::node* radix_tree::find_node(const StringRef& key, node* node, int de
  * Returns the smallest node x such that *x>=key, or end()
  */
 radix_tree::iterator radix_tree::lower_bound(const StringRef& key) {
-	if(m_root == NULL || m_size == 0)
-        return iterator(NULL);
+	if(m_root == nullptr || m_size == 0)
+        return iterator(nullptr);
     return lower_bound(key, m_root);
 }
 
 radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
-    iterator result(NULL);
+    iterator result(nullptr);
 	int size = child_size(node);
 
 	for (int it = 0; it < size; ++it) {
@@ -689,16 +689,16 @@ radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
  * Returns the smallest x such that *x>key, or end()
  */
 radix_tree::iterator radix_tree::upper_bound(const StringRef& key) {
-	if(m_root == NULL || m_size == 0)
-        return iterator(NULL);
+	if(m_root == nullptr || m_size == 0)
+        return iterator(nullptr);
     return upper_bound(key, m_root);
 }
 
 radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
-	if(node == NULL || node->m_is_leaf)
+	if(node == nullptr || node->m_is_leaf)
         return iterator(node);
 
-    iterator result(NULL);
+    iterator result(nullptr);
 	int size = child_size(node);
 
 	for (int it = 0; it < size; ++it) {
@@ -731,7 +731,7 @@ radix_tree::iterator radix_tree::previous(radix_tree::iterator i) {
         // for iterator == end(), find the largest element
 		return descend<1>(m_root);
 	} else if (i == begin()) {
-		return iterator(NULL);
+		return iterator(nullptr);
 	} else {
 		--i;
         return i;
@@ -810,7 +810,7 @@ radix_tree::node* radix_tree::prepend(node* split, const StringRef& key, const S
 
 std::pair<radix_tree::iterator, bool> radix_tree::insert(const StringRef& key, const StringRef& val,
                                                          bool replaceExisting) {
-	if (m_root == NULL) {
+	if (m_root == nullptr) {
 		m_root = (node*)new radix_tree::internalNode();
 		total_bytes += getElementBytes(m_root);
 	}
@@ -855,8 +855,8 @@ void radix_tree::erase(iterator it) {
 }
 
 bool radix_tree::erase(radix_tree::node* child) {
-	if (m_root == NULL) return false;
-	ASSERT(child != NULL);
+	if (m_root == nullptr) return false;
+	ASSERT(child != nullptr);
 
 	if (!child->m_is_leaf) return false;
 

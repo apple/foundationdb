@@ -91,12 +91,12 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 		catch(...) {
 			new (db) DatabaseContext(unknown_error());
 		}
-	}, NULL);
+	}, nullptr);
 }
 
 ThreadSafeDatabase::~ThreadSafeDatabase() {
 	DatabaseContext *db = this->db;
-	onMainThreadVoid( [db](){ db->delref(); }, NULL );
+	onMainThreadVoid( [db](){ db->delref(); }, nullptr );
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
@@ -114,18 +114,18 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx) {
 		    cx->addref();
 		    new (tr) ReadYourWritesTransaction(Database(cx));
 	    },
-	    NULL);
+	    nullptr);
 }
 
 ThreadSafeTransaction::~ThreadSafeTransaction() {
 	ReadYourWritesTransaction *tr = this->tr;
 	if (tr)
-		onMainThreadVoid( [tr](){ tr->delref(); }, NULL );
+		onMainThreadVoid( [tr](){ tr->delref(); }, nullptr );
 }
 
 void ThreadSafeTransaction::cancel() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->cancel(); }, NULL );
+	onMainThreadVoid( [tr](){ tr->cancel(); }, nullptr );
 }
 
 void ThreadSafeTransaction::setVersion( Version v ) {
@@ -171,6 +171,16 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes( const K
 		} );
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+                                                                                       int64_t chunkSize) {
+	KeyRange r = range;
+
+	ReadYourWritesTransaction* tr = this->tr;
+	return onMainThread([tr, r, chunkSize]() -> Future<Standalone<VectorRef<KeyRef>>> {
+		tr->checkDeferredError();
+		return tr->getRangeSplitPoints(r, chunkSize);
+	});
+}
 
 ThreadFuture< Standalone<RangeResultRef> > ThreadSafeTransaction::getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot, bool reverse ) {
 	KeySelector b = begin;
@@ -335,17 +345,17 @@ ThreadFuture<Void> ThreadSafeTransaction::onError( Error const& e ) {
 
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
-	r.tr = NULL;
+	r.tr = nullptr;
 }
 
 ThreadSafeTransaction::ThreadSafeTransaction(ThreadSafeTransaction&& r) noexcept {
 	tr = r.tr;
-	r.tr = NULL;
+	r.tr = nullptr;
 }
 
 void ThreadSafeTransaction::reset() {
 	ReadYourWritesTransaction *tr = this->tr;
-	onMainThreadVoid( [tr](){ tr->reset(); }, NULL );
+	onMainThreadVoid( [tr](){ tr->reset(); }, nullptr );
 }
 
 extern const char* getSourceVersion();

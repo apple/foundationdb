@@ -171,20 +171,13 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		subtaskCount = getOption( options, LiteralStringRef("subtaskCount"), 20 );
 	}
 
-	virtual std::string description() {
-		return "TaskBucketCorrectness";
-	}
+	std::string description() const override { return "TaskBucketCorrectness"; }
 
-	virtual Future<Void> start(Database const& cx) {
-		return _start(cx, this);
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check(Database const& cx) {
-		return _check(cx, this);
-	}
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, bool chained, int subtaskCount) {
 		state Key addedInitKey(LiteralStringRef("addedInitTasks"));

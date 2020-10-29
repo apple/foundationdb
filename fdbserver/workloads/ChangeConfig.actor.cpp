@@ -41,18 +41,16 @@ struct ChangeConfigWorkload : TestWorkload {
 		networkAddresses = getOption( options, LiteralStringRef("coordinators"), StringRef() ).toString();
 	}
 
-	virtual std::string description() { return "ChangeConfig"; }
+	std::string description() const override { return "ChangeConfig"; }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( this->clientId != 0 ) return Void();
 		return ChangeConfigClient( cx->clone(), this );
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload *self) {
 		if (g_network->isSimulated() && g_simulator.extraDB) {

@@ -624,8 +624,8 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		choose {
 			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
 				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id())
-				    .detail("MasterProxy0", ni.masterProxies.size() ? ni.masterProxies[0].id() : UID())
-					.detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
+				    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].id() : UID())
+				    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
 				    .detail("ClientID", ni.id);
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 			}
@@ -681,24 +681,25 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 	}
 }
 
-void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastMasterProxyUIDs, std::vector<MasterProxyInterface>& lastMasterProxies,
-					  std::vector<UID>& lastGrvProxyUIDs, std::vector<GrvProxyInterface>& lastGrvProxies) {
-	if(ni.masterProxies.size() > CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS) {
-		std::vector<UID> masterProxyUIDs;
-		for(auto& masterProxy : ni.masterProxies) {
-			masterProxyUIDs.push_back(masterProxy.id());
+void shrinkProxyList(ClientDBInfo& ni, std::vector<UID>& lastCommitProxyUIDs,
+                     std::vector<CommitProxyInterface>& lastCommitProxies, std::vector<UID>& lastGrvProxyUIDs,
+                     std::vector<GrvProxyInterface>& lastGrvProxies) {
+	if (ni.commitProxies.size() > CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS) {
+		std::vector<UID> commitProxyUIDs;
+		for (auto& commitProxy : ni.commitProxies) {
+			commitProxyUIDs.push_back(commitProxy.id());
 		}
-		if(masterProxyUIDs != lastMasterProxyUIDs) {
-			lastMasterProxyUIDs.swap(masterProxyUIDs);
-			lastMasterProxies = ni.masterProxies;
-			deterministicRandom()->randomShuffle(lastMasterProxies);
-			lastMasterProxies.resize(CLIENT_KNOBS->MAX_MASTER_PROXY_CONNECTIONS);
-			for(int i = 0; i < lastMasterProxies.size(); i++) {
-				TraceEvent("ConnectedMasterProxy").detail("MasterProxy", lastMasterProxies[i].id());
+		if (commitProxyUIDs != lastCommitProxyUIDs) {
+			lastCommitProxyUIDs.swap(commitProxyUIDs);
+			lastCommitProxies = ni.commitProxies;
+			deterministicRandom()->randomShuffle(lastCommitProxies);
+			lastCommitProxies.resize(CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS);
+			for (int i = 0; i < lastCommitProxies.size(); i++) {
+				TraceEvent("ConnectedCommitProxy").detail("CommitProxy", lastCommitProxies[i].id());
 			}
 		}
-		ni.firstProxy = ni.masterProxies[0];
-		ni.masterProxies = lastMasterProxies;
+		ni.firstCommitProxy = ni.commitProxies[0];
+		ni.commitProxies = lastCommitProxies;
 	}
 	if(ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
 		std::vector<UID> grvProxyUIDs;
@@ -719,14 +720,16 @@ void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastMasterProxyUIDs, s
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
+ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
+    Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info,
+    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
 	state int successIdx = 0;
 	state Optional<double> incorrectTime;
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastCommitProxyUIDs;
+	state std::vector<CommitProxyInterface> lastCommitProxies;
 	state std::vector<UID> lastGrvProxyUIDs;
 	state std::vector<GrvProxyInterface> lastGrvProxies;
 
@@ -780,7 +783,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			connFile->notifyConnected();
 
 			auto& ni = rep.get().mutate();
-			shrinkProxyList(ni, lastProxyUIDs, lastProxies, lastGrvProxyUIDs, lastGrvProxies);
+			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->set( ni );
 			successIdx = idx;
 		} else {

@@ -32,7 +32,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StatusClient.h"
@@ -43,6 +43,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/LogProtocolMessage.h"
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -130,12 +131,12 @@ struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
 		delete adding;
 	}
 
-	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, NULL, NULL); }
-	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, NULL, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), NULL); }
-	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), NULL); }
+	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
+	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), nullptr); }
+	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), nullptr); }
 
-	bool isReadable() const { return readWrite!=NULL; }
+	bool isReadable() const { return readWrite!=nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
 	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
@@ -151,10 +152,10 @@ struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
 };
 
 struct StorageServerDisk {
-	explicit StorageServerDisk( struct StorageServer* data, IKeyValueStore* storage ) : data(data), storage(storage) {}
+	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
 	void makeNewStorageServerDurable();
-	bool makeVersionMutationsDurable( Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft );
+	bool makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft);
 	void makeVersionDurable( Version version );
 	Future<bool> restoreDurableState();
 
@@ -500,7 +501,7 @@ public:
 			previousBusiestTag.reset();
 			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-				if (rate > SERVER_KNOBS->MIN_TAG_PAGES_RATE) {
+				if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
 					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 				}
 
@@ -1020,6 +1021,11 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	return Void();
 };
 
+// Pessimistic estimate the number of overhead bytes used by each
+// watch. Watch key references are stored in an AsyncMap<Key,bool>, and actors
+// must be kept alive until the watch is finished.
+static constexpr size_t WATCH_OVERHEAD_BYTES = 1000;
+
 ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, SpanID parent ) {
 	state Location spanLocation = "SS:WatchValueImpl"_loc;
 	state Span span(spanLocation, { parent });
@@ -1070,7 +1076,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, 
 				}
 
 				++data->numWatches;
-				data->watchBytes += ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+				data->watchBytes += (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				try {
 					if(latest < minVersion) {
 						// If the version we read is less than minVersion, then we may fail to be notified of any changes that occur up to or including minVersion
@@ -1083,10 +1089,10 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req, 
 					}
 					wait(watchFuture);
 					--data->numWatches;
-					data->watchBytes -= ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+					data->watchBytes -= (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 				} catch( Error &e ) {
 					--data->numWatches;
-					data->watchBytes -= ( req.key.expectedSize() + req.value.expectedSize() + 1000 );
+					data->watchBytes -= (req.key.expectedSize() + req.value.expectedSize() + WATCH_OVERHEAD_BYTES);
 					throw;
 				}
 			} catch( Error &e ) {
@@ -2776,6 +2782,7 @@ private:
 ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 {
 	state double start;
+	state Span span("SS:update"_loc);
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -2846,6 +2853,10 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm.toString());
 					dbgLastMessageWasProtocol = true;
 					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+				}
+				else if (cloneReader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(cloneReader)) {
+					SpanContextMessage scm;
+					cloneReader >> scm;
 				}
 				else {
 					MutationRef msg;
@@ -2940,6 +2951,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
 			}
+			else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
+				SpanContextMessage scm;
+				rd >> scm;
+				span.addParent(scm.spanContext);
+			}
 			else {
 				MutationRef msg;
 				rd >> msg;
@@ -2991,7 +3007,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(injectedChanges) data->lastVersionWithData = ver;
 
-		data->updateEagerReads = NULL;
+		data->updateEagerReads = nullptr;
 		data->debug_inApplyUpdate = false;
 
 		if(ver == invalidVersion && !fii.changes.empty() ) {
@@ -3081,20 +3097,21 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		loop {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before", since oldestVersion.set() may trigger waiting actors)
-			// forgetVersionsBeforeAsync visibly forgets immediately (without waiting) but asynchronously frees memory.
-			Future<Void> finishedForgetting = data->mutableData().forgetVersionsBeforeAsync( newOldestVersion, TaskPriority::UpdateStorage );
-			data->oldestVersion.set( newOldestVersion );
-			wait( finishedForgetting );
-			wait( yield(TaskPriority::UpdateStorage) );
+			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
+			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
+			// immediately (without waiting) but asynchronously frees memory.
+			Future<Void> finishedForgetting =
+			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
+			data->oldestVersion.set(newOldestVersion);
+			wait(finishedForgetting);
+			wait(yield(TaskPriority::UpdateStorage));
 			if (done) break;
 		}
 
 		// Set the new durable version as part of the outstanding change set, before commit
-		if (startOldestVersion != newOldestVersion)
-			data->storage.makeVersionDurable( newOldestVersion );
+		if (startOldestVersion != newOldestVersion) data->storage.makeVersionDurable(newOldestVersion);
 
-		debug_advanceMaxCommittedVersion( data->thisServerID, newOldestVersion );
+		debug_advanceMaxCommittedVersion(data->thisServerID, newOldestVersion);
 		state Future<Void> durable = data->storage.commit();
 		state Future<Void> durableDelay = Void();
 
@@ -3102,12 +3119,14 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
 		}
 
-		wait( durable );
+		wait(durable);
 
-		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
+		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
-		if(newOldestVersion > data->rebootAfterDurableVersion) {
-			TraceEvent("RebootWhenDurableTriggered", data->thisServerID).detail("NewOldestVersion", newOldestVersion).detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
+		if (newOldestVersion > data->rebootAfterDurableVersion) {
+			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
+			    .detail("NewOldestVersion", newOldestVersion)
+			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
 			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
 			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
 			// Otherwise, in the race situation when storage server receives both reboot and
@@ -3119,19 +3138,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		wait( delay(0, TaskPriority::UpdateStorage) ); //Setting durableInProgess could cause the storage server to shut down, so delay to check for cancellation
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
+		                                             // down, so delay to check for cancellation
 
-		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was effective and
-		// are applied after we change the durable version. Also ensure that we have to lock while calling changeDurableVersion,
-		// because otherwise the latest version of mutableData might be partially loaded.
-		wait( data->durableVersionLock.take() );
-		data->popVersion( data->durableVersion.get() + 1 );
+		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
+		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
+		// changeDurableVersion, because otherwise the latest version of mutableData might be partially loaded.
+		wait(data->durableVersionLock.take());
+		data->popVersion(data->durableVersion.get() + 1);
 
-		while (!changeDurableVersion( data, newOldestVersion )) {
-			if(g_network->check_yield(TaskPriority::UpdateStorage)) {
+		while (!changeDurableVersion(data, newOldestVersion)) {
+			if (g_network->check_yield(TaskPriority::UpdateStorage)) {
 				data->durableVersionLock.release();
 				wait(delay(0, TaskPriority::UpdateStorage));
-				wait( data->durableVersionLock.take() );
+				wait(data->durableVersionLock.take());
 			}
 		}
 
@@ -3139,7 +3159,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 
-		wait( durableDelay );
+		wait(durableDelay);
 	}
 }
 
@@ -3224,14 +3244,15 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations, 
 	}
 }
 
-bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion, Version newStorageVersion, int64_t& bytesLeft ) {
+bool StorageServerDisk::makeVersionMutationsDurable(Version& prevStorageVersion, Version newStorageVersion,
+                                                    int64_t& bytesLeft) {
 	if (bytesLeft <= 0) return true;
 
 	// Apply mutations from the mutationLog
 	auto u = data->getMutationLog().upper_bound(prevStorageVersion);
 	if (u != data->getMutationLog().end() && u->first <= newStorageVersion) {
 		VerUpdateRef const& v = u->second;
-		ASSERT( v.version > prevStorageVersion && v.version <= newStorageVersion );
+		ASSERT(v.version > prevStorageVersion && v.version <= newStorageVersion);
 		// TODO(alexmiller): Update to version tracking.
 		DEBUG_KEY_RANGE("makeVersionMutationsDurable", v.version, KeyRangeRef());
 		writeMutations(v.mutations, v.version, "makeVersionDurable");
@@ -3255,7 +3276,7 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	data->addMutationToMutationLogOrStorage(version, MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
-ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* storage, Key begin, Key end, std::vector<Standalone<VectorRef<KeyValueRef>>>* results = NULL) {
+ACTOR Future<Void> applyByteSampleResult( StorageServer* data, IKeyValueStore* storage, Key begin, Key end, std::vector<Standalone<VectorRef<KeyValueRef>>>* results = nullptr) {
 	state int totalFetches = 0;
 	state int totalKeys = 0;
 	state int totalBytes = 0;
@@ -3676,6 +3697,14 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 					self->metrics.getReadHotRanges(req);
 				}
 			}
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
+				if (!self->isReadable(req.keys)) {
+					TEST(true); // getSplitPoints immediate wrong_shard_server()
+					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
+				} else {
+					self->metrics.getSplitPoints(req);
+				}
+			}
 			when (wait(doPollMetrics) ) {
 				self->metrics.poll();
 				doPollMetrics = delay(SERVER_KNOBS->STORAGE_SERVER_POLL_METRICS_DELAY);
@@ -3974,9 +4003,13 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 
 	loop {
 		state Future<Void> infoChanged = self->db->onChange();
-		state Reference<ProxyInfo> proxies( new ProxyInfo(self->db->get().client.masterProxies) );
+		state Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(self->db->get().client.commitProxies, false));
 		choose {
-			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? basicLoadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
+			when(GetStorageServerRejoinInfoReply _rep =
+			         wait(commitProxies->size()
+			                  ? basicLoadBalance(commitProxies, &CommitProxyInterface::getStorageServerRejoinInfo,
+			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
+			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 				try {
 					tr.reset();
@@ -4171,4 +4204,3 @@ void versionedMapTest() {
 	printf("Memory used: %f MB\n",
 		 (after - before)/ 1e6);
 }
-

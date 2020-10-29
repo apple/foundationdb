@@ -90,22 +90,21 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual std::string description() { return "Data Distribution Metrics Exclude"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) { return _start(cx, this); }
-	virtual Future<bool> check( Database const& cx ) {
+	std::string description() const override { return "Data Distribution Metrics Exclude"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<bool> check(Database const& cx) override {
 		movingDataPerSec = peakMovingData / ddDone;
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( PerfMetric( "peakMovingData", peakMovingData, false));
 		m.push_back( PerfMetric( "peakInQueue", peakInQueue, false));
 		m.push_back( PerfMetric( "peakInFlight", peakInFlight, false));
 		m.push_back( PerfMetric( "DDDuration", ddDone, false ) );
 		m.push_back( PerfMetric( "movingDataPerSec", movingDataPerSec, false));
 	}
-
 };
 
 WorkloadFactory<DDMetricsExcludeWorkload> DDMetricsExcludeWorkloadFactory("DDMetricsExclude");

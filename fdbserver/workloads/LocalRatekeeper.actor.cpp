@@ -54,7 +54,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		blockWritesFor = getOption(options, LiteralStringRef("blockWritesFor"),
 								   double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX)/double(1e6));
 	}
-	virtual std::string description() { return "LocalRatekeeperWorkload"; }
+	std::string description() const { return "LocalRatekeeperWorkload"; }
 
 	ACTOR static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
 		state Transaction tr(cx);
@@ -123,15 +123,15 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		// we run this only on one client
 		if (clientId != 0 || !g_network->isSimulated()) {
 			return Void();
 		}
 		return _start(this, cx);
 	}
-	virtual Future<bool> check(Database const& cx) { return !testFailed; }
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	Future<bool> check(Database const& cx) override { return !testFailed; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 } // namespace

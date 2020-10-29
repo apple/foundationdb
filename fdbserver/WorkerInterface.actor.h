@@ -46,7 +46,7 @@ struct WorkerInterface {
 	LocalityData locality;
 	RequestStream< struct InitializeTLogRequest > tLog;
 	RequestStream< struct RecruitMasterRequest > master;
-	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
+	RequestStream<struct InitializeCommitProxyRequest> commitProxy;
 	RequestStream< struct InitializeGrvProxyRequest > grvProxy;
 	RequestStream< struct InitializeDataDistributorRequest > dataDistributor;
 	RequestStream< struct InitializeRatekeeperRequest > ratekeeper;
@@ -81,7 +81,7 @@ struct WorkerInterface {
 		clientInterface.initEndpoints();
 		tLog.getEndpoint( TaskPriority::Worker );
 		master.getEndpoint( TaskPriority::Worker );
-		masterProxy.getEndpoint( TaskPriority::Worker );
+		commitProxy.getEndpoint(TaskPriority::Worker);
 		grvProxy.getEndpoint( TaskPriority::Worker );
 		resolver.getEndpoint( TaskPriority::Worker );
 		logRouter.getEndpoint( TaskPriority::Worker );
@@ -93,7 +93,10 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, clientInterface, locality, tLog, master, masterProxy, grvProxy, dataDistributor, ratekeeper, resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate, eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq, backup, updateServerDBInfo);
+		serializer(ar, clientInterface, locality, tLog, master, commitProxy, grvProxy, dataDistributor, ratekeeper,
+		           resolver, storage, logRouter, debugPing, coordinationPing, waitFailure, setMetricsRate,
+		           eventLogRequest, traceBatchDumpRequest, testerInterface, diskStoreRequest, execReq, workerSnapReq,
+		           backup, updateServerDBInfo);
 	}
 };
 
@@ -180,7 +183,7 @@ struct RegisterMasterRequest {
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
-	std::vector<MasterProxyInterface> masterProxies;
+	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<GrvProxyInterface> grvProxies;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
@@ -199,7 +202,7 @@ struct RegisterMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, id, mi, logSystemConfig, masterProxies, grvProxies, resolvers, recoveryCount, registrationCount,
+		serializer(ar, id, mi, logSystemConfig, commitProxies, grvProxies, resolvers, recoveryCount, registrationCount,
 		           configuration, priorCommittedLogServers, recoveryState, recoveryStalled, reply);
 	}
 };
@@ -209,7 +212,7 @@ struct RecruitFromConfigurationReply {
 	std::vector<WorkerInterface> backupWorkers;
 	std::vector<WorkerInterface> tLogs;
 	std::vector<WorkerInterface> satelliteTLogs;
-	std::vector<WorkerInterface> masterProxies;
+	std::vector<WorkerInterface> commitProxies;
 	std::vector<WorkerInterface> grvProxies;
 	std::vector<WorkerInterface> resolvers;
 	std::vector<WorkerInterface> storageServers;
@@ -221,7 +224,7 @@ struct RecruitFromConfigurationReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tLogs, satelliteTLogs, masterProxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
+		serializer(ar, tLogs, satelliteTLogs, commitProxies, grvProxies, resolvers, storageServers, oldLogRouters, dcId,
 		           satelliteFallback, backupWorkers);
 	}
 };
@@ -433,13 +436,13 @@ struct RecruitMasterRequest {
 	}
 };
 
-struct InitializeMasterProxyRequest {
+struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
 	bool firstProxy;
-	ReplyPromise<MasterProxyInterface> reply;
+	ReplyPromise<CommitProxyInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -488,13 +491,13 @@ struct InitializeRatekeeperRequest {
 struct InitializeResolverRequest {
 	constexpr static FileIdentifier file_identifier = 7413317;
 	uint64_t recoveryCount;
-	int proxyCount;
+	int commitProxyCount;
 	int resolverCount;
 	ReplyPromise<ResolverInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryCount, proxyCount, resolverCount, reply);
+		serializer(ar, recoveryCount, commitProxyCount, resolverCount, reply);
 	}
 };
 
@@ -672,7 +675,7 @@ struct Role {
 	static const Role STORAGE_SERVER;
 	static const Role TRANSACTION_LOG;
 	static const Role SHARED_TRANSACTION_LOG;
-	static const Role MASTER_PROXY;
+	static const Role COMMIT_PROXY;
 	static const Role GRV_PROXY;
 	static const Role MASTER;
 	static const Role RESOLVER;
@@ -735,7 +738,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData, StorageServerIn
                                  Reference<ClusterConnectionFile> connFile );  // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
 ACTOR Future<Void> masterServer(MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface,
                                 ServerCoordinators serverCoordinators, LifetimeToken lifetime, bool forceRecovery);
-ACTOR Future<Void> masterProxyServer(MasterProxyInterface proxy, InitializeMasterProxyRequest req,
+ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy, InitializeCommitProxyRequest req,
                                      Reference<AsyncVar<ServerDBInfo>> db, std::string whitelistBinPaths);
 ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy, InitializeGrvProxyRequest req, Reference<AsyncVar<ServerDBInfo>> db);
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData, IDiskQueue* persistentQueue,

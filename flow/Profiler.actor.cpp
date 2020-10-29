@@ -163,7 +163,7 @@ struct Profiler {
 	}
 
 	void enableSignal(bool enabled) {
-		sigprocmask( enabled?SIG_UNBLOCK:SIG_BLOCK, &profilingSignals, NULL );
+		sigprocmask( enabled?SIG_UNBLOCK:SIG_BLOCK, &profilingSignals, nullptr );
 	}
 
 	void phdr( struct dl_phdr_info* info ) {
@@ -216,7 +216,7 @@ struct Profiler {
 		act.sa_sigaction = SignalClosure::signal_handler;
 		sigemptyset(&act.sa_mask);
 		act.sa_flags = SA_SIGINFO;
-		sigaction( SIGPROF, &act, NULL );
+		sigaction( SIGPROF, &act, nullptr );
 
 		// Set up periodic profiling timer
 		int period_ns = period * 1000;
@@ -236,7 +236,7 @@ struct Profiler {
 			return Void();
 		}
 		self->timerInitialized = true;
-		if(timer_settime( self->periodicTimer, 0, &tv, NULL ) != 0) {
+		if(timer_settime( self->periodicTimer, 0, &tv, nullptr ) != 0) {
 			TraceEvent(SevWarn, "FailedToSetProfilingTimer").GetLastError();
 			return Void();
 		}

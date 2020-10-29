@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;

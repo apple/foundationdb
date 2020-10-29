@@ -63,7 +63,7 @@ void RandomByteGenerator::writeRandomBytesToBuffer(void *buf, int bytes){
 const int AsyncFileWorkload::_PAGE_SIZE = 4096;
 
 AsyncFileWorkload::AsyncFileWorkload(WorkloadContext const& wcx)
-	: TestWorkload(wcx), fileHandle(NULL)
+	: TestWorkload(wcx), fileHandle(nullptr)
 {
 	//Only run on one client
 	enabled = clientId == 0;
@@ -93,13 +93,13 @@ AsyncFileBuffer::AsyncFileBuffer(size_t size, bool aligned)
 		buffer = (unsigned char*)_aligned_malloc(size, AsyncFileWorkload::_PAGE_SIZE);
 #else
 		if(posix_memalign((void**)&buffer, AsyncFileWorkload::_PAGE_SIZE, size) != 0)
-			buffer = NULL;
+			buffer = nullptr;
 #endif
 	}
 	else
 		buffer = (unsigned char*)malloc(size);
 
-	if(buffer == NULL)
+	if(buffer == nullptr)
 	{
 		TraceEvent(SevError, "TestFailure").detail("Reason", "Insufficient memory");
 		ASSERT(false);

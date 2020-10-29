@@ -57,11 +57,11 @@ struct VersionStampWorkload : TestWorkload {
 		soleOwnerOfMetadataVersionKey = getOption(options, LiteralStringRef("soleOwnerOfMetadataVersionKey"), false);
 	}
 
-	virtual std::string description() { return "VersionStamp"; }
+	std::string description() const override { return "VersionStamp"; }
 
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		// Versionstamp behavior changed starting with API version 520, so
 		// choose a version to check compatibility.
 		double choice = deterministicRandom()->random01();
@@ -131,7 +131,7 @@ struct VersionStampWorkload : TestWorkload {
 		return result;
 	}
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (clientId == 0)
 			return _check(cx, this);
 		return true;
@@ -162,7 +162,17 @@ struct VersionStampWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
-		state Version readVersion = wait(tr.getReadVersion());
+		state Version readVersion;
+		loop {
+			try {
+				Version _readVersion = wait(tr.getReadVersion());
+				readVersion = _readVersion;
+				break;
+			}
+			catch(Error &e) {
+				wait(tr.onError(e));
+			}
+		}
 
 		if(BUGGIFY) {
 			if(deterministicRandom()->random01() < 0.5) {
@@ -283,14 +293,14 @@ struct VersionStampWorkload : TestWorkload {
 		return true;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
 		state double startTime = now();
 		state double lastTime = now();
 		state Database extraDB;
 
-		if (g_simulator.extraDB != NULL) {
+		if (g_simulator.extraDB != nullptr) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			extraDB = Database::createDatabase(extraFile, -1);
 		}

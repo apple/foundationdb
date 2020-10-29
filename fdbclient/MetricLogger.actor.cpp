@@ -171,7 +171,7 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig *config, TDMetri
 // Implementation of IMetricDB
 class MetricDB : public IMetricDB {
 public:
-	MetricDB(ReadYourWritesTransaction *tr = NULL) : tr(tr) {}
+	MetricDB(ReadYourWritesTransaction *tr = nullptr) : tr(tr) {}
 	~MetricDB() {}
 
 	// levelKey is the prefix for the entire level, no timestamp at the end

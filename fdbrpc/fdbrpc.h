@@ -80,7 +80,7 @@ private:
 };
 
 template <class T>
-struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
+struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	using FastAllocated<NetSAV<T>>::operator new;
 	using FastAllocated<NetSAV<T>>::operator delete;
 
@@ -89,8 +89,8 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	  : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {
 	}
 
-	virtual void destroy() { delete this; }
-	virtual void receive(ArenaObjectReader& reader) {
+	void destroy() override { delete this; }
+	void receive(ArenaObjectReader& reader) override {
 		if (!SAV<T>::canBeSet()) return;
 		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
@@ -115,7 +115,7 @@ public:
 
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
 	bool isSet() { return sav->isSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
@@ -144,7 +144,7 @@ public:
 	}
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() { auto ptr = sav; sav = nullptr; return ptr; }
 	explicit ReplyPromise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
@@ -212,12 +212,8 @@ void setReplyPriority(ReplyPromise<Reply> & p, TaskPriority taskID) { p.getEndpo
 template <class Reply>
 void setReplyPriority(const ReplyPromise<Reply> & p, TaskPriority taskID) { p.getEndpoint(taskID); }
 
-
-
-
-
 template <class T>
-struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T>> {
+struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T>> {
 	using FastAllocated<NetNotifiedQueue<T>>::operator new;
 	using FastAllocated<NetNotifiedQueue<T>>::operator delete;
 
@@ -225,17 +221,16 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
-	virtual void destroy() { delete this; }
-	virtual void receive(ArenaObjectReader& reader) {
+	void destroy() override { delete this; }
+	void receive(ArenaObjectReader& reader) override {
 		this->addPromiseRef();
 		T message;
 		reader.deserialize(message);
 		this->send(std::move(message));
 		this->delPromiseRef();
 	}
-	virtual bool isStream() const { return true; }
+	bool isStream() const override { return true; }
 };
-
 
 template <class T>
 class RequestStream {

@@ -43,11 +43,9 @@ struct MoveKeysWorkload : TestWorkload {
 		maxKeyspace = getOption( options, LiteralStringRef("maxKeyspace"), 0.1 );
 	}
 
-	virtual std::string description() { return "MoveKeysWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	std::string description() const override { return "MoveKeysWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR Future<Void> _start( Database cx, MoveKeysWorkload *self ) {
 		if( self->enabled ) {
@@ -76,10 +74,11 @@ struct MoveKeysWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual double getCheckTimeout() { return testDuration/2 + 1; }
-	virtual Future<bool> check( Database const& cx ) { return tag(delay(testDuration/2), true); }  // Give the database time to recover from our damage
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	double getCheckTimeout() const override { return testDuration / 2 + 1; }
+	Future<bool> check(Database const& cx) override {
+		return tag(delay(testDuration / 2), true);
+	} // Give the database time to recover from our damage
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	KeyRange getRandomKeys() const {
 		double len = deterministicRandom()->random01() * this->maxKeyspace;
@@ -133,7 +132,9 @@ struct MoveKeysWorkload : TestWorkload {
 
 		try {
 			state Promise<Void> signal;
-			wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false, relocateShardInterval.pairID ) );
+			state DDEnabledState ddEnabledState;
+			wait(moveKeys(cx, keys, destinationTeamIDs, destinationTeamIDs, lock, signal, &fl1, &fl2, false,
+			              relocateShardInterval.pairID, &ddEnabledState));
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {

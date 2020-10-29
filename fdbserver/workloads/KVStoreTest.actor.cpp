@@ -104,7 +104,7 @@ struct KVTest {
 	bool dispose;
 
 	explicit KVTest(int nodeCount, bool dispose, int keyBytes)
-	  : store(NULL), dispose(dispose), startVersion(Version(time(NULL)) << 30), lastSet(startVersion),
+	  : store(nullptr), dispose(dispose), startVersion(Version(time(nullptr)) << 30), lastSet(startVersion),
 	    lastCommit(startVersion), lastDurable(startVersion), nodeCount(nodeCount), keyBytes(keyBytes) {}
 	~KVTest() { close(); }
 	void close() {
@@ -215,21 +215,21 @@ struct KVStoreTestWorkload : TestWorkload {
 		saturation = getOption(options, LiteralStringRef("saturation"), false);
 		storeType = getOption(options, LiteralStringRef("storeType"), LiteralStringRef("ssd")).toString();
 	}
-	virtual std::string description() { return "KVStoreTest"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) {
+	std::string description() const override { return "KVStoreTest"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled) return testKVStore(this);
 		return Void();
 	}
-	virtual Future<bool> check(Database const& cx) { return true; }
-	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, Histogram<float>& h) {
+	Future<bool> check(Database const& cx) override { return true; }
+	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, Histogram<float>& h) const {
 		m.push_back(PerfMetric("Min " + name, 1000.0 * h.min(), true));
 		m.push_back(PerfMetric("Average " + name, 1000.0 * h.mean(), true));
 		m.push_back(PerfMetric("Median " + name, 1000.0 * h.medianEstimate(), true));
 		m.push_back(PerfMetric("95%% " + name, 1000.0 * h.percentileEstimate(0.95), true));
 		m.push_back(PerfMetric("Max " + name, 1000.0 * h.max(), true));
 	}
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		if (setupTook) m.push_back(PerfMetric("SetupTook", setupTook, false));
 
 		m.push_back(reads.getMetric());

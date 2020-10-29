@@ -49,19 +49,17 @@ struct WatchesWorkload : TestWorkload {
 		tempRand.randomShuffle( nodeOrder );
 	}
 
-	virtual std::string description() { return "Watches"; }
+	std::string description() const override { return "Watches"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return _setup(cx, this);
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
 			return watchesWorker( cx, this );
 		return Void();
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		bool ok = true;
 		for( int i = 0; i < clients.size(); i++ )
 			if( clients[i].isError() )
@@ -70,7 +68,7 @@ struct WatchesWorkload : TestWorkload {
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		if( clientId == 0 ) {
 			m.push_back( cycles.getMetric() );
 			m.push_back( PerfMetric( "Mean Latency (ms)", 1000 * cycleLatencies.mean() / nodes, true ) );

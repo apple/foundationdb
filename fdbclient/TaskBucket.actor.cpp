@@ -69,7 +69,7 @@ REGISTER_TASKFUNC(AddTaskFunc);
 
 struct IdleTaskFunc : TaskFuncBase {
 	static StringRef name;
-	static const uint32_t version = 1;
+	static constexpr uint32_t version = 1;
 
 	StringRef getName() const { return name; };
 	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -1242,6 +1242,6 @@ ACTOR Future<Key> getCompletionKey(TaskCompletionKey *self, Future<Reference<Tas
 }
 
 Future<Key> TaskCompletionKey::get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
-	ASSERT(key.present() == (joinFuture.getPtr() == NULL));
+	ASSERT(key.present() == (joinFuture.getPtr() == nullptr));
 	return key.present() ? key.get() : getCompletionKey(this, joinFuture->joinedFuture(tr, taskBucket));
 }

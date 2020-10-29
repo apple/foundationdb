@@ -72,6 +72,8 @@ struct StorageServerInterface {
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
 	RequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
+	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
+
 	explicit StorageServerInterface(UID uid) : uniqueID( uid ) {}
 	StorageServerInterface() : uniqueID( deterministicRandom()->randomUniqueID() ) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
@@ -98,6 +100,7 @@ struct StorageServerInterface {
 				getKeyValueStoreType = RequestStream<ReplyPromise<KeyValueStoreType>>( getValue.getEndpoint().getAdjustedEndpoint(9) );
 				watchValue = RequestStream<struct WatchValueRequest>( getValue.getEndpoint().getAdjustedEndpoint(10) );
 				getReadHotRanges = RequestStream<struct ReadHotSubRangeRequest>( getValue.getEndpoint().getAdjustedEndpoint(11) );
+				getRangeSplitPoints = RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -125,6 +128,7 @@ struct StorageServerInterface {
 		streams.push_back(getKeyValueStoreType.getReceiver());
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
+		streams.push_back(getRangeSplitPoints.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -476,6 +480,34 @@ struct ReadHotSubRangeRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, reply, arena);
+	}
+};
+
+struct SplitRangeReply {
+	constexpr static FileIdentifier file_identifier = 11813134;
+	// If the given range can be divided, contains the split points.
+	// If the given range cannot be divided(for exmaple its total size is smaller than the chunk size), this would be
+	// empty
+	Standalone<VectorRef<KeyRef>> splitPoints;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, splitPoints);
+	}
+};
+struct SplitRangeRequest {
+	constexpr static FileIdentifier file_identifier = 10725174;
+	Arena arena;
+	KeyRangeRef keys;
+	int64_t chunkSize;
+	ReplyPromise<SplitRangeReply> reply;
+
+	SplitRangeRequest() {}
+	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keys, chunkSize, reply, arena);
 	}
 };
 

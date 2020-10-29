@@ -158,7 +158,7 @@ struct TPCC : TestWorkload {
 		}
 	}
 
-	virtual std::string description() override { return DESCRIPTION; }
+	std::string description() const override { return DESCRIPTION; }
 
 	// Transactions
 
@@ -674,16 +674,16 @@ struct TPCC : TestWorkload {
 		}
 	}
 
-	double transactionsPerMinute() {
+	double transactionsPerMinute() const {
 		return metrics.successfulNewOrderTransactions * 60.0 / (testDuration - 2 * warmupTime);
 	}
 
-	bool recordMetrics() {
+	bool recordMetrics() const {
 		auto now = g_network->now();
 		return (now > startTime + warmupTime && now < startTime + testDuration - warmupTime);
 	}
 
-	virtual Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override {
 		if (clientId >= clientsUsed) return Void();
 		return _start(cx, this);
 	}
@@ -705,10 +705,10 @@ struct TPCC : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx) override {
+	Future<bool> check(Database const& cx) override {
 		return (transactionsPerMinute() > expectedTransactionsPerMinute);
 	}
-	virtual void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientsUsed);
 
 		m.push_back(PerfMetric("Transactions Per Minute", transactionsPerMinute(), false));

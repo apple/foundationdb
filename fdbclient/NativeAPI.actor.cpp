@@ -40,7 +40,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -95,7 +95,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	DatabaseContext* ctx, const Reference<LocationInfo> alternatives, RequestStream<Request> Interface::*channel,
 	const Request& request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
-	QueueModel* model = NULL) {
+	QueueModel* model = nullptr) {
 	if (alternatives->hasCaches) {
 		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
 	}
@@ -147,7 +147,7 @@ Reference<StorageServerInfo> StorageServerInfo::getInterface( DatabaseContext *c
 }
 
 void StorageServerInfo::notifyContextDestroyed() {
-	cx = NULL;
+	cx = nullptr;
 }
 
 StorageServerInfo::~StorageServerInfo() {
@@ -155,7 +155,7 @@ StorageServerInfo::~StorageServerInfo() {
 		auto it = cx->server_interf.find( interf.id() );
 		if( it != cx->server_interf.end() )
 			cx->server_interf.erase( it );
-		cx = NULL;
+		cx = nullptr;
 	}
 }
 
@@ -187,6 +187,12 @@ std::string printable( const std::string& str ) {
 
 std::string printable( const KeyRangeRef& range ) {
 	return printable(range.begin) + " - " + printable(range.end);
+}
+
+std::string printable(const VectorRef<KeyRangeRef>& val) {
+	std::string s;
+	for (int i = 0; i < val.size(); i++) s = s + printable(val[i]) + " ";
+	return s;
 }
 
 int unhex( char c ) {
@@ -484,15 +490,15 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 }
 
 ACTOR static Future<Void> monitorProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
-	state vector< MasterProxyInterface > curProxies;
+	state vector<CommitProxyInterface> curCommitProxies;
 	state vector< GrvProxyInterface > curGrvProxies;
-	curProxies = clientDBInfo->get().masterProxies;
+	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop{
 		wait(clientDBInfo->onChange());
-		if (clientDBInfo->get().masterProxies != curProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
-			curProxies = clientDBInfo->get().masterProxies;
+		if (clientDBInfo->get().commitProxies != curCommitProxies || clientDBInfo->get().grvProxies != curGrvProxies) {
+			curCommitProxies = clientDBInfo->get().commitProxies;
 			curGrvProxies = clientDBInfo->get().grvProxies;
 			triggerVar->trigger();
 		}
@@ -571,13 +577,6 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 							containedRangesBegin = ranges.begin().range().begin;
 						}
 						for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
-							// We probably don't want to do the code below? Otherwise we would never
-							// fetch the corresponding storages - which would give us a different semantics
-							//if (containedRangesEnd > iter->range().begin) {
-							//	self->locationCache.insert(
-							//	    KeyRangeRef{ containedRangesEnd, iter->range().begin },
-							//	    Reference<LocationInfo>{ new LocationInfo{ cacheInterfaces, true } });
-							//}
 							containedRangesEnd = iter->range().end;
 							if (iter->value() && !iter->value()->hasCaches) {
 								iter->value() = addCaches(iter->value(), cacheInterfaces);
@@ -586,7 +585,8 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 						auto iter = self->locationCache.rangeContaining(begin);
 						if (iter->value() && !iter->value()->hasCaches) {
 							if (end>=iter->range().end) {
-								self->locationCache.insert(KeyRangeRef{ begin, iter->range().end },
+								Key endCopy = iter->range().end; // Copy because insertion invalidates iterator
+								self->locationCache.insert(KeyRangeRef{ begin, endCopy },
 														   addCaches(iter->value(), cacheInterfaces));
 							} else {
 								self->locationCache.insert(KeyRangeRef{ begin, end },
@@ -595,7 +595,8 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 						}
 						iter = self->locationCache.rangeContainingKeyBefore(end);
 						if (iter->value() && !iter->value()->hasCaches) {
-							self->locationCache.insert(KeyRangeRef{iter->range().begin, end}, addCaches(iter->value(), cacheInterfaces));
+							Key beginCopy = iter->range().begin; // Copy because insertion invalidates iterator
+							self->locationCache.insert(KeyRangeRef{beginCopy, end}, addCaches(iter->value(), cacheInterfaces));
 						}
 					}
 				}
@@ -881,7 +882,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
-	connected = (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size())
+	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
 	                ? Void()
 	                : clientInfo->onChange();
 
@@ -928,8 +929,27 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<ExclusionInProgressRangeImpl>(
-		        KeyRangeRef(LiteralStringRef("inProgressExclusion/"), LiteralStringRef("inProgressExclusion0"))
+		        KeyRangeRef(LiteralStringRef("in_progress_exclusion/"), LiteralStringRef("in_progress_exclusion0"))
 				.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CONFIGURATION, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ProcessClassRangeImpl>(
+		        KeyRangeRef(LiteralStringRef("process/class_type/"), LiteralStringRef("process/class_type0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::CONFIGURATION, SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<ProcessClassSourceRangeImpl>(
+		        KeyRangeRef(LiteralStringRef("process/class_source/"), LiteralStringRef("process/class_source0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
+		registerSpecialKeySpaceModule(
+			SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+			std::make_unique<LockDatabaseImpl>(singleKeyRange(LiteralStringRef("db_locked"))
+					.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<ConsistencyCheckImpl>(
+		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1164,10 +1184,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::MACHINE_ID:
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
-				if( clientInfo->get().masterProxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies) );
-				if( clientInfo->get().grvProxies.size() )
-					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ) );
+			    if (clientInfo->get().commitProxies.size())
+				    commitProxies = Reference<CommitProxyInfo>(new CommitProxyInfo(clientInfo->get().commitProxies, false));
+			    if( clientInfo->get().grvProxies.size() )
+					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies, true) );
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1176,10 +1196,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				break;
 			case FDBDatabaseOptions::DATACENTER_ID:
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
-				if( clientInfo->get().masterProxies.size() )
-					masterProxies = Reference<ProxyInfo>( new ProxyInfo( clientInfo->get().masterProxies));
-				if( clientInfo->get().grvProxies.size() )
-					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies ));
+			    if (clientInfo->get().commitProxies.size())
+				    commitProxies = Reference<CommitProxyInfo>( new CommitProxyInfo(clientInfo->get().commitProxies, false));
+			    if( clientInfo->get().grvProxies.size() )
+					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies, true));
 				server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
@@ -1220,13 +1240,13 @@ ACTOR static Future<Void> switchConnectionFileImpl(Reference<ClusterConnectionFi
 	    .detail("ConnectionString", connFile->getConnectionString().toString());
 
 	// Reset state from former cluster.
-	self->masterProxies.clear();
+	self->commitProxies.clear();
 	self->grvProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
 	self->invalidateCache(allKeys);
 
 	auto clearedClientInfo = self->clientInfo->get();
-	clearedClientInfo.masterProxies.clear();
+	clearedClientInfo.commitProxies.clear();
 	clearedClientInfo.grvProxies.clear();
 	clearedClientInfo.id = deterministicRandom()->randomUniqueID();
 	self->clientInfo->set(clearedClientInfo);
@@ -1307,7 +1327,7 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detail("ClusterFile", connFile->getFilename().c_str())
 				.detail("ConnectionString", connFile->getConnectionString().toString())
-				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 				.detail("ApiVersion", apiVersion)
 				.detailf("ImageOffset", "%p", platform::getImageOffset())
 				.trackLatest("ClientStart");
@@ -1561,29 +1581,29 @@ void stopNetwork() {
 void DatabaseContext::updateProxies() {
 	if (proxiesLastChange == clientInfo->get().id) return;
 	proxiesLastChange = clientInfo->get().id;
-	masterProxies.clear();
+	commitProxies.clear();
 	grvProxies.clear();
-	bool masterProxyProvisional = false, grvProxyProvisional = false;
-	if (clientInfo->get().masterProxies.size()) {
-		masterProxies = Reference<ProxyInfo>(new ProxyInfo(clientInfo->get().masterProxies));
-		masterProxyProvisional = clientInfo->get().masterProxies[0].provisional;
+	bool commitProxyProvisional = false, grvProxyProvisional = false;
+	if (clientInfo->get().commitProxies.size()) {
+		commitProxies = Reference<CommitProxyInfo>(new CommitProxyInfo(clientInfo->get().commitProxies, false));
+		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = Reference<GrvProxyInfo>(new GrvProxyInfo(clientInfo->get().grvProxies));
+		grvProxies = Reference<GrvProxyInfo>(new GrvProxyInfo(clientInfo->get().grvProxies, true));
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
-	if (clientInfo->get().masterProxies.size() && clientInfo->get().grvProxies.size()) {
-		ASSERT(masterProxyProvisional == grvProxyProvisional);
-		proxyProvisional = masterProxyProvisional;
+	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
+		ASSERT(commitProxyProvisional == grvProxyProvisional);
+		proxyProvisional = commitProxyProvisional;
 	}
 }
 
-Reference<ProxyInfo> DatabaseContext::getMasterProxies(bool useProvisionalProxies) {
+Reference<CommitProxyInfo> DatabaseContext::getCommitProxies(bool useProvisionalProxies) {
 	updateProxies();
 	if (proxyProvisional && !useProvisionalProxies) {
-		return Reference<ProxyInfo>();
+		return Reference<CommitProxyInfo>();
 	}
-	return masterProxies;
+	return commitProxies;
 }
 
 Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxies) {
@@ -1594,19 +1614,19 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(bool useProvisionalProxie
 	return grvProxies;
 }
 
-//Actor which will wait until the MultiInterface<MasterProxyInterface> returned by the DatabaseContext cx is not NULL
-ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx, bool useProvisionalProxies) {
+// Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not nullptr
+ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx, bool useProvisionalProxies) {
 	loop{
-		Reference<ProxyInfo> proxies = cx->getMasterProxies(useProvisionalProxies);
-		if (proxies)
-			return proxies;
+		Reference<CommitProxyInfo> commitProxies = cx->getCommitProxies(useProvisionalProxies);
+		if (commitProxies)
+			return commitProxies;
 		wait( cx->onProxiesChanged() );
 	}
 }
 
-//Returns a future which will not be set until the ProxyInfo of this DatabaseContext is not NULL
-Future<Reference<ProxyInfo>> DatabaseContext::getMasterProxiesFuture(bool useProvisionalProxies) {
-	return ::getMasterProxiesFuture(this, useProvisionalProxies);
+// Returns a future which will not be set until the CommitProxyInfo of this DatabaseContext is not nullptr
+Future<Reference<CommitProxyInfo>> DatabaseContext::getCommitProxiesFuture(bool useProvisionalProxies) {
+	return ::getCommitProxiesFuture(this, useProvisionalProxies);
 }
 
 void GetRangeLimits::decrement( VectorRef<KeyValueRef> const& data ) {
@@ -1733,8 +1753,8 @@ ACTOR Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(Da
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when (wait(cx->onProxiesChanged())) {}
-			when (GetKeyServerLocationsReply rep = wait(basicLoadBalance(
-			         cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations,
+			when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
+			         cx->getCommitProxies(info.useProvisionalProxies), &CommitProxyInterface::getKeyServersLocations,
 			         GetKeyServerLocationsRequest(span.context, key, Optional<KeyRef>(), 100, isBackward, key.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
@@ -1782,8 +1802,8 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when ( wait( cx->onProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
-			         cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::getKeyServersLocations,
+			when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
+			         cx->getCommitProxies(info.useProvisionalProxies), &CommitProxyInterface::getKeyServersLocations,
 			         GetKeyServerLocationsRequest(span.context, keys.begin, keys.end, limit, reverse, keys.arena()),
 			         TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
@@ -1806,6 +1826,7 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 	}
 }
 
+// Returns a vector of <ShardRange, storage server location info> pairs.
 template <class F>
 Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database const& cx, KeyRange const& keys, int limit, bool reverse, F StorageServerInterface::*member, TransactionInfo const& info ) {
 	ASSERT (!keys.empty());
@@ -2512,7 +2533,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					GetKeyValuesReply _rep =
 						wait(loadBalance(cx.getPtr(), beginServer.second, &StorageServerInterface::getKeyValues, req,
 										 TaskPriority::DefaultPromiseEndpoint, false,
-										 cx->enableLocalityLoadBalance ? &cx->queueModel : NULL));
+										 cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr));
 					rep = _rep;
 					++cx->transactionPhysicalReadsCompleted;
 				} catch(Error&) {
@@ -2678,7 +2699,7 @@ void debugAddTags(Transaction *tr) {
 Transaction::Transaction(Database const& cx)
   : cx(cx), info(cx->taskID, deterministicRandom()->randomUniqueID()), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
     committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
-    trLogInfo(createTrLogInfoProbabilistically(cx)), span(info.spanID, "Transaction"_loc) {
+    trLogInfo(createTrLogInfoProbabilistically(cx)), tr(info.spanID), span(info.spanID, "Transaction"_loc) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(this);
 	}
@@ -3450,14 +3471,16 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		req.debugID = commitID;
 		state Future<CommitID> reply;
 		if (options.commitOnFirstProxy) {
-			if(cx->clientInfo->get().firstProxy.present()) {
-				reply = throwErrorOr ( brokenPromiseToMaybeDelivered ( cx->clientInfo->get().firstProxy.get().commit.tryGetReply(req) ) );
+			if (cx->clientInfo->get().firstCommitProxy.present()) {
+				reply = throwErrorOr(brokenPromiseToMaybeDelivered(
+				    cx->clientInfo->get().firstCommitProxy.get().commit.tryGetReply(req)));
 			} else {
-				const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().masterProxies;
+				const std::vector<CommitProxyInterface>& proxies = cx->clientInfo->get().commitProxies;
 				reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
 			}
 		} else {
-			reply = basicLoadBalance( cx->getMasterProxies(info.useProvisionalProxies), &MasterProxyInterface::commit, req, TaskPriority::DefaultPromiseEndpoint, true );
+			reply = basicLoadBalance(cx->getCommitProxies(info.useProvisionalProxies), &CommitProxyInterface::commit,
+			                         req, TaskPriority::DefaultPromiseEndpoint, true);
 		}
 
 		choose {
@@ -3531,8 +3554,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// We don't know if the commit happened, and it might even still be in flight.
 
 			if (!options.causalWriteRisky) {
-				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the version we submitted with is dead, or by committing a conflicting transaction successfully
-				//if ( cx->getMasterProxies()->masterGeneration <= originalMasterGeneration )
+				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the
+				// version we submitted with is dead, or by committing a conflicting transaction successfully
+				// if ( cx->getCommitProxies()->masterGeneration <= originalMasterGeneration )
 
 				// To ensure the original request is not in flight, we need a key range which intersects its read conflict ranges
 				// We pick a key range which also intersects its write conflict ranges, since that avoids potentially creating conflicts where there otherwise would be none
@@ -3879,12 +3903,14 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
                                                            TransactionPriority priority, uint32_t flags,
                                                            TransactionTagMap<uint32_t> tags, Optional<UID> debugID) {
 	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
-	try {
-		++cx->transactionReadVersionBatches;
-		if( debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
-		loop {
+
+	++cx->transactionReadVersionBatches;
+	if( debugID.present() )
+		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.Before");
+	loop {
+		try {
 			state GetReadVersionRequest req( span.context, transactionCount, priority, flags, tags, debugID );
+
 			choose {
 				when ( wait( cx->onProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( basicLoadBalance( cx->getGrvProxies(flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES), &GrvProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
@@ -3913,12 +3939,17 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan, Da
 					return v;
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
+				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
+			if(e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
+				wait(delayJittered(5.0));
+			} else {
+				throw;
+			}
 		}
-	} catch (Error& e) {
-		if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
-			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-		throw;
 	}
+
 }
 
 ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream<DatabaseContext::VersionRequest> versionStream, TransactionPriority priority, uint32_t flags ) {
@@ -4320,8 +4351,11 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			// 	    .detail("KeysEnd", keys.end.printable().c_str());
 			// }
 			state vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
+			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
-				ReadHotSubRangeRequest req(locations[i].first);
+				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+				ReadHotSubRangeRequest req(KeyRangeRef(partBegin, partEnd));
 				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getReadHotRanges, req,
 				                          TaskPriority::DataDistribution);
 			}
@@ -4433,8 +4467,8 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
 			when(ErrorOr<GetDDMetricsReply> rep =
-			         wait(errorOr(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::getDDMetrics,
-			                                  GetDDMetricsRequest(keys, shardLimit))))) {
+			         wait(errorOr(basicLoadBalance(cx->getCommitProxies(false), &CommitProxyInterface::getDDMetrics,
+			                                       GetDDMetricsRequest(keys, shardLimit))))) {
 				if (rep.isError()) {
 					throw rep.getError();
 				}
@@ -4447,6 +4481,58 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 
 Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> Transaction::getReadHotRanges(KeyRange const& keys) {
 	return ::getReadHotRanges(cx, keys);
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize) {
+	state Span span("NAPI:GetRangeSplitPoints"_loc);
+	loop {
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
+		    wait(getKeyRangeLocations(cx, keys, 100, false, &StorageServerInterface::getRangeSplitPoints,
+		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
+		try {
+			state int nLocs = locations.size();
+			state vector<Future<SplitRangeReply>> fReplies(nLocs);
+			KeyRef partBegin, partEnd;
+			for (int i = 0; i < nLocs; i++) {
+				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
+				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
+				fReplies[i] = loadBalance(locations[i].second->locations(), &StorageServerInterface::getRangeSplitPoints, req,
+				                          TaskPriority::DataDistribution);
+			}
+
+			wait(waitForAll(fReplies));
+			Standalone<VectorRef<KeyRef>> results;
+
+			results.push_back_deep(results.arena(), keys.begin);
+			for (int i = 0; i < nLocs; i++) {
+				if (i > 0) {
+					results.push_back_deep(results.arena(), locations[i].first.begin); // Need this shard boundary
+				}
+				if (fReplies[i].get().splitPoints.size() > 0) {
+					results.append(results.arena(), fReplies[i].get().splitPoints.begin(),
+										fReplies[i].get().splitPoints.size());
+					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
+				}
+			}
+			if (results.back() != keys.end) {
+				results.push_back_deep(results.arena(), keys.end);
+			}
+
+			return results;
+		} catch (Error& e) {
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
+				throw;
+			}
+			cx->invalidateCache(keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
+}
+
+Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
+	return ::getRangeSplitPoints(cx, keys, chunkSize);
 }
 
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
@@ -4539,7 +4625,9 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 		loop {
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
-				when(wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::proxySnapReq, ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID, true /*atmostOnce*/ ))) {
+				when(wait(basicLoadBalance(cx->getCommitProxies(false), &CommitProxyInterface::proxySnapReq,
+				                           ProxySnapRequest(snapCmd, snapUID, snapUID), cx->taskID,
+				                           true /*atmostOnce*/))) {
 					TraceEvent("SnapCreateExit")
 						.detail("SnapCmd", snapCmd.toString())
 						.detail("UID", snapUID);
@@ -4567,8 +4655,8 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
 				when(ExclusionSafetyCheckReply _ddCheck =
-				         wait(basicLoadBalance(cx->getMasterProxies(false), &MasterProxyInterface::exclusionSafetyCheckReq,
-				                          req, cx->taskID))) {
+				         wait(basicLoadBalance(cx->getCommitProxies(false),
+				                               &CommitProxyInterface::exclusionSafetyCheckReq, req, cx->taskID))) {
 					ddCheck = _ddCheck.safe;
 					break;
 				}

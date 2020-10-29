@@ -11,7 +11,7 @@ Summary
 Usage
 =====
 
-- To build the `flowbench` executable, add `-DBUILD_FLOWBENCH=ON` to your cmake command.
+- To build the `flowbench` executable, run `ninja flowbench` or `make flowbench` depending on which build system you're using.
 - Then you can run `bin/flowbench --help` to see possible uses of `flowbench`.
 - Running `bin/flowbench` directly will run all registered benchmarks, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/flowbench --benchmark_filter=<regex>`
 - All benchmark names can be listed with `bin/flowbench --benchmark_list_tests`

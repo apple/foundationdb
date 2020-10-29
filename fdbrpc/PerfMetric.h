@@ -58,8 +58,8 @@ struct PerfIntCounter {
 	PerfIntCounter(std::string name, vector<PerfIntCounter*>& v) : name(name), value(0) { v.push_back(this); }
 	void operator += (int64_t delta) { value += delta; }
 	void operator ++ () { value += 1; }
-	PerfMetric getMetric() { return PerfMetric( name, (double)value, false, "%.0lf" ); }
-	int64_t getValue() { return value; }
+	PerfMetric getMetric() const { return PerfMetric(name, static_cast<double>(value), false, "%.0lf"); }
+	int64_t getValue() const { return value; }
 	void clear() { value = 0; }
 
 private:
@@ -72,8 +72,8 @@ struct PerfDoubleCounter {
 	PerfDoubleCounter(std::string name, vector<PerfDoubleCounter*>& v) : name(name), value(0) { v.push_back(this); }
 	void operator += (double delta) { value += delta; }
 	void operator ++ () { value += 1.0; }
-	PerfMetric getMetric() { return PerfMetric( name, value, false ); }
-	double getValue() { return value; }
+	PerfMetric getMetric() const { return PerfMetric(name, value, false); }
+	double getValue() const { return value; }
 	void clear() { value = 0.0; }
 
 private:

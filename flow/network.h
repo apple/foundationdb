@@ -347,7 +347,7 @@ struct NetworkMetrics {
 
 	static const std::vector<int> starvationBins;
 
-	NetworkMetrics() {
+	NetworkMetrics() : lastRunLoopBusyness(0) {
 		for(int priority : starvationBins) {
 			starvationTrackers.emplace_back(static_cast<TaskPriority>(priority));
 		}

@@ -242,13 +242,17 @@ public:
 	}
 
 	bool present() const { return impl.has_value(); }
-	T& get() {
+	T& get() & {
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return impl.value();
 	}
-	T const& get() const {
+	T const& get() const& {
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return impl.value();
+	}
+	T&& get() && {
+		UNSTOPPABLE_ASSERT(impl.has_value());
+		return std::move(impl.value());
 	}
 	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
 
@@ -562,7 +566,7 @@ public:
 		memcpy(dst, data, length);
 		return dst + length;
 	}
-
+	
 	std::vector<StringRef> splitAny(StringRef sep) const {
 		StringRef r = *this;
 		std::vector<StringRef> tokens;

@@ -219,9 +219,9 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual std::string description() { return descriptionString.toString(); }
-	virtual Future<Void> setup( Database const& cx ) { return _setup( cx, this ); }
-	virtual Future<Void> start( Database const& cx ) { return _start( cx, this ); }
+	std::string description() const override { return descriptionString.toString(); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR static Future<bool> traceDumpWorkers( Reference<AsyncVar<ServerDBInfo>> db ) {
 		try {
@@ -261,7 +261,7 @@ struct ReadWriteWorkload : KVWorkload {
 			return true;
 	}
 
-	virtual void getMetrics(std::vector<PerfMetric>& m) {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = metricsDuration;
 		int reads = (aTransactions.getValue() * readsPerTransactionA) + (bTransactions.getValue() * readsPerTransactionB);
 		int writes = (aTransactions.getValue() * writesPerTransactionA) + (bTransactions.getValue() * writesPerTransactionB);

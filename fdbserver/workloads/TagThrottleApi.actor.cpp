@@ -36,23 +36,21 @@ struct TagThrottleApiWorkload : TestWorkload {
 		autoThrottleEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 	}
 
-	virtual std::string description() { return TagThrottleApiWorkload::NAME; }
+	std::string description() const override { return TagThrottleApiWorkload::NAME; }
 
-	virtual Future<Void> setup(Database const& cx) { 
+	Future<Void> setup(Database const& cx) override {
 		DatabaseContext::debugUseTags = true;
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (this->clientId != 0) return Void();
 		return timeout(runThrottleApi(this, cx), testDuration, Void());
 	}
 
-	virtual Future<bool> check(Database const& cx) { 
-		return true; 
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	static Optional<TagThrottleType> randomTagThrottleType() {
 		Optional<TagThrottleType> throttleType;

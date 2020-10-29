@@ -21,7 +21,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -61,8 +61,9 @@ struct VersionedMessage {
 
 		ArenaReader reader(arena, message, AssumeVersion(currentProtocolVersion));
 
-		// Return false for LogProtocolMessage.
+		// Return false for LogProtocolMessage and SpanContextMessage metadata messages.
 		if (LogProtocolMessage::isNextIn(reader)) return false;
+		if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) return false;
 
 		reader >> *m;
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
@@ -428,7 +429,7 @@ struct BackupData {
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
 		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(span.context, 1, TransactionPriority::DEFAULT,
+			GetReadVersionRequest request(span.context, 0, TransactionPriority::DEFAULT,
 			                                     GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onProxiesChanged())) {}

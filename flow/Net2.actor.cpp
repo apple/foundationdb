@@ -63,12 +63,12 @@ std::atomic<int64_t> net2RunLoopIterations(0);
 std::atomic<int64_t> net2RunLoopSleeps(0);
 
 volatile size_t net2backtraces_max = 10000;
-volatile void** volatile net2backtraces = NULL;
+volatile void** volatile net2backtraces = nullptr;
 volatile size_t net2backtraces_offset = 0;
 volatile bool net2backtraces_overflow = false;
 volatile int net2backtraces_count = 0;
 
-volatile void **other_backtraces = NULL;
+volatile void **other_backtraces = nullptr;
 sigset_t sigprof_set;
 
 
@@ -144,7 +144,7 @@ public:
 		if ( thread_network == this )
 			stopImmediately();
 		else
-			onMainThreadVoid( [this] { this->stopImmediately(); }, NULL );
+			onMainThreadVoid( [this] { this->stopImmediately(); }, nullptr );
 	}
 	virtual void addStopCallback( std::function<void()> fn ) {
 		if ( thread_network == this )
@@ -322,7 +322,7 @@ struct SendBufferIterator {
 		if(limit > 0)
 			p = p->next;
 		else
-			p = NULL;
+			p = nullptr;
 	}
 
 	boost::asio::const_buffer operator*() const {
@@ -537,10 +537,10 @@ struct SSLHandshakerThread : IThreadPoolReceiver {
 	SSLHandshakerThread() {}
 	virtual void init() {}
 
-	struct Handshake : TypedAction<SSLHandshakerThread,Handshake> {
+	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
 		Handshake(ssl_socket &socket, ssl_socket::handshake_type type) : socket(socket), type(type) {
 		}
-		virtual double getTimeEstimate() { return 0.001; }
+		double getTimeEstimate() const override { return 0.001; }
 
 		ThreadReturnPromise<Void> done;
 		ssl_socket &socket;
@@ -629,30 +629,10 @@ public:
 		init();
 	}
 
-	ACTOR static void doAcceptHandshake( Reference<SSLConnection> self, Promise<Void> connected) {
-		state std::pair<IPAddress,uint16_t> peerIP;
+	ACTOR static void doAcceptHandshake( Reference<SSLConnection> self, Promise<Void> connected ) {
 		state Hold<int> holder;
 
 		try {
-			peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
-			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-				if (now() < iter->second.second) {
-					if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
-						TraceEvent("TLSIncomingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
-						wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-						self->closeSocket();
-						connected.sendError(connection_failed());
-						return;
-					}
-				} else {
-					g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
-				}
-			}
-
-			wait(g_network->networkInfo.handshakeLock->take());
-			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
-
 			Future<Void> onHandshook;
 
 			// If the background handshakers are not all busy, use one
@@ -672,24 +652,51 @@ public:
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
 		} catch (...) {
-			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-				iter->second.first++;
-			} else {
-				g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
-			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
 	}
 
 	ACTOR static Future<Void> acceptHandshakeWrapper( Reference<SSLConnection> self ) {
+		state std::pair<IPAddress,uint16_t> peerIP;
+		peerIP = std::make_pair(self->getPeerAddress().ip, static_cast<uint16_t>(0));
+		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+		if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+			if (now() < iter->second.second) {
+				if(iter->second.first >= FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_ATTEMPTS) {
+					TraceEvent("TLSIncomingConnectionThrottlingWarning").suppressFor(1.0).detail("PeerIP", peerIP.first.toString());
+					wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+					self->closeSocket();
+					throw connection_failed();
+				}
+			} else {
+				g_network->networkInfo.serverTLSConnectionThrottler.erase(peerIP);
+			}
+		}
+
+		wait(g_network->networkInfo.handshakeLock->take());
+		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+		
 		Promise<Void> connected;
 		doAcceptHandshake(self, connected);
 		try {
-			wait(connected.getFuture());
-			return Void();
+			choose {
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
+			}
 		} catch (Error& e) {
+			if(e.code() != error_code_actor_cancelled) {
+				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+				if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+					iter->second.first++;
+				} else {
+					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT);
+				}
+			}
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
 			throw;
@@ -704,9 +711,6 @@ public:
 		state Hold<int> holder;
 
 		try {
-			wait(g_network->networkInfo.handshakeLock->take());
-			state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
-
 			Future<Void> onHandshook;
 			// If the background handshakers are not all busy, use one
 			if(N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
@@ -725,26 +729,37 @@ public:
 			wait(delay(0, TaskPriority::Handshake));
 			connected.send(Void());
 		} catch (...) {
-			std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
-			auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
-			if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
-				iter->second.first++;
-			} else {
-				g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
-			}
 			self->closeSocket();
 			connected.sendError(connection_failed());
 		}
 	}
 
 	ACTOR static Future<Void> connectHandshakeWrapper( Reference<SSLConnection> self ) {
+		wait(g_network->networkInfo.handshakeLock->take());
+		state FlowLock::Releaser releaser(*g_network->networkInfo.handshakeLock);
+		
 		Promise<Void> connected;
 		doConnectHandshake(self, connected);
 		try {
-			wait(connected.getFuture());
-			return Void();
+			choose {
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
+			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
+			if(e.code() != error_code_actor_cancelled) {
+				std::pair<IPAddress,uint16_t> peerIP = std::make_pair(self->peer_address.ip, self->peer_address.port);
+				auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
+				if(iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
+					iter->second.first++;
+				} else {
+					g_network->networkInfo.serverTLSConnectionThrottler[peerIP] = std::make_pair(0,now() + FLOW_KNOBS->TLS_CLIENT_CONNECTION_THROTTLE_TIMEOUT);
+				}
+			}
 			self->closeSocket();
 			throw;
 		}
@@ -1299,7 +1314,7 @@ void Net2::run() {
 			net2backtraces_overflow = false;
 			net2backtraces_count = 0;
 
-			pthread_sigmask(SIG_SETMASK, &orig_set, NULL);
+			pthread_sigmask(SIG_SETMASK, &orig_set, nullptr);
 
 			if (was_overflow) {
 				TraceEvent("Net2RunLoopProfilerOverflow")
@@ -1644,7 +1659,7 @@ void ASIOReactor::sleep(double sleepTime) {
 			timespec tv;
 			tv.tv_sec = 0;
 			tv.tv_nsec = 20000;
-			nanosleep(&tv, NULL);
+			nanosleep(&tv, nullptr);
 #endif
 		}
 		else

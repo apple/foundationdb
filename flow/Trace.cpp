@@ -89,6 +89,7 @@ struct SuppressionMap {
 	}
 };
 
+#define TRACE_BATCH_IMPLICIT_SEVERITY SevInfo
 TraceBatch g_traceBatch;
 std::atomic<trace_clock_t> g_trace_clock{ TRACE_CLOCK_NOW };
 
@@ -201,34 +202,34 @@ public:
 
 	Reference<BarrierList> barriers;
 
-	struct WriterThread : IThreadPoolReceiver {
+	struct WriterThread final : IThreadPoolReceiver {
 		WriterThread( Reference<BarrierList> barriers, Reference<ITraceLogWriter> logWriter, Reference<ITraceLogFormatter> formatter )
 			: barriers(barriers), logWriter(logWriter), formatter(formatter) {}
 
-		virtual void init() {}
+		void init() override {}
 
 		Reference<ITraceLogWriter> logWriter;
 		Reference<ITraceLogFormatter> formatter;
 		Reference<BarrierList> barriers;
 
-		struct Open : TypedAction<WriterThread,Open> {
-			virtual double getTimeEstimate() { return 0; }
+		struct Open final : TypedAction<WriterThread, Open> {
+			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Open& o ) {
 			logWriter->open();
 			logWriter->write(formatter->getHeader());
 		}
 
-		struct Close : TypedAction<WriterThread,Close> {
-			virtual double getTimeEstimate() { return 0; }
+		struct Close final : TypedAction<WriterThread, Close> {
+			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Close& c ) {
 			logWriter->write(formatter->getFooter());
 			logWriter->close();
 		}
 
-		struct Roll : TypedAction<WriterThread,Roll> {
-			virtual double getTimeEstimate() { return 0; }
+		struct Roll final : TypedAction<WriterThread, Roll> {
+			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Roll& c ) {
 			logWriter->write(formatter->getFooter());
@@ -236,18 +237,18 @@ public:
 			logWriter->write(formatter->getHeader());
 		}
 
-		struct Barrier : TypedAction<WriterThread, Barrier> {
-			virtual double getTimeEstimate() { return 0; }
+		struct Barrier final : TypedAction<WriterThread, Barrier> {
+			double getTimeEstimate() const override { return 0; }
 		};
 		void action( Barrier& a ) {
 			barriers->pop();
 		}
 
-		struct WriteBuffer : TypedAction<WriterThread, WriteBuffer> {
+		struct WriteBuffer final : TypedAction<WriterThread, WriteBuffer> {
 			std::vector<TraceEventFields> events;
 
 			WriteBuffer(std::vector<TraceEventFields> events) : events(events) {}
-			virtual double getTimeEstimate() { return .001; }
+			double getTimeEstimate() const override { return .001; }
 		};
 		void action( WriteBuffer& a ) {
 			for(auto event : a.events) {
@@ -260,11 +261,11 @@ public:
 			}
 		}
 
-		struct Ping : TypedAction<WriterThread, Ping> {
+		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
 			explicit Ping(){};
-			virtual double getTimeEstimate() { return 0; }
+			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {
 			try {
@@ -378,7 +379,7 @@ public:
 		if(!logTraceEventMetrics)
 			return;
 
-		EventMetricHandle<TraceEventNameID> *m = NULL;
+		EventMetricHandle<TraceEventNameID> *m = nullptr;
 		switch(severity)
 		{
 			case SevError:       m = &SevErrorNames;      break;
@@ -389,7 +390,7 @@ public:
 			default:
 			break;
 		}
-		if(m != NULL)
+		if(m != nullptr)
 		{
 			(*m)->name = StringRef((uint8_t*)name, strlen(name));
 			(*m)->id = id.toString();
@@ -679,7 +680,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	} else {
 		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
 	}
-	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
+	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(nullptr)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
@@ -1140,6 +1141,9 @@ bool TraceBatch::dumpImmediately() {
 }
 
 void TraceBatch::addEvent( const char *name, uint64_t id, const char *location ) {
+	if(FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
+		return;
+	}
 	auto& eventInfo = eventBatch.emplace_back(EventInfo(TraceEvent::getCurrentTime(), name, id, location));
 	if (dumpImmediately())
 		dump();
@@ -1148,6 +1152,9 @@ void TraceBatch::addEvent( const char *name, uint64_t id, const char *location )
 }
 
 void TraceBatch::addAttach( const char *name, uint64_t id, uint64_t to ) {
+	if(FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
+		return;
+	}
 	auto& attachInfo = attachBatch.emplace_back(AttachInfo(TraceEvent::getCurrentTime(), name, id, to));
 	if (dumpImmediately())
 		dump();
@@ -1156,6 +1163,9 @@ void TraceBatch::addAttach( const char *name, uint64_t id, uint64_t to ) {
 }
 
 void TraceBatch::addBuggify( int activated, int line, std::string file ) {
+	if(FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
+		return;
+	}
 	if( g_network ) {
 		auto& buggifyInfo = buggifyBatch.emplace_back(BuggifyInfo(TraceEvent::getCurrentTime(), activated, line, file));
 		if (dumpImmediately())
@@ -1168,7 +1178,7 @@ void TraceBatch::addBuggify( int activated, int line, std::string file ) {
 }
 
 void TraceBatch::dump() {
-	if (!g_traceLog.isOpen())
+	if (!g_traceLog.isOpen() || FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY)
 		return;
 	std::string machine;
 	if(g_network->isSimulated()) {
@@ -1204,7 +1214,7 @@ void TraceBatch::dump() {
 }
 
 TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, const char *location) {
-	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
@@ -1212,7 +1222,7 @@ TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, con
 }
 
 TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, uint64_t to) {
-	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
@@ -1220,7 +1230,7 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, u
 }
 
 TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {
-	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", "BuggifySection");
 	fields.addField("Activated", format("%d", activated));

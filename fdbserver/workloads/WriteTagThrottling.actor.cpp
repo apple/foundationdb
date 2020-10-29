@@ -90,7 +90,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		goodTag = TransactionTag(std::string("gT"));
 	}
 
-	virtual std::string description() { return WriteTagThrottlingWorkload::NAME; }
+	std::string description() const override { return WriteTagThrottlingWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
 		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
@@ -124,11 +124,11 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		wait(timeout(waitForAll(clientActors), self->testDuration, Void()));
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if(fastSuccess) return Void();
 		return _start(cx, this);
 	}
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if(fastSuccess) return true;
 		if (writeThrottle) {
 			if (!badActorThrottleRetries && !goodActorThrottleRetries) {
@@ -149,7 +149,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		}
 		return true;
 	}
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("Transactions (badActor)", badActorTrNum, false));
 		m.push_back(PerfMetric("Transactions (goodActor)", goodActorTrNum, false));
 		m.push_back(PerfMetric("Avg Latency (ms, badActor)", 1000 * badActorTotalLatency / badActorTrNum, true));
