@@ -398,7 +398,7 @@ struct P2PNetworkTest {
 
 			state int sent = packets.getUnsent()->unsentBytesInQueue(FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 			
-			wait(conn->asyncWrite(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
+			wait(conn->asyncWrite(packets.getUnsent(), sent));
 			self->bytesSent += sent;
 			packets.sent(sent);
 
