@@ -55,7 +55,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		slowModeStart = getOption( options, LiteralStringRef("slowModeStart"), 1000.0 );
 		numOps = getOption( options, LiteralStringRef("numOps"), 21 );
 		rarelyCommit = getOption( options, LiteralStringRef("rarelyCommit"), false );
-		maximumTotalData = getOption( options, LiteralStringRef("maximumTotalData"), 7e6);
+		maximumTotalData = getOption( options, LiteralStringRef("maximumTotalData"), 3e6);
 		minNode = getOption( options, LiteralStringRef("minNode"), 0);
 		useSystemKeys = getOption( options, LiteralStringRef("useSystemKeys"), deterministicRandom()->random01() < 0.5);
 		adjacentKeys = deterministicRandom()->random01() < 0.5;

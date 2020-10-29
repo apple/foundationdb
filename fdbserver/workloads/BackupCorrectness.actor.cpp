@@ -387,7 +387,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
 
-		// Increment the backup agent requets
+		// Increment the backup agent requests
 		if (self->agentRequest) {
 			BackupAndRestoreCorrectnessWorkload::backupAgentRequests ++;
 		}

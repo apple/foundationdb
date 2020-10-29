@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BackupContainer_H
-#define FDBCLIENT_BackupContainer_H
+#ifndef FDBCLIENT_BACKUP_CONTAINER_H
+#define FDBCLIENT_BACKUP_CONTAINER_H
 #pragma once
 
 #include "flow/flow.h"
@@ -40,7 +40,7 @@ Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Datab
 // TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
 class IBackupFile {
 public:
-	IBackupFile(std::string fileName) : m_fileName(fileName), m_offset(0) {}
+	IBackupFile(const std::string& fileName) : m_fileName(fileName), m_offset(0) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
 	virtual Future<Void> append(const void *data, int len) = 0;
@@ -247,7 +247,7 @@ public:
 	                                               int64_t totalBytes) = 0;
 
 	// Open a file for read by name
-	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;
+	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;
 
 	// Returns the key ranges in the snapshot file. This is an expensive function
 	// and should only be used in simulation for sanity check.
@@ -289,9 +289,9 @@ public:
 	                                                          bool logsOnly = false, Version beginVersion = -1) = 0;
 
 	// Get an IBackupContainer based on a container spec string
-	static Reference<IBackupContainer> openContainer(std::string url);
+	static Reference<IBackupContainer> openContainer(const std::string& url);
 	static std::vector<std::string> getURLFormats();
-	static Future<std::vector<std::string>> listContainers(std::string baseURL);
+	static Future<std::vector<std::string>> listContainers(const std::string& baseURL);
 
 	std::string getURL() const {
 		return URL;
