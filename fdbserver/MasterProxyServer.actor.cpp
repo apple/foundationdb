@@ -65,6 +65,12 @@ struct ProxyStats {
 	Version lastCommitVersionAssigned;
 	double transactionRateAllowed, batchTransactionRateAllowed;
 	double transactionLimit, batchTransactionLimit;
+	// how much of the GRV requests queue was processed in one attempt to hand out read version.
+	double percentageOfGRVQueueProcessed;
+	double percentageOfBatchGRVQueueProcessed;
+
+	LatencySample normalTxnGRVTimeInQueue;
+	LatencySample batchTxnGRVTimeInQueue;
 
 	LatencySample commitLatencySample;
 	LatencySample grvLatencySample;
@@ -74,14 +80,33 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
-	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
-		txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
-		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),	txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
-		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc), 
-		lastCommitVersionAssigned(0), commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE), grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY), grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY)
-	{
+	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
+	                    int64_t* commitBatchesMemBytesCountPtr)
+	  : cc("ProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
+	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
+	    txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
+	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
+	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
+	    txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
+	    txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
+	    txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),
+	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
+	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
+	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
+	    txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc),
+	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
+	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), lastCommitVersionAssigned(0),
+	    commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+	    normalTxnGRVTimeInQueue("NormalTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
@@ -91,6 +116,9 @@ struct ProxyStats {
 		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
 		specialCounter(cc, "NormalTransactionLimit", [this]() { return this->transactionLimit; });
 		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
+		specialCounter(cc, "PercentageOfGRVQueueProcessed", [this]() { return this->PercentageOfGRVQueueProcessed; });
+		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed",
+		               [this]() { return this->PercentageOfBatchGRVQueueProcessed; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };
@@ -1334,6 +1362,9 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 
 		int requestsToStart = 0;
 
+		uint32_t systemQueueSize = systemQueue.size();
+		uint32_t defaultQueueSize = defaultQueue.size();
+		uint32_t batchQueueSize = batchQueue.size();
 		while (requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
 			Deque<GetReadVersionRequest>* transactionQueue;
 			if(!systemQueue.empty()) {
@@ -1362,12 +1393,17 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 			}
 
 			transactionsStarted[req.flags&1] += tc;
-			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE)
+			double currentTime = g_network->timer();
+			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
 				systemTransactionsStarted[req.flags & 1] += tc;
-			else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT)
+				stats->normalTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
+			} else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 				defaultPriTransactionsStarted[req.flags & 1] += tc;
-			else
+				stats->normalTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
+			} else {
 				batchPriTransactionsStarted[req.flags & 1] += tc;
+				stats->batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
+			}
 
 			start[req.flags & 1].push_back(std::move(req));  static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
@@ -1399,6 +1435,8 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
 		}
 
+		int nonBatchGRVProcessed = 0;
+		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
 				Future<GetReadVersionReply> readVersionReply = getLiveCommittedVersion(commitData, i, &otherProxies, debugID, transactionsStarted[i], systemTransactionsStarted[i], defaultPriTransactionsStarted[i], batchPriTransactionsStarted[i]);
@@ -1408,8 +1446,12 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 				if (i == 0) { 
 					addActor.send(timeReply(readVersionReply, replyTimes));
 				}
+				nonBatchGRVProcessed += systemTransactionsStarted[i] + defaultPriTransactionsStarted[i];
+				batchGRVProcessed += batchPriTransactionsStarted[i];
 			}
 		}
+		stats->percentageOfGRVQueueProcessed = (double)nonBatchGRVProcessed / (systemQueueSize + defaultQueueSize);
+		stats->percentageOfBatchGRVQueueProcessed = (double)batchGRVProcessed / batchQueueSize;
 	}
 }
 
