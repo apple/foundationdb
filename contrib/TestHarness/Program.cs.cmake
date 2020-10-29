@@ -289,13 +289,18 @@ namespace SummarizeTest
                     }
                     uniqueFiles = uniqueFileSet.ToArray();
                     testFile = random.Choice(uniqueFiles);
-                    string oldBinaryVersionLowerBound = "0.0.0";
+                    // The on-disk format changed in 4.0.0, and 5.x can't load files from 3.x.
+                    string oldBinaryVersionLowerBound = "4.0.0";
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
                     if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
                         oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
                     }
                     string oldBinaryVersionUpperBound = getFdbserverVersion(fdbserverName);
+                    if (versionGreaterThanOrEqual("4.0.0", oldBinaryVersionUpperBound)) {
+                        // If the binary under test is from 3.x, then allow upgrade tests from 3.x binaries.
+                        oldBinaryVersionLowerBound = "0.0.0";
+                    }
                     string[] currentBinary = { fdbserverName };
                     IEnumerable<string> oldBinaries = Array.FindAll(
                                                          Directory.GetFiles(oldBinaryFolder),
