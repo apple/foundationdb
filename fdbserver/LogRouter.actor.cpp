@@ -75,6 +75,7 @@ struct LogRouterData {
 
 	UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
+	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
 	Version startVersion;
@@ -148,7 +149,8 @@ struct LogRouterData {
 		specialCounter(cc, "WaitForVersionMaxMS", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMS", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMaxMS", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return 1000*val; });
-		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
+		specialCounter(cc, "PrimaryPeekLocation", [this]() { return this->primaryPeekLocation; }) logger =
+		    traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
 	}
 };
 
@@ -264,6 +266,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() ) {
 						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
+						self->primaryPeekLocation = r->getPrimaryPeekLocation();
 						TraceEvent("LogRouterPeekLocation", self->dbgid).detail("LogID", r->getPrimaryPeekLocation()).trackLatest(self->eventCacheHolder->trackingKey);
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
