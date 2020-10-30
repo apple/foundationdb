@@ -35,7 +35,7 @@
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
-#include "fdbclient/AsyncFileBlobStore.actor.h"
+#include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
@@ -265,9 +265,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			std::string resource;
 
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
-			BlobStoreEndpoint::ParametersT backupParams;
-			Reference<BlobStoreEndpoint> bstore =
-			    BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
+			S3BlobStoreEndpoint::ParametersT backupParams;
+			Reference<S3BlobStoreEndpoint> bstore =
+			    S3BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
 
 			if (resource.empty()) throw backup_invalid_url();
 			for (auto c : resource)
@@ -314,9 +314,9 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 		} else if (u.startsWith(LiteralStringRef("blobstore://"))) {
 			std::string resource;
 
-			BlobStoreEndpoint::ParametersT backupParams;
-			Reference<BlobStoreEndpoint> bstore =
-			    BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError, &backupParams);
+			S3BlobStoreEndpoint::ParametersT backupParams;
+			Reference<S3BlobStoreEndpoint> bstore =
+			    S3BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError, &backupParams);
 
 			if (!resource.empty()) {
 				TraceEvent(SevWarn, "BackupContainer")
