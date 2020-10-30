@@ -3171,16 +3171,21 @@ void platformInit() {
 #endif
 }
 
+std::atomic<bool> terminationSignaled(false);
+
 void terminationHandler(int sig) {
-#ifdef __linux__
-	g_network->stop();
-#else
-	// No termination handler for other platforms!
+	g_network->signalStop(sig);
+#ifdef __unixish__
+	if(terminationSignaled.is_lock_free() && terminationSignaled.exchange(true)) {
+		g_network->stop();
+	}
+	else {
+	}
 #endif
 }
 
 void crashHandler(int sig) {
-#ifdef __linux__
+#ifdef __unixish__
 	// Pretty much all of this handler is risking undefined behavior and hangs,
 	//  but the idea is that we're about to crash anyway...
 	std::string backtrace = platform::get_backtrace();
@@ -3222,7 +3227,7 @@ void crashHandler(int sig) {
 }
 
 void registerSignalHandler() {
-#ifdef __linux__
+#ifdef __unixish__
 	struct sigaction termAction;
 	termAction.sa_handler = terminationHandler;
 	sigfillset(&termAction.sa_mask);

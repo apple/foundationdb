@@ -869,6 +869,9 @@ public:
 	virtual void stop() {
 		isStopped = true;
 	}
+	virtual void signalStop(int signal) {
+		stop();
+	}
 	virtual void addStopCallback( std::function<void()> fn ) {
 		stopCallbacks.emplace_back(std::move(fn));
 	}
