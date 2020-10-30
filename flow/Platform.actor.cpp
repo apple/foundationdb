@@ -2968,10 +2968,17 @@ extern "C" void criticalError(int exitCode, const char *type, const char *messag
 
 extern void flushTraceFileVoid();
 
+#ifdef USE_GCOV
+extern "C" void __gcov_flush();
+#endif
+
 extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
 	closeTraceFile();
+#ifdef USE_GCOV
+	__gcov_flush();
+#endif
 #ifdef _WIN32
 	// This function is documented as being asynchronous, but we suspect it might actually be synchronous in the
 	// case that it is passed a handle to the current process. If not, then there may be cases where we escalate
@@ -3003,7 +3010,7 @@ ImageInfo getImageInfo(const void *symbol) {
 	ImageInfo imageInfo;
 
 #ifdef __linux__
-	link_map *linkMap;
+	link_map* linkMap = nullptr;
 	int res = dladdr1(symbol, &info, (void**)&linkMap, RTLD_DL_LINKMAP);
 #else
 	int res = dladdr(symbol, &info);

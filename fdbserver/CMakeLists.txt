@@ -123,6 +123,7 @@ set(FDBSERVER_SRCS
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
   workloads/ParallelRestore.actor.cpp
+  workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
@@ -184,6 +185,7 @@ set(FDBSERVER_SRCS
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
   workloads/RestoreBackup.actor.cpp
+  workloads/RestoreFromBlob.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
