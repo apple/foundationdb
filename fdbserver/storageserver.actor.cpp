@@ -3406,7 +3406,9 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 
 	wait( self->byteSampleRecovery );
 
-	actors.add(traceCounters("StorageMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self->counters.cc, self->thisServerID.toString() + "/StorageMetrics"));
+	actors.add(traceCounters("StorageMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                         &self->counters.cc, self->thisServerID.toString() + "/StorageMetrics",
+	                         [self](TraceEvent& te) { te.detail("Tag", self->tag); }));
 
 	loop {
 		choose {

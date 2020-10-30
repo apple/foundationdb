@@ -149,9 +149,11 @@ struct LogRouterData {
 		specialCounter(cc, "WaitForVersionMaxMS", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMS", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMaxMS", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return 1000*val; });
-		specialCounter(cc, "PrimaryPeekLocation", [this]() { return this->primaryPeekLocation; });
-		logger =
-		    traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
+		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
+		                       "LogRouterMetrics", [this](TraceEvent& te) {
+			                       te.detail("PrimaryPeekLocation", this->primaryPeekLocation);
+			                       te.detail("RouterTag", this->routerTag)
+		                       });
 	}
 };
 
