@@ -1542,8 +1542,8 @@ TEST_CASE("fdb_get_server_protocol") {
   FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
   uint64_t out;
 
-  fdb_future_block_until_ready(protocolFuture);
-  fdb_future_get_uint64(protocolFuture, &out);
+  fdb_check(fdb_future_block_until_ready(protocolFuture));
+  fdb_check(fdb_future_get_uint64(protocolFuture, &out));
   fdb_future_destroy(protocolFuture);
 }
 
