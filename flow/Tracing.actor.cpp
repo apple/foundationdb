@@ -144,23 +144,16 @@ public:
 		auto request = buffers_.front();
 		buffers_.pop();
 
-		// request.write_byte(6 | 0b10010000); // write as array
-		request.write_byte(6 | 0b10000000); // write as map
+		request.write_byte(6 | 0b10010000); // write as array
 
-		serialize_string("first", request);
 		serialize_value(span.context.first(), request, 0xcf);
-		serialize_string("second", request);
 		serialize_value(span.context.second(), request, 0xcf);
 
-		serialize_string("begin", request);
 		serialize_value(span.begin, request, 0xcb);
-		serialize_string("end", request);
 		serialize_value(span.end, request, 0xcb);
 
-		serialize_string("location", request);
 		serialize_string(span.location.name.toString(), request);
 
-		serialize_string("parents", request);
 		serialize_vector(span.parents, request);
 
 		++pending_messages_;
