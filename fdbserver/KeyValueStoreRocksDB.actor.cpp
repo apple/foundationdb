@@ -93,12 +93,31 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 		}
 
+		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
+			VectorRef<KeyRangeRef>& deletes;
+			Arena& arena;
+
+			DeleteVisitor(VectorRef<KeyRangeRef>& deletes, Arena& arena) : deletes(deletes), arena(arena) {}
+
+			rocksdb::Status DeleteRangeCF(uint32_t /*column_family_id*/, const rocksdb::Slice& begin,
+			                              const rocksdb::Slice& end) override {
+				KeyRangeRef kr(toStringRef(begin), toStringRef(end));
+				deletes.push_back_deep(arena, kr);
+				return rocksdb::Status::OK();
+			}
+		};
+
 		struct CommitAction : TypedAction<Writer, CommitAction> {
 			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
+			Standalone<VectorRef<KeyRangeRef>> deletes;
+			DeleteVisitor dv(deletes, deletes.arena());
+			ASSERT(a.batchToCommit->Iterate(&dv).ok());
+			// If there are any range deletes, we should have added them to be deleted.
+			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
@@ -107,6 +126,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
+				for (const auto& keyRange : deletes) {
+					auto begin = toSlice(keyRange.begin);
+					auto end = toSlice(keyRange.end);
+					ASSERT(db->SuggestCompactRange(db->DefaultColumnFamily(), &begin, &end).ok());
+				}
 			}
 		}
 
