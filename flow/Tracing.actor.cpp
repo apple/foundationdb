@@ -206,6 +206,9 @@ private:
 		int size = vec.size() * 2;
 		if (size <= 15) {
 			request.write_byte((uint8_t) size | 0b10010000);
+		} else if (size <= 65535) {
+			request.write_byte(0xdc);
+			request.write_bytes((uint8_t*) &size, 2);
 		} else {
 			// TODO: Add support for longer vectors if necessary.
 			ASSERT(false);
