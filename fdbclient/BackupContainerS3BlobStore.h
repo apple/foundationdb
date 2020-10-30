@@ -22,12 +22,12 @@
 #define FDBCLIENT_BACKUP_CONTAINER_S3_BLOBSTORE_H
 #pragma once
 
-#include "fdbclient/AsyncFileBlobStore.actor.h"
+#include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 
 class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
                                          ReferenceCounted<BackupContainerS3BlobStore> {
-	Reference<BlobStoreEndpoint> m_bstore;
+	Reference<S3BlobStoreEndpoint> m_bstore;
 	std::string m_name;
 
 	// All backup data goes into a single bucket
@@ -41,8 +41,8 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	friend class BackupContainerS3BlobStoreImpl;
 
 public:
-	BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, const std::string& name,
-	                           const BlobStoreEndpoint::ParametersT& params);
+	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore, const std::string& name,
+	                           const S3BlobStoreEndpoint::ParametersT& params);
 
 	void addref() override;
 	void delref() override;
@@ -51,7 +51,7 @@ public:
 
 	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
 
-	static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, const std::string& bucket);
+	static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, const std::string& bucket);
 
 	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
 

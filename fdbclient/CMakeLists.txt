@@ -1,6 +1,6 @@
 set(FDBCLIENT_SRCS
-  AsyncFileBlobStore.actor.cpp
-  AsyncFileBlobStore.actor.h
+  AsyncFileS3BlobStore.actor.cpp
+  AsyncFileS3BlobStore.actor.h
   AsyncTaskThread.actor.cpp
   AsyncTaskThread.h
   Atomic.h
@@ -15,7 +15,6 @@ set(FDBCLIENT_SRCS
   BackupContainerLocalDirectory.h
   BackupContainerS3BlobStore.actor.cpp
   BackupContainerS3BlobStore.h
-  BlobStore.actor.cpp
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
@@ -61,6 +60,7 @@ set(FDBCLIENT_SRCS
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
+  S3BlobStore.actor.cpp
   Schemas.cpp
   Schemas.h
   SnapshotCache.h
