@@ -89,16 +89,24 @@ struct TraceRequest {
 	}
 };
 
-ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers) {
+ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers, int* pending_messages) {
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:8889");
 	state Reference<IUDPSocket> socket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 
 	loop choose {
 		when(state TraceRequest request = waitNext(inputStream)) {
 			int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
+			--(*pending_messages);
 			request.reset();
 			buffers->push(request);
 		}
+	}
+}
+
+ACTOR Future<Void> traceLog(int* pending_messages) {
+	loop {
+		TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pending_messages);
+		wait(delay(5.0));
 	}
 }
 
@@ -119,7 +127,8 @@ public:
 	void trace(Span const& span) override {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
-			actor_ = traceSend(stream_.getFuture(), &buffers_);
+			send_actor_ = traceSend(stream_.getFuture(), &buffers_, &pending_messages_);
+			log_actor_ = traceLog(&pending_messages_);
 		});
 
 		// ASSERT(!actor_.isReady());
@@ -154,6 +163,7 @@ public:
 		serialize_string("parents", request);
 		serialize_vector(span.parents, request);
 
+		++pending_messages_;
 		stream_.send(request);
 	}
 
@@ -211,9 +221,11 @@ private:
 	// around until the send completes. Therefore, multiple buffers may be
 	// needed at any one time to handle multiple trace calls.
 	std::queue<TraceRequest> buffers_;
+	int pending_messages_;
 
 	PromiseStream<TraceRequest> stream_;
-	Future<Void> actor_;
+	Future<Void> send_actor_;
+	Future<Void> log_actor_;
 };
 
 ITracer* g_tracer = new NoopTracer();
