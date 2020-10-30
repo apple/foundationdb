@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileBlobStore.actor.h"
+#include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -32,9 +32,9 @@ public:
 	// number of slashes so the backup names are kept in a separate folder tree from their actual data.
 	static const std::string INDEXFOLDER;
 
-	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
+	ACTOR static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, std::string bucket) {
 		state std::string basePath = INDEXFOLDER + '/';
-		BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
+		S3BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
 		std::vector<std::string> results;
 		for (auto& f : contents.objects) {
 			results.push_back(
@@ -79,7 +79,7 @@ public:
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(
+		state S3BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listObjects(
 		    bc->m_bucket, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
 		BackupContainerFileSystem::FilesAndSizesT files;
 		for (auto& o : result.objects) {
@@ -130,8 +130,8 @@ std::string BackupContainerS3BlobStore::indexEntry() {
 	return BackupContainerS3BlobStoreImpl::INDEXFOLDER + "/" + m_name;
 }
 
-BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<BlobStoreEndpoint> bstore, const std::string& name,
-                                                       const BlobStoreEndpoint::ParametersT& params)
+BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore, const std::string& name,
+                                                       const S3BlobStoreEndpoint::ParametersT& params)
   : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
 
 	// Currently only one parameter is supported, "bucket"
@@ -156,24 +156,24 @@ void BackupContainerS3BlobStore::delref() {
 }
 
 std::string BackupContainerS3BlobStore::getURLFormat() {
-	return BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
+	return S3BlobStoreEndpoint::getURLFormat(true) + " (Note: The 'bucket' parameter is required.)";
 }
 
 Future<Reference<IAsyncFile>> BackupContainerS3BlobStore::readFile(const std::string& path) {
 	return Reference<IAsyncFile>(new AsyncFileReadAheadCache(
-	    Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, m_bucket, dataPath(path))),
+	    Reference<IAsyncFile>(new AsyncFileS3BlobStoreRead(m_bstore, m_bucket, dataPath(path))),
 	    m_bstore->knobs.read_block_size, m_bstore->knobs.read_ahead_blocks, m_bstore->knobs.concurrent_reads_per_file,
 	    m_bstore->knobs.read_cache_blocks_per_file));
 }
 
-Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<BlobStoreEndpoint> bstore,
+Future<std::vector<std::string>> BackupContainerS3BlobStore::listURLs(Reference<S3BlobStoreEndpoint> bstore,
                                                                       const std::string& bucket) {
 	return BackupContainerS3BlobStoreImpl::listURLs(bstore, bucket);
 }
 
 Future<Reference<IBackupFile>> BackupContainerS3BlobStore::writeFile(const std::string& path) {
 	return Reference<IBackupFile>(new BackupContainerS3BlobStoreImpl::BackupFile(
-	    path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
+	    path, Reference<IAsyncFile>(new AsyncFileS3BlobStoreWrite(m_bstore, m_bucket, dataPath(path)))));
 }
 
 Future<Void> BackupContainerS3BlobStore::deleteFile(const std::string& path) {
