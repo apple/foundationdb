@@ -934,6 +934,8 @@ struct LogPushData : NonCopyable {
 			// subsequence wasn't actually used and can be decremented.
 			if (!updatedLocation) {
 				this->subsequence--;
+				TEST(true);  // No new SpanContextMessage written to transaction logs
+				ASSERT(this->subsequence > 0);
 			}
 		} else {
 			// When writing a metadata message, make sure transaction state has
@@ -992,6 +994,7 @@ private:
 			return false;
 		}
 
+		TEST(true);  // Wrote SpanContextMessage to a transaction log
 		writtenLocations.insert(location);
 
 		BinaryWriter& wr = messagesWriter[location];
