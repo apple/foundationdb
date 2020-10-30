@@ -1,12 +1,20 @@
 set(FDBCLIENT_SRCS
   AsyncFileBlobStore.actor.cpp
   AsyncFileBlobStore.actor.h
+  AsyncTaskThread.actor.cpp
+  AsyncTaskThread.h
   Atomic.h
   AutoPublicAddress.cpp
   BackupAgent.actor.h
   BackupAgentBase.actor.cpp
   BackupContainer.actor.cpp
   BackupContainer.h
+  BackupContainerFileSystem.actor.cpp
+  BackupContainerFileSystem.h
+  BackupContainerLocalDirectory.actor.cpp
+  BackupContainerLocalDirectory.h
+  BackupContainerS3BlobStore.actor.cpp
+  BackupContainerS3BlobStore.h
   BlobStore.actor.cpp
   ClientLogEvents.h
   ClientWorkerInterface.h
@@ -93,6 +101,46 @@ set(options_srcs ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 vexillographer_compile(TARGET fdboptions LANG cpp OUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.h ${CMAKE_CURRENT_BINARY_DIR}/FDBOptions.g.cpp)
 
+set(BUILD_AZURE_BACKUP OFF CACHE BOOL "Build Azure backup client")
+if(BUILD_AZURE_BACKUP)
+  add_compile_definitions(BUILD_AZURE_BACKUP)
+  set(FDBCLIENT_SRCS
+    ${FDBCLIENT_SRCS}
+    BackupContainerAzureBlobStore.actor.cpp
+    BackupContainerAzureBlobStore.h)
+
+  configure_file(azurestorage.cmake azurestorage-download/CMakeLists.txt)
+
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+    RESULT_VARIABLE results
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
+  )
+
+  if(results)
+    message(FATAL_ERROR "Configuration step for AzureStorage has Failed. ${results}")
+  endif()
+
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} --build . --config Release
+    RESULT_VARIABLE results
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-download
+  )
+
+  if(results)
+    message(FATAL_ERROR "Build step for AzureStorage has Failed. ${results}")
+  endif()
+
+  add_subdirectory(
+    ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-src
+    ${CMAKE_CURRENT_BINARY_DIR}/azurestorage-build
+  )
+endif()
+
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
-target_link_libraries(fdbclient PUBLIC fdbrpc)
+if(BUILD_AZURE_BACKUP)
+  target_link_libraries(fdbclient PUBLIC fdbrpc PRIVATE curl uuid azure-storage-lite)
+else()
+  target_link_libraries(fdbclient PUBLIC fdbrpc)
+endif()
