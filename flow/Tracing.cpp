@@ -60,6 +60,9 @@ void openTracer(TracerType type) {
 	case TracerType::LOG_FILE:
 		g_tracer = new LogfileTracer{};
 		break;
+	case TracerType::END:
+		ASSERT(false);
+		break;
 	}
 }
 
