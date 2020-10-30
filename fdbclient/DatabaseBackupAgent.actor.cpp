@@ -2189,10 +2189,6 @@ public:
 				state Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
 				wait(success(statusFuture) && success(destUidFuture));
 
-				UID destUid = destUidFuture.get();
-				if (destUid.isValid()) {
-					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
-				}
 				EBackupState status = statusFuture.get();
 				if (!backupAgent->isRunnable(status)) {
 					throw backup_unneeded();
