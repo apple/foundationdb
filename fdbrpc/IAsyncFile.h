@@ -26,7 +26,7 @@
 #include "flow/flow.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
-// The desirability of the above semantic is disputed. Some classes (AsyncFileBlobStore,
+// The desirability of the above semantic is disputed. Some classes (AsyncFileS3BlobStore,
 // AsyncFileCached) maintain references, while others (AsyncFileNonDurable) don't, and the comment
 // is unapplicable to some others as well (AsyncFileKAIO). It's safest to assume that all operations
 // must complete or cancel, but you should probably look at the file implementations you'll be using.
