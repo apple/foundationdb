@@ -152,7 +152,7 @@ struct LogRouterData {
 		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
 		                       "LogRouterMetrics", [this](TraceEvent& te) {
 			                       te.detail("PrimaryPeekLocation", this->primaryPeekLocation);
-			                       te.detail("RouterTag", this->routerTag);
+			                       te.detail("RouterTag", this->routerTag.toString());
 		                       });
 	}
 };
