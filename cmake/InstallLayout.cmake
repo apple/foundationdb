@@ -105,68 +105,88 @@ function(symlink_files)
   endif()
 endfunction()
 
-# 'map' from (destination, package) to path
-# format vars like install_destination_for_${destination}_${package}
-set(install_destination_for_bin_tgz "bin")
-set(install_destination_for_bin_deb "usr/bin")
+################################################################################
+# Install Destinations
+################################################################################
+
+# Note: These variables are used by the following functions:
+#   fdb_configure_and_install
+#   fdb_install
+# They have to be defined *BEFORE* the function.
+
+# RedHat Enterprise Linux 6
 set(install_destination_for_bin_el6 "usr/bin")
-set(install_destination_for_bin_el7 "usr/bin")
-set(install_destination_for_bin_pm "usr/local/bin")
-set(install_destination_for_sbin_tgz "sbin")
-set(install_destination_for_sbin_deb "usr/sbin")
 set(install_destination_for_sbin_el6 "usr/sbin")
-set(install_destination_for_sbin_el7 "usr/sbin")
-set(install_destination_for_sbin_pm "usr/local/libexec")
-set(install_destination_for_lib_tgz "lib")
-set(install_destination_for_lib_deb "usr/lib")
 set(install_destination_for_lib_el6 "usr/lib64")
-set(install_destination_for_lib_el7 "usr/lib64")
-set(install_destination_for_lib_pm "usr/local/lib")
-set(install_destination_for_fdbmonitor_tgz "sbin")
-set(install_destination_for_fdbmonitor_deb "usr/lib/foundationdb")
 set(install_destination_for_fdbmonitor_el6 "usr/lib/foundationdb")
-set(install_destination_for_fdbmonitor_el7 "usr/lib/foundationdb")
-set(install_destination_for_fdbmonitor_pm "usr/local/libexec")
-set(install_destination_for_include_tgz "include")
-set(install_destination_for_include_deb "usr/include")
 set(install_destination_for_include_el6 "usr/include")
-set(install_destination_for_include_el7 "usr/include")
-set(install_destination_for_include_pm "usr/local/include")
-set(install_destination_for_etc_tgz "etc/foundationdb")
-set(install_destination_for_etc_deb "etc/foundationdb")
 set(install_destination_for_etc_el6 "etc/foundationdb")
-set(install_destination_for_etc_el7 "etc/foundationdb")
-set(install_destination_for_etc_pm "usr/local/etc/foundationdb")
-set(install_destination_for_log_tgz "log/foundationdb")
-set(install_destination_for_log_deb "var/log/foundationdb")
 set(install_destination_for_log_el6 "var/log/foundationdb")
-set(install_destination_for_log_el7 "var/log/foundationdb")
-set(install_destination_for_log_pm "usr/local/foundationdb/logs")
-set(install_destination_for_data_tgz "lib/foundationdb")
-set(install_destination_for_data_deb "var/lib/foundationdb/data")
 set(install_destination_for_data_el6 "var/lib/foundationdb/data")
+
+# RedHat Enterprise Linux 7
+set(install_destination_for_bin_el7 "usr/bin")
+set(install_destination_for_sbin_el7 "usr/sbin")
+set(install_destination_for_lib_el7 "usr/lib64")
+set(install_destination_for_fdbmonitor_el7 "usr/lib/foundationdb")
+set(install_destination_for_include_el7 "usr/include")
+set(install_destination_for_etc_el7 "etc/foundationdb")
+set(install_destination_for_log_el7 "var/log/foundationdb")
 set(install_destination_for_data_el7 "var/lib/foundationdb/data")
+
+# Debian Linux
+set(install_destination_for_bin_deb "usr/bin")
+set(install_destination_for_sbin_deb "usr/sbin")
+set(install_destination_for_lib_deb "usr/lib")
+set(install_destination_for_fdbmonitor_deb "usr/lib/foundationdb")
+set(install_destination_for_include_deb "usr/include")
+set(install_destination_for_etc_deb "etc/foundationdb")
+set(install_destination_for_log_deb "var/log/foundationdb")
+set(install_destination_for_data_deb "var/lib/foundationdb/data")
+
+# MacOS X Package Manager
+set(install_destination_for_bin_pm "usr/local/bin")
+set(install_destination_for_sbin_pm "usr/local/libexec")
+set(install_destination_for_lib_pm "usr/local/lib")
+set(install_destination_for_fdbmonitor_pm "usr/local/libexec")
+set(install_destination_for_include_pm "usr/local/include")
+set(install_destination_for_etc_pm "usr/local/etc/foundationdb")
+set(install_destination_for_log_pm "usr/local/foundationdb/logs")
 set(install_destination_for_data_pm "usr/local/foundationdb/data")
 
+# .tar.gz
+set(install_destination_for_bin_tgz "usr/local/bin")
+set(install_destination_for_sbin_tgz "usr/local/libexec")
+set(install_destination_for_lib_tgz "lib")
+set(install_destination_for_fdbmonitor_tgz "usr/local/libexec")
+set(install_destination_for_include_tgz "usr/local/include")
+set(install_destination_for_etc_tgz "usr/local/etc/foundationdb")
+set(install_destination_for_log_tgz "usr/local/foundationdb/logs")
+set(install_destination_for_data_tgz "usr/local/foundationdb/data")
+
 set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 function(fdb_configure_and_install)
-  if(NOT WIN32 AND NOT OPEN_FOR_IDE)
-    set(one_value_options COMPONENT DESTINATION FILE DESTINATION_SUFFIX)
-    cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
-    foreach(package tgz deb el6 el7 pm)
-      set(INCLUDE_DIR "${install_destination_for_include_${package}}")
-      set(LIB_DIR "${install_destination_for_lib_${package}}")
-      set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
-      string(REGEX REPLACE "\.in$" "" name "${IN_FILE}")
-      get_filename_component(name "${name}" NAME)
-      set(generated_file_name "${generated_dir}/${package}/${name}")
-      configure_file("${IN_FILE}" "${generated_file_name}" @ONLY)
-      install(
-        FILES "${generated_file_name}"
-        DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
-        COMPONENT "${IN_COMPONENT}-${package}")
-    endforeach()
+  if(WIN32 OR OPEN_FOR_IDE)
+    return()
   endif()
+
+  set(one_value_options COMPONENT DESTINATION FILE DESTINATION_SUFFIX)
+  cmake_parse_arguments(IN "${options}" "${one_value_options}" "${multi_value_options}" "${ARGN}")
+
+  foreach(package tgz deb el6 el7 pm)
+    set(INCLUDE_DIR "${install_destination_for_include_${package}}")
+    set(LIB_DIR "${install_destination_for_lib_${package}}")
+    set(install_path "${install_destination_for_${IN_DESTINATION}_${package}}")
+    string(REGEX REPLACE "\.in$" "" name "${IN_FILE}")
+    get_filename_component(name "${name}" NAME)
+    set(generated_file_name "${generated_dir}/${package}/${name}")
+    configure_file("${IN_FILE}" "${generated_file_name}" @ONLY)
+    install(
+      FILES "${generated_file_name}"
+      DESTINATION "${install_path}${IN_DESTINATION_SUFFIX}"
+      COMPONENT "${IN_COMPONENT}-${package}")
+  endforeach()
 endfunction()
 
 function(fdb_install)
@@ -259,25 +279,6 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/packaging/foundationdb.ico)
 set(CPACK_PACKAGE_CONTACT "The FoundationDB Community")
 
-set(CPACK_COMPONENT_SERVER-EL6_DEPENDS clients-el6)
-set(CPACK_COMPONENT_SERVER-EL7_DEPENDS clients-el7)
-set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
-set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
-set(CPACK_COMPONENT_SERVER-PM_DEPENDS clients-pm)
-
-set(CPACK_COMPONENT_SERVER-EL6_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-TGZ_DISPLAY_NAME "foundationdb-server")
-set(CPACK_COMPONENT_SERVER-PM_DISPLAY_NAME "foundationdb-server")
-
-set(CPACK_COMPONENT_CLIENTS-EL6_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-EL7_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-DEB_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
-set(CPACK_COMPONENT_CLIENTS-PM_DISPLAY_NAME "foundationdb-clients")
-
-
 # MacOS needs a file exiension for the LICENSE file
 configure_file(${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_BINARY_DIR}/License.txt COPYONLY)
 
@@ -308,6 +309,16 @@ set(deb-server-filename "foundationdb-server_${PROJECT_VERSION}${prerelease_stri
 ################################################################################
 # Configuration for RPM
 ################################################################################
+
+# Dependencies for RedHat Enterprise 6
+set(CPACK_COMPONENT_SERVER-EL6_DEPENDS clients-el6)
+set(CPACK_COMPONENT_SERVER-EL6_DISPLAY_NAME "foundationdb-server")
+set(CPACK_COMPONENT_CLIENTS-EL6_DISPLAY_NAME "foundationdb-clients")
+
+# Dependencies for RedHat Enterprise 7
+set(CPACK_COMPONENT_SERVER-EL7_DEPENDS clients-el7)
+set(CPACK_COMPONENT_SERVER-EL7_DISPLAY_NAME "foundationdb-server")
+set(CPACK_COMPONENT_CLIENTS-EL7_DISPLAY_NAME "foundationdb-clients")
 
 set(CPACK_RPM_PACKAGE_LICENSE "Apache 2.0")
 
@@ -390,14 +401,14 @@ set(CPACK_RPM_SERVER-EL6_PACKAGE_REQUIRES
   "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 set(CPACK_RPM_SERVER-EL7_PACKAGE_REQUIRES
   "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
-#set(CPACK_RPM_java_PACKAGE_REQUIRES
-#  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
-#set(CPACK_RPM_python_PACKAGE_REQUIRES
-#  "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 
 ################################################################################
 # Configuration for DEB
 ################################################################################
+
+set(CPACK_COMPONENT_SERVER-DEB_DEPENDS clients-deb)
+set(CPACK_COMPONENT_SERVER-DEB_DISPLAY_NAME "foundationdb-server")
+set(CPACK_COMPONENT_CLIENTS-DEB_DISPLAY_NAME "foundationdb-clients")
 
 set(CPACK_DEBIAN_CLIENTS-DEB_FILE_NAME "${deb-clients-filename}_amd64.deb")
 set(CPACK_DEBIAN_SERVER-DEB_FILE_NAME "${deb-server-filename}_amd64.deb")
@@ -423,8 +434,12 @@ set(CPACK_DEBIAN_SERVER-DEB_PACKAGE_CONTROL_EXTRA
   ${CMAKE_SOURCE_DIR}/packaging/deb/DEBIAN-foundationdb-server/postrm)
 
 ################################################################################
-# MacOS configuration
+# Configuration for MacOS
 ################################################################################
+
+set(CPACK_COMPONENT_SERVER-PM_DEPENDS clients-pm)
+set(CPACK_COMPONENT_SERVER-PM_DISPLAY_NAME "foundationdb-server")
+set(CPACK_COMPONENT_CLIENTS-PM_DISPLAY_NAME "foundationdb-clients")
 
 if(APPLE)
   install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/osx/uninstall-FoundationDB.sh
@@ -436,8 +451,12 @@ if(APPLE)
 endif()
 
 ################################################################################
-# Configuration for DEB
+# Configuration for TGZ
 ################################################################################
+
+set(CPACK_COMPONENT_SERVER-TGZ_DEPENDS clients-tgz)
+set(CPACK_COMPONENT_SERVER-TGZ_DISPLAY_NAME "foundationdb-server")
+set(CPACK_COMPONENT_CLIENTS-TGZ_DISPLAY_NAME "foundationdb-clients")
 
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_ARCHIVE_CLIENTS-TGZ_FILE_NAME "${deb-clients-filename}.x86_64")

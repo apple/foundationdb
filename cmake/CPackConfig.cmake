@@ -4,7 +4,7 @@ if ((NOT GENERATE_EL6) AND (NOT "$ENV{GENERATE_EL6}" STREQUAL ""))
   endif()
 endif()
 
-# RPM specifics
+# Red Hat Package Manager
 if(CPACK_GENERATOR MATCHES "RPM")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   if(GENERATE_EL6)
@@ -16,11 +16,15 @@ if(CPACK_GENERATOR MATCHES "RPM")
   endif()
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+
+# Debian package
 elseif(CPACK_GENERATOR MATCHES "DEB")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   set(CPACK_COMPONENTS_ALL clients-deb server-deb)
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+
+# OSX package
 elseif(CPACK_GENERATOR MATCHES "productbuild")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   set(CPACK_COMPONENTS_ALL clients-pm server-pm)
@@ -39,11 +43,15 @@ elseif(CPACK_GENERATOR MATCHES "productbuild")
     set(prerelease_string "")
   endif()
   set(CPACK_PACKAGE_FILE_NAME "FoundationDB-${PROJECT_VERSION}${prerelease_string}")
+
+# .tar.gz package
 elseif(CPACK_GENERATOR MATCHES "TGZ")
   set(CPACK_STRIP_FILES TRUE)
   set(CPACK_COMPONENTS_ALL clients-tgz server-tgz)
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+
+# Unsupported
 else()
   message(FATAL_ERROR "Unsupported package format ${CPACK_GENERATOR}")
 endif()
