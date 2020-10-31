@@ -396,13 +396,15 @@ struct P2PNetworkTest {
 				wait(yield(TaskPriority::WriteSocket));
 			}
 
-			state int sent = packets.getUnsent()->unsentBytesInQueue(FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
-			
-			wait(conn->asyncWrite(packets.getUnsent(), sent));
-			self->bytesSent += sent;
-			packets.sent(sent);
+			state size_t sent;
+			wait(conn->asyncWrite(packets.getUnsent(), &sent, FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
 
-			if (packets.empty()) {
+			if(sent != 0) {
+				self->bytesSent += sent;
+				packets.sent(sent);
+			}
+
+			if(packets.empty()) {
 				break;
 			}
 

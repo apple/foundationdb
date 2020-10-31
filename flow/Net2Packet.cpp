@@ -139,7 +139,7 @@ void ReliablePacket::remove() {
 }
 
 void UnsentPacketQueue::sent(int bytes) {
-	while (bytes && unsent_first) {
+	while (bytes) {
 		ASSERT( unsent_first );
 		PacketBuffer* b = unsent_first;
 

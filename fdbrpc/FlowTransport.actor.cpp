@@ -467,9 +467,12 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		loop {
 			lastWriteTime = now();
 
-			state int sent = self->unsent.getUnsent()->unsentBytesInQueue(FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			// state int toSend = self->unsent.getUnsent()->unsentBytesInQueue(FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			state size_t sent;
 
-			wait(conn->asyncWrite(self->unsent.getUnsent(), sent));
+			wait(conn->asyncWrite(self->unsent.getUnsent(), &sent, FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
+
+			// ASSERT_EQ(toSend, sent);
 
 			if (sent) {
 				self->bytesSent += sent;
@@ -888,7 +891,7 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		}
 
 		if (e-p<packetLen) break;
-		ASSERT( packetLen >= sizeof(UID) );
+		ASSERT_GE( packetLen, sizeof(UID) );
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
