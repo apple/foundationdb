@@ -18,7 +18,9 @@ Any functions that needs `ACTOR` support should put `ACTOR` before its definitio
 ACTOR Future<Void> actorFunction();
 ```
 
-The `ACTOR` must return a `Future` object. If it is intended to return `void`, then `Void` should be used; otherwise, if the value type is `T` ,then `Future<T>` should be the return type.
+The `ACTOR` should return a `Future` object.  [^footnote_actor_return_type] If it is intended to return `void`, then `Void` should be used; otherwise, if the value type is `T` ,then `Future<T>` should be the return type.
+
+[^footnote_actor_return_type]: There are certain cases those `Future` is not used as the returning type, they are not discussed here.
 
 ### `wait` and `delay`
 
@@ -56,7 +58,7 @@ ACTOR Future<Void> waitInt() {
 
  See `waitInt.actor.cpp` for more details.
 
-### `state` d variable
+### `state`  variable
 
 As the `ACTOR` function will be transpiled into several complicated classes, the variable scope will be affected, and is different from standard C++ function variables. If a variable is defined as `state`, then it is accessible within the *whole* actor, no matter where it is defined. However, its value will be the default value before the first assignment. On the other hand, a variable that is defined without `state` will have limited scope, i.e. between its definition and the `wait` call after it.
 
@@ -101,12 +103,12 @@ It is important to remember that, if `wait`, or other `ACTOR` commands are used 
 
 #### Add $\lambda$ functions to `ACTOR`
 
-`ACTOR`s will be compiled into C++ classes; thus, a $\lambda$ function inside the `ACTOR` will also affected by the scoping of `ACTOR`s. Additionally, the variable capturing of the $\lambda$ function is usually unexpected. To allow $\lambda$ functions access the `state` variables, it is necessary to explicitly let the $\lambda$ function capture `*this`. For example:
+`ACTOR`s will be compiled into C++ classes; thus, a $\lambda$ function inside the `ACTOR` will also affected by the scoping of `ACTOR`s. Additionally, the variable capturing of the $\lambda$ function is usually unexpected. To allow $\lambda$ functions to access the `state` variables, it is necessary to explicitly let the $\lambda$ function capture `*this`. For example:
 
 ```c++
 ACTOR Future<Void> lambdaCapturing() {
-	// The variable marked as state will be accessible everywhere in the ACTOR
-	state int stateValue = 0;
+    // The variable marked as state will be accessible everywhere in the ACTOR
+    state int stateValue = 0;
     // NOTE: it is necessary to capture `this` pointer in order to access
     // stateVariable!
     state std::function<void()> lambda1 = [this]() {
