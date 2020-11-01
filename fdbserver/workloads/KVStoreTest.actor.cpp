@@ -28,9 +28,9 @@
 extern IKeyValueStore *makeDummyKeyValueStore();
 
 template <class T>
-class Histogram {
+class TestHistogram {
 public:
-	Histogram(int minSamples = 100) : minSamples(minSamples) { reset(); }
+	TestHistogram(int minSamples = 100) : minSamples(minSamples) { reset(); }
 
 	void reset(){
 		N = 0;
@@ -153,7 +153,7 @@ struct KVTest {
 	}
 };
 
-ACTOR Future<Void> testKVRead( KVTest* test, Key key, Histogram<float>* latency, PerfIntCounter* count ) {
+ACTOR Future<Void> testKVRead( KVTest* test, Key key, TestHistogram<float>* latency, PerfIntCounter* count ) {
 	//state Version s1 = test->lastCommit;
 	state Version s2 = test->lastDurable;
 
@@ -171,7 +171,7 @@ ACTOR Future<Void> testKVRead( KVTest* test, Key key, Histogram<float>* latency,
 	return Void();
 }
 
-ACTOR Future<Void> testKVReadSaturation( KVTest* test, Histogram<float>* latency, PerfIntCounter* count ) {
+ACTOR Future<Void> testKVReadSaturation( KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count ) {
 	while (true) {
 		state double begin = timer();
 		Optional<Value> val = wait( test->store->readValue(test->randomKey()) );
@@ -181,7 +181,7 @@ ACTOR Future<Void> testKVReadSaturation( KVTest* test, Histogram<float>* latency
 	}
 }
 
-ACTOR Future<Void> testKVCommit( KVTest* test, Histogram<float>* latency, PerfIntCounter* count ) {
+ACTOR Future<Void> testKVCommit( KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count ) {
 	state Version v = test->lastSet;
 	test->lastCommit = v;
 	state double begin = timer();
@@ -202,7 +202,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	bool doSetup, doClear, doCount;
 	std::string filename;
 	PerfIntCounter reads, sets, commits;
-	Histogram<float> readLatency, commitLatency;
+	TestHistogram<float> readLatency, commitLatency;
 	double setupTook;
 	std::string storeType;
 
@@ -232,7 +232,7 @@ struct KVStoreTestWorkload : TestWorkload {
 		return Void();
 	}
 	virtual Future<bool> check( Database const& cx ) { return true; }
-	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, Histogram<float>& h){
+	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, TestHistogram<float>& h){
 		m.push_back( PerfMetric( "Min " + name, 1000.0 * h.min(), true) );
 		m.push_back( PerfMetric( "Average " + name, 1000.0 * h.mean(), true) );
 		m.push_back( PerfMetric( "Median " + name, 1000.0 * h.medianEstimate(), true) );
