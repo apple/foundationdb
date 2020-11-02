@@ -22,6 +22,8 @@
 #define FLOW_HISTOGRAM_H
 #pragma once
 
+#include <flow/Arena.h>
+
 #include <string>
 #include <map>
 
@@ -51,7 +53,7 @@ public:
         bytes
     };
 
-    Histogram(char const * group, char const * op, Unit unit) : group(group), op(op), unit(unit), registry(GetHistogramRegistry()) {
+    Histogram(StringRef group, StringRef op, Unit unit) : group(group.toString()), op(op.toString()), unit(unit), registry(GetHistogramRegistry()) {
         clear();
         registry.registerHistogram(this);
     }
@@ -74,7 +76,7 @@ public:
     }
 
     void clear() {
-        for (uint32_t i : buckets) {
+        for (uint32_t & i : buckets) {
             i = 0;
         }
     }

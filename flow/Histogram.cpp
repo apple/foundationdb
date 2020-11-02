@@ -71,7 +71,7 @@ void HistogramRegistry::unregisterHistogram(Histogram * h) {
             .detail("group", h->group)
             .detail("op", h->op);
     }
-    ASSERT_EQ(histograms.erase(h->name()), 1);
+    ASSERT(histograms.erase(h->name()) == 1);
 }
 
 void HistogramRegistry::logReport() {
@@ -101,21 +101,11 @@ void Histogram::writeToLog() {
             case Unit::microseconds:
             {
                 uint32_t usec = ((uint32_t)1)<<i;
-                // C++20: format string using std::format.  eg: std::format("{:03d}", usec % 100) 
-                // size:  3 bytes after decimal
-                //        1 bytes for decimal
-                //        1 byte for null
-                //        7 bytes in 4 million
-
-                char decimal[12];
-                snprintf(decimal, 12, "%u.%03u", usec / 1000, usec % 1000);
-                e.detail(decimal, buckets[i]);
+                e.detail(format("%u.%03u", usec / 1000, usec % 1000), buckets[i]);
                 break;
             }
             case Unit::bytes:
-                char decimal[11];
-                snprintf(decimal, 11, "%u", ((uint32_t)1)<<i);
-                e.detail(decimal, buckets[i]);
+                e.detail(format("%u", ((uint32_t)1)<<i), buckets[i]);
                 break;
             default:
                 ASSERT(false);
