@@ -22,11 +22,13 @@
     <ClCompile Include="FileTraceLogWriter.cpp" />
     <ClCompile Include="XmlTraceLogFormatter.cpp" />
     <ClCompile Include="JsonTraceLogFormatter.cpp" />
+    <ClCompile Include="Histogram.cpp" />
     <ClInclude Include="FileTraceLogWriter.h" />
     <ClInclude Include="XmlTraceLogFormatter.h" />
     <ClInclude Include="JsonTraceLogFormatter.h" />
     <ClInclude Include="MetricSample.h" />
     <ClInclude Include="Profiler.h" />
+    <ClInclude Include="Histogram.h" />
     <ActorCompiler Include="Profiler.actor.cpp" />
     <ActorCompiler Include="Net2.actor.cpp" />
     <ClCompile Include="IThreadPool.cpp" />
