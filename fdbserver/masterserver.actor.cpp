@@ -1579,6 +1579,11 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			TEST(true); // Recovering from snapshot, writing to snapShotEndVersionKey
 			BinaryWriter bw(Unversioned());
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
+			// Pause the backups that got restored in this snapshot to avoid data corruption
+			// Requires further operational work to abort the backup
+			Key backupPauseKey =
+			    Subspace(fileBackupPrefixRange.begin).get(BackupAgentBase::keyTasks).pack(LiteralStringRef("pause"));
+			tr.set(recoveryCommitRequest.arena, backupPauseKey, StringRef());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
 			tr.clear(recoveryCommitRequest.arena, singleKeyRange(writeRecoveryKey));
 		}

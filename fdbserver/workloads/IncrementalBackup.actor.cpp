@@ -41,10 +41,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 	int waitRetries;
 	bool stopBackup;
 	bool checkBeginVersion;
-	bool manualBackupAgentStart;
-
-	double backupPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
-	std::vector<Future<Void>> agentFutures;
+	bool clearBackupAgentKeys;
 
 	IncrementalBackupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupDir = getOption(options, LiteralStringRef("backupDir"), LiteralStringRef("file://simfdb/backups/"));
@@ -55,7 +52,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		waitRetries = getOption(options, LiteralStringRef("waitRetries"), -1);
 		stopBackup = getOption(options, LiteralStringRef("stopBackup"), false);
 		checkBeginVersion = getOption(options, LiteralStringRef("checkBeginVersion"), false);
-		manualBackupAgentStart = getOption(options, LiteralStringRef("manualBackupAgentStart"), false);
+		clearBackupAgentKeys = getOption(options, LiteralStringRef("clearBackupAgentKeys"), false);
 	}
 
 	std::string description() const override { return "IncrementalBackup"; }
@@ -157,7 +154,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			TraceEvent("IBackupSubmitSuccess");
 		}
 		if (self->restoreOnly) {
-			if (self->manualBackupAgentStart) {
+			if (self->clearBackupAgentKeys) {
 				state Transaction clearTr(cx);
 				// Clear Relevant System Keys
 				loop {
@@ -171,9 +168,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 						wait(clearTr.onError(e));
 					}
 				}
-				TraceEvent("IBackupRunBackupAgent");
-				self->agentFutures.push_back(
-				    self->backupAgent.run(cx, &self->backupPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 			}
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
