@@ -86,7 +86,7 @@ struct LogRouterData {
 	Tag routerTag;
 	bool allowPops;
 	LogSet logSet;
-	bool foundEpochEnd;
+	bool foundEpochEnd; // Cluster is not fully recovered yet. LR has to handle recovery
 	double waitForVersionTime = 0; // The total amount of time LR waits for remote tLog to peek and pop its data.
 	double maxWaitForVersionTime = 0; // The max one-instance wait time when LR must wait for remote tLog to pop data.
 	double getMoreTime = 0; // The total amount of time LR waits for satellite tLog's data to become available.
@@ -142,8 +142,10 @@ struct LogRouterData {
 
 		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
 
+		// FetchedVersions: How many version of mutations buffered at LR and have not been popped by remote tLogs
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
+		// TODO: Add minPopped locality and minPoppedId, similar as tLog Metrics
 		specialCounter(cc, "FetchedVersions", [this](){ return std::max<Version>(0, std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, this->version.get() - this->minPopped.get())); });
 		specialCounter(cc, "MinKnownCommittedVersion", [this](){ return this->minKnownCommittedVersion; });
 		specialCounter(cc, "PoppedVersion", [this](){ return this->poppedVersion; });
@@ -227,6 +229,7 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 		return Void();
 	}
 	if(!self->foundEpochEnd) {
+		// Why it only needs to wait for (ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), instead of ver?
 		wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 	} else {
 		while(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < ver) {

@@ -557,7 +557,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
 
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
-		specialCounter(cc, "QueueCommittedVersion", [this](){ return this->queueCommittedVersion.get(); });
+		specialCounter(cc, "QueueCommittedVersion",
+		               [this]() { return this->queueCommittedVersion.get(); }); // Q: What is this?
 		specialCounter(cc, "PersistentDataVersion", [this](){ return this->persistentDataVersion; });
 		specialCounter(cc, "PersistentDataDurableVersion", [this](){ return this->persistentDataDurableVersion; });
 		specialCounter(cc, "KnownCommittedVersion", [this](){ return this->knownCommittedVersion; });
@@ -763,6 +764,7 @@ ACTOR Future<Void> updatePoppedLocation( TLogData* self, Reference<LogData> logD
 	return Void();
 }
 
+// Q: pop disk queue to what?
 ACTOR Future<Void> popDiskQueue( TLogData* self, Reference<LogData> logData ) {
 	if (!logData->initialized) return Void();
 
