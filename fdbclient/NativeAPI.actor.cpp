@@ -30,6 +30,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/MultiInterface.h"
 
 #include "fdbclient/Atomic.h"
@@ -56,6 +57,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -4181,13 +4183,24 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 	}
 
-	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5));
+	// how long to delay for? Should this be a knob?
+	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) || delay(2.0));
 
 	std::unordered_map<uint64_t, int> protocolCount;
-	for(int i = 0; i<coordProtocols.size(); i++) {
-		if(coordProtocols[i].isReady()) {
-			protocolCount[coordProtocols[i].get().version.version()]++;
+	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+		// storing the coordAddr in a diff variable gives wrong behavior?
+		// const NetworkAddress& coordAddr = coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress();
+		// Optional<ProtocolVersion> coordinatorProtocolOptional = FlowTransport::transport().getPeerProtocolVersion(coordAddr);
+		Optional<ProtocolVersion> coordinatorProtocolOptional = FlowTransport::transport().getPeerProtocolVersion(coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
+		if(coordinatorProtocolOptional.present()) {
+			protocolCount[coordinatorProtocolOptional.get().version()]++;
 		}
+	}
+
+	// how do we hang instead?
+	// we delay(2.0) so that we can get the protocol version from versions w/o stable interfaces
+	if(protocolCount.empty()) {
+		return ProtocolVersion(0);
 	}
 
 	uint64_t majorityProtocol = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
@@ -4197,7 +4210,6 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 }
 
 ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	// TODO: let client know if server is present but before this feature is introduced
 	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
 	return protocolVersion.version();
 }

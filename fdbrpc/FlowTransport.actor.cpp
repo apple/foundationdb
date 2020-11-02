@@ -196,6 +196,10 @@ struct PingReceiver final : NetworkMessageReceiver {
 		reader.deserialize(reply);
 		reply.send(Void());
 	}
+
+	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
+		return { RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() };
+	}
 };
 
 class TransportData {
@@ -708,6 +712,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 
 				conn->close();
 				conn = Reference<IConnection>();
+				self->protocolVersion.reset();
 			}
 
 			// Clients might send more packets in response, which needs to go out on the next connection
@@ -1130,14 +1135,19 @@ ACTOR static Future<Void> connectionReader(
 							onConnected.send( peer );
 							wait( delay(0) );  // Check for cancellation
 						}
+						peer->protocolVersion = peerProtocolVersion;
 					}
 				}
+
+				if(peerProtocolVersion.hasStableInterfaces() || !expectConnectPacket) {
+					peer->resetPing.trigger();
+				}
+
 				if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 				}
 				else if(!expectConnectPacket) {
 					unprocessed_begin = unprocessed_end;
-					peer->resetPing.trigger();
 				}
 
 				if (readWillBlock)
@@ -1226,7 +1236,6 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 			orderedAddresses.insert(address);
 		}
 	}
-
 	return peer;
 }
 
@@ -1510,6 +1519,10 @@ Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, con
 
 Reference<AsyncVar<bool>> FlowTransport::getDegraded() {
 	return self->degraded;
+}
+
+Optional<ProtocolVersion> FlowTransport::getPeerProtocolVersion(NetworkAddress addr) {
+	return self->peers.at(addr)->protocolVersion;
 }
 
 void FlowTransport::resetConnection( NetworkAddress address ) {

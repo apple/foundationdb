@@ -158,6 +158,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	ContinuousSample<double> pingLatencies;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
+	Optional<ProtocolVersion> protocolVersion;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
@@ -236,6 +237,8 @@ public:
 	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 
 	bool incompatibleOutgoingConnectionsPresent();
+
+	Optional<ProtocolVersion> getPeerProtocolVersion(NetworkAddress addr);
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
