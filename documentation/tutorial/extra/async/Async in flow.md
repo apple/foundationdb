@@ -488,4 +488,4 @@ However, this is actually the *expected* result. Recalling the fact that corouti
 	auto _ = stopAfter(waitForAll<Void>({loopFunc(), asyncVarLoop()}));
 ```
 
-The function `loopFunc()` will run, increasing the `integerTrigger`'s value by 1, and yield the control. `asyncVarLoop`() is then started, and `loop` `wait`ing for `integerTrigger` and `terminateTrigger`. Since the event is triggered *before* the `wait`, it is ignored by the `wait`. The first increment is thus not outputted.
+The function `loopFunc()` will run, increasing the `integerTrigger`'s value by 1, and yield the control. `asyncVarLoop`() is then started, and `loop` `wait`ing for `integerTrigger` and `terminateTrigger`. Since the event is triggered *before* the `wait`, it is then ignored by the `wait`. The first increment is thus not outputted.
