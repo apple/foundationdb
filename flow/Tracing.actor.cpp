@@ -172,6 +172,7 @@ public:
 		// ASSERT(!log_actor_.isReady());
 
 		if (buffers_.empty()) {
+			TraceEvent(SevInfo, "TracingSpanCreateBuffer");
 			buffers_.push(TraceRequest{
 				.buffer = new uint8_t[kTraceBufferSize],
 				.data_size = 0,
@@ -194,7 +195,12 @@ public:
 		serialize_vector(span.parents, request);
 
 		++pending_messages_;
+		++total_messages_;
 		stream_.send(request);
+
+		if (total_messages_ % 10000 == 0) {
+			TraceEvent("TracingSpanTotalMessages").detail("Messages", total_messages_);
+		}
 	}
 
 private:
@@ -260,6 +266,7 @@ private:
 	// needed at any one time to handle multiple trace calls.
 	std::queue<TraceRequest> buffers_;
 	int pending_messages_;
+	int total_messages_;  // TODO: This should be removed after performance testing is done
 
 	PromiseStream<TraceRequest> stream_;
 	Future<Void> send_actor_;
