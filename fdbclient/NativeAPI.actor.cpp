@@ -4462,7 +4462,6 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit) {
-	state Future<Void> clientTimeout = delay(5.0);
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
@@ -4474,7 +4473,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 				}
 				return rep.get().storageMetricsList;
 			}
-			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
 }
