@@ -4172,36 +4172,74 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
+ACTOR Future<Void> getConnectPktVersions(vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars) {
+	state int targetQuorumSize = peerProtocolAsyncVars.size()/2 + 1;
+	state int majorityProtocolCount = 0;
+	
+	while(majorityProtocolCount < peerProtocolAsyncVars.size()/2 + 1) {
+		state vector<Future<Void>> peerProtocolVersionFutures;
+		peerProtocolVersionFutures.reserve(peerProtocolAsyncVars.size());
+
+		for(int i = 0; i<peerProtocolAsyncVars.size(); i++) {
+			peerProtocolVersionFutures.push_back(peerProtocolAsyncVars[i]->get().present() ? Void() : peerProtocolAsyncVars.back()->onChange());
+			// what if a server dies here? below code wouldn't know because we already pushed Void()
+			// moved this code within the loop so if a server does dies between waits, we'll know
+			// doesn't solve problem completely though?
+
+			// can we extend quorum to take in a lambda to define what counts as "ready"?
+		}
+
+		wait(smartQuorum(peerProtocolVersionFutures, targetQuorumSize, 1.5));
+		std::unordered_map<uint64_t, int> protocolCount;
+
+		for(int i = 0; i<peerProtocolVersionFutures.size(); i++) {
+			if(peerProtocolVersionFutures[i].isReady()) {
+				protocolCount[peerProtocolAsyncVars[i]->get().get().version()]++;
+			}
+		}
+		
+		majorityProtocolCount = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
+			return l.second < r.second;
+		})->second;
+
+		if(targetQuorumSize < peerProtocolAsyncVars.size()) {
+			targetQuorumSize++;
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConnectionFile> f) {
 	state ClientCoordinators coord(f);
 
 	state vector<Future<ProtocolInfoReply>> coordProtocols;
+	state vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars;
 	coordProtocols.reserve(coord.clientLeaderServers.size());
+	peerProtocolAsyncVars.reserve(coord.clientLeaderServers.size());
+
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
 		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
 			{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
 		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+
+		Reference<AsyncVar<Optional<ProtocolVersion>>> protocolOptionalAsyncVar = FlowTransport::transport().getPeerProtocolAsyncVar(coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
+		peerProtocolAsyncVars.push_back(protocolOptionalAsyncVar);
 	}
 
-	// how long to delay for? Should this be a knob?
-	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) || delay(2.0));
+	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) || getConnectPktVersions(peerProtocolAsyncVars));
 
 	std::unordered_map<uint64_t, int> protocolCount;
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		// storing the coordAddr in a diff variable gives wrong behavior?
-		// const NetworkAddress& coordAddr = coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress();
-		// Optional<ProtocolVersion> coordinatorProtocolOptional = FlowTransport::transport().getPeerProtocolVersion(coordAddr);
-		Optional<ProtocolVersion> coordinatorProtocolOptional = FlowTransport::transport().getPeerProtocolVersion(coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
-		if(coordinatorProtocolOptional.present()) {
-			protocolCount[coordinatorProtocolOptional.get().version()]++;
+		if(coordProtocols[i].isReady()) {
+			protocolCount[coordProtocols[i].get().version.version()]++;
+		}
+		else if(peerProtocolAsyncVars[i]->get().present()) {
+			protocolCount[peerProtocolAsyncVars[i]->get().get().version()]++;
 		}
 	}
 
-	// how do we hang instead?
-	// we delay(2.0) so that we can get the protocol version from versions w/o stable interfaces
-	if(protocolCount.empty()) {
-		return ProtocolVersion(0);
-	}
+	ASSERT(!protocolCount.empty());
 
 	uint64_t majorityProtocol = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
 		return l.second < r.second;

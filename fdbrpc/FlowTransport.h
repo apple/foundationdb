@@ -158,7 +158,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	ContinuousSample<double> pingLatencies;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
-	Optional<ProtocolVersion> protocolVersion;
+	Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
@@ -238,7 +238,7 @@ public:
 
 	bool incompatibleOutgoingConnectionsPresent();
 
-	Optional<ProtocolVersion> getPeerProtocolVersion(NetworkAddress addr);
+	Reference<AsyncVar<Optional<ProtocolVersion>>> getPeerProtocolAsyncVar(NetworkAddress addr);
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
