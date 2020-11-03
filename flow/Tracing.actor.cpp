@@ -27,6 +27,17 @@
 
 namespace {
 
+// Serialized packets will be sent to this port via UDP. In simulation, a UDP
+// server also listens on this port.
+constexpr uint16_t kUdpPort = 8889;
+
+// Initial size of buffer used to store serialized traces. Buffer will be
+// resized when necessary.
+constexpr int kTraceBufferSize = 1024;
+
+// The time interval between each report of the tracer queue size (seconds).
+constexpr float kQueueSizeLogInterval = 5.0;
+
 struct NoopTracer : ITracer {
 	TracerType type() const { return TracerType::DISABLED; }
 	void trace(Span const& span) override {}
@@ -77,6 +88,7 @@ struct TraceRequest {
 			size *= 2;
 		}
 
+		TraceEvent(SevInfo, "TracingSpanResizedBuffer").detail("OldSize", buffer_size).detail("NewSize", size);
 		uint8_t* new_buffer = new uint8_t[size];
 		memcpy(new_buffer, buffer, data_size);
 		free(buffer);
@@ -89,24 +101,46 @@ struct TraceRequest {
 	}
 };
 
-ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers, int* pending_messages) {
-	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:8889");
+// A server listening for UDP trace messages, run only in simulation.
+ACTOR Future<Void> simulationStartServer() {
+	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", kUdpPort);
+	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
+	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
+	serverSocket->bind(localAddress);
+
+	state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+	state uint8_t* packet = mutateString(packetString);
+
+	loop {
+		int size = wait(serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE));
+		auto message = packetString.substr(0, size);
+
+		// For now, just check the first byte in the message matches. Data is
+		// currently written as an array, so first byte should match msgpack
+		// array notation. In the future, the entire message should be
+		// deserialized to make sure all data is written correctly.
+		ASSERT(message[0] == (6 | 0b10010000));
+	}
+}
+
+ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers, int* pendingMessages) {
+	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
 	state Reference<IUDPSocket> socket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 
 	loop choose {
 		when(state TraceRequest request = waitNext(inputStream)) {
 			int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
-			--(*pending_messages);
+			--(*pendingMessages);
 			request.reset();
 			buffers->push(request);
 		}
 	}
 }
 
-ACTOR Future<Void> traceLog(int* pending_messages) {
+ACTOR Future<Void> traceLog(int* pendingMessages) {
 	loop {
-		TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pending_messages);
-		wait(delay(5.0));
+		TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
+		wait(delay(kQueueSizeLogInterval));
 	}
 }
 
@@ -129,15 +163,19 @@ public:
 		std::call_once(once, [&]() {
 			send_actor_ = traceSend(stream_.getFuture(), &buffers_, &pending_messages_);
 			log_actor_ = traceLog(&pending_messages_);
+			if (g_network->isSimulated()) {
+				udp_server_actor_ = simulationStartServer();
+			}
 		});
 
-		// ASSERT(!actor_.isReady());
+		ASSERT(!send_actor_.isReady());
+		ASSERT(!log_actor_.isReady());
 
 		if (buffers_.empty()) {
 			buffers_.push(TraceRequest{
-				.buffer = new uint8_t[256],
+				.buffer = new uint8_t[kTraceBufferSize],
 				.data_size = 0,
-				.buffer_size = 256
+				.buffer_size = kTraceBufferSize
 			});
 		}
 
@@ -146,8 +184,7 @@ public:
 
 		request.write_byte(6 | 0b10010000); // write as array
 
-		serialize_value(span.context.first(), request, 0xcf);
-		serialize_value(span.context.second(), request, 0xcf);
+		serialize_uid(span.context, request);
 
 		serialize_value(span.begin, request, 0xcb);
 		serialize_value(span.end, request, 0xcb);
@@ -193,6 +230,12 @@ private:
 		request.write_bytes((uint8_t*) str.data(), size);
 	}
 
+	// Writes the given UID to the request.
+	inline void serialize_uid(const UID& uid, TraceRequest& request) {
+		serialize_value(uid.first(), request, 0xcf);
+		serialize_value(uid.second(), request, 0xcf);
+	}
+
 	// Writes the given vector to the request. Assumes each element in the
 	// vector is a SpanID, and serializes as two big-endian 64-bit integers.
 	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
@@ -208,8 +251,7 @@ private:
 		}
 
 		for (const auto& parentContext : vec) {
-			serialize_value(parentContext.first(), request, 0xcf);
-			serialize_value(parentContext.second(), request, 0xcf);
+			serialize_uid(parentContext, request);
 		}
 	}
 
@@ -222,6 +264,7 @@ private:
 	PromiseStream<TraceRequest> stream_;
 	Future<Void> send_actor_;
 	Future<Void> log_actor_;
+	Future<Void> udp_server_actor_;
 };
 
 ITracer* g_tracer = new NoopTracer();
