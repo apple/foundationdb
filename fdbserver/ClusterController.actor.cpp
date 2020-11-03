@@ -1212,7 +1212,9 @@ public:
 		for(auto& logSet : dbi.logSystemConfig.tLogs) {
 			if(region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
-				ASSERT(!oldSatelliteFallback || logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info());
+				ASSERT(!oldSatelliteFallback ||
+				       (region.satelliteTLogPolicyFallback.isValid() &&
+				        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
 				break;
 			}
 		}
