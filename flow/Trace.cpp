@@ -61,7 +61,7 @@ public:
 	Future<Void> getError() {
 		return errors.getFuture();
 	}
-	void addThread( IThreadPoolReceiver* userData ) {
+	void addThread(IThreadPoolReceiver* userData, const char*) {
 		ASSERT( !thread );
 		thread = userData;
 	}

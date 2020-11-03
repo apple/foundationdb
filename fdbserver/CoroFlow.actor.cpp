@@ -58,8 +58,7 @@ struct Coroutine /*: IThreadlike*/ {
 
 	void start() {
 		int result = Coro_startCoro_( swapCoro(coro), coro, this, &entry );
-		if (result == ENOMEM) 
-			platform::outOfMemory();
+		if (result == ENOMEM) platform::outOfMemory();
 	}
 
 	void unblock() {
@@ -136,7 +135,7 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 			try {
 				if(!stop)
 					userData->init();
-				
+
 				while (!stop) {
 					pool->queueLock.enter();
 					if (pool->work.empty()) {
@@ -178,8 +177,8 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 	Error error;
 
 	ACTOR Future<Void> stopOnError( WorkPool* w ) {
-		try { 
-			wait( w->getError() );  
+		try {
+			wait(w->getError());
 			ASSERT(false);
 		} catch (Error& e) {
 			w->stop(e);
@@ -200,7 +199,7 @@ public:
 	}
 
 	virtual Future<Void> getError() { return pool->anyError.getResult(); }
-	virtual void addThread( IThreadPoolReceiver* userData ) {
+	virtual void addThread(IThreadPoolReceiver* userData, const char*) {
 		checkError();
 
 		auto w = new Worker(pool.getPtr(), userData);
@@ -245,7 +244,7 @@ public:
 		for(int i=0; i<pool->workers.size(); i++)
 			pool->workers[i]->stop = true;
 
-		std::vector<Worker*> idle; 
+		std::vector<Worker*> idle;
 		std::swap(idle, pool->idle);
 		pool->queueLock.leave();
 
@@ -294,8 +293,7 @@ void CoroThreadPool::init()
 {
 	if (!current_coro) {
 		current_coro = main_coro = Coro_new();
-		if (main_coro == NULL) 
-			platform::outOfMemory();
+		if (main_coro == NULL) platform::outOfMemory();
 
 		Coro_initializeMainCoro(main_coro);
 		//printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));
