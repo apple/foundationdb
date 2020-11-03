@@ -168,8 +168,8 @@ public:
 			}
 		});
 
-		ASSERT(!send_actor_.isReady());
-		ASSERT(!log_actor_.isReady());
+		// ASSERT(!send_actor_.isReady());
+		// ASSERT(!log_actor_.isReady());
 
 		if (buffers_.empty()) {
 			buffers_.push(TraceRequest{
