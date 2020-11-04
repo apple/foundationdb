@@ -216,6 +216,7 @@ public: // workload functions
 						snapFailed = true;
 						break;
 					}
+					TraceEvent("SnapCreateError").error(e);
 					++retry;
 					// snap v2 can fail for many reasons, so retry for 5 times and then fail it
 					if (self->retryLimit != -1 && retry > self->retryLimit) {

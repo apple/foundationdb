@@ -33,6 +33,7 @@ execute_process(
 if(results)
   message(FATAL_ERROR "Build step for Benchmark has Failed. ${results}")
 endif()
+set(BENCHMARK_ENABLE_TESTING OFF)
 add_subdirectory(
   ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src
   ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build

@@ -312,5 +312,12 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class ConsistencyCheckImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit ConsistencyCheckImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif

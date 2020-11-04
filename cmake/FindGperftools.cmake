@@ -52,6 +52,7 @@ mark_as_advanced(
 
 if (GPERFTOOLS_FOUND)
   add_library(gperftools UNKNOWN IMPORTED)
+  target_compile_definitions(gperftools PUBLIC USE_GPERFTOOLS)
   set_target_properties(gperftools PROPERTIES
     IMPORTED_LOCATION ${GPERFTOOLS_TCMALLOC_AND_PROFILER}
     INTERFACE_INCLUDE_DIRECTORIES "${GPERFTOOLS_INCLUDE_DIR}")

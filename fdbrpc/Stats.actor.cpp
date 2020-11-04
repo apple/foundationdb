@@ -45,7 +45,7 @@ double Counter::getRate() const {
 }
 
 double Counter::getRoughness() const {
-	double elapsed = now() - roughness_interval_start;
+	double elapsed = last_event - roughness_interval_start;
 	if(elapsed == 0) {
 		return -1;
 	}

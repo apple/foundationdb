@@ -1050,12 +1050,11 @@ TraceEvent& TraceEvent::GetLastError() {
 #endif
 }
 
-// We're cheating in counting, as in practice, we only use {10,20,30,40}.
-static_assert(SevMaxUsed / 10 + 1 == 5, "Please bump eventCounts[5] to SevMaxUsed/10+1");
-unsigned long TraceEvent::eventCounts[5] = { 0, 0, 0, 0, 0 };
+unsigned long TraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = {0, 0, 0, 0, 0};
 
 unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
-  return TraceEvent::eventCounts[sev/10];
+	ASSERT(sev <= SevMaxUsed);
+	return TraceEvent::eventCounts[sev/10];
 }
 
 TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
