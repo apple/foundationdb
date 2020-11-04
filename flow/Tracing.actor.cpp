@@ -172,7 +172,10 @@ public:
 		// ASSERT(!log_actor_.isReady());
 
 		if (buffers_.empty()) {
-			TraceEvent(SevInfo, "TracingSpanCreateBuffer");
+			++total_buffers_;
+			if (total_buffers_ % 500 == 0) {
+				TraceEvent(SevInfo, "TracingSpanCreateBuffer").detail("Buffers", total_buffers_);
+			}
 			buffers_.push(TraceRequest{
 				.buffer = new uint8_t[kTraceBufferSize],
 				.data_size = 0,
@@ -266,6 +269,7 @@ private:
 	// needed at any one time to handle multiple trace calls.
 	std::queue<TraceRequest> buffers_;
 	int pending_messages_;
+	int total_buffers_;  // TODO: This should be removed after performance testing is done
 	int total_messages_;  // TODO: This should be removed after performance testing is done
 
 	PromiseStream<TraceRequest> stream_;
