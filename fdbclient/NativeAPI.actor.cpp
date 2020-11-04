@@ -4175,18 +4175,13 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 ACTOR Future<Void> getConnectPktVersions(vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars) {
 	state int targetQuorumSize = peerProtocolAsyncVars.size()/2 + 1;
 	state int majorityProtocolCount = 0;
-	
+
 	while(majorityProtocolCount < peerProtocolAsyncVars.size()/2 + 1) {
 		state vector<Future<Void>> peerProtocolVersionFutures;
 		peerProtocolVersionFutures.reserve(peerProtocolAsyncVars.size());
 
 		for(int i = 0; i<peerProtocolAsyncVars.size(); i++) {
-			peerProtocolVersionFutures.push_back(peerProtocolAsyncVars[i]->get().present() ? Void() : peerProtocolAsyncVars.back()->onChange());
-			// what if a server dies here? below code wouldn't know because we already pushed Void()
-			// moved this code within the loop so if a server does dies between waits, we'll know
-			// doesn't solve problem completely though?
-
-			// can we extend quorum to take in a lambda to define what counts as "ready"?
+			peerProtocolVersionFutures.push_back(peerProtocolAsyncVars[i]->get().present() ? Void() : peerProtocolAsyncVars[i]->onChange());
 		}
 
 		wait(smartQuorum(peerProtocolVersionFutures, targetQuorumSize, 1.5));
@@ -4207,6 +4202,127 @@ ACTOR Future<Void> getConnectPktVersions(vector<Reference<AsyncVar<Optional<Prot
 		}
 	}
 
+	return Void();
+}
+
+ProtocolVersion testGetMajorityProtocolVersionFromAsyncVars(vector<Reference<AsyncVar<Optional<ProtocolVersion>>>>& peerProtocolAsyncVars) {
+	std::unordered_map<uint64_t, int> protocolCount;
+	for (int i = 0; i < peerProtocolAsyncVars.size(); i++) {
+		if(peerProtocolAsyncVars[i]->get().present()) {
+			protocolCount[peerProtocolAsyncVars[i]->get().get().version()]++;
+		}
+	}
+
+	if(protocolCount.empty()) {
+		return ProtocolVersion(0);
+	}
+
+	uint64_t majorityProtocol = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
+		return l.second < r.second;
+	})->first;
+	return ProtocolVersion(majorityProtocol);
+}
+
+ACTOR Future<Void> testSetProtocolVersionAsyncVarAfterTimeout(Reference<AsyncVar<Optional<ProtocolVersion>>> peerProtocolAsyncVar, ProtocolVersion version, int delayTime) {
+	wait(delay(delayTime));
+	peerProtocolAsyncVar->set(version);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/protocol_version/get_all_current") {
+	state ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010001LL);
+	Reference<AsyncVar<Optional<ProtocolVersion>>> first = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+	Reference<AsyncVar<Optional<ProtocolVersion>>> second = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+	Reference<AsyncVar<Optional<ProtocolVersion>>> third = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+
+	state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
+
+	wait(getConnectPktVersions(peerProtocolAsyncVars));
+
+	ASSERT(testGetMajorityProtocolVersionFromAsyncVars(peerProtocolAsyncVars) == protocolVersion);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/protocol_version/get_one_diff") {
+	state ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010001LL);
+	state ProtocolVersion otherProtocolVersion = ProtocolVersion(0x0FDB00B070010000LL);
+
+	Reference<AsyncVar<Optional<ProtocolVersion>>> first = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(otherProtocolVersion));
+	Reference<AsyncVar<Optional<ProtocolVersion>>> second = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+	Reference<AsyncVar<Optional<ProtocolVersion>>> third = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+
+	state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
+
+	wait(getConnectPktVersions(peerProtocolAsyncVars));
+
+	ASSERT(testGetMajorityProtocolVersionFromAsyncVars(peerProtocolAsyncVars) == protocolVersion);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/protocol_version/wait_for_majority_one_empty") {
+	state ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010001LL);
+	Reference<AsyncVar<Optional<ProtocolVersion>>> first = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+	Reference<AsyncVar<Optional<ProtocolVersion>>> second = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+	Reference<AsyncVar<Optional<ProtocolVersion>>> third = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+
+	state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
+
+	std::vector<Future<Void>> futures = {getConnectPktVersions(peerProtocolAsyncVars), testSetProtocolVersionAsyncVarAfterTimeout(first, protocolVersion, 1)};
+	wait(waitForAll(futures));
+
+	ASSERT(testGetMajorityProtocolVersionFromAsyncVars(peerProtocolAsyncVars) == protocolVersion);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/protocol_version/wait_one") {
+	state ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010001LL);
+	Reference<AsyncVar<Optional<ProtocolVersion>>> first = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+
+	state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first};
+
+	std::vector<Future<Void>> futures = {getConnectPktVersions(peerProtocolAsyncVars), testSetProtocolVersionAsyncVarAfterTimeout(first, protocolVersion, 1)};
+	wait(waitForAll(futures));
+
+	ASSERT(testGetMajorityProtocolVersionFromAsyncVars(peerProtocolAsyncVars) == protocolVersion);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/protocol_version/wait_for_majority") {
+	state ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010001LL);
+	state ProtocolVersion otherProtocolVersion = ProtocolVersion(0x0FDB00B070010000LL);
+
+	Reference<AsyncVar<Optional<ProtocolVersion>>> first = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+	Reference<AsyncVar<Optional<ProtocolVersion>>> second = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(otherProtocolVersion));
+	Reference<AsyncVar<Optional<ProtocolVersion>>> third = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>(protocolVersion));
+
+	state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
+
+	std::vector<Future<Void>> futures = {getConnectPktVersions(peerProtocolAsyncVars), testSetProtocolVersionAsyncVarAfterTimeout(first, protocolVersion, 1)};
+	wait(waitForAll(futures));
+
+	ASSERT(testGetMajorityProtocolVersionFromAsyncVars(peerProtocolAsyncVars) == protocolVersion);
+	return Void();
+}
+
+TEST_CASE("/fdbclient/protocol_version/wait_for_majority_one_diff") {
+	state ProtocolVersion protocolVersion = ProtocolVersion(0x0FDB00B070010001LL);
+	state ProtocolVersion otherProtocolVersion = ProtocolVersion(0x0FDB00B070010000LL);
+
+	Reference<AsyncVar<Optional<ProtocolVersion>>> first = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+	Reference<AsyncVar<Optional<ProtocolVersion>>> second = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+	Reference<AsyncVar<Optional<ProtocolVersion>>> third = Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>());
+
+	state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
+
+	std::vector<Future<Void>> futures = {
+		getConnectPktVersions(peerProtocolAsyncVars),
+		testSetProtocolVersionAsyncVarAfterTimeout(first, protocolVersion, 1),
+		testSetProtocolVersionAsyncVarAfterTimeout(second, otherProtocolVersion, 1),
+		testSetProtocolVersionAsyncVarAfterTimeout(third, protocolVersion, 2)
+	};
+	wait(waitForAll(futures));
+
+	ASSERT(testGetMajorityProtocolVersionFromAsyncVars(peerProtocolAsyncVars) == protocolVersion);
 	return Void();
 }
 
