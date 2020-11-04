@@ -19,11 +19,16 @@
  */
 
 #include <cinttypes>
+#include <functional>
+#include <type_traits>
+#include <unordered_map>
+
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
-#include "flow/IndexedSet.h"
-#include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
+#include "flow/Hash3.h"
+#include "flow/Histogram.h"
+#include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
@@ -52,11 +57,8 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
-#include <type_traits>
-#include "flow/actorcompiler.h"  // This must be the last #include.
 
-using std::pair;
-using std::make_pair;
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #pragma region Data Structures
 
@@ -240,13 +242,13 @@ struct UpdateEagerReadInfo {
 	void finishKeyBegin() {
 		std::sort(keyBegin.begin(), keyBegin.end());
 		keyBegin.resize( std::unique(keyBegin.begin(), keyBegin.end()) - keyBegin.begin() );
-		std::sort(keys.begin(), keys.end(), [](const pair<KeyRef, int>& lhs, const pair<KeyRef, int>& rhs) { return (lhs.first < rhs.first) || (lhs.first == rhs.first && lhs.second > rhs.second); } );
-		keys.resize(std::unique(keys.begin(), keys.end(), [](const pair<KeyRef, int>& lhs, const pair<KeyRef, int>& rhs) { return lhs.first == rhs.first; } ) - keys.begin());
+		std::sort(keys.begin(), keys.end(), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) { return (lhs.first < rhs.first) || (lhs.first == rhs.first && lhs.second > rhs.second); } );
+		keys.resize(std::unique(keys.begin(), keys.end(), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) { return lhs.first == rhs.first; } ) - keys.begin());
 		//value gets populated in doEagerReads
 	}
 
 	Optional<Value>& getValue(KeyRef key) {
-		int i = std::lower_bound(keys.begin(), keys.end(), pair<KeyRef, int>(key, 0), [](const pair<KeyRef, int>& lhs, const pair<KeyRef, int>& rhs) { return lhs.first < rhs.first; } ) - keys.begin();
+		int i = std::lower_bound(keys.begin(), keys.end(),std::pair<KeyRef, int>(key, 0), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) { return lhs.first < rhs.first; } ) - keys.begin();
 		ASSERT( i < keys.size() && keys[i].first == key );
 		return value[i];
 	}
@@ -297,8 +299,8 @@ private:
 
 public:
 	Tag tag;
-	vector<pair<Version,Tag>> history;
-	vector<pair<Version,Tag>> allHistory;
+	vector<std::pair<Version,Tag>> history;
+	vector<std::pair<Version,Tag>> allHistory;
 	Version poppedAllAfter;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
@@ -345,8 +347,8 @@ public:
 				poppedAllAfter = std::numeric_limits<Version>::max();
 			}
 
-			vector<pair<Version,Tag>>* hist = &history;
-			vector<pair<Version,Tag>> allHistoryCopy;
+			vector<std::pair<Version,Tag>>* hist = &history;
+			vector<std::pair<Version,Tag>> allHistoryCopy;
 			if(popAllTags) {
 				allHistoryCopy = allHistory;
 				hist = &allHistoryCopy;
@@ -1950,7 +1952,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 	state TraceInterval interval("FetchKeys");
 	state KeyRange keys = shard->keys;
 	state Future<Void> warningLogger = logFetchKeysWarning(shard);
-	state double startt = now();
+	state const double startTime = now();
 	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
@@ -1989,7 +1991,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
-		data->counters.fetchWaitingMS += 1000*(executeStart - startt);
+		data->counters.fetchWaitingMS += 1000 * (executeStart - startTime);
 
 		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated until all mutations for a version
 		// have been processed. We need to take the durableVersionLock to ensure data->version is greater than the version of the mutation which caused
@@ -2214,7 +2216,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		TraceEvent(SevError, "FetchKeysError", data->thisServerID)
 			.error(e)
-			.detail("Elapsed", now()-startt)
+			.detail("Elapsed", now() - startTime)
 			.detail("KeyBegin", keys.begin)
 			.detail("KeyEnd",keys.end);
 		if (e.code() != error_code_actor_cancelled)
