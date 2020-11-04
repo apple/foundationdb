@@ -75,6 +75,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
 		if (self->waitForBackup) {
+			wait(self->backupAgent.changePause(cx, false));
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
 			state Version v;
