@@ -40,7 +40,7 @@ typedef Standalone<TransactionTagRef> TransactionTag;
 
 class TagSet {
 public:
-	typedef std::set<TransactionTagRef>::const_iterator const_iterator;
+	typedef std::vector<TransactionTagRef>::const_iterator const_iterator;
 
 	TagSet() : bytes(0) {}
 
@@ -54,51 +54,35 @@ public:
 	const_iterator end() const {
 		return tags.end();
 	}
+
 	void clear() {
 		tags.clear();
 		bytes = 0;
 	}
-//private:
-	Arena arena;
-	std::set<TransactionTagRef> tags;
-	size_t bytes;
-};
 
-template <>
-struct dynamic_size_traits<TagSet> : std::true_type {
-	// May be called multiple times during one serialization
 	template <class Context>
-	static size_t size(const TagSet& t, Context&) {
-		return t.tags.size() + t.bytes;
-	}
-
-	// Guaranteed to be called only once during serialization
-	template <class Context>
-	static void save(uint8_t* out, const TagSet& t, Context& c) {
+	void save(uint8_t* out, Context& c) const {
 		uint8_t *start = out;
-		for (const auto& tag : t.tags) {
+		for (const auto& tag : *this) {
 			*(out++) = (uint8_t)tag.size();
 
 			std::copy(tag.begin(), tag.end(), out);
 			out += tag.size();
 		}
 
-		ASSERT((size_t)(out-start) == size(t, c));
+		ASSERT((size_t)(out - start) == size() + bytes);
 	}
 
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* data, size_t size, TagSet& t, Context& context) {
+	void load(const uint8_t* data, size_t size, Context& context) {
 		//const uint8_t *start = data;
 		const uint8_t *end = data + size;
 		while(data < end) {
 			uint8_t len = *(data++);
-			TransactionTagRef tag(context.tryReadZeroCopy(data, len), len);
+			// Tags are already deduplicated
+			const auto& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
 			data += len;
-
-			t.tags.insert(tag);
-			t.bytes += tag.size();
+			bytes += tag.size();
 		}
 
 		ASSERT(data == end);
@@ -106,7 +90,41 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 		// Deserialized tag sets share the arena with the request that contained them
 		// For this reason, persisting a TagSet that shares memory with other request
 		// members should be done with caution.
-		t.arena = context.arena();
+		arena = context.arena();
+	}
+
+	size_t getBytes() const { return bytes; }
+
+	const Arena& getArena() const { return arena; }
+
+private:
+	size_t bytes;
+	Arena arena;
+	// Currently there are never >= 256 tags, so
+	// std::vector is faster than std::set. This may
+	// change if we allow more tags in the future.
+	std::vector<TransactionTagRef> tags;
+};
+
+template <>
+struct dynamic_size_traits<TagSet> : std::true_type {
+	// May be called multiple times during one serialization
+	template <class Context>
+	static size_t size(const TagSet& t, Context&) {
+		return t.size() + t.getBytes();
+	}
+
+	// Guaranteed to be called only once during serialization
+	template <class Context>
+	static void save(uint8_t* out, const TagSet& t, Context& c) {
+		t.save(out, c);
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* data, size_t size, TagSet& t, Context& context) {
+		t.load(data, size, context);
 	}
 };
 

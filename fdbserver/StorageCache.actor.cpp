@@ -1388,9 +1388,9 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		//++data->counters.fetchExecutingCount;
 		//data->counters.fetchExecutingMS += 1000*(now() - executeStart);
 
-		TraceEvent(SevDebug, interval.end(), data->thisServerID);
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error &e){
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
 
 		// TODO define the shuttingDown state of cache server
 		if (e.code() == error_code_actor_cancelled && /* !data->shuttingDown &&*/ cacheRange->phase >= AddingCacheRange::Fetching) {
