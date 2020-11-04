@@ -567,7 +567,7 @@ ACTOR Future<Void> commitBatch(
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
 
 	if(localBatchNumber-self->latestLocalCommitBatchResolving.get()>SERVER_KNOBS->RESET_MASTER_BATCHES && now()-self->lastMasterReset>SERVER_KNOBS->RESET_MASTER_DELAY) {
-		TraceEvent(SevWarnAlways, "ConnectionResetMaster")
+		TraceEvent(SevWarnAlways, "ConnectionResetMaster", self->dbgid)
 		    .detail("PeerAddress", self->master.address())
 		    .detail("CurrentBatch", localBatchNumber)
 		    .detail("InProcessBatch", self->latestLocalCommitBatchResolving.get());
@@ -635,7 +635,7 @@ ACTOR Future<Void> commitBatch(
 	    now() - self->lastResolverReset > SERVER_KNOBS->RESET_RESOLVER_DELAY) {
 
 		for (int r = 0; r<self->resolvers.size(); r++) {
-			TraceEvent(SevWarnAlways, "ConnectionResetResolver")
+			TraceEvent(SevWarnAlways, "ConnectionResetResolver", self->dbgid)
 			    .detail("PeerAddr", self->resolvers[r].address())
 			    .detail("CurrentBatch", localBatchNumber)
 			    .detail("InProcessBatch", self->latestLocalCommitBatchLogging.get());
