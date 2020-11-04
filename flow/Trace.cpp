@@ -430,7 +430,7 @@ public:
 							rolledFields.addField("Time", format("%.6f", time));
 							rolledFields.addField("OriginalTime", itr->second);
 						}
-						if (itr->first == "DateTime") {
+						else if (itr->first == "DateTime") {
 							UNSTOPPABLE_ASSERT(time > 0); // "Time" field should always come first
 							rolledFields.addField("DateTime", TraceEvent::printRealTime(time));
 							rolledFields.addField("OriginalDateTime", itr->second);
