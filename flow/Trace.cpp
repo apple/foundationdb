@@ -565,7 +565,7 @@ public:
 		return f;
 	}
 
-	void retriveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
+	void retrieveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
 
 	~TraceLog() {
 		close();
@@ -812,8 +812,8 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	return *this;
 }
 
-void retriveTraceLogIssues(std::set<std::string>& out) {
-	return g_traceLog.retriveTraceLogIssues(out);
+void retrieveTraceLogIssues(std::set<std::string>& out) {
+	return g_traceLog.retrieveTraceLogIssues(out);
 }
 
 Future<Void> pingTraceLogWriterThread() {
