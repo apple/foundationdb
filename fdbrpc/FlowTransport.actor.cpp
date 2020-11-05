@@ -238,12 +238,18 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 				    .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent)
 				    .detail("ConnectOutgoingCount", peer->connectOutgoingCount)
 				    .detail("ConnectIncomingCount", peer->connectIncomingCount)
-				    .detail("ConnectFailedCount", peer->connectFailedCount);
+				    .detail("ConnectFailedCount", peer->connectFailedCount)
+				    .detail("ConnectMinLatency", peer->connectLatencies.min())
+				    .detail("ConnectMaxLatency", peer->connectLatencies.max())
+				    .detail("ConnectMeanLatency", peer->connectLatencies.mean())
+				    .detail("ConnectMedianLatency", peer->connectLatencies.median())
+				    .detail("ConnectP90Latency", peer->connectLatencies.percentile(0.90));
 				peer->lastLoggedTime = now();
 				peer->connectOutgoingCount = 0;
 				peer->connectIncomingCount = 0;
 				peer->connectFailedCount = 0;
 				peer->pingLatencies.clear();
+				peer->connectLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
 				peer->lastLoggedBytesSent = peer->bytesSent;
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
@@ -496,6 +502,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						when( Reference<IConnection> _conn = wait( INetworkConnections::net()->connect(self->destination) ) ) { 
 							conn = _conn;
 							wait(conn->connectHandshake());
+							self->connectLatencies.addSample(now() - self->lastConnectTime);
 							if (FlowTransport::isClient()) {
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							}
