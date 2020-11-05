@@ -126,17 +126,20 @@ ACTOR Future<Void> simulationStartServer() {
 ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers, int* pendingMessages) {
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
 	state Reference<IUDPSocket> socket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
+	state bool sendError = false;
 
 	loop choose {
 		when(state TraceRequest request = waitNext(inputStream)) {
 			try {
-				int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
+				if (!sendError) {
+					int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
+				}
 				 --(*pendingMessages);
 				request.reset();
 				buffers->push(request);
 			} catch (Error& e) {
 				TraceEvent("TracingSpanSendError").detail("Error", e.what());
-				wait(delay(5.0));
+				sendError = true;
 			}
 		}
 	}
