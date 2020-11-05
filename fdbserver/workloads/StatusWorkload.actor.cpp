@@ -27,8 +27,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-extern bool noUnseed;
-
 struct StatusWorkload : TestWorkload {
 	double testDuration, requestsPerSecond;
 	bool enableLatencyBands;
@@ -53,8 +51,6 @@ struct StatusWorkload : TestWorkload {
 			// This is sort of a hack, but generate code coverage *requirements* for everything in schema
 			schemaCoverageRequirements(parsedSchema.get());
 		}
-
-		noUnseed = true;
 	}
 
 	virtual std::string description() { return "StatusWorkload"; }

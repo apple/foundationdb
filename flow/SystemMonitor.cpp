@@ -57,7 +57,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 	                                                    &ipAddr, &statState->systemState, true);
 	NetworkData netData;
 	netData.init();
-	if (!DEBUG_DETERMINISM && currentStats.initialized) {
+	if (!g_network->isSimulated() && currentStats.initialized) {
 		{
 			TraceEvent(eventName.c_str())
 				.detail("Elapsed", currentStats.elapsed)

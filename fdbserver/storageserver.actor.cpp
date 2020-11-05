@@ -1001,7 +1001,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
-	double duration = timer() - req.requestTime();
+	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
@@ -1599,7 +1599,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
-	double duration = timer() - req.requestTime();
+	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
@@ -1665,7 +1665,7 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 	++data->counters.finishedQueries;
 	--data->readQueueSizeMetric;
 
-	double duration = timer() - req.requestTime();
+	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
 	if(data->latencyBandConfig.present()) {
 		int maxReadBytes = data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
