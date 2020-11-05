@@ -1572,7 +1572,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	int mmApplied = 0;  // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {
 		Optional<Value> snapRecoveryFlag = self->txnStateStore->readValue(writeRecoveryKey).get();
-		TraceEvent("MasterRecoverySnap")
+		TraceEvent("MasterRecoverySnapshotCheck")
 		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A")
 		    .detail("LastEpochEnd", self->lastEpochEnd);
 		if (snapRecoveryFlag.present()) {
@@ -1581,6 +1581,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Pause the backups that got restored in this snapshot to avoid data corruption
 			// Requires further operational work to abort the backup
+			TraceEvent("MasterRecoveryPauseBackupAgents");
 			Key backupPauseKey =
 			    Subspace(fileBackupPrefixRange.begin).get(BackupAgentBase::keyTasks).pack(LiteralStringRef("pause"));
 			tr.set(recoveryCommitRequest.arena, backupPauseKey, StringRef());

@@ -75,6 +75,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 
 	ACTOR static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
 		if (self->waitForBackup) {
+			// Undergoing recovery with the snapshot system keys set will pause the backup agent
+			// Pre-emptively unpause any backup agents before attempting to wait to avoid getting stuck
 			wait(self->backupAgent.changePause(cx, false));
 			state Reference<IBackupContainer> backupContainer;
 			state UID backupUID;
