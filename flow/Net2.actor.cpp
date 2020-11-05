@@ -131,6 +131,7 @@ public:
 	// INetwork interface
 	virtual double now() { return currentTime; };
 	virtual double timer() { return ::timer(); };
+	double timer_monotonic() override { return ::timer_monotonic(); };
 	virtual Future<Void> delay( double seconds, TaskPriority taskId );
 	virtual Future<class Void> yield( TaskPriority taskID );
 	virtual bool check_yield(TaskPriority taskId);

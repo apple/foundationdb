@@ -462,6 +462,9 @@ public:
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop, 
 	// so it cannot be used to measure times of functions that do not have wait statements.
 
+	virtual double timer_monotonic() = 0;
+	// Similar to timer, but monotonic
+
 	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) = 0;
 	// The given future will be set after seconds have elapsed
 
