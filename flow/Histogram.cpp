@@ -19,7 +19,8 @@
  */
 
 #include <flow/Histogram.h>
-#include <flow/Trace.h>
+#include <flow/flow.h>
+#include <flow/UnitTest.h>
 // TODO: remove dependency on fdbrpc.
 
 // we need to be able to check if we're in simulation so that the histograms are properly
@@ -74,6 +75,14 @@ void HistogramRegistry::unregisterHistogram(Histogram * h) {
     ASSERT(histograms.erase(h->name()) == 1);
 }
 
+Histogram * HistogramRegistry::lookupHistogram(std::string name) {
+    auto h = histograms.find(name);
+    if (h == histograms.end()) {
+        return nullptr;
+    }
+    return h->second;
+}
+
 void HistogramRegistry::logReport() {
     for (auto & i : histograms) {
         i.second->writeToLog();
@@ -100,16 +109,63 @@ void Histogram::writeToLog() {
             switch(unit) {
             case Unit::microseconds:
             {
-                uint32_t usec = ((uint32_t)1)<<i;
-                e.detail(format("%u.%03u", usec / 1000, usec % 1000), buckets[i]);
+                uint32_t usec = ((uint32_t)1)<<(i+1);
+                e.detail(format("LessThan%u.%03u", usec / 1000, usec % 1000), buckets[i]);
                 break;
             }
             case Unit::bytes:
-                e.detail(format("%u", ((uint32_t)1)<<i), buckets[i]);
+                e.detail(format("LessThan%u", ((uint32_t)1)<<(i+1)), buckets[i]);
                 break;
             default:
                 ASSERT(false);
             }
         }
     }
+}
+
+TEST_CASE("/flow/histogram/smoke_test") {
+    
+    {
+        Reference<Histogram> h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+
+        h->sample(0);
+        ASSERT(h->buckets[0] == 1);
+        h->sample(1);
+        ASSERT(h->buckets[0] == 2);
+
+        h->sample(2);
+        ASSERT(h->buckets[1] == 1);
+
+        GetHistogramRegistry().logReport();
+
+        ASSERT(h->buckets[0] == 0);
+        h->sample(0);
+        ASSERT(h->buckets[0] == 1);
+        h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts2"), Histogram::Unit::bytes);
+        
+        // confirm that old h was deallocated.
+        h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+        ASSERT(h->buckets[0] == 0);
+
+        h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("times"), Histogram::Unit::microseconds);
+
+        h->sampleSeconds(0.000000);
+        h->sampleSeconds(0.0000019);
+        ASSERT(h->buckets[0] == 2);
+        h->sampleSeconds(0.0000021);
+        ASSERT(h->buckets[1] == 1);
+        h->sampleSeconds(0.000015);
+        ASSERT(h->buckets[3] == 1);
+
+        h->sampleSeconds(4400.0);
+        ASSERT(h->buckets[31] == 1);
+
+        GetHistogramRegistry().logReport();
+
+    }    
+
+    // h has been deallocated.  Does this crash?
+    GetHistogramRegistry().logReport();
+
+    return Void();
 }

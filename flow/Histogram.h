@@ -38,6 +38,7 @@ class HistogramRegistry {
     public:
         void registerHistogram(Histogram * h);
         void unregisterHistogram(Histogram * h);
+        Histogram * lookupHistogram(std::string name);
         void logReport();
     private:
         std::map<std::string, Histogram*> histograms;
@@ -46,20 +47,40 @@ class HistogramRegistry {
 // TODO: This should be scoped properly for simulation (instead of just having all the "machines" share one histogram namespace)
 HistogramRegistry & GetHistogramRegistry();
 
-class Histogram {
+class Histogram : public ReferenceCounted<Histogram> {
 public:
     enum class Unit {
         microseconds,
         bytes
     };
 
-    Histogram(StringRef group, StringRef op, Unit unit) : group(group.toString()), op(op.toString()), unit(unit), registry(GetHistogramRegistry()) {
+private:
+    Histogram(std::string group, std::string op, Unit unit) : group(group), op(op), unit(unit), registry(GetHistogramRegistry()) {
         clear();
         registry.registerHistogram(this);
     }
 
+    static std::string generateName(std::string group, std::string op) {
+        return group + ":" + op;
+    }
+
+public:
+
     ~Histogram() {
         registry.unregisterHistogram(this);
+    }
+
+
+    static Reference<Histogram> getHistogram(StringRef group, StringRef op, Unit unit) {
+        std::string group_str = group.toString();
+        std::string op_str = op.toString();
+        std::string name = generateName(group_str, op_str);
+        HistogramRegistry & registry = GetHistogramRegistry();
+        Histogram * h = registry.lookupHistogram(name);
+        if (!h) {
+            h = new Histogram(group_str, op_str, unit);
+        }
+        return Reference(h);
     }
 
     inline void sample(uint32_t sample) {
@@ -72,7 +93,12 @@ public:
     }
 
     inline void sampleSeconds(double delta) {
-        sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
+        uint64_t delta_usec = (delta * 1000000);
+        if (delta_usec > UINT32_MAX) {
+            sample(UINT32_MAX);
+        } else {
+            sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
+        }
     }
 
     void clear() {
@@ -83,15 +109,13 @@ public:
     void writeToLog();
 
     std::string name() {
-        return group + ":" + op;
+        return generateName(this->group, this->op);
     }
 
     std::string const group;
     std::string const op;
     Unit const unit;
     HistogramRegistry & registry;
-    
-private:
     uint32_t buckets[32];
 };
 
