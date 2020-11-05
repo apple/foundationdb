@@ -129,10 +129,15 @@ ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<
 
 	loop choose {
 		when(state TraceRequest request = waitNext(inputStream)) {
-			int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
-			--(*pendingMessages);
-			request.reset();
-			buffers->push(request);
+			try {
+				int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
+				 --(*pendingMessages);
+				request.reset();
+				buffers->push(request);
+			} catch (Error& e) {
+				TraceEvent("TracingSpanSendError").detail("Error", e.what());
+				wait(delay(5.0));
+			}
 		}
 	}
 }
