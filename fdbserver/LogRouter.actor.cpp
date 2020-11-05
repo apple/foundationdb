@@ -90,7 +90,7 @@ struct LogRouterData {
 	double maxWaitForVersionTime = 0;
 	double getMoreTime = 0;
 	double maxGetMoreTime = 0;
-	uint64_t generation = -1;
+	int64_t generation = -1;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
