@@ -75,6 +75,7 @@ struct LogRouterData {
 
 	UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
+	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
 	Version startVersion;
@@ -89,6 +90,7 @@ struct LogRouterData {
 	double maxWaitForVersionTime = 0;
 	double getMoreTime = 0;
 	double maxGetMoreTime = 0;
+	int64_t generation = -1;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -119,9 +121,12 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
-	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
-		cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc), getMoreBlockedCount("GetMoreBlockedCount", cc) {
+	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
+	  : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()),
+	    version(req.startVersion - 1), minPopped(0), generation(req.recoveryCount), startVersion(req.startVersion),
+	    allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
+	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
+	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -148,7 +153,12 @@ struct LogRouterData {
 		specialCounter(cc, "WaitForVersionMaxMS", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMS", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMaxMS", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return 1000*val; });
-		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
+		specialCounter(cc, "Generation", [this]() { return this->generation; });
+		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
+		                       "LogRouterMetrics", [this](TraceEvent& te) {
+			                       te.detail("PrimaryPeekLocation", this->primaryPeekLocation);
+			                       te.detail("RouterTag", this->routerTag.toString());
+		                       });
 	}
 };
 
@@ -264,6 +274,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() ) {
 						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
+						self->primaryPeekLocation = r->getPrimaryPeekLocation();
 						TraceEvent("LogRouterPeekLocation", self->dbgid).detail("LogID", r->getPrimaryPeekLocation()).trackLatest(self->eventCacheHolder->trackingKey);
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
