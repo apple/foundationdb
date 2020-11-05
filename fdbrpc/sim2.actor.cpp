@@ -751,7 +751,9 @@ public:
 		return timerTime; 
 	}
 
-	virtual Future<class Void> delay( double seconds, TaskPriority taskID ) {
+	double timer_monotonic() override { return timer(); }
+
+	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
 	}
