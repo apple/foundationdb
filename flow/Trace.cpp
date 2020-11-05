@@ -1480,7 +1480,7 @@ RealTimePrinter::RealTimePrinter() : beginTime(Clock::now()), flowBeginTime(g_ne
 // converts the given flow time into a
 // string. now has to be larger
 // then flowBeginTime.
-// %Y-%m-%dT%H:%M:%S
+// %Y-%m-%dT%H:%M:%SZ
 // This only has second-resolution for the simple reason
 // that std::put_time does not support higher resolution.
 // As we always also log the flow time and this is only for
@@ -1493,8 +1493,14 @@ std::string RealTimePrinter::toString(double now) {
 		n = Clock::to_time_t(Clock::now());
 	}
 	std::stringstream ss;
-	// Use thread-safe localtime_r instead of localtime
+
+#ifdef _WIN32
+	// MSVC gmtime is threadsafe
+	ss << std::put_time(::gmtime(&n), "%Y-%m-%dT%H:%M:%SZ");
+#else
+	// use threadsafe gmt
 	struct tm result;
-	ss << std::put_time(::localtime_r(&n, &result), "%Y-%m-%dT%H:%M:%S");
+	ss << std::put_time(::gmtime_r(&n, &result), "%Y-%m-%dT%H:%M:%SZ");
+#endif
 	return ss.str();
 }
