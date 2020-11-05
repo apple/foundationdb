@@ -666,7 +666,7 @@ private:
 };
 
 struct PacketBuffer : SendBuffer {
-private: 
+private:
 	int reference_count;
 	uint32_t const size_;
 	double const enqueue_time;

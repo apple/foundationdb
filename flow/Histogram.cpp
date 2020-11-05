@@ -29,8 +29,8 @@
 // metrics.
 #include <fdbrpc/simulator.h>
 
-// pull in some global pointers too:  These types are implemented in fdbrpc/sim2.actor.cpp, which is not available here.  Yuck.
-// If you're not using the simulator, these will remain null, and all should be well.
+// pull in some global pointers too:  These types are implemented in fdbrpc/sim2.actor.cpp, which is not available here.
+// Yuck. If you're not using the simulator, these will remain null, and all should be well.
 
 // TODO: create a execution context abstraction that allows independent flow instances within a process.
 // The simulator would be the main user of it, and histogram would be the only other user (for now).
@@ -39,133 +39,130 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 
 // Fallback registry when we're not in simulation -- if we had execution contexts we wouldn't need to check if
 // we have a simulated contex here; we'd just use the current context regardless.
-static HistogramRegistry * globalHistograms = nullptr;
+static HistogramRegistry* globalHistograms = nullptr;
 
-HistogramRegistry & GetHistogramRegistry() {
-    ISimulator::ProcessInfo * info = g_simulator.getCurrentProcess();
+HistogramRegistry& GetHistogramRegistry() {
+	ISimulator::ProcessInfo* info = g_simulator.getCurrentProcess();
 
-    if (info) {
-        // in simulator; scope histograms to simulated process
-        return info->histograms;
-    }
-    // avoid link order issues where the registry hasn't been initialized, but we're
-    // instantiating a histogram
-    if (globalHistograms == nullptr) {
-        globalHistograms = new HistogramRegistry();
-    }
-    return *globalHistograms;
+	if (info) {
+		// in simulator; scope histograms to simulated process
+		return info->histograms;
+	}
+	// avoid link order issues where the registry hasn't been initialized, but we're
+	// instantiating a histogram
+	if (globalHistograms == nullptr) {
+		globalHistograms = new HistogramRegistry();
+	}
+	return *globalHistograms;
 }
 
-void HistogramRegistry::registerHistogram(Histogram * h) {
-    if (histograms.find(h->name()) != histograms.end()) {
-        TraceEvent(SevError, "HistogramDoubleRegistered")
-            .detail("group", h->group)
-            .detail("op", h->op);
-        ASSERT(false);
-    }
-    histograms.insert(std::pair<std::string, Histogram*>(h->name(), h));
+void HistogramRegistry::registerHistogram(Histogram* h) {
+	if (histograms.find(h->name()) != histograms.end()) {
+		TraceEvent(SevError, "HistogramDoubleRegistered").detail("group", h->group).detail("op", h->op);
+		ASSERT(false);
+	}
+	histograms.insert(std::pair<std::string, Histogram*>(h->name(), h));
 }
 
-void HistogramRegistry::unregisterHistogram(Histogram * h) {
-    if (histograms.find(h->name()) == histograms.end()) {
-        TraceEvent(SevError, "HistogramNotRegistered")
-            .detail("group", h->group)
-            .detail("op", h->op);
-    }
-    ASSERT(histograms.erase(h->name()) == 1);
+void HistogramRegistry::unregisterHistogram(Histogram* h) {
+	if (histograms.find(h->name()) == histograms.end()) {
+		TraceEvent(SevError, "HistogramNotRegistered").detail("group", h->group).detail("op", h->op);
+	}
+	ASSERT(histograms.erase(h->name()) == 1);
 }
 
-Histogram * HistogramRegistry::lookupHistogram(std::string name) {
-    auto h = histograms.find(name);
-    if (h == histograms.end()) {
-        return nullptr;
-    }
-    return h->second;
+Histogram* HistogramRegistry::lookupHistogram(std::string name) {
+	auto h = histograms.find(name);
+	if (h == histograms.end()) {
+		return nullptr;
+	}
+	return h->second;
 }
 
 void HistogramRegistry::logReport() {
-    for (auto & i : histograms) {
-        i.second->writeToLog();
-        i.second->clear();
-    }
+	for (auto& i : histograms) {
+		i.second->writeToLog();
+		i.second->clear();
+	}
 }
 
 void Histogram::writeToLog() {
-    bool active = false;
-    for (uint32_t i = 0; i < 32; i++) {
-        if (buckets[i]) {
-            active = true;
-            break;
-        }
-    }
-    if (!active) {
-        return ;
-    }
+	bool active = false;
+	for (uint32_t i = 0; i < 32; i++) {
+		if (buckets[i]) {
+			active = true;
+			break;
+		}
+	}
+	if (!active) {
+		return;
+	}
 
-    TraceEvent e(SevInfo, "Histogram");
-    e.detail("Group", group).detail("Op", op);
-    for (uint32_t i = 0; i < 32; i++) {
-        if (buckets[i]) {
-            switch(unit) {
-            case Unit::microseconds:
-            {
-                uint32_t usec = ((uint32_t)1)<<(i+1);
-                e.detail(format("LessThan%u.%03u", usec / 1000, usec % 1000), buckets[i]);
-                break;
-            }
-            case Unit::bytes:
-                e.detail(format("LessThan%u", ((uint32_t)1)<<(i+1)), buckets[i]);
-                break;
-            default:
-                ASSERT(false);
-            }
-        }
-    }
+	TraceEvent e(SevInfo, "Histogram");
+	e.detail("Group", group).detail("Op", op);
+	for (uint32_t i = 0; i < 32; i++) {
+		if (buckets[i]) {
+			switch (unit) {
+			case Unit::microseconds: {
+				uint32_t usec = ((uint32_t)1) << (i + 1);
+				e.detail(format("LessThan%u.%03u", usec / 1000, usec % 1000), buckets[i]);
+				break;
+			}
+			case Unit::bytes:
+				e.detail(format("LessThan%u", ((uint32_t)1) << (i + 1)), buckets[i]);
+				break;
+			default:
+				ASSERT(false);
+			}
+		}
+	}
 }
 
 TEST_CASE("/flow/histogram/smoke_test") {
-    
-    {
-        Reference<Histogram> h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
 
-        h->sample(0);
-        ASSERT(h->buckets[0] == 1);
-        h->sample(1);
-        ASSERT(h->buckets[0] == 2);
+	{
+		Reference<Histogram> h =
+		    Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
 
-        h->sample(2);
-        ASSERT(h->buckets[1] == 1);
+		h->sample(0);
+		ASSERT(h->buckets[0] == 1);
+		h->sample(1);
+		ASSERT(h->buckets[0] == 2);
 
-        GetHistogramRegistry().logReport();
+		h->sample(2);
+		ASSERT(h->buckets[1] == 1);
 
-        ASSERT(h->buckets[0] == 0);
-        h->sample(0);
-        ASSERT(h->buckets[0] == 1);
-        h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts2"), Histogram::Unit::bytes);
-        
-        // confirm that old h was deallocated.
-        h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-        ASSERT(h->buckets[0] == 0);
+		GetHistogramRegistry().logReport();
 
-        h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("times"), Histogram::Unit::microseconds);
+		ASSERT(h->buckets[0] == 0);
+		h->sample(0);
+		ASSERT(h->buckets[0] == 1);
+		h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts2"),
+		                            Histogram::Unit::bytes);
 
-        h->sampleSeconds(0.000000);
-        h->sampleSeconds(0.0000019);
-        ASSERT(h->buckets[0] == 2);
-        h->sampleSeconds(0.0000021);
-        ASSERT(h->buckets[1] == 1);
-        h->sampleSeconds(0.000015);
-        ASSERT(h->buckets[3] == 1);
+		// confirm that old h was deallocated.
+		h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
+		ASSERT(h->buckets[0] == 0);
 
-        h->sampleSeconds(4400.0);
-        ASSERT(h->buckets[31] == 1);
+		h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("times"),
+		                            Histogram::Unit::microseconds);
 
-        GetHistogramRegistry().logReport();
+		h->sampleSeconds(0.000000);
+		h->sampleSeconds(0.0000019);
+		ASSERT(h->buckets[0] == 2);
+		h->sampleSeconds(0.0000021);
+		ASSERT(h->buckets[1] == 1);
+		h->sampleSeconds(0.000015);
+		ASSERT(h->buckets[3] == 1);
 
-    }    
+		h->sampleSeconds(4400.0);
+		ASSERT(h->buckets[31] == 1);
 
-    // h has been deallocated.  Does this crash?
-    GetHistogramRegistry().logReport();
+		GetHistogramRegistry().logReport();
+	}
 
-    return Void();
+	// h has been deallocated.  Does this crash?
+	GetHistogramRegistry().logReport();
+
+	return Void();
 }
