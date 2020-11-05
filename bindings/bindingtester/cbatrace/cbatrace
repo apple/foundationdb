@@ -52,37 +52,37 @@ echo "    ----------------------------------------------"
 echo "    - run command: ${command} \"${@}\""
 
 usage() {
-	echo ""
-	echo "    cbatrace - A utility script used to trace C bindings API calls. "
+    echo ""
+    echo "    cbatrace - A utility script used to trace C bindings API calls. "
     echo "      The script uses the LD_PRELOAD trick to intercept calls to APIs " 
     echo "      tp the shared libarary libfdb_c.so and replace them by calls " 
     echo "      to their corresponding wrapper APIs from library libcbatracefdb_c.so" 
     echo "      in order to produce tracing information" 
-	echo ""
-	echo "    Usage: $0 [options] <program> [args...]"
-	echo ""
-	echo "    Options:"
-	echo "      -h            : Show this help."
-	echo "      -c            : Count and show calls for each library call."
-	echo "      -o <file_name>: Write the trace output to the file file_name rather than to stdout."
-	echo ""
-	echo "    Examples:"
-	echo "      - Trace the C binding API calls when running test 'fdb_c_txn_size_test'."
+    echo ""
+    echo "    Usage: $0 [options] <program> [args...]"
+    echo ""
+    echo "    Options:"
+    echo "      -h            : Show this help."
+    echo "      -c            : Count and show calls for each library call."
+    echo "      -o <file_name>: Write the trace output to the file file_name rather than to stdout."
+    echo ""
+    echo "    Examples:"
+    echo "      - Trace the C binding API calls when running test 'fdb_c_txn_size_test'."
     echo "        Show the summary of calls on stdout."
     echo "        > ./cbatrace ~/build/bin/fdb_c_txn_size_test"
- 	echo ""
- 	echo "      - Same as above, but also show every API call (as it occurs) with incremental counts."
+    echo ""
+    echo "      - Same as above, but also show every API call (as it occurs) with incremental counts."
     echo "        Show the summary of calls on stdout."
     echo "        > ./cbatrace -c ~/build/bin/fdb_c_txn_size_test"
- 	echo ""
- 	echo "      - Same as above, but use file 'cbatrace.log' to save the tracing result."
+    echo ""
+    echo "      - Same as above, but use file 'cbatrace.log' to save the tracing result."
     echo "        > ./cbatrace -c -o /tmp/cbatrace.log ~/build/bin/fdb_c_txn_size_test"
- 	echo ""          
-	if [ "$#" = 0 ]; then
-		exit 0
-	else
-		exit "$1"
-	fi
+    echo ""          
+    if [ "$#" = 0 ]; then
+	exit 0
+    else
+	exit "$1"
+    fi
 }
 
 
@@ -114,7 +114,7 @@ CBATRACE_LIBDIR=$(dirname $(realpath "$0"))
 
 # display usage if missing arguments
 if [ "$#" = "0" ]; then
-	usage 1
+    usage 1
 fi
 
 # run command 
