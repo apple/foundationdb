@@ -1582,8 +1582,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 			// Pause the backups that got restored in this snapshot to avoid data corruption
 			// Requires further operational work to abort the backup
 			TraceEvent("MasterRecoveryPauseBackupAgents");
-			Key backupPauseKey =
-			    Subspace(fileBackupPrefixRange.begin).get(BackupAgentBase::keyTasks).pack(LiteralStringRef("pause"));
+			Key backupPauseKey = FileBackupAgent::getPauseKey();
 			tr.set(recoveryCommitRequest.arena, backupPauseKey, StringRef());
 			// Clear the key so multiple recoveries will not overwrite the first version recorded
 			tr.clear(recoveryCommitRequest.arena, singleKeyRange(writeRecoveryKey));
