@@ -55,12 +55,12 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
                             std::map<Tag, Version>* tag_popped, bool initialCommit) {
 	//std::map<keyRef, vector<uint16_t>> cacheRangeInfo;
 	std::map<KeyRef, MutationRef> cachedRangeInfo;
-	if (toCommit) {
-		toCommit->addTransactionInfo(spanContext);
-	}
 
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
+		if (toCommit) {
+			toCommit->addTransactionInfo(spanContext);
+		}
 
 		if (m.param1.size() && m.param1[0] == systemKeys.begin[0] && m.type == MutationRef::SetValue) {
 			if(m.param1.startsWith(keyServersPrefix)) {
