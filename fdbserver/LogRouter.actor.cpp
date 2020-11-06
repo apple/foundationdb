@@ -75,12 +75,13 @@ struct LogRouterData {
 
 	UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
-	NotifiedVersion version; // The largest version at which the log router has peeked mutations from satellite tLog.
+	NotifiedVersion version; // The largest version at which the log router has peeked mutations
+	                         // from satellite tLog or primary tLogs.
 	NotifiedVersion minPopped; // The minimum version among all tags that has been popped by remote tLogs.
 	Version startVersion;
 	Version minKnownCommittedVersion; // The minimum durable version among all LRs.
 	                                  // A LR's durable version is the maximum version of mutations that have been
-	                                  // peeked by remote tLog.
+	                                  // popped by remote tLog.
 	Version poppedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
@@ -271,7 +272,6 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			state double startTime = now();
 			choose {
 				when(wait( getMoreF ) ) {
-
 					self->getMoreTime += now() - startTime;
 					self->maxGetMoreTime = std::max(self->maxGetMoreTime, now() - startTime);
 					break;

@@ -39,7 +39,7 @@ typedef int64_t Generation;
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3, // Q: definition?
+	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
 	tagLocalityLogRouterMapped = -6, // Q: definition? I guess it is used by pseudo tags

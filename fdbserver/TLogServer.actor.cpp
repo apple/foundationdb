@@ -484,7 +484,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version unrecoveredBefore, recoveredAt;
 
 	struct PeekTrackerData {
-		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
+		std::map<int, Promise<std::pair<Version, bool>>>
+		    sequence_version; // second: Version is peeked begin version. bool is onlySpilled
 		double lastUpdate;
 
 		Tag tag;

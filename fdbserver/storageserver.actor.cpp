@@ -1622,7 +1622,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady()) checkFatalError.get();
 
-	// TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion); // Q:Uncomment it?
+	// TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
@@ -3015,7 +3015,6 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 void StorageServerDisk::makeVersionDurable( Version version ) {
 	storage->set( KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())) );
 
-	// Q: shall we enable it? How frequent will it be printed?
 	// TraceEvent("MakeDurable", data->thisServerID)
 	//     .detail("FromVersion", prevStorageVersion)
 	//     .detail("ToVersion", version);

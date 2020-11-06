@@ -160,7 +160,7 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData) :
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	UID dbgid;
 	LogSystemType logSystemType;
-	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, logRouter, or remote
+	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
 	int expectedLogSets;
 	int logRouterTags;
 	int txsTags;
@@ -253,7 +253,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		auto& localityVersion = pseudoLocalityPopVersion[locality];
 		localityVersion = std::max(localityVersion, upTo);
 		Version minVersion = localityVersion;
-		// Q: Why do we need to use the minimum popped version among all tags?
+		// Why do we need to use the minimum popped version among all tags? Reason: for example,
+		// 2 pseudo tags pop 100 or 150, respectively. It's only safe to pop min(100, 150),
+		// because [101,150) is needed by another pseudo tag.
 		for (const auto& it : pseudoLocalityPopVersion) {
 			minVersion = std::min(minVersion, it.second);
 		}
