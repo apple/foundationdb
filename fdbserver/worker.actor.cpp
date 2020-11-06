@@ -835,7 +835,8 @@ ACTOR Future<Void> workerServer(
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder, locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(
+	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
 
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define
