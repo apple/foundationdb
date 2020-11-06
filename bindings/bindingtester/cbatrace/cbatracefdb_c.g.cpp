@@ -256,6 +256,8 @@ static void init (void) {
 struct FDBCluster;
 struct FDBDatabase;
 struct FDBFuture;
+struct FDBKey;
+struct FDBKeyValue;
 struct FDBTransaction;
 typedef int fdb_bool_t;
 typedef int fdb_error_t;
@@ -350,6 +352,14 @@ fdb_error_t
 , fdb_future_get_key
 , ( FDBFuture* f, uint8_t const** out_key, int* out_key_length )
 , ( f, out_key, out_key_length )
+)
+
+/* fdb_future_get_key_array() */
+MAKE_FUNCTION_RET(
+fdb_error_t 
+, fdb_future_get_key_array
+, ( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
+, ( f, out_key_array, out_count )
 )
 
 /* fdb_future_get_string_array() */
@@ -536,6 +546,14 @@ FDBFuture*
 , ( tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length )
 )
 
+/* fdb_transaction_get_range_split_points() */
+MAKE_FUNCTION_RET(
+FDBFuture* 
+, fdb_transaction_get_range_split_points
+, ( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size)
+, ( tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length, chunk_size )
+)
+
 /* fdb_transaction_get_read_version() */
 MAKE_FUNCTION_RET(
 FDBFuture* 
@@ -603,46 +621,48 @@ static void end (void) {
   // display the summary for API calls counters 
   fprintf(outputFile, " <Event Type=\"summary\" Name=\"totals\">\n");
   
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_watch", _count_fdb_transaction_watch.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_run_network", _count_fdb_run_network.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_database_create_transaction", _count_fdb_database_create_transaction.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_add_network_thread_completion_hook", _count_fdb_add_network_thread_completion_hook.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_stop_network", _count_fdb_stop_network.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_database_destroy", _count_fdb_database_destroy.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_int64", _count_fdb_future_get_int64.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_get_error", _count_fdb_get_error.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_committed_version", _count_fdb_transaction_get_committed_version.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_release_memory", _count_fdb_future_release_memory.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_key", _count_fdb_future_get_key.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_read_version", _count_fdb_transaction_get_read_version.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_on_error", _count_fdb_transaction_on_error.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_string_array", _count_fdb_future_get_string_array.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_versionstamp", _count_fdb_transaction_get_versionstamp.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_cancel", _count_fdb_future_cancel.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_commit", _count_fdb_transaction_commit.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_database_create_transaction", _count_fdb_database_create_transaction.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_committed_version", _count_fdb_transaction_get_committed_version.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_get_error", _count_fdb_get_error.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_set", _count_fdb_transaction_set.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_int64", _count_fdb_future_get_int64.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_addresses_for_key", _count_fdb_transaction_get_addresses_for_key.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_future_destroy", _count_fdb_future_destroy.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_error_predicate", _count_fdb_error_predicate.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_block_until_ready", _count_fdb_future_block_until_ready.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_reset", _count_fdb_transaction_reset.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_addresses_for_key", _count_fdb_transaction_get_addresses_for_key.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_set_callback", _count_fdb_future_set_callback.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_approximate_size", _count_fdb_transaction_get_approximate_size.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_set", _count_fdb_transaction_set.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_atomic_op", _count_fdb_transaction_atomic_op.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_versionstamp", _count_fdb_transaction_get_versionstamp.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_network_set_option", _count_fdb_network_set_option.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_clear", _count_fdb_transaction_clear.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_select_api_version_impl", _count_fdb_select_api_version_impl.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_add_network_thread_completion_hook", _count_fdb_add_network_thread_completion_hook.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_read_version", _count_fdb_transaction_get_read_version.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_cancel", _count_fdb_future_cancel.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_get_max_api_version", _count_fdb_get_max_api_version.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_is_ready", _count_fdb_future_is_ready.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_value", _count_fdb_future_get_value.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_on_error", _count_fdb_transaction_on_error.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_cancel", _count_fdb_transaction_cancel.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_add_conflict_range", _count_fdb_transaction_add_conflict_range.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_clear_range", _count_fdb_transaction_clear_range.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_get_client_version", _count_fdb_get_client_version.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_stop_network", _count_fdb_stop_network.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_create_database", _count_fdb_create_database.load());
-  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_set_read_version", _count_fdb_transaction_set_read_version.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_is_ready", _count_fdb_future_is_ready.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_run_network", _count_fdb_run_network.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_block_until_ready", _count_fdb_future_block_until_ready.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_range_split_points", _count_fdb_transaction_get_range_split_points.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_key", _count_fdb_future_get_key.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_watch", _count_fdb_transaction_watch.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_destroy", _count_fdb_transaction_destroy.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_add_conflict_range", _count_fdb_transaction_add_conflict_range.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_set_callback", _count_fdb_future_set_callback.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_get_client_version", _count_fdb_get_client_version.load());
   xmlWriteEvent(outputFile, 2, "api", "fdb_database_set_option", _count_fdb_database_set_option.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_clear", _count_fdb_transaction_clear.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_atomic_op", _count_fdb_transaction_atomic_op.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_clear_range", _count_fdb_transaction_clear_range.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_key_array", _count_fdb_future_get_key_array.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_set_read_version", _count_fdb_transaction_set_read_version.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_release_memory", _count_fdb_future_release_memory.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_get_approximate_size", _count_fdb_transaction_get_approximate_size.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_future_get_value", _count_fdb_future_get_value.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_network_set_option", _count_fdb_network_set_option.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_cancel", _count_fdb_transaction_cancel.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_transaction_reset", _count_fdb_transaction_reset.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_select_api_version_impl", _count_fdb_select_api_version_impl.load());
+  xmlWriteEvent(outputFile, 2, "api", "fdb_get_max_api_version", _count_fdb_get_max_api_version.load());
 
   // generate closing xml tags 
   fprintf(outputFile, " </Event>\n");

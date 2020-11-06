@@ -96,15 +96,15 @@ def genFunctionActualParams(functionSet, functionName, functionFormalParams):
 def genTypes(headerFile):
     # regular expresson to extrace FDB APIs signatures 
     # (function name, arguments, and retrun type) 
-    r = re.compile("(struct|typedef)\s+" # Beginning of the string either struct or type def 
-                   "(\w+)\s+"            # STD type for typedef or orginal type for struct         
+    r = re.compile("(typedef|struct)\s+" # Beginning of the string either struct or type def 
+                   "(?!enum )(\w+)\s+"   # STD type for typedef or struct except enum
+                   "(?:[{][^}]+[}]\s+)?" # body for typedef struct (non-numbered optional group)          
                    "(\w+)\s*[;]")        # Type name, the word before ending ';'
 
     # extract types from the header file 
     with open(headerFile, 'r') as f:
         types = sorted(set( 
-            m.group(1) 
-            + ' ' 
+            m.group(1) + ' ' 
             + (m.group(3) if m.group(1) == 'struct' else m.group(2) + ' ' + m.group(3)) 
             + ';'     
         for m in r.finditer(" ".join(f.read().split()))))
