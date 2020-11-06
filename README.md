@@ -10,7 +10,7 @@ Documentation can be found online at <https://apple.github.io/foundationdb/>. Th
 
 ## Forums
 
-[The FoundationDB Forums](https://forums.foundationdb.org/) are the home for most of the discussion and communication about the FoundationDB project. We welcome your participation!  We want FoundationDB to be a great project to be a part of and, as part of that, have established a [Code of Conduct](CODE_OF_CONDUCT.md) to establish what constitutes permissible modes of interaction.
+[The FoundationDB Forums](https://forums.foundationdb.org/) are the home of most of the discussion and communication about the FoundationDB project. We welcome your participation!  We want FoundationDB to be a great project to be a part of and, as part of that, have established a [Code of Conduct](CODE_OF_CONDUCT.md) to establish what constitutes permissible modes of interaction.
 
 ## Contributing
 
