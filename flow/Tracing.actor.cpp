@@ -181,9 +181,7 @@ public:
 
 		if (buffers_.empty()) {
 			++total_buffers_;
-			if (total_buffers_ % 500 == 0) {
-				TraceEvent(SevInfo, "TracingSpanCreateBuffer").detail("Buffers", total_buffers_);
-			}
+			TraceEvent(SevInfo, "TracingSpanCreateBuffer").detail("Buffers", total_buffers_);
 			buffers_.push(TraceRequest{
 				.buffer = new uint8_t[kTraceBufferSize],
 				.data_size = 0,
@@ -209,7 +207,7 @@ public:
 		++total_messages_;
 		stream_.send(request);
 
-		if (total_messages_ % 10000 == 0) {
+		if (total_messages_ % 50000 == 0) {
 			TraceEvent("TracingSpanTotalMessages").detail("Messages", total_messages_);
 		}
 	}
