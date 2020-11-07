@@ -103,7 +103,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
@@ -354,7 +354,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("%.6f %-10s Wait #%4d for %lld tasks to end\n", now(), randomID.toString().c_str(), waitCycles, (long long) taskCount);
 
 					wait(delay(5.0));
-					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+					tr = makeReference<ReadYourWritesTransaction>(cx);
 					int64_t _taskCount = wait( backupAgent->getTaskCount(tr) );
 					taskCount = _taskCount;
 

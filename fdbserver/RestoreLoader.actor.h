@@ -188,7 +188,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		nodeID = loaderInterfID;
 		nodeIndex = assignedIndex;
 		role = RestoreRole::Loader;
-		hasPendingRequests = Reference<AsyncVar<bool>>(new AsyncVar<bool>(false));
+		hasPendingRequests = makeReference<AsyncVar<bool>>(false);
 	}
 
 	~RestoreLoaderData() = default;
@@ -216,8 +216,8 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 
 	void initVersionBatch(int batchIndex) {
 		TraceEvent("FastRestoreLoaderInitVersionBatch", nodeID).detail("BatchIndex", batchIndex);
-		batch[batchIndex] = Reference<LoaderBatchData>(new LoaderBatchData(nodeID, batchIndex));
-		status[batchIndex] = Reference<LoaderBatchStatus>(new LoaderBatchStatus());
+		batch[batchIndex] = makeReference<LoaderBatchData>(nodeID, batchIndex);
+		status[batchIndex] = makeReference<LoaderBatchStatus>();
 	}
 
 	void resetPerRestoreRequest() {

@@ -663,13 +663,9 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 			value = std::move(v);
 		}
 
-		static Reference<ReferencedObject<V>> from(V const& v) {
-			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
-		}
+	    static Reference<ReferencedObject<V>> from(V const& v) { return makeReference<ReferencedObject<V>>(v); }
 
-		static Reference<ReferencedObject<V>> from(V&& v) {
-			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(std::move(v)));
-		}
+	    static Reference<ReferencedObject<V>> from(V&& v) { return makeReference<ReferencedObject<V>>(std::move(v)); }
 
 	private:
 		V value;

@@ -222,7 +222,8 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		StringRef key = c.eat(":");
 		StringRef secret = c.eat();
 
-		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders));
+		return makeReference<BlobStoreEndpoint>(host.toString(), service.toString(), key.toString(), secret.toString(),
+		                                        knobs, extraHeaders);
 
 	} catch(std::string &err) {
 		if(error != nullptr)

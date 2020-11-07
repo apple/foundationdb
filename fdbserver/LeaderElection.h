@@ -60,7 +60,7 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 							  bool hasConnected,
 							  Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo)
 {
-	Reference<AsyncVar<Value>> serializedInfo(new AsyncVar<Value>);
+	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = tryBecomeLeaderInternal(coordinators, ObjectWriter::toValue(proposedInterface, IncludeVersion()),
 	                                         serializedInfo, hasConnected, asyncPriorityInfo);
 	return m || asyncDeserialize(serializedInfo, outKnownLeader);

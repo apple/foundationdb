@@ -32,7 +32,7 @@ Reference<StorageInfo> getStorageInfo(UID id, std::map<UID, Reference<StorageInf
 	Reference<StorageInfo> storageInfo;
 	auto cacheItr = storageCache->find(id);
 	if(cacheItr == storageCache->end()) {
-		storageInfo = Reference<StorageInfo>( new StorageInfo() );
+		storageInfo = makeReference<StorageInfo>();
 		storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
 		storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
 		(*storageCache)[id] = storageInfo;
@@ -127,7 +127,7 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 					if(storageCache) {
 						auto cacheItr = storageCache->find(id);
 						if(cacheItr == storageCache->end()) {
-							Reference<StorageInfo> storageInfo = Reference<StorageInfo>( new StorageInfo() );
+							Reference<StorageInfo> storageInfo = makeReference<StorageInfo>();
 							storageInfo->tag = tag;
 							Optional<Key> interfKey = txnStateStore->readValue( serverListKeyFor(id) ).get();
 							if(interfKey.present()) {
@@ -198,7 +198,7 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 
 						auto cacheItr = storageCache->find(id);
 						if(cacheItr == storageCache->end()) {
-							Reference<StorageInfo> storageInfo = Reference<StorageInfo>( new StorageInfo() );
+							Reference<StorageInfo> storageInfo = makeReference<StorageInfo>();
 							storageInfo->interf = interf;
 							Optional<Key> tagKey = txnStateStore->readValue( serverTagKeyFor(id) ).get();
 							if(tagKey.present()) {
@@ -221,7 +221,7 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 					auto &p = (*uid_applyMutationsData)[uid];
 					p.endVersion = BinaryReader::fromStringRef<Version>(m.param2, Unversioned());
 					if(p.keyVersion == Reference<KeyRangeMap<Version>>())
-						p.keyVersion = Reference<KeyRangeMap<Version>>( new KeyRangeMap<Version>() );
+						p.keyVersion = makeReference<KeyRangeMap<Version>>();
 					if(!p.worker.isValid() || p.worker.isReady()) {
 						auto addPrefixValue = txnStateStore->readValue(uid.withPrefix(applyMutationsAddPrefixRange.begin)).get();
 						auto removePrefixValue = txnStateStore->readValue(uid.withPrefix(applyMutationsRemovePrefixRange.begin)).get();
@@ -241,7 +241,7 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 						Key k = m.param1.substr(applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID));
 						auto &p = (*uid_applyMutationsData)[uid];
 						if(p.keyVersion == Reference<KeyRangeMap<Version>>())
-							p.keyVersion = Reference<KeyRangeMap<Version>>( new KeyRangeMap<Version>() );
+							p.keyVersion = makeReference<KeyRangeMap<Version>>();
 						p.keyVersion->rawInsert( k, BinaryReader::fromStringRef<Version>(m.param2, Unversioned()) );
 					}
 				}
@@ -416,7 +416,7 @@ void applyMetadataMutations(SpanID const& spanContext, UID const& dbgid, Arena& 
 						if(uid == uid2) {
 							auto &p = (*uid_applyMutationsData)[uid];
 							if(p.keyVersion == Reference<KeyRangeMap<Version>>())
-								p.keyVersion = Reference<KeyRangeMap<Version>>( new KeyRangeMap<Version>() );
+								p.keyVersion = makeReference<KeyRangeMap<Version>>();
 							p.keyVersion->rawErase( KeyRangeRef( m.param1.substr(applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID)), m.param2.substr(applyMutationsKeyVersionMapRange.begin.size() + sizeof(UID))) );
 						}
 					}

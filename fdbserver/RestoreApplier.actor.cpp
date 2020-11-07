@@ -43,8 +43,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 void handleUpdateRateRequest(RestoreUpdateRateRequest req, Reference<RestoreApplierData> self);
 
 ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx) {
-	state Reference<RestoreApplierData> self =
-	    Reference<RestoreApplierData>(new RestoreApplierData(applierInterf.id(), nodeIndex));
+	state Reference<RestoreApplierData> self = makeReference<RestoreApplierData>(applierInterf.id(), nodeIndex);
 	state ActorCollection actors(false);
 	state Future<Void> exitRole = Never();
 

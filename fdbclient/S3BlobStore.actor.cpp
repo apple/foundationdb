@@ -235,8 +235,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 		StringRef key = c.eat(":");
 		StringRef secret = c.eat();
 
-		return Reference<S3BlobStoreEndpoint>(new S3BlobStoreEndpoint(
-		    host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders));
+		return makeReference<S3BlobStoreEndpoint>(host.toString(), service.toString(), key.toString(),
+		                                          secret.toString(), knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr) *error = err;

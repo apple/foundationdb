@@ -37,7 +37,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator.extraDB != nullptr);
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
 		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
@@ -139,8 +139,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		TraceEvent("DifferentClusters_CopiedDatabase");
 		wait(advanceVersion(self->extraDB, rv));
 		TraceEvent("DifferentClusters_AdvancedVersion");
-		wait(cx->switchConnectionFile(Reference<ClusterConnectionFile>(
-		    new ClusterConnectionFile(self->extraDB->getConnectionFile()->getConnectionString()))));
+		wait(cx->switchConnectionFile(
+		    makeReference<ClusterConnectionFile>(self->extraDB->getConnectionFile()->getConnectionString())));
 		TraceEvent("DifferentClusters_SwitchedConnectionFile");
 		state Transaction tr(cx);
 		tr.setVersion(rv);

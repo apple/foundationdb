@@ -116,7 +116,7 @@ struct LogRouterData {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, Version knownCommittedVersion) {
-		Reference<TagData> newTagData(new TagData(tag, popped, knownCommittedVersion));
+		auto newTagData = makeReference<TagData>(tag, popped, knownCommittedVersion);
 		tag_data[tag.id] = newTagData;
 		return newTagData;
 	}
@@ -138,7 +138,7 @@ struct LogRouterData {
 			}
 		}
 
-		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
+		eventCacheHolder = makeReference<EventCacheHolder>(dbgid.shortString() + ".PeekLocation");
 
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });

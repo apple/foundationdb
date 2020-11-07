@@ -60,7 +60,7 @@ struct OldLogData {
 	    pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch) {
 		tLogs.resize(conf.tLogs.size());
 		for (int j = 0; j < conf.tLogs.size(); j++) {
-			Reference<LogSet> logSet(new LogSet(conf.tLogs[j]));
+			auto logSet = makeReference<LogSet>(conf.tLogs[j]);
 			tLogs[j] = logSet;
 		}
 	}
@@ -286,8 +286,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf, bool excludeRemote, bool useRecoveredAt, Optional<PromiseStream<Future<Void>>> addActor ) {
 		ASSERT(lsConf.logSystemType == LogSystemType::tagPartitioned || (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()));
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
-		Reference<TagPartitionedLogSystem> logSystem(
-		    new TagPartitionedLogSystem(dbgid, locality, lsConf.epoch, addActor));
+		auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, lsConf.epoch, addActor);
 
 		logSystem->tLogs.reserve(lsConf.tLogs.size());
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
@@ -321,7 +320,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		ASSERT( lsConf.logSystemType == LogSystemType::tagPartitioned || (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()) );
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
 		const LogEpoch e = lsConf.oldTLogs.size() > 0 ? lsConf.oldTLogs[0].epoch : 0;
-		Reference<TagPartitionedLogSystem> logSystem(new TagPartitionedLogSystem(dbgid, locality, e));
+		auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, e);
 
 		if (lsConf.oldTLogs.size()) {
 			for (const TLogSet& tLogSet : lsConf.oldTLogs[0].tLogs) {
@@ -539,7 +538,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(it->isLocal && it->logServers.size()) {
 				if(it->connectionResetTrackers.size() == 0) {
 					for(int i = 0; i < it->logServers.size(); i++) {
-						it->connectionResetTrackers.push_back(Reference<ConnectionResetInfo>( new ConnectionResetInfo() ));
+						it->connectionResetTrackers.push_back(makeReference<ConnectionResetInfo>());
 					}
 				}
 				vector<Future<Void>> tLogCommitResults;
@@ -583,7 +582,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if(begin >= lastBegin && localSets.size()) {
 			TraceEvent("TLogPeekAllCurrentOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestLogs", localSets[bestSet]->logServerString());
-			return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, begin, end, parallelGetMore ) );
+			return makeReference<ILogSystem::SetPeekCursor>(
+			    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, end, parallelGetMore);
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
@@ -600,7 +600,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						break;
 					}
 					TraceEvent("TLogPeekAllDead", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size());
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+					return makeReference<ILogSystem::ServerPeekCursor>(
+					    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false,
+					    false);
 				}
 
 				int bestOldSet = 0;
@@ -626,7 +628,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if(!cursors.size() && !foundSpecial) {
 						continue;
 					}
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+					return makeReference<ILogSystem::ServerPeekCursor>(
+					    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false,
+					    false);
 				}
 				if(thisSpecial) {
 					foundSpecial = true;
@@ -644,7 +648,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+			return makeReference<ILogSystem::MultiCursor>(cursors, epochEnds);
 		}
 	}
 
@@ -663,11 +667,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		if(bestSet == -1) {
 			TraceEvent("TLogPeekRemoteNoBestSet", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end.present() ? end.get() : getPeekEnd());
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, parallelGetMore ) );
+			return makeReference<ILogSystem::ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(),
+			                                                   tag, begin, getPeekEnd(), false, parallelGetMore);
 		}
 		if(begin >= lastBegin) {
 			TraceEvent("TLogPeekRemoteBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end.present() ? end.get() : getPeekEnd()).detail("BestSet", bestSet).detail("BestSetStart", lastBegin).detail("LogRouterIds", tLogs[bestSet]->logRouterString());
-			return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor( tLogs[bestSet]->logRouters, tag, begin, end.present() ? end.get() + 1 : getPeekEnd(), parallelGetMore ) );
+			return makeReference<ILogSystem::BufferedCursor>(
+			    tLogs[bestSet]->logRouters, tag, begin, end.present() ? end.get() + 1 : getPeekEnd(), parallelGetMore);
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
@@ -679,7 +685,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
 					TraceEvent("TLogPeekRemoteDead", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end.present() ? end.get() : getPeekEnd()).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size());
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, parallelGetMore ) );
+					return makeReference<ILogSystem::ServerPeekCursor>(
+					    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false,
+					    parallelGetMore);
 				}
 
 				int bestOldSet = -1;
@@ -696,7 +704,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 				if(bestOldSet == -1) {
 					TraceEvent("TLogPeekRemoteNoOldBestSet", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end.present() ? end.get() : getPeekEnd());
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, parallelGetMore ) );
+					return makeReference<ILogSystem::ServerPeekCursor>(
+					    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false,
+					    parallelGetMore);
 				}
 
 				if(thisBegin < lastBegin) {
@@ -710,14 +720,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				i++;
 			}
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+			return makeReference<ILogSystem::MultiCursor>(cursors, epochEnds);
 		}
 	}
 
 	Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, Tag tag, bool parallelGetMore ) final {
 		if(!tLogs.size()) {
 			TraceEvent("TLogPeekNoLogSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			return makeReference<ILogSystem::ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(),
+			                                                   tag, begin, getPeekEnd(), false, false);
 		}
 
 		if(tag.locality == tagLocalityRemoteLog) {
@@ -730,7 +741,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Reference<IPeekCursor> peek(UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore) final {
 		if(tags.empty()) {
 			TraceEvent("TLogPeekNoTags", dbgid).detail("Begin", begin);
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, getPeekEnd(), false, false ) );
+			return makeReference<ILogSystem::ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(),
+			                                                   invalidTag, begin, getPeekEnd(), false, false);
 		}
 
 		if(tags.size() == 1) {
@@ -741,7 +753,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for(auto tag : tags) {
 			cursors.push_back(peek(dbgid, begin, end, tag, parallelGetMore));
 		}
-		return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), true, tLogs[0]->locality == tagLocalityUpgraded, false) );
+		return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(),
+		                                                 true, tLogs[0]->locality == tagLocalityUpgraded, false);
 	}
 
 	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end, bool useMergePeekCursors, int8_t peekLocality = tagLocalityInvalid ) {
@@ -770,17 +783,22 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(useMergePeekCursors || logCount > 1) {
 				throw worker_removed();
 			} else {
-				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+				return makeReference<ILogSystem::ServerPeekCursor>(
+				    Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false);
 			}
 		}
 
 		if(begin >= tLogs[bestSet]->startVersion) {
 			TraceEvent("TLogPeekLocalBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestSet", bestSet).detail("BestSetStart", tLogs[bestSet]->startVersion).detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )]->get().id());
 			if(useMergePeekCursors) {
-				return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logServers, tLogs[bestSet]->bestLocationFor( tag ), tLogs[bestSet]->logServers.size() + 1 - tLogs[bestSet]->tLogReplicationFactor, tag,
-							begin, end, true, tLogs[bestSet]->tLogLocalities, tLogs[bestSet]->tLogPolicy, tLogs[bestSet]->tLogReplicationFactor) );
+				return makeReference<ILogSystem::MergedPeekCursor>(
+				    tLogs[bestSet]->logServers, tLogs[bestSet]->bestLocationFor(tag),
+				    tLogs[bestSet]->logServers.size() + 1 - tLogs[bestSet]->tLogReplicationFactor, tag, begin, end,
+				    true, tLogs[bestSet]->tLogLocalities, tLogs[bestSet]->tLogPolicy,
+				    tLogs[bestSet]->tLogReplicationFactor);
 			} else {
-				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, begin, end, false, false ) );
+				return makeReference<ILogSystem::ServerPeekCursor>(
+				    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)], tag, begin, end, false, false);
 			}
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
@@ -862,7 +880,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+			return makeReference<ILogSystem::MultiCursor>(cursors, epochEnds);
 		}
 	}
 
@@ -870,7 +888,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		Version end = getEnd();
 		if(!tLogs.size()) {
 			TraceEvent("TLogPeekTxsNoLogs", dbgid);
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), txsTag, begin, end, false, false ) );
+			return makeReference<ILogSystem::ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(),
+			                                                   txsTag, begin, end, false, false);
 		}
 		TraceEvent("TLogPeekTxs", dbgid).detail("Begin", begin).detail("End", end).detail("LocalEnd", localEnd).detail("PeekLocality", peekLocality).detail("CanDiscardPopped", canDiscardPopped);
 
@@ -892,7 +911,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
 			}
 
-			return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end, false, false, canDiscardPopped) );
+			return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, false, canDiscardPopped);
 		}
 
 		try {
@@ -906,7 +925,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					cursors.push_back(peekLocal(dbgid, txsTag, begin, end, true, peekLocality));
 				}
 
-				return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end, false, false, canDiscardPopped) );
+				return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, false, canDiscardPopped);
 			}
 
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
@@ -926,11 +945,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				allCursors.push_back(peekAll(dbgid, localEnd, end, txsTag, true));
 			}
 
-			cursors[1] = Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(localCursors, begin, localEnd, false, false, canDiscardPopped) );
-			cursors[0] = Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(allCursors, localEnd, end, false, false, false) );
+			cursors[1] = makeReference<ILogSystem::BufferedCursor>(localCursors, begin, localEnd, false, false,
+			                                                       canDiscardPopped);
+			cursors[0] = makeReference<ILogSystem::BufferedCursor>(allCursors, localEnd, end, false, false, false);
 			epochEnds.emplace_back(localEnd);
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+			return makeReference<ILogSystem::MultiCursor>(cursors, epochEnds);
 		} catch( Error& e ) {
 			if(e.code() == error_code_worker_removed) {
 				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
@@ -942,7 +962,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					cursors.push_back(peekAll(dbgid, begin, end, txsTag, true));
 				}
 
-				return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end, false, false, canDiscardPopped) );
+				return makeReference<ILogSystem::BufferedCursor>(cursors, begin, end, false, false, canDiscardPopped);
 			}
 			throw;
 		}
@@ -969,7 +989,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				epochEnds.emplace_back(history[i].first);
 			}
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+			return makeReference<ILogSystem::MultiCursor>(cursors, epochEnds);
 		}
 	}
 
@@ -1006,7 +1026,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 				TraceEvent("TLogPeekLogRouterSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
-				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, begin, getPeekEnd(), true ) );
+				return makeReference<ILogSystem::SetPeekCursor>(
+				    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin, getPeekEnd(), true);
 			} else {
 				int bestPrimarySet = -1;
 				int bestSatelliteSet = -1;
@@ -1029,7 +1050,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 				const auto& log = tLogs[bestSet];
 				TraceEvent("TLogPeekLogRouterBestOnly", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("LogId", log->logServers[log->bestLocationFor( tag )]->get().id());
-				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( log->logServers[log->bestLocationFor( tag )], tag, begin, getPeekEnd(), false, true ) );
+				return makeReference<ILogSystem::ServerPeekCursor>(log->logServers[log->bestLocationFor(tag)], tag,
+				                                                   begin, getPeekEnd(), false, true);
 			}
 		}
 		bool firstOld = true;
@@ -1065,11 +1087,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 				TraceEvent("TLogPeekLogRouterOldSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("OldEpoch", old.epochEnd).detail("RecoveredAt", recoveredAt.present() ? recoveredAt.get() : -1).detail("FirstOld", firstOld);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
-				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, begin, firstOld && recoveredAt.present() ? recoveredAt.get() + 1 : old.epochEnd, true ) );
+				return makeReference<ILogSystem::SetPeekCursor>(
+				    localSets, bestSet, localSets[bestSet]->bestLocationFor(tag), tag, begin,
+				    firstOld && recoveredAt.present() ? recoveredAt.get() + 1 : old.epochEnd, true);
 			}
 			firstOld = false;
 		}
-		return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+		return makeReference<ILogSystem::ServerPeekCursor>(Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag,
+		                                                   begin, getPeekEnd(), false, false);
 	}
 
 	Version getKnownCommittedVersion() final {
@@ -1473,7 +1498,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				removedBackupWorkers.erase(reply.interf.id());
 				continue;
 			}
-			Reference<AsyncVar<OptionalInterface<BackupInterface>>> worker(new AsyncVar<OptionalInterface<BackupInterface>>(OptionalInterface<BackupInterface>(reply.interf)));
+			auto worker = makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(
+			    OptionalInterface<BackupInterface>(reply.interf));
 			if (reply.backupEpoch != logsetEpoch) {
 				// find the logset from oldLogData
 				logsetEpoch = reply.backupEpoch;
@@ -1638,7 +1664,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if (!prevState.tLogs.size()) {
 			// This is a brand new database
-			Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality, 0) );
+			auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, 0);
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->recoverAt = 0;
 			logSystem->knownCommittedVersion = 0;
@@ -1884,8 +1910,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
 				TEST( lastEnd.present() );  // Restarting recovery at an earlier point
 
-				Reference<TagPartitionedLogSystem> logSystem(
-				    new TagPartitionedLogSystem(dbgid, locality, prevState.recoveryCount));
+				auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, prevState.recoveryCount);
 
 				lastEnd = minEnd;
 				logSystem->tLogs = logServers;
@@ -1942,7 +1967,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			if(!found) {
 				TraceEvent("RecruitingOldLogRoutersAddingLocality").detail("Locality", locality).detail("LastStart", lastStart);
-				Reference<LogSet> newLogSet( new LogSet() );
+				auto newLogSet = makeReference<LogSet>();
 				newLogSet->locality = locality;
 				newLogSet->startVersion = lastStart;
 				newLogSet->isLocal = false;
@@ -1987,7 +2012,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			if(!found) {
 				TraceEvent("RecruitingOldLogRoutersAddingLocality").detail("Locality", locality).detail("LastStart", lastStart);
-				Reference<LogSet> newLogSet( new LogSet() );
+				auto newLogSet = makeReference<LogSet>();
 				newLogSet->locality = locality;
 				newLogSet->startVersion = lastStart;
 				old.tLogs.push_back(newLogSet);
@@ -2226,7 +2251,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for( int i = 0; i < remoteTLogInitializationReplies.size(); i++ ) {
-			logSet->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(remoteTLogInitializationReplies[i].get()) ) );
+			logSet->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+			    OptionalInterface<TLogInterface>(remoteTLogInitializationReplies[i].get()));
 			logSet->tLogLocalities[i] = remoteWorkers.remoteTLogs[i].locality;
 		}
 		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
@@ -2502,7 +2528,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			wait( waitForAll( satelliteInitializationReplies ) || oldRouterRecruitment );
 
 			for( int i = 0; i < satelliteInitializationReplies.size(); i++ ) {
-				logSystem->tLogs[1]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(satelliteInitializationReplies[i].get()) ) );
+				logSystem->tLogs[1]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+				    OptionalInterface<TLogInterface>(satelliteInitializationReplies[i].get()));
 			}
 
 			for( int i = 0; i < logSystem->tLogs[1]->logServers.size(); i++)
@@ -2512,7 +2539,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		wait( waitForAll( initializationReplies ) || oldRouterRecruitment );
 
 		for( int i = 0; i < initializationReplies.size(); i++ ) {
-			logSystem->tLogs[0]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
+			logSystem->tLogs[0]->logServers[i] = makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+			    OptionalInterface<TLogInterface>(initializationReplies[i].get()));
 			logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
 		}
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);

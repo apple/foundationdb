@@ -3790,7 +3790,7 @@ int main(int argc, char* argv[]) {
 		auto initCluster = [&](bool quiet = false) {
 			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
 			try {
-				ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+				ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 			}
 			catch (Error& e) {
 				if(!quiet)
@@ -3813,7 +3813,7 @@ int main(int argc, char* argv[]) {
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
-				sourceCcf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
+				sourceCcf = makeReference<ClusterConnectionFile>(resolvedSourceClusterFile.first);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());

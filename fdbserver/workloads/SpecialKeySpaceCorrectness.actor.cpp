@@ -63,7 +63,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
-		self->ryw = Reference(new ReadYourWritesTransaction(cx));
+		self->ryw = makeReference<ReadYourWritesTransaction>(cx);
 		self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 		self->ryw->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		self->ryw->setVersion(100);
@@ -278,7 +278,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
-		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		// begin key outside module range
 		try {
 			wait(success(tx->getRange(
@@ -442,8 +442,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		TEST(!read); // test write conflict range special key implementation
 		// Get a default special key range instance
 		Database cx = cx_->clone();
-		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
-		state Reference<ReadYourWritesTransaction> referenceTx = Reference(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> referenceTx = makeReference<ReadYourWritesTransaction>(cx);
 		state bool ryw = deterministicRandom()->coinflip();
 		if (!ryw) {
 			tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
@@ -588,7 +588,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		// All management api related tests
 		Database cx = cx_->clone();
-		state Reference<ReadYourWritesTransaction> tx = Reference(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test ordered option keys
 		{
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);

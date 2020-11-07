@@ -283,7 +283,7 @@ TransportData::TransportData(uint64_t transportId)
 		transportId(transportId),
 		numIncompatibleConnections(0)
 {
-	degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
+	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
 }
 
@@ -1192,7 +1192,7 @@ Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) {
 Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper ) {
 	auto peer = getPeer(address);
 	if(!peer) {
-		peer = Reference<Peer>( new Peer(this, address) );
+		peer = makeReference<Peer>(this, address);
 		if(startConnectionKeeper && !isLocalAddress(address)) {
 			peer->connect = connectionKeeper(peer);
 		}

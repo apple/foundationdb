@@ -241,7 +241,7 @@ public:
 
 		void setFile(Reference<IAsyncFile> f) {
 			this->f = f;
-			this->syncQueue = Reference<SyncQueue>( new SyncQueue(1, f) );
+			this->syncQueue = makeReference<SyncQueue>(1, f);
 		}
 	};
 	File files[2];  // After readFirstAndLastPages(), files[0] is logically before files[1] (pushes are always into files[1])

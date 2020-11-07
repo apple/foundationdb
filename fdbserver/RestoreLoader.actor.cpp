@@ -218,8 +218,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
                                      RestoreControllerInterface ci) {
-	state Reference<RestoreLoaderData> self =
-	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex, ci));
+	state Reference<RestoreLoaderData> self = makeReference<RestoreLoaderData>(loaderInterf.id(), nodeIndex, ci);
 	state Future<Void> error = actorCollection(self->addActor.getFuture());
 	state ActorCollection actors(false); // actors whose errors can be ignored
 	state Future<Void> exitRole = Never();
