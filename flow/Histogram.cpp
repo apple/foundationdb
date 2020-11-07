@@ -51,6 +51,7 @@ HistogramRegistry& GetHistogramRegistry() {
 	// avoid link order issues where the registry hasn't been initialized, but we're
 	// instantiating a histogram
 	if (globalHistograms == nullptr) {
+		// Note:  This will show up as a leak on shutdown, but we're OK with that.
 		globalHistograms = new HistogramRegistry();
 	}
 	return *globalHistograms;
@@ -65,10 +66,12 @@ void HistogramRegistry::registerHistogram(Histogram* h) {
 }
 
 void HistogramRegistry::unregisterHistogram(Histogram* h) {
-	if (histograms.find(h->name()) == histograms.end()) {
+	std::string name = h->name();
+	if (histograms.find(name) == histograms.end()) {
 		TraceEvent(SevError, "HistogramNotRegistered").detail("group", h->group).detail("op", h->op);
 	}
-	ASSERT(histograms.erase(h->name()) == 1);
+	int count = histograms.erase(name);
+	ASSERT(count == 1);
 }
 
 Histogram* HistogramRegistry::lookupHistogram(std::string name) {

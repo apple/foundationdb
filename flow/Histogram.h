@@ -42,22 +42,27 @@ public:
 	void logReport();
 
 private:
+	// This map is ordered by key so that ops within the same group end up
+	// next to each other in the trace log.
 	std::map<std::string, Histogram*> histograms;
 };
 
-// TODO: This should be scoped properly for simulation (instead of just having all the "machines" share one histogram
-// namespace)
 HistogramRegistry& GetHistogramRegistry();
 
-class Histogram : public ReferenceCounted<Histogram> {
+/*
+ * A fast histogram with power-of-two spaced buckets.
+ *
+ * For more information about this technique, see:
+ * https://www.fsl.cs.stonybrook.edu/project-osprof.html
+ */
+class Histogram sealed : public ReferenceCounted<Histogram> {
 public:
 	enum class Unit { microseconds, bytes };
 
 private:
-	Histogram(std::string group, std::string op, Unit unit)
-	  : group(group), op(op), unit(unit), registry(GetHistogramRegistry()) {
+	Histogram(std::string group, std::string op, Unit unit, HistogramRegistry& registry)
+	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
 		clear();
-		registry.registerHistogram(this);
 	}
 
 	static std::string generateName(std::string group, std::string op) { return group + ":" + op; }
@@ -72,18 +77,30 @@ public:
 		HistogramRegistry& registry = GetHistogramRegistry();
 		Histogram* h = registry.lookupHistogram(name);
 		if (!h) {
-			h = new Histogram(group_str, op_str, unit);
+			h = new Histogram(group_str, op_str, unit, registry);
+			registry.registerHistogram(h);
+			return Reference<Histogram>(h);
+		} else {
+			return Reference<Histogram>::addRef(h);
 		}
-		return Reference(h);
 	}
 
+	// This histogram buckets samples into powers of two.
 	inline void sample(uint32_t sample) {
+		size_t idx;
 #ifdef _WIN32
 		unsigned long index;
-		buckets[_BitScanReverse(&index, sample) ? index : 0]++;
+		// _BitScanReverse sets index to the position of the first non-zero bit, so
+		// _BitScanReverse(sample) ~= log_2(sample).  _BitScanReverse returns false if
+		// sample is zero.
+		idx = _BitScanReverse(&index, sample) ? index : 0;
 #else
-		buckets[sample ? (31 - __builtin_clz(sample)) : 0]++;
+		// __builtin_clz counts the leading zeros in its uint32_t argument.  So, 31-clz ~= log_2(sample).
+		// __builtin_clz(0) is undefined.
+		idx = sample ? (31 - __builtin_clz(sample)) : 0;
 #endif
+		ASSERT(idx < 32);
+		buckets[idx]++;
 	}
 
 	inline void sampleSeconds(double delta) {

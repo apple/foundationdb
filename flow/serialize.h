@@ -667,12 +667,13 @@ private:
 
 struct PacketBuffer : SendBuffer {
 private:
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 	int reference_count;
 	uint32_t const size_;
-	double const enqueue_time;
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 
 public:
+	double const enqueue_time;
+
 	uint8_t* data() { return const_cast<uint8_t*>(static_cast<SendBuffer*>(this)->data); }
 	size_t size() { return size_; }
 
