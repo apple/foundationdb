@@ -10,6 +10,7 @@ runConsistencyCheck = false
     testName = 'IncrementalBackup'
     tag = 'default'
     submitOnly = true
+    waitForBackup = true
 
 [[test]]
 testTitle = 'PreSnapWorkloads'

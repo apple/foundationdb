@@ -99,6 +99,11 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	}
 }
 
+Key FileBackupAgent::getPauseKey() {
+	FileBackupAgent backupAgent;
+	return backupAgent.taskBucket->getPauseKey();
+}
+
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 

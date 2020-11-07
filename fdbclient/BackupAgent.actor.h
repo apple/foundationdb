@@ -269,6 +269,7 @@ public:
 
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
+	static Key getPauseKey();
 
 	// parallel restore
 	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
