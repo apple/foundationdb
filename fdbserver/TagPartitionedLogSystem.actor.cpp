@@ -84,13 +84,13 @@ LogSet::LogSet(const TLogSet& tLogSet) :
 	satelliteTagLocations(tLogSet.satelliteTagLocations)
 {
 	for (const auto& log : tLogSet.tLogs) {
-		logServers.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(log));
+		logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
 	for (const auto& log : tLogSet.logRouters) {
-		logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(log));
+		logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
 	for (const auto& log : tLogSet.backupWorkers) {
-		backupWorkers.emplace_back(new AsyncVar<OptionalInterface<BackupInterface>>(log));
+		backupWorkers.push_back(makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(log));
 	}
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
 	updateLocalitySet(tLogLocalities);
@@ -105,7 +105,8 @@ LogSet::LogSet(const CoreTLogSet& coreSet) :
 	satelliteTagLocations(coreSet.satelliteTagLocations)
 {
 	for (const auto& log : coreSet.tLogs) {
-		logServers.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(log)));
+		logServers.push_back(
+		    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(log)));
 	}
 	// Do NOT recover coreSet.backupWorkers, because master will recruit new ones.
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
@@ -300,7 +301,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->pseudoLocalities = lsConf.pseudoLocalities;
 		for (const TLogSet& tLogSet : lsConf.tLogs) {
 			if (!excludeRemote || tLogSet.isLocal) {
-				logSystem->tLogs.emplace_back(new LogSet(tLogSet));
+				logSystem->tLogs.push_back(makeReference<LogSet>(tLogSet));
 			}
 		}
 
@@ -324,7 +325,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if (lsConf.oldTLogs.size()) {
 			for (const TLogSet& tLogSet : lsConf.oldTLogs[0].tLogs) {
-				logSystem->tLogs.emplace_back(new LogSet(tLogSet));
+				logSystem->tLogs.push_back(makeReference<LogSet>(tLogSet));
 			}
 			logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
 			logSystem->txsTags = lsConf.oldTLogs[0].txsTags;
@@ -589,7 +590,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			if(lastBegin < end && localSets.size()) {
 				TraceEvent("TLogPeekAllAddingCurrent", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestLogs", localSets[bestSet]->logServerString());
-				cursors.emplace_back(new ILogSystem::SetPeekCursor( localSets, bestSet, localSets[bestSet]->bestLocationFor( tag ), tag, lastBegin, end, parallelGetMore));
+				cursors.push_back(makeReference<ILogSystem::SetPeekCursor>(localSets, bestSet,
+				                                                           localSets[bestSet]->bestLocationFor(tag),
+				                                                           tag, lastBegin, end, parallelGetMore));
 			}
 			for (int i = 0; begin < lastBegin; i++) {
 				if(i == oldLogData.size()) {
@@ -632,7 +635,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(thisBegin < lastBegin) {
 					if(thisBegin < end) {
 						TraceEvent("TLogPeekAllAddingOld", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestLogs", localOldSets[bestOldSet]->logServerString()).detail("LastBegin", lastBegin).detail("ThisBegin", thisBegin);
-						cursors.emplace_back(new ILogSystem::SetPeekCursor(localOldSets, bestOldSet, localOldSets[bestOldSet]->bestLocationFor( tag ), tag, thisBegin, std::min(lastBegin, end), parallelGetMore));
+						cursors.push_back(makeReference<ILogSystem::SetPeekCursor>(
+						    localOldSets, bestOldSet, localOldSets[bestOldSet]->bestLocationFor(tag), tag, thisBegin,
+						    std::min(lastBegin, end), parallelGetMore));
 						epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 					}
 					lastBegin = thisBegin;
@@ -667,7 +672,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
 			TraceEvent("TLogPeekRemoteAddingBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end.present() ? end.get() : getPeekEnd()).detail("BestSet", bestSet).detail("BestSetStart", lastBegin).detail("LogRouterIds", tLogs[bestSet]->logRouterString());
-			cursors.emplace_back(new ILogSystem::BufferedCursor( tLogs[bestSet]->logRouters, tag, lastBegin, end.present() ? end.get() + 1 : getPeekEnd(), parallelGetMore ) );
+			cursors.push_back(makeReference<ILogSystem::BufferedCursor>(tLogs[bestSet]->logRouters, tag, lastBegin,
+			                                                            end.present() ? end.get() + 1 : getPeekEnd(),
+			                                                            parallelGetMore));
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
@@ -695,7 +702,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(thisBegin < lastBegin) {
 					TraceEvent("TLogPeekRemoteAddingOldBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end.present() ? end.get() : getPeekEnd()).detail("BestOldSet", bestOldSet).detail("LogRouterIds", oldLogData[i].tLogs[bestOldSet]->logRouterString())
 					.detail("LastBegin", lastBegin).detail("ThisBegin", thisBegin).detail("BestStartVer", oldLogData[i].tLogs[bestOldSet]->startVersion);
-					cursors.emplace_back(new ILogSystem::BufferedCursor(oldLogData[i].tLogs[bestOldSet]->logRouters, tag, thisBegin, lastBegin, parallelGetMore));
+					cursors.push_back(makeReference<ILogSystem::BufferedCursor>(
+					    oldLogData[i].tLogs[bestOldSet]->logRouters, tag, thisBegin, lastBegin, parallelGetMore));
 					epochEnds.emplace_back(lastBegin);
 					lastBegin = thisBegin;
 				}
@@ -781,10 +789,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(tLogs[bestSet]->startVersion < end) {
 				TraceEvent("TLogPeekLocalAddingBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestSet", bestSet).detail("BestSetStart", tLogs[bestSet]->startVersion).detail("LogId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )]->get().id());
 				if(useMergePeekCursors) {
-					cursors.emplace_back(new ILogSystem::MergedPeekCursor(tLogs[bestSet]->logServers, tLogs[bestSet]->bestLocationFor( tag ), tLogs[bestSet]->logServers.size() + 1 - tLogs[bestSet]->tLogReplicationFactor, tag,
-								tLogs[bestSet]->startVersion, end, true, tLogs[bestSet]->tLogLocalities, tLogs[bestSet]->tLogPolicy, tLogs[bestSet]->tLogReplicationFactor));
+					cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(
+					    tLogs[bestSet]->logServers, tLogs[bestSet]->bestLocationFor(tag),
+					    tLogs[bestSet]->logServers.size() + 1 - tLogs[bestSet]->tLogReplicationFactor, tag,
+					    tLogs[bestSet]->startVersion, end, true, tLogs[bestSet]->tLogLocalities,
+					    tLogs[bestSet]->tLogPolicy, tLogs[bestSet]->tLogReplicationFactor));
 				} else {
-					cursors.emplace_back(new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, tLogs[bestSet]->startVersion, end, false, false));
+					cursors.push_back(makeReference<ILogSystem::ServerPeekCursor>(
+					    tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor(tag)], tag,
+					    tLogs[bestSet]->startVersion, end, false, false));
 				}
 			}
 			Version lastBegin = tLogs[bestSet]->startVersion;
@@ -834,8 +847,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						TraceEvent("TLogPeekLocalAddingOldBest", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("BestOldSet", bestOldSet)
 							.detail("LogServers", oldLogData[i].tLogs[bestOldSet]->logServerString()).detail("ThisBegin", thisBegin).detail("LastBegin", lastBegin);
 						//detail("LogId", oldLogData[i].tLogs[bestOldSet]->logServers[tLogs[bestOldSet]->bestLocationFor( tag )]->get().id());
-						cursors.emplace_back(new ILogSystem::MergedPeekCursor( oldLogData[i].tLogs[bestOldSet]->logServers, oldLogData[i].tLogs[bestOldSet]->bestLocationFor( tag ), oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 - oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor, tag,
-							thisBegin, std::min(lastBegin, end), useMergePeekCursors, oldLogData[i].tLogs[bestOldSet]->tLogLocalities, oldLogData[i].tLogs[bestOldSet]->tLogPolicy, oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor));
+						cursors.push_back(makeReference<ILogSystem::MergedPeekCursor>(
+						    oldLogData[i].tLogs[bestOldSet]->logServers,
+						    oldLogData[i].tLogs[bestOldSet]->bestLocationFor(tag),
+						    oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 -
+						        oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor,
+						    tag, thisBegin, std::min(lastBegin, end), useMergePeekCursors,
+						    oldLogData[i].tLogs[bestOldSet]->tLogLocalities,
+						    oldLogData[i].tLogs[bestOldSet]->tLogPolicy,
+						    oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor));
 						epochEnds.emplace_back(std::min(lastBegin, end));
 					}
 					lastBegin = thisBegin;
@@ -1733,12 +1753,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state std::vector<Future<Void>> failureTrackers;
 
 		for (const CoreTLogSet& coreSet : prevState.tLogs) {
-			logServers.emplace_back(new LogSet(coreSet));
+			logServers.push_back(makeReference<LogSet>(coreSet));
 			std::vector<Reference<AsyncVar<bool>>> failed;
 
 			for (const auto& logVar : logServers.back()->logServers) {
 				allLogServers.push_back(std::make_pair(logVar,coreSet.tLogPolicy));
-				failed.emplace_back(new AsyncVar<bool>());
+				failed.push_back(makeReference<AsyncVar<bool>>());
 				failureTrackers.push_back(monitorLog(logVar, failed.back()));
 			}
 			logFailed.push_back(failed);
@@ -1833,7 +1853,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 				std::vector<Reference<AsyncVar<bool>>> failed;
 				for(auto& log : logServers[0]->logServers) {
-					failed.emplace_back(new AsyncVar<bool>());
+					failed.push_back(makeReference<AsyncVar<bool>>());
 					failureTrackers.push_back( monitorLog(log, failed.back() ) );
 				}
 				ASSERT(logFailed.size() == 1);
@@ -2007,7 +2027,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(auto& tLogs : self->tLogs) {
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
-						tLogs->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
+						tLogs->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+						    OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
 						failed.push_back(waitFailureClient(
 						    logRouterInitializationReplies[nextReplies][i].get().waitFailure,
 						    SERVER_KNOBS->TLOG_TIMEOUT,
@@ -2028,7 +2049,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(auto& tLogs : old.tLogs) {
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
-						tLogs->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
+						tLogs->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+						    OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get())));
 						if(!forRemote) {
 							failed.push_back(waitFailureClient(
 							    logRouterInitializationReplies[nextReplies][i].get().waitFailure,
@@ -2199,7 +2221,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		wait( waitForAll(remoteTLogInitializationReplies) && waitForAll(logRouterInitializationReplies) && oldRouterRecruitment );
 
 		for( int i = 0; i < logRouterInitializationReplies.size(); i++ ) {
-			logSet->logRouters.emplace_back(new AsyncVar<OptionalInterface<TLogInterface>>(OptionalInterface<TLogInterface>(logRouterInitializationReplies[i].get())));
+			logSet->logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(
+			    OptionalInterface<TLogInterface>(logRouterInitializationReplies[i].get())));
 		}
 
 		for( int i = 0; i < remoteTLogInitializationReplies.size(); i++ ) {
@@ -2248,7 +2271,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			TraceEvent("AddPseudoLocality", logSystem->getDebugID()).detail("Locality", "Backup");
 		}
 
-		logSystem->tLogs.emplace_back(new LogSet());
+		logSystem->tLogs.push_back(makeReference<LogSet>());
 		logSystem->tLogs[0]->tLogVersion = configuration.tLogVersion;
 		logSystem->tLogs[0]->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
 		logSystem->tLogs[0]->tLogReplicationFactor = configuration.tLogReplicationFactor;
@@ -2266,7 +2289,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		if(region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
-			logSystem->tLogs.emplace_back(new LogSet());
+			logSystem->tLogs.push_back(makeReference<LogSet>());
 			if(recr.satelliteFallback) {
 				logSystem->tLogs[1]->tLogWriteAntiQuorum = region.satelliteTLogWriteAntiQuorumFallback;
 				logSystem->tLogs[1]->tLogReplicationFactor = region.satelliteTLogReplicationFactorFallback;
