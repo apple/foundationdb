@@ -3567,6 +3567,29 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 	}
 }
 
+ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
+	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
+		return Void();
+	}
+
+	loop {
+		wait(delay(SERVER_KNOBS->DD_METRICS_REPORT_INTERVAL));
+
+		const auto numRunningFetchKeys = self->currentRunningFetchKeys.numRunning();
+		if (numRunningFetchKeys == 0) {
+			continue;
+		}
+
+		const auto longestRunningFetchKeys = self->currentRunningFetchKeys.longestTime();
+		TraceEvent(SevInfo, "FetchKeyCurrentStatus")
+			.detail("Timestamp", now())
+			.detail("LongestRunningTime", longestRunningFetchKeys.first)
+			.detail("StartKey", longestRunningFetchKeys.second.begin)
+			.detail("EndKey", longestRunningFetchKeys.second.end)
+			.detail("NumRunning", numRunningFetchKeys);
+	}
+}
+
 ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterface ssi )
 {
 	state Future<Void> doUpdate = Void();
@@ -3584,6 +3607,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
 	actors.add(checkBehind(self));
+	actors.add(reportStorageServerState(self));
 
 	self->coreStarted.send( Void() );
 
