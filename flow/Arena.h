@@ -99,9 +99,9 @@ public:
 	explicit Arena(size_t reservedSize);
 	//~Arena();
 	Arena(const Arena&);
-	Arena(Arena && r) BOOST_NOEXCEPT;
+	Arena(Arena && r) noexcept;
 	Arena& operator=(const Arena&);
-	Arena& operator=(Arena&&) BOOST_NOEXCEPT;
+	Arena& operator=(Arena&&) noexcept;
 
 	void dependsOn(const Arena& p);
 	size_t getSize() const;

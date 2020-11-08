@@ -66,8 +66,8 @@ struct NotifiedVersion {
 		set( v );
 	}
 
-	NotifiedVersion(NotifiedVersion&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
-	void operator=(NotifiedVersion&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = std::move(r.val); }
+	NotifiedVersion(NotifiedVersion&& r) noexcept : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
+	void operator=(NotifiedVersion&& r) noexcept { waiting = std::move(r.waiting); val = std::move(r.val); }
 
 private:
 	typedef std::pair<Version,Promise<Void>> Item;
@@ -112,8 +112,8 @@ struct NotifiedDouble {
 		set( v );
 	}
 
-	NotifiedDouble(NotifiedDouble&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
-	void operator=(NotifiedDouble&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
+	NotifiedDouble(NotifiedDouble&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
+	void operator=(NotifiedDouble&& r) noexcept { waiting = std::move(r.waiting); val = r.val; }
 
 private:
 	typedef std::pair<double,Promise<Void>> Item;

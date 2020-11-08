@@ -1287,7 +1287,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 		int remaining;
 		Releaser() : lock(0), remaining(0) {}
 		Releaser( FlowLock& lock, int64_t amount = 1 ) : lock(&lock), remaining(amount) {}
-		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
+		Releaser(Releaser&& r) noexcept : lock(r.lock), remaining(r.remaining) { r.remaining = 0; }
 		void operator=(Releaser&& r) { if (remaining) lock->release(remaining); lock = r.lock; remaining = r.remaining; r.remaining = 0; }
 
 		void release( int64_t amount = -1 ) {
@@ -1430,8 +1430,8 @@ struct NotifiedInt {
 		set( v );
 	}
 
-	NotifiedInt(NotifiedInt&& r) BOOST_NOEXCEPT : waiting(std::move(r.waiting)), val(r.val) {}
-	void operator=(NotifiedInt&& r) BOOST_NOEXCEPT { waiting = std::move(r.waiting); val = r.val; }
+	NotifiedInt(NotifiedInt&& r) noexcept : waiting(std::move(r.waiting)), val(r.val) {}
+	void operator=(NotifiedInt&& r) noexcept { waiting = std::move(r.waiting); val = r.val; }
 
 private:
 	typedef std::pair<int64_t,Promise<Void>> Item;
@@ -1452,7 +1452,7 @@ struct BoundedFlowLock : NonCopyable, public ReferenceCounted<BoundedFlowLock> {
 		int64_t permitNumber;
 		Releaser() : lock(nullptr), permitNumber(0) {}
 		Releaser( BoundedFlowLock* lock, int64_t permitNumber ) : lock(lock), permitNumber(permitNumber) {}
-		Releaser(Releaser&& r) BOOST_NOEXCEPT : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
+		Releaser(Releaser&& r) noexcept : lock(r.lock), permitNumber(r.permitNumber) { r.permitNumber = 0; }
 		void operator=(Releaser&& r) { if (permitNumber) lock->release(permitNumber); lock = r.lock; permitNumber = r.permitNumber; r.permitNumber = 0; }
 
 		void release() {
@@ -1628,7 +1628,7 @@ public:
 		futures = f.futures;
 	}
 
-	AndFuture(AndFuture&& f) BOOST_NOEXCEPT {
+	AndFuture(AndFuture&& f) noexcept {
 		futures = std::move(f.futures);
 	}
 
@@ -1648,7 +1648,7 @@ public:
 		futures = f.futures;
 	}
 
-	void operator=(AndFuture&& f) BOOST_NOEXCEPT {
+	void operator=(AndFuture&& f) noexcept {
 		futures = std::move(f.futures);
 	}
 

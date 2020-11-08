@@ -584,7 +584,7 @@ inline static int clz( uint32_t value ) {
 #endif
 
 #include <boost/config.hpp>
-// The formerly existing BOOST_NOEXCEPT is now BOOST_NOEXCEPT
+// The formerly existing noexcept is now noexcept
 
 #else
 #define EXTERNC

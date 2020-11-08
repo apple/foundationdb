@@ -69,13 +69,13 @@ public:
 		// FIXME: Specialization for POD types using memcpy?
 	}
 
-	Deque(Deque&& r) BOOST_NOEXCEPT : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
+	Deque(Deque&& r) noexcept : begin(r.begin), end(r.end), mask(r.mask), arr(r.arr) {
 		r.arr = 0;
 		r.begin = r.end = 0;
 		r.mask = -1;
 	}
 
-	void operator=(Deque&& r) BOOST_NOEXCEPT {
+	void operator=(Deque&& r) noexcept {
 		cleanup();
 
 		begin = r.begin;

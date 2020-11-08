@@ -490,10 +490,10 @@ public:
 	VersionedMap() : oldestVersion(0), latestVersion(0) {
 		latestRoot = &roots[0];
 	}
-	VersionedMap( VersionedMap&& v ) BOOST_NOEXCEPT : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
+	VersionedMap( VersionedMap&& v ) noexcept : oldestVersion(v.oldestVersion), latestVersion(v.latestVersion), roots(std::move(v.roots)) {
 		latestRoot = &roots[latestVersion];
 	}
-	void operator = (VersionedMap && v) BOOST_NOEXCEPT {
+	void operator = (VersionedMap && v) noexcept {
 		oldestVersion = v.oldestVersion;
 		latestVersion = v.latestVersion;
 		roots = std::move(v.roots);

@@ -216,14 +216,14 @@ struct MetricData {
 		appendStart(appendStart) {
 	}
 
-	MetricData( MetricData&& r ) BOOST_NOEXCEPT :
+	MetricData( MetricData&& r ) noexcept :
 		start(r.start),
 		rollTime(r.rollTime),
 		appendStart(r.appendStart),
 		writer(std::move(r.writer)) {
 	}
 
-	void operator=( MetricData&& r ) BOOST_NOEXCEPT {
+	void operator=( MetricData&& r ) noexcept {
 		start = r.start; rollTime = r.rollTime; appendStart = r.appendStart; writer = std::move(r.writer);
 	}
 
@@ -634,9 +634,9 @@ template <class T, class Descriptor = NullDescriptor, class FieldLevelType = Fie
 struct EventField : public Descriptor {
 	std::vector<FieldLevelType> levels;
 
-	EventField( EventField&& r ) BOOST_NOEXCEPT : Descriptor(r), levels(std::move(r.levels)) {}
+	EventField( EventField&& r ) noexcept : Descriptor(r), levels(std::move(r.levels)) {}
 
-	void operator=( EventField&& r ) BOOST_NOEXCEPT {
+	void operator=( EventField&& r ) noexcept {
 		levels = std::move(r.levels);
 	}
 
