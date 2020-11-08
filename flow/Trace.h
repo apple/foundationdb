@@ -569,11 +569,6 @@ struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 	}
 };
 
-// Evil but potentially useful for verbose messages:
-#if CENABLED(0, NOT_IN_CLEAN)
-#define TRACE( t, m ) if (TraceEvent::isEnabled(t)) TraceEvent(t,m)
-#endif
-
 struct NetworkAddress;
 void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory = ".", std::string baseOfBase = "trace", std::string logGroup = "default");
 void initTraceEventMetrics();

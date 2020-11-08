@@ -121,7 +121,7 @@ extern bool isAssertDisabled( int line );
 EXTERNC void breakpoint_me();
 
 #ifdef FDB_CLEAN_BUILD
-#  define NOT_IN_CLEAN BOOST_STATIC_ASSERT_MSG(0, "This code can not be enabled in a clean build.");
+#  define NOT_IN_CLEAN static_assert(0, "This code can not be enabled in a clean build.");
 #else
 #  define NOT_IN_CLEAN
 #endif
