@@ -1,4 +1,4 @@
-testTitle=DDMetricsExclude_populate
+testTitle=DDMetricsExclude_Populate
     testName=Mako
     testDuration=30.0
     transactionsPerSecond=100000
@@ -14,7 +14,7 @@ testTitle=DDMetricsExclude_populate
     runBenchmark=true
     preserveData=true
 
-testTitle=DDMetricsExclude_test
+testTitle=DDMetricsExclude_Test
     testName=Mako
     testDuration=60.0
     transactionsPerSecond=100000
