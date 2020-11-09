@@ -426,8 +426,10 @@ public:
 
 	static bool should_poll() { return false; }
 
-	ACTOR static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode,
-													Reference<DiskParameters> diskParameters = Reference<DiskParameters>(new DiskParameters(25000, 150000000)), bool delayOnWrite = true ) {
+	ACTOR static Future<Reference<IAsyncFile>> open(
+	    std::string filename, int flags, int mode,
+	    Reference<DiskParameters> diskParameters = makeReference<DiskParameters>(25000, 150000000),
+	    bool delayOnWrite = true) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
@@ -793,8 +795,8 @@ public:
 			return waitForProcessAndConnect( toAddr, this );
 		}
 		auto peerp = getProcessByAddress(toAddr);
-		Reference<Sim2Conn> myc( new Sim2Conn( getCurrentProcess() ) );
-		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
+		auto myc = makeReference<Sim2Conn>(getCurrentProcess());
+		auto peerc = makeReference<Sim2Conn>(peerp);
 
 		myc->connect(peerc, toAddr);
 		IPAddress localIp;
@@ -1843,7 +1845,8 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 			}
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
-			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
+			auto diskParameters =
+			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
 			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );

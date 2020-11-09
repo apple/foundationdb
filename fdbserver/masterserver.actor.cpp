@@ -240,41 +240,16 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::vector<WorkerInterface> backupWorkers; // Recruited backup workers from cluster controller.
 
-	MasterData(
-		Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
-		MasterInterface const& myInterface,
-		ServerCoordinators const& coordinators,
-		ClusterControllerFullInterface const& clusterController,
-		Standalone<StringRef> const& dbId,
-		PromiseStream<Future<Void>> const& addActor,
-		bool forceRecovery
-		)
-		: dbgid(myInterface.id()),
-		  myInterface(myInterface),
-		  dbInfo(dbInfo),
-		  cstate(coordinators, addActor, dbgid),
-		  coordinators(coordinators),
-		  clusterController(clusterController),
-		  dbId(dbId),
-		  forceRecovery(forceRecovery),
-		  safeLocality(tagLocalityInvalid),
-		  primaryLocality(tagLocalityInvalid),
-		  neverCreated(false),
-		  lastEpochEnd(invalidVersion),
-		  liveCommittedVersion(invalidVersion),
-		  databaseLocked(false),
-		  minKnownCommittedVersion(invalidVersion),
-		  recoveryTransactionVersion(invalidVersion),
-		  lastCommitTime(0),
-		  registrationCount(0),
-		  version(invalidVersion),
-		  lastVersionTime(0),
-		  txnStateStore(0),
-		  memoryLimit(2e9),
-		  addActor(addActor),
-		  hasConfiguration(false),
-		  recruitmentStalled( Reference<AsyncVar<bool>>( new AsyncVar<bool>() ) )
-	{
+	MasterData(Reference<AsyncVar<ServerDBInfo>> const& dbInfo, MasterInterface const& myInterface,
+	           ServerCoordinators const& coordinators, ClusterControllerFullInterface const& clusterController,
+	           Standalone<StringRef> const& dbId, PromiseStream<Future<Void>> const& addActor, bool forceRecovery)
+	  : dbgid(myInterface.id()), myInterface(myInterface), dbInfo(dbInfo), cstate(coordinators, addActor, dbgid),
+	    coordinators(coordinators), clusterController(clusterController), dbId(dbId), forceRecovery(forceRecovery),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), neverCreated(false),
+	    lastEpochEnd(invalidVersion), liveCommittedVersion(invalidVersion), databaseLocked(false),
+	    minKnownCommittedVersion(invalidVersion), recoveryTransactionVersion(invalidVersion), lastCommitTime(0),
+	    registrationCount(0), version(invalidVersion), lastVersionTime(0), txnStateStore(0), memoryLimit(2e9),
+	    addActor(addActor), hasConfiguration(false), recruitmentStalled(makeReference<AsyncVar<bool>>(false)) {
 		if(forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID");
 			forceRecovery = false;

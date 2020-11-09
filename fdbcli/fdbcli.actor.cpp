@@ -2509,7 +2509,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 
 Reference<ReadYourWritesTransaction> getTransaction(Database db, Reference<ReadYourWritesTransaction> &tr, FdbOptions *options, bool intrans) {
 	if(!tr || !intrans) {
-		tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
+		tr = makeReference<ReadYourWritesTransaction>(db);
 		options->apply(tr);
 	}
 
@@ -3011,7 +3011,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
-		ccf = Reference<ClusterConnectionFile>( new ClusterConnectionFile( resolvedClusterFile.first ) );
+		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
@@ -3472,7 +3472,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
-						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
 							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
@@ -3537,7 +3537,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
-						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
 							addInterfs.push_back(addInterface(&address_interface, connectLock, it));
@@ -3875,7 +3875,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
 						                                   CLIENT_KNOBS->TOO_MANY)));
 						ASSERT(!kvs.more);
-						Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+						auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
 						std::vector<Future<Void>> addInterfs;
 						for( auto it : kvs ) {
 							addInterfs.push_back(addInterface(&address_interface, connectLock, it));

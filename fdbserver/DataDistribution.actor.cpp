@@ -365,7 +365,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
                                                                             MoveKeysLock moveKeysLock,
                                                                             std::vector<Optional<Key>> remoteDcIds,
                                                                             const DDEnabledState* ddEnabledState) {
-	state Reference<InitialDataDistribution> result = Reference<InitialDataDistribution>(new InitialDataDistribution);
+	state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
 	state Key beginKey = allKeys.begin;
 
 	state bool succeeded;
@@ -1261,7 +1261,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	void addTeam(const vector<Reference<TCServerInfo>>& newTeamServers, bool isInitialTeam,
 	             bool redundantTeam = false) {
-		Reference<TCTeamInfo> teamInfo(new TCTeamInfo(newTeamServers));
+		auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 		// Move satisfiesPolicy to the end for performance benefit
 		bool badTeam = redundantTeam || teamInfo->size() != configuration.storageTeamSize
@@ -1318,7 +1318,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 	// Add a machine team specified by input machines
 	Reference<TCMachineTeamInfo> addMachineTeam(vector<Reference<TCMachineInfo>> machines) {
-		Reference<TCMachineTeamInfo> machineTeamInfo(new TCMachineTeamInfo(machines));
+		auto machineTeamInfo = makeReference<TCMachineTeamInfo>(machines);
 		machineTeams.push_back(machineTeamInfo);
 
 		// Assign machine teams to machine
@@ -2343,7 +2343,11 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		allServers.push_back( newServer.id() );
 
 		TraceEvent("AddedStorageServer", distributorId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().getPrimaryAddress());
-		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, this, processClass, includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(), storageServerSet ) );
+		auto& r = server_info[newServer.id()] = makeReference<TCServerInfo>(
+		    newServer, this, processClass,
+		    includedDCs.empty() ||
+		        std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end(),
+		    storageServerSet);
 
 		// Establish the relation between server and machine
 		checkAndCreateMachine(r);
@@ -2409,7 +2413,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			TEST(true);
 			// For each machine, store the first server's localityEntry into machineInfo for later use.
 			LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->id);
-			machineInfo = Reference<TCMachineInfo>(new TCMachineInfo(server, localityEntry));
+			machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
 			machine_info.insert(std::make_pair(machine_id, machineInfo));
 		} else {
 			machineInfo = machine_info.find(machine_id)->second;
@@ -4876,7 +4880,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 			vector<Reference<AsyncVar<bool>>> zeroHealthyTeams;
 			tcis.push_back(TeamCollectionInterface());
-			zeroHealthyTeams.push_back(Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ));
+			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = configuration.storageTeamSize;
 
 			// Stored outside of data distribution tracker to avoid slow tasks
@@ -4888,8 +4892,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				tcis.push_back(TeamCollectionInterface());
 				storageTeamSize = 2*configuration.storageTeamSize;
 
-				zeroHealthyTeams.push_back( Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ) );
-				anyZeroHealthyTeams = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+				zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
+				anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
 				actors.push_back( anyTrue(zeroHealthyTeams, anyZeroHealthyTeams) );
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
@@ -4908,10 +4912,16 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    "DDQueue", self->ddId, &normalDDQueueErrors()));
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = Reference<DDTeamCollection>( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy) );
+			primaryTeamCollection = makeReference<DDTeamCollection>(
+			    cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId,
+			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(),
+			    zeroHealthyTeams[0], true, processingUnhealthy);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				remoteTeamCollection = Reference<DDTeamCollection>( new DDTeamCollection(cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo), zeroHealthyTeams[1], false, processingUnhealthy) );
+				remoteTeamCollection = makeReference<DDTeamCollection>(
+				    cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds,
+				    Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo),
+				    zeroHealthyTeams[1], false, processingUnhealthy);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(
@@ -5326,31 +5336,17 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 }
 
 DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
-	Database database = DatabaseContext::create(
-		Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>()),
-		Never(),
-		LocalityData(),
-		false
-	);
+	Database database =
+	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
 
 	DatabaseConfiguration conf;
 	conf.storageTeamSize = teamSize;
 	conf.storagePolicy = policy;
 
-	DDTeamCollection* collection = new DDTeamCollection(
-		database,
-		UID(0, 0),
-		MoveKeysLock(),
-		PromiseStream<RelocateShard>(),
-		Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()),
-		conf,
-		{},
-		{},
-		Future<Void>(Void()),
-		Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ),
-		true,
-		Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) )
-	);
+	DDTeamCollection* collection =
+	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
+	                         makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
+	                         makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false));
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -5359,7 +5355,8 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	 	interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
-		collection->server_info[uid] = Reference<TCServerInfo>(new TCServerInfo(interface, collection, ProcessClass(), true, collection->storageServerSet));
+		collection->server_info[uid] =
+		    makeReference<TCServerInfo>(interface, collection, ProcessClass(), true, collection->storageServerSet);
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 		collection->checkAndCreateMachine(collection->server_info[uid]);
 	}
@@ -5368,8 +5365,8 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 }
 
 DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
-	Database database = DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>>(new AsyncVar<ClientDBInfo>()),
-	                                            Never(), LocalityData(), false);
+	Database database =
+	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
 
 	DatabaseConfiguration conf;
 	conf.storageTeamSize = teamSize;
@@ -5377,10 +5374,8 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 
 	DDTeamCollection* collection =
 	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
-	                         Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()), conf, {}, {},
-	                         Future<Void>(Void()),
-	                         Reference<AsyncVar<bool>>(new AsyncVar<bool>(true)), true,
-	                         Reference<AsyncVar<bool>>(new AsyncVar<bool>(false)));
+	                         makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
+	                         makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false));
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
@@ -5400,7 +5395,7 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
 		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
 		collection->server_info[uid] =
-		    Reference<TCServerInfo>(new TCServerInfo(interface, collection, ProcessClass(), true, collection->storageServerSet));
+		    makeReference<TCServerInfo>(interface, collection, ProcessClass(), true, collection->storageServerSet);
 
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 	}

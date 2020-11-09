@@ -682,7 +682,7 @@ TEST_CASE("/flow/flow/yieldedFuture/progress")
 	// Check that if check_yield always returns true, the yieldedFuture will do nothing immediately but will
 	// get one thing done per "tick" (per delay(0) returning).
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	yn->nextYield = 0;
 
@@ -717,7 +717,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 {
 	// Check expectations about exactly how yieldedFuture responds to check_yield results
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	for(int r=0; r<100; r++) {
 		Promise<Void> p;
@@ -765,7 +765,7 @@ TEST_CASE("/flow/perf/yieldedFuture")
 	double start;
 	int N = 1000000;
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	yn->nextYield = 2*N + 100;
 

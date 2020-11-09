@@ -558,7 +558,7 @@ ACTOR Future<Void> timeoutMonitorLeader(Database db) {
 Future<StatusObject> StatusClient::statusFetcher( Database db ) {
 	db->lastStatusFetch = now();
 	if(!db->statusClusterInterface) {
-		db->statusClusterInterface = Reference<AsyncVar<Optional<ClusterInterface>>>(new AsyncVar<Optional<ClusterInterface>>);
+		db->statusClusterInterface = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 		db->statusLeaderMon = timeoutMonitorLeader(db);
 	}
 

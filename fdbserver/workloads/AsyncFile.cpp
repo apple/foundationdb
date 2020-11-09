@@ -76,7 +76,7 @@ AsyncFileWorkload::AsyncFileWorkload(WorkloadContext const& wcx)
 
 Reference<AsyncFileBuffer> AsyncFileWorkload::allocateBuffer(size_t size)
 {
-	return Reference<AsyncFileBuffer>(new AsyncFileBuffer(size, unbufferedIO));
+	return makeReference<AsyncFileBuffer>(size, unbufferedIO);
 }
 
 Future<bool> AsyncFileWorkload::check(Database const& cx)

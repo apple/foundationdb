@@ -156,7 +156,7 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
@@ -301,7 +301,7 @@ struct VersionStampWorkload : TestWorkload {
 		state Database extraDB;
 
 		if (g_simulator.extraDB != nullptr) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 

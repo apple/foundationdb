@@ -363,8 +363,7 @@ Future<std::vector<std::string>> IBackupContainer::listContainers(const std::str
 
 ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-	state Reference<ReadYourWritesTransaction> tr =
-	    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 
 	state int64_t time = BackupAgentBase::parseTime(datetime);
 	if (time < 0) {

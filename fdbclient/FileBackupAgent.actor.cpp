@@ -1403,8 +1403,8 @@ namespace fileBackup {
 					else {
 						ASSERT(snapshotBatchSize.present());
 						// Batch future key exists in the config so create future from it
-						snapshotBatchFuture = Reference<TaskFuture>(new TaskFuture(futureBucket, snapshotBatchFutureKey.get()));
-					}
+					    snapshotBatchFuture = makeReference<TaskFuture>(futureBucket, snapshotBatchFutureKey.get());
+				    }
 
 					break;
 				} catch(Error &e) {

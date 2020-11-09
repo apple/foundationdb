@@ -92,7 +92,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 	if (g_simulator.drAgents == ISimulator::BackupToDB) {
 		Database cx = Database::createDatabase(connFile, -1);
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		state Database extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents").detail("ConnFile", connFile->getConnectionString().toString()).detail("ExtraString", extraFile->getConnectionString().toString());
@@ -267,10 +267,11 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 			if(!useSeedFile) {
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
-				connFile = Reference<ClusterConnectionFile>( new ClusterConnectionFile( joinPath( *dataFolder, "fdb.cluster" )));
+				connFile = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			}
 			else {
-				connFile = Reference<ClusterConnectionFile>( new ClusterConnectionFile( joinPath( *dataFolder, "fdb.cluster" ), connStr.toString() ) );
+				connFile =
+				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 			}
 		}
 		else {
@@ -1423,10 +1424,9 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		std::string clusterFileDir = joinPath( dataFolder, deterministicRandom()->randomUniqueID().toString() );
 		platform::createDirectory( clusterFileDir );
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
-		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(
-									   new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))),
-								   TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration),
-						  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
+		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
+		                           TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration),
+		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}

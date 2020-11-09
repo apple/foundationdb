@@ -717,7 +717,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 			continue;
 		}
 
-		Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics(new AsyncVar<Optional<ShardMetrics>>());
+		auto shardMetrics = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 
 		// For the case where the new tracker will take over at the boundaries of current shard(s)
 		//  we can use the old size if it is available. This will be the case when merging shards.

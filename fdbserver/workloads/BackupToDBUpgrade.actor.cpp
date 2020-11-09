@@ -68,7 +68,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("DRU_Start");

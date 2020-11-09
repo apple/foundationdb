@@ -184,7 +184,7 @@ public:
 			localitySet = itKeyValue->_resultset;
 		}
 		else {
-			localitySet = Reference<LocalitySet>(new LocalitySet(*_localitygroup));
+			localitySet = makeReference<LocalitySet>(*_localitygroup);
 			_cachemisses ++;
 			// If the key is not within the current key set, skip it because no items within
 			// the current entry array has the key
@@ -213,7 +213,7 @@ public:
 
 	// This function is used to create an subset containing the specified entries
 	Reference<LocalitySet> restrict(std::vector<LocalityEntry> const&	entryArray) {
-		Reference<LocalitySet>	localitySet(new LocalitySet(*_localitygroup));
+		auto localitySet = makeReference<LocalitySet>(*_localitygroup);
 		for (auto& entry : entryArray) {
 			localitySet->add(getRecordViaEntry(entry), *this);
 		}
@@ -509,7 +509,7 @@ struct LocalityGroup : public LocalitySet {
 
 	LocalityEntry const& add(LocalityData const& data) {
 		// _recordArray.size() is the new entry index for the new data
-		Reference<LocalityRecord>	record(new LocalityRecord(convertToAttribMap(data), _recordArray.size()));
+		auto record = makeReference<LocalityRecord>(convertToAttribMap(data), _recordArray.size());
 		_recordArray.push_back(record);
 		return LocalitySet::add(record, *this);
 	}
@@ -552,7 +552,7 @@ struct LocalityGroup : public LocalitySet {
 
 	// Convert locality data to sorted vector of int pairs
 	Reference<KeyValueMap>	convertToAttribMap(LocalityData const&	data) {
-		Reference<KeyValueMap>	attribHashMap(new KeyValueMap);
+		auto attribHashMap = makeReference<KeyValueMap>();
 		for (auto& dataPair : data._data) {
 			auto indexKey = keyIndex(dataPair.first);
 			auto indexValue = valueIndex(dataPair.second);
