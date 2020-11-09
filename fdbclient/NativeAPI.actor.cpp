@@ -4173,34 +4173,44 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
-Optional<ProtocolVersion> getMajorityProtocol(const std::unordered_map<uint64_t, int>& protocolCount, int majorityThreshold) {
-	if(protocolCount.empty()) {
-		return Optional<ProtocolVersion>();
-	}
+std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> getPeerProtocolAsyncVars(Reference<ClusterConnectionFile> f) {
+	ClientCoordinators coord(f);
 
-	auto maxElementItr = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
-		return l.second < r.second;
-	});
+	std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars;
+	peerProtocolAsyncVars.reserve(coord.clientLeaderServers.size());
 
-	if(maxElementItr->second >= majorityThreshold) {
-		return ProtocolVersion(maxElementItr->first);
+	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+		Reference<AsyncVar<Optional<ProtocolVersion>>> protocolOptionalAsyncVar = FlowTransport::transport().getPeerProtocolAsyncVar(coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
+		peerProtocolAsyncVars.push_back(protocolOptionalAsyncVar);
 	}
-	return Optional<ProtocolVersion>();
+	return peerProtocolAsyncVars;
 }
 
-ACTOR Future<ProtocolVersion> getConnectPktVersions(vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars) {
-	std::unordered_map<uint64_t, int> initialProtocolCount;
-	for(int i = 0; i<peerProtocolAsyncVars.size(); i++) {
-		if(peerProtocolAsyncVars[i]->get().present()) {
-			initialProtocolCount[peerProtocolAsyncVars[i]->get().get().version()]++;
-		}
-	}
-	Optional<ProtocolVersion> protocolVersionOptional = getMajorityProtocol(initialProtocolCount, peerProtocolAsyncVars.size() / 2 + 1);
-	if(protocolVersionOptional.present()) {
-		return protocolVersionOptional.get();
-	}
-	
+ACTOR Future<ProtocolVersion> waitConnectPktVersions(std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars) {
 	loop {
+		std::unordered_map<uint64_t, int> protocolCount;
+		for(int i = 0; i<peerProtocolAsyncVars.size(); i++) {
+			if(peerProtocolAsyncVars[i]->get().present()) {
+				protocolCount[peerProtocolAsyncVars[i]->get().get().version()]++;
+			}
+		}
+
+		Optional<ProtocolVersion> protocolVersionOptional = Optional<ProtocolVersion>();
+		if(protocolCount.size() > 0) {
+			auto maxElementItr = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
+				return l.second < r.second;
+			});
+
+			if(maxElementItr->second >= peerProtocolAsyncVars.size() / 2 + 1) {
+				protocolVersionOptional = ProtocolVersion(maxElementItr->first);
+			}
+		}
+		
+		if(protocolVersionOptional.present()) {
+			return protocolVersionOptional.get();
+		}
+
+		// if there is no protocol that a majority of coordinators agree on, wait for peerProtocolAsyncVars change
 		state vector<Future<Void>> peerProtocolVersionFutures;
 		peerProtocolVersionFutures.reserve(peerProtocolAsyncVars.size());
 
@@ -4209,44 +4219,50 @@ ACTOR Future<ProtocolVersion> getConnectPktVersions(vector<Reference<AsyncVar<Op
 		}
 
 		wait(waitForAny(peerProtocolVersionFutures));
-
-		std::unordered_map<uint64_t, int> protocolCount;
-		for(int i = 0; i<peerProtocolAsyncVars.size(); i++) {
-			if(peerProtocolAsyncVars[i]->get().present()) {
-				protocolCount[peerProtocolAsyncVars[i]->get().get().version()]++;
-			}
-		}
-		Optional<ProtocolVersion> protocolVersionOptional = getMajorityProtocol(protocolCount, peerProtocolAsyncVars.size() / 2 + 1);
-		if(protocolVersionOptional.present()) {
-			return protocolVersionOptional.get();
-		}
 	}
 }
 
-ACTOR Future<ProtocolVersion> getCoordProtocolRequestVersions(vector<Future<ProtocolInfoReply>> coordProtocols) {
+ACTOR Future<ProtocolVersion> getConnectPktVersions(Reference<ClusterConnectionFile> f) {
+
+	std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = getPeerProtocolAsyncVars(f);
+	ProtocolVersion connectPktVersion = wait(waitConnectPktVersions(peerProtocolAsyncVars));
+	return connectPktVersion;
+}
+
+ACTOR Future<Void> updateProtocolRequestCount(Future<ProtocolInfoReply> f, Promise<ProtocolVersion> majorityEqual, std::unordered_map<uint64_t, int>* protocolCount, int majorityThreshold) {
+	ProtocolInfoReply reply = wait(f);
+
+	if(++(*protocolCount)[reply.version.version()] >= majorityThreshold) {
+		if(majorityEqual.canBeSet()) {
+			majorityEqual.send(reply.version);
+		}
+	}
+
+	return Never();
+}
+
+ACTOR Future<ProtocolVersion> getCoordProtocolRequestVersions(Reference<ClusterConnectionFile> f) {
+	state ActorCollection actors(false);
+
 	// make sure that we keep connections open until we receive connect packets where there is a majority of packets with an equal protocol version
+	state ClientCoordinators coord(f);
 
-	state int targetQuorumSize = coordProtocols.size() / 2 + 1;
 	loop {
-		wait(smartQuorum(coordProtocols, targetQuorumSize, 1.5));
+		actors.clear(false);
+		state Promise<ProtocolVersion> majorityEqual;
+		state std::unordered_map<uint64_t, int> protocolCount;
 
-		std::unordered_map<uint64_t, int> protocolCount;
-		for(int i = 0; i<coordProtocols.size(); i++) {
-			if(coordProtocols[i].isReady()) {
-				protocolCount[coordProtocols[i].get().version.version()]++;
-			}
+		for(int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
+				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+
+			actors.add(updateProtocolRequestCount(retryBrokenPromise(requestStream, ProtocolInfoRequest{}), majorityEqual, &protocolCount, coord.clientLeaderServers.size() / 2 + 1));
 		}
 
-		Optional<ProtocolVersion> protocolVersionOptional = getMajorityProtocol(protocolCount, coordProtocols.size() / 2 + 1);
-		if(protocolVersionOptional.present()) {
-			return protocolVersionOptional.get();
-		}
-
-		// if there is no majority, smartQuorum will fail an assert.
-		// Or we dont increment targetQuorumSize and we'll spin in this loop
-		// We can break out and only read from the connect packet?
-		if(++targetQuorumSize > coordProtocols.size()) {
-			return ProtocolVersion(0);
+		choose {
+			when(ProtocolVersion majorityVersion = wait(majorityEqual.getFuture())) { return majorityVersion; }
+			when(wait(delay(2.0))) {}
+			when(wait(actors.getResult())) { throw internal_error(); }
 		}
 	}
 }
@@ -4266,7 +4282,7 @@ namespace {
 
 		state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
 
-		ProtocolVersion result = wait(getConnectPktVersions(peerProtocolAsyncVars));
+		ProtocolVersion result = wait(waitConnectPktVersions(peerProtocolAsyncVars));
 
 		ASSERT(result == protocolVersion);
 		return Void();
@@ -4282,7 +4298,7 @@ namespace {
 
 		state std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = {first, second, third};
 
-		ProtocolVersion result = wait(getConnectPktVersions(peerProtocolAsyncVars));
+		ProtocolVersion result = wait(waitConnectPktVersions(peerProtocolAsyncVars));
 
 		ASSERT(result == protocolVersion);
 		return Void();
@@ -4302,7 +4318,7 @@ namespace {
 
 		loop {
 			choose {
-				when(ProtocolVersion result = wait(getConnectPktVersions(peerProtocolAsyncVars))) {
+				when(ProtocolVersion result = wait(waitConnectPktVersions(peerProtocolAsyncVars))) {
 					ASSERT(result == protocolVersion);
 					break;
 				}
@@ -4324,7 +4340,7 @@ namespace {
 
 		loop {
 			choose {
-				when(ProtocolVersion result = wait(getConnectPktVersions(peerProtocolAsyncVars))) {
+				when(ProtocolVersion result = wait(waitConnectPktVersions(peerProtocolAsyncVars))) {
 					ASSERT(result == protocolVersion);
 					break;
 				}
@@ -4350,7 +4366,7 @@ namespace {
 
 		loop {
 			choose {
-				when(ProtocolVersion result = wait(getConnectPktVersions(peerProtocolAsyncVars))) {
+				when(ProtocolVersion result = wait(waitConnectPktVersions(peerProtocolAsyncVars))) {
 					ASSERT(result == protocolVersion);
 					break;
 				}
@@ -4378,7 +4394,7 @@ namespace {
 
 		loop {
 			choose {
-				when(ProtocolVersion result = wait(getConnectPktVersions(peerProtocolAsyncVars))) {
+				when(ProtocolVersion result = wait(waitConnectPktVersions(peerProtocolAsyncVars))) {
 					ASSERT(result == protocolVersion);
 					break;
 				}
@@ -4389,34 +4405,13 @@ namespace {
 	}
 }
 
-ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConnectionFile> f) {
-	ClientCoordinators coord(f);
-
-	std::vector<Future<ProtocolInfoReply>> coordProtocols;
-	std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars;
-	coordProtocols.reserve(coord.clientLeaderServers.size());
-	peerProtocolAsyncVars.reserve(coord.clientLeaderServers.size());
-
-	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
-		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
-			{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
-		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-
-		Reference<AsyncVar<Optional<ProtocolVersion>>> protocolOptionalAsyncVar = FlowTransport::transport().getPeerProtocolAsyncVar(coord.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
-		peerProtocolAsyncVars.push_back(protocolOptionalAsyncVar);
-	}
-
-	// make request to protocol info endpoint to send connect packets if need be and keep connections open
-	getCoordProtocolRequestVersions(coordProtocols);
-
-	// wait for connect packets to be sent/received if we don't already have the peer's protocol
-	ProtocolVersion protocolVersion = wait(getConnectPktVersions(peerProtocolAsyncVars));
-	return protocolVersion;
-}
-
 ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
-	return protocolVersion.version();
+	loop {
+		choose {
+			when(ProtocolVersion coordProtocol = wait(getCoordProtocolRequestVersions(f))) { return coordProtocol.version(); }
+			when(ProtocolVersion coordProtocol = wait(getConnectPktVersions(f))) { return coordProtocol.version(); }
+		}
+	}
 }
 
 uint32_t Transaction::getSize() {
