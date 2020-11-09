@@ -89,3 +89,4 @@ flow/coveragetool/obj
 temp/
 /compile_commands.json
 /.ccls-cache
+.clangd/

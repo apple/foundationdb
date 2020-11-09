@@ -30,6 +30,8 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
+#include "flow/Arena.h"
+#include "flow/Histogram.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -91,6 +93,7 @@ struct LogRouterData {
 	double getMoreTime = 0;
 	double maxGetMoreTime = 0;
 	int64_t generation = -1;
+	Histogram peekLatencyDist;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -126,7 +129,8 @@ struct LogRouterData {
 	    version(req.startVersion - 1), minPopped(0), generation(req.recoveryCount), startVersion(req.startVersion),
 	    allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
-	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
+	    getMoreBlockedCount("GetMoreBlockedCount", cc),
+	    peekLatencyDist(dbgid.toString(), LiteralStringRef("LogRouterPeekLatency"), Histogram::Unit::microseconds) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -266,8 +270,10 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			state double startTime = now();
 			choose {
 				when(wait( getMoreF ) ) {
-					self->getMoreTime += now() - startTime;
-					self->maxGetMoreTime = std::max(self->maxGetMoreTime, now() - startTime);
+					double peekTime = now() - startTime;
+					self->peekLatencyDist.sampleSeconds(peekTime);
+					self->getMoreTime += peekTime;
+					self->maxGetMoreTime = std::max(self->maxGetMoreTime, peekTime);
 					break;
 				}
 				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
