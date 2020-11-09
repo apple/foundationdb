@@ -16,6 +16,7 @@ runConsistencyCheck = false
 testTitle = 'PreSnapWorkloads'
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'SimpleAtomicAdd'
@@ -24,6 +25,7 @@ clearAfterTest = false
 testTitle = 'TakeSnap'
 simBackupAgents = 'BackupToFile'
 clearAfterTest = false
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'SnapTest'
