@@ -153,7 +153,7 @@ struct KVTest {
 	}
 };
 
-ACTOR Future<Void> testKVRead( KVTest* test, Key key, TestHistogram<float>* latency, PerfIntCounter* count ) {
+ACTOR Future<Void> testKVRead(KVTest* test, Key key, TestHistogram<float>* latency, PerfIntCounter* count) {
 	//state Version s1 = test->lastCommit;
 	state Version s2 = test->lastDurable;
 
@@ -171,7 +171,7 @@ ACTOR Future<Void> testKVRead( KVTest* test, Key key, TestHistogram<float>* late
 	return Void();
 }
 
-ACTOR Future<Void> testKVReadSaturation( KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count ) {
+ACTOR Future<Void> testKVReadSaturation(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
 	while (true) {
 		state double begin = timer();
 		Optional<Value> val = wait( test->store->readValue(test->randomKey()) );
@@ -181,7 +181,7 @@ ACTOR Future<Void> testKVReadSaturation( KVTest* test, TestHistogram<float>* lat
 	}
 }
 
-ACTOR Future<Void> testKVCommit( KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count ) {
+ACTOR Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
 	state Version v = test->lastSet;
 	test->lastCommit = v;
 	state double begin = timer();
@@ -232,7 +232,7 @@ struct KVStoreTestWorkload : TestWorkload {
 		return Void();
 	}
 	virtual Future<bool> check( Database const& cx ) { return true; }
-	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, TestHistogram<float>& h){
+	void metricsFromHistogram(vector<PerfMetric>& m, std::string name, TestHistogram<float>& h) {
 		m.push_back( PerfMetric( "Min " + name, 1000.0 * h.min(), true) );
 		m.push_back( PerfMetric( "Average " + name, 1000.0 * h.mean(), true) );
 		m.push_back( PerfMetric( "Median " + name, 1000.0 * h.medianEstimate(), true) );

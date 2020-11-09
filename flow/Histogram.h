@@ -35,64 +35,97 @@
 class Histogram;
 
 class HistogramRegistry {
-    public:
-        void registerHistogram(Histogram * h);
-        void unregisterHistogram(Histogram * h);
-        void logReport();
-    private:
-        std::map<std::string, Histogram*> histograms;
+public:
+	void registerHistogram(Histogram* h);
+	void unregisterHistogram(Histogram* h);
+	Histogram* lookupHistogram(std::string name);
+	void logReport();
+
+private:
+	// This map is ordered by key so that ops within the same group end up
+	// next to each other in the trace log.
+	std::map<std::string, Histogram*> histograms;
 };
 
-// TODO: This should be scoped properly for simulation (instead of just having all the "machines" share one histogram namespace)
-HistogramRegistry & GetHistogramRegistry();
+HistogramRegistry& GetHistogramRegistry();
 
-class Histogram {
+/*
+ * A fast histogram with power-of-two spaced buckets.
+ *
+ * For more information about this technique, see:
+ * https://www.fsl.cs.stonybrook.edu/project-osprof.html
+ */
+class Histogram sealed : public ReferenceCounted<Histogram> {
 public:
-    enum class Unit {
-        microseconds,
-        bytes
-    };
+	enum class Unit { microseconds, bytes };
 
-    Histogram(StringRef group, StringRef op, Unit unit) : group(group.toString()), op(op.toString()), unit(unit), registry(GetHistogramRegistry()) {
-        clear();
-        registry.registerHistogram(this);
-    }
-
-    ~Histogram() {
-        registry.unregisterHistogram(this);
-    }
-
-    inline void sample(uint32_t sample) {
-#ifdef _WIN32
-        unsigned long index;
-        buckets[_BitScanReverse(&index, sample) ? index : 0]++;
-#else
-        buckets[sample ? (31 - __builtin_clz(sample)) : 0]++;
-#endif
-    }
-
-    inline void sampleSeconds(double delta) {
-        sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
-    }
-
-    void clear() {
-        for (uint32_t & i : buckets) {
-            i = 0;
-        }
-    }
-    void writeToLog();
-
-    std::string name() {
-        return group + ":" + op;
-    }
-
-    std::string const group;
-    std::string const op;
-    Unit const unit;
-    HistogramRegistry & registry;
-    
 private:
-    uint32_t buckets[32];
+	Histogram(std::string group, std::string op, Unit unit, HistogramRegistry& registry)
+	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
+		clear();
+	}
+
+	static std::string generateName(std::string group, std::string op) { return group + ":" + op; }
+
+public:
+	~Histogram() { registry.unregisterHistogram(this); }
+
+	static Reference<Histogram> getHistogram(StringRef group, StringRef op, Unit unit) {
+		std::string group_str = group.toString();
+		std::string op_str = op.toString();
+		std::string name = generateName(group_str, op_str);
+		HistogramRegistry& registry = GetHistogramRegistry();
+		Histogram* h = registry.lookupHistogram(name);
+		if (!h) {
+			h = new Histogram(group_str, op_str, unit, registry);
+			registry.registerHistogram(h);
+			return Reference<Histogram>(h);
+		} else {
+			return Reference<Histogram>::addRef(h);
+		}
+	}
+
+	// This histogram buckets samples into powers of two.
+	inline void sample(uint32_t sample) {
+		size_t idx;
+#ifdef _WIN32
+		unsigned long index;
+		// _BitScanReverse sets index to the position of the first non-zero bit, so
+		// _BitScanReverse(sample) ~= log_2(sample).  _BitScanReverse returns false if
+		// sample is zero.
+		idx = _BitScanReverse(&index, sample) ? index : 0;
+#else
+		// __builtin_clz counts the leading zeros in its uint32_t argument.  So, 31-clz ~= log_2(sample).
+		// __builtin_clz(0) is undefined.
+		idx = sample ? (31 - __builtin_clz(sample)) : 0;
+#endif
+		ASSERT(idx < 32);
+		buckets[idx]++;
+	}
+
+	inline void sampleSeconds(double delta) {
+		uint64_t delta_usec = (delta * 1000000);
+		if (delta_usec > UINT32_MAX) {
+			sample(UINT32_MAX);
+		} else {
+			sample((uint32_t)(delta * 1000000)); // convert to microseconds and truncate to integer
+		}
+	}
+
+	void clear() {
+		for (uint32_t& i : buckets) {
+			i = 0;
+		}
+	}
+	void writeToLog();
+
+	std::string name() { return generateName(this->group, this->op); }
+
+	std::string const group;
+	std::string const op;
+	Unit const unit;
+	HistogramRegistry& registry;
+	uint32_t buckets[32];
 };
 
 #endif // FLOW_HISTOGRAM_H
