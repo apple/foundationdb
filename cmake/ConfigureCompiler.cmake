@@ -233,7 +233,6 @@ else()
       -Wno-unused-function
       -Wno-unused-local-typedef
       -Wno-unused-parameter
-      -Wno-unused-value
       )
     if (USE_CCACHE)
       add_compile_options(
