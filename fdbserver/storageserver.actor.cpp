@@ -2276,7 +2276,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						}
 
 						TEST( true );
-						TEST( shard->updates.size() );
+						TEST( shard->updates.size() ); // Shard has updates
 						ASSERT( otherShard->updates.empty() );
 					}
 				}

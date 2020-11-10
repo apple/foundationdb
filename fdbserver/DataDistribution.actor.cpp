@@ -2410,7 +2410,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		Reference<TCMachineInfo> machineInfo;
 		if (machine_info.find(machine_id) == machine_info.end()) {
 			// uid is the first storage server process on the machine
-			TEST(true);
+			TEST(true); // First storage server in process on the machine
 			// For each machine, store the first server's localityEntry into machineInfo for later use.
 			LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->id);
 			machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
@@ -3054,7 +3054,7 @@ ACTOR Future<Void> machineTeamRemover(DDTeamCollection* self) {
 				// in the serverTeams vector in the machine team.
 				--teamIndex;
 				self->addTeam(team->getServers(), true, true);
-				TEST(true);
+				TEST(true); // Removed machine team
 			}
 
 			self->doBuildTeams = true;

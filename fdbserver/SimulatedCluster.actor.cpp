@@ -756,7 +756,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		break;
 	}
 	case 3: {
-		TEST(true); // Simulated cluster using radix-tree storage engine
+		TEST(true); // Simulated cluster using redwood storage engine
 		set_config("ssd-redwood-experimental");
 		break;
 		}
@@ -857,7 +857,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				int satellite_replication_type = deterministicRandom()->randomInt(0,3);
 				switch (satellite_replication_type) {
 				case 0: {
-					TEST( true );  // Simulated cluster using no satellite redundancy mode
+					TEST( true );  // Simulated cluster using no satellite redundancy mode (>4 datacenters)
 					break;
 				}
 				case 1: {
@@ -884,7 +884,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 					break;
 				}
 				case 1: {
-					TEST( true );  // Simulated cluster using no satellite redundancy mode
+					TEST( true );  // Simulated cluster using no satellite redundancy mode (<4 datacenters)
 					break;
 				}
 				case 2: {
@@ -1138,8 +1138,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 	// Use IPv6 25% of the time
 	bool useIPv6 = deterministicRandom()->random01() < 0.25;
-	TEST( useIPv6 );
-	TEST( !useIPv6 );
+	TEST( useIPv6 ); // Use IPv6
+	TEST( !useIPv6 ); // Use IPv4
 
 	vector<NetworkAddress> coordinatorAddresses;
 	if(minimumRegions > 1) {

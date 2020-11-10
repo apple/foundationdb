@@ -224,7 +224,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); // Restore starts at specified time
+			TEST(!stopDifferentialFuture.isReady()); // Restore starts at specified time - stopDifferential not ready
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))

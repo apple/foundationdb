@@ -212,9 +212,9 @@ struct StorageServerMetrics {
 	void notify( KeyRef key, StorageMetrics& metrics ) {
 		ASSERT (metrics.bytes == 0); // ShardNotifyMetrics
 		if (g_network->isSimulated()) {
-			TEST(metrics.bytesPerKSecond != 0); // ShardNotifyMetrics
-			TEST(metrics.iosPerKSecond != 0); // ShardNotifyMetrics
-			TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics
+			TEST(metrics.bytesPerKSecond != 0); // ShardNotifyMetrics bytes
+			TEST(metrics.iosPerKSecond != 0); // ShardNotifyMetrics ios
+			TEST(metrics.bytesReadPerKSecond != 0); // ShardNotifyMetrics bytesRead
 		}
 
 		double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;

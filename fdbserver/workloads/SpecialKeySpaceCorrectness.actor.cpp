@@ -109,7 +109,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				return;
 			}
 			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
-			TEST(!f.isReady());
+			TEST(!f.isReady()); // status json not ready
 		}
 		ASSERT(f.isError());
 		ASSERT(f.getError().code() == error_code_transaction_cancelled);
@@ -317,7 +317,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")),
 			    CLIENT_KNOBS->TOO_MANY)));
-			TEST(true);
+			TEST(true); // read transaction special keyrange
 			tx->reset();
 		} catch (Error& e) {
 			throw;
@@ -341,7 +341,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
 			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/transaction0"), false, 0);
 			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
-			TEST(true);
+			TEST(true); // end key selector inside module range
 			tx->reset();
 		} catch (Error& e) {
 			throw;
