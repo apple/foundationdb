@@ -76,7 +76,7 @@ struct Span {
 enum class TracerType {
 	DISABLED = 0,
 	LOG_FILE = 1,
-	FLUENTD = 2,
+	UDP = 2,
 	END = 3
 };
 

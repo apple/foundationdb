@@ -162,9 +162,9 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 	}
 }
 
-struct FluentDTracer : ITracer {
+struct UDPTracer : ITracer {
 public:
-	~FluentDTracer() override {
+	~UDPTracer() override {
 		while (!buffers_.empty()) {
 			auto& request = buffers_.front();
 			buffers_.pop();
@@ -172,7 +172,7 @@ public:
 		}
 	}
 
-	TracerType type() const override { return TracerType::FLUENTD; }
+	TracerType type() const override { return TracerType::UDP; }
 
 	// Serializes the given span to msgpack format and sends the data via UDP.
 	void trace(Span const& span) override {
@@ -311,8 +311,8 @@ void openTracer(TracerType type) {
 	case TracerType::LOG_FILE:
 		g_tracer = new LogfileTracer{};
 		break;
-	case TracerType::FLUENTD:
-		g_tracer = new FluentDTracer{};
+	case TracerType::UDP:
+		g_tracer = new UDPTracer{};
 		break;
 	}
 }
