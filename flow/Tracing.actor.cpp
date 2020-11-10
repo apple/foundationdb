@@ -165,7 +165,6 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 struct FluentDTracer : ITracer {
 public:
 	~FluentDTracer() override {
-		// TODO: Handle case where socket->send returns after FluentDTracer instance is destructed?
 		while (!buffers_.empty()) {
 			auto& request = buffers_.front();
 			buffers_.pop();
@@ -186,12 +185,14 @@ public:
 			}
 		});
 
+		if (span.location.name.size() == 0) {
+			return;
+		}
+
 		// ASSERT(!send_actor_.isReady());
 		// ASSERT(!log_actor_.isReady());
 
 		if (buffers_.empty()) {
-			++total_buffers_;
-			TraceEvent(SevInfo, "TracingSpanCreateBuffer").detail("Buffers", total_buffers_);
 			buffers_.push(TraceRequest{
 				.buffer = new uint8_t[kTraceBufferSize],
 				.data_size = 0,
@@ -202,9 +203,14 @@ public:
 		auto request = buffers_.front();
 		buffers_.pop();
 
-		request.write_byte(6 | 0b10010000); // write as array
+		// Serialize span fields as an array. If you change the serialization
+		// format here, make sure to update the fluentd filter to be able to
+		// correctly parse the updated format!
+		uint8_t size = 5;
+		if (span.parents.size() == 0) --size;
+		request.write_byte(size | 0b10010000); // write as array
 
-		serialize_uid(span.context, request);
+		serialize_string(span.context.toString(), request);
 
 		serialize_value(span.begin, request, 0xcb);
 		serialize_value(span.end, request, 0xcb);
@@ -214,12 +220,7 @@ public:
 		serialize_vector(span.parents, request);
 
 		++pending_messages_;
-		++total_messages_;
 		stream_.send(request);
-
-		if (total_messages_ % 50000 == 0) {
-			TraceEvent("TracingSpanTotalMessages").detail("Messages", total_messages_);
-		}
 	}
 
 private:
@@ -242,9 +243,7 @@ private:
 	// specified by the msgpack specification.
 	inline void serialize_string(const std::string& str, TraceRequest& request) {
 		int size = str.size();
-		if (size == 0) {
-			return;
-		}
+		ASSERT(size > 0);
 
 		if (size <= 31) {
 			request.write_byte((uint8_t) size | 0b10100000);
@@ -259,16 +258,14 @@ private:
 		request.write_bytes((uint8_t*) str.data(), size);
 	}
 
-	// Writes the given UID to the request.
-	inline void serialize_uid(const UID& uid, TraceRequest& request) {
-		serialize_value(uid.first(), request, 0xcf);
-		serialize_value(uid.second(), request, 0xcf);
-	}
-
 	// Writes the given vector to the request. Assumes each element in the
 	// vector is a SpanID, and serializes as two big-endian 64-bit integers.
 	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
-		int size = vec.size() * 2;
+		int size = vec.size();
+		if (size == 0) {
+			return;
+		}
+
 		if (size <= 15) {
 			request.write_byte((uint8_t) size | 0b10010000);
 		} else if (size <= 65535) {
@@ -281,7 +278,7 @@ private:
 		}
 
 		for (const auto& parentContext : vec) {
-			serialize_uid(parentContext, request);
+			serialize_string(parentContext.toString(), request);
 		}
 	}
 
@@ -291,8 +288,6 @@ private:
 	std::queue<TraceRequest> buffers_;
 	int pending_messages_;
 	bool send_error_;
-	int total_buffers_;  // TODO: This should be removed after performance testing is done
-	int total_messages_;  // TODO: This should be removed after performance testing is done
 
 	PromiseStream<TraceRequest> stream_;
 	Future<Void> send_actor_;
