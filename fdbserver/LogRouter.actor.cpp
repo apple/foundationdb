@@ -93,7 +93,7 @@ struct LogRouterData {
 	double getMoreTime = 0;
 	double maxGetMoreTime = 0;
 	int64_t generation = -1;
-	Histogram peekLatencyDist;
+	Reference<Histogram> peekLatencyDist;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -130,7 +130,8 @@ struct LogRouterData {
 	    allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc),
-	    peekLatencyDist(dbgid.toString(), LiteralStringRef("LogRouterPeekLatency"), Histogram::Unit::microseconds) {
+	    peekLatencyDist(Histogram::getHistogram(LiteralStringRef("LogRouter"), LiteralStringRef("PeekTLogLatency"),
+	                                            Histogram::Unit::microseconds)) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -271,7 +272,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			choose {
 				when(wait( getMoreF ) ) {
 					double peekTime = now() - startTime;
-					self->peekLatencyDist.sampleSeconds(peekTime);
+					self->peekLatencyDist->sampleSeconds(peekTime);
 					self->getMoreTime += peekTime;
 					self->maxGetMoreTime = std::max(self->maxGetMoreTime, peekTime);
 					break;
