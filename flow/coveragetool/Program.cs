@@ -36,6 +36,9 @@ namespace coveragetool
         public string Condition;
     };
 
+    class ParseException : Exception {
+    }
+
     class Program
     {
         public static int Main(string[] args)
@@ -82,10 +85,14 @@ namespace coveragetool
                 .Where( fi=>new FileInfo(fi).LastWriteTimeUtc > outputTime )
                 .ToLookup(n=>n);
 
-            cases = cases
+            try {
+                cases = cases
                 .Where(c => exists.Contains(c.File) && !changedFiles.Contains(c.File))
                 .Concat( changedFiles.SelectMany( f => ParseSource( f.Key ) ) )
                 .ToArray();
+            } catch (ParseException) {
+                return 1;
+            }
 
             if (!quiet) {
                 Console.WriteLine("  {0}/{1} files scanned", changedFiles.Count, inputPaths.Length);
@@ -140,18 +147,34 @@ namespace coveragetool
         }
         public static CoverageCase[] ParseSource(string filename)
         {
-            var regex = new Regex( @"^([^/]|/[^/])*(TEST|INJECT_FAULT|SHOULD_INJECT_FAULT)[ \t]*\(([^)]*)\)" );
+            var regex = new Regex( @"^([^/]|/[^/])*\s+(TEST|INJECT_FAULT|SHOULD_INJECT_FAULT)[ \t]*\(([^)]*)\)" );
 
             var lines = File.ReadAllLines(filename);
-            return Enumerable.Range(0, lines.Length)
+            var res = Enumerable.Range(0, lines.Length)
                 .Where( i=>regex.IsMatch(lines[i]) && !lines[i].StartsWith("#define") )
-                .Select( i=>new CoverageCase { 
-                    File = filename, 
+                .Select( i=>new CoverageCase {
+                    File = filename,
                     Line = i+1,
                     Comment = FindComment(lines[i]),
                     Condition = regex.Match(lines[i]).Groups[3].Value
                     } )
                 .ToArray();
+            var comments = new Dictionary<string, CoverageCase>();
+            bool isUnique = true;
+            foreach(var coverageCase in res) {
+                if (comments.ContainsKey(coverageCase.Comment)) {
+                    isUnique = false;
+                    var prev = comments[coverageCase.Comment];
+                    Console.Error.WriteLine(String.Format("Error at {0}:{1}: {2} is not a unique comment", coverageCase.File, coverageCase.Line, coverageCase.Comment));
+                    Console.Error.WriteLine(String.Format("\tPreviously seen in {0} at {1}", prev.File, prev.Line));
+                } else {
+                    comments.Add(coverageCase.Comment, coverageCase);
+                }
+            }
+            if (!isUnique) {
+                throw new ParseException();
+            }
+            return res;
         }
         public static string FindComment(string line)
         {
