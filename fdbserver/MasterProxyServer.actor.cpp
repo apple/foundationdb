@@ -69,7 +69,7 @@ struct ProxyStats {
 	double percentageOfGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
 
-	LatencySample normalTxnGRVTimeInQueue;
+	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
 
 	LatencySample commitLatencySample;
@@ -103,18 +103,20 @@ struct ProxyStats {
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-	    normalTxnGRVTimeInQueue("NormalTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    transactionRateAllowed(0), batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
+	    percentageOfGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		// The rate at which the limit(budget) is allowed to grow.
-		specialCounter(cc, "NormalTransactionRateAllowed", [this]() { return this->transactionRateAllowed; });
+		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
 		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
-		specialCounter(cc, "NormalTransactionLimit", [this]() { return this->transactionLimit; });
+		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return this->transactionLimit; });
 		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
 		specialCounter(cc, "PercentageOfGRVQueueProcessed", [this]() { return this->percentageOfGRVQueueProcessed; });
 		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed",
@@ -1396,10 +1398,9 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 			double currentTime = g_network->timer();
 			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
 				systemTransactionsStarted[req.flags & 1] += tc;
-				stats->normalTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 			} else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
 				defaultPriTransactionsStarted[req.flags & 1] += tc;
-				stats->normalTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
+				stats->defaultTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 			} else {
 				batchPriTransactionsStarted[req.flags & 1] += tc;
 				stats->batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
