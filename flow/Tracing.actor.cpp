@@ -119,7 +119,7 @@ ACTOR Future<Void> simulationStartServer() {
 		// currently written as an array, so first byte should match msgpack
 		// array notation. In the future, the entire message should be
 		// deserialized to make sure all data is written correctly.
-		ASSERT(message[0] == (5 | 0b10010000));
+		ASSERT(message[0] == (4 | 0b10010000) || (5 | 0b10010000));
 	}
 }
 
