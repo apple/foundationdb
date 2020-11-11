@@ -588,7 +588,7 @@ public:
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
 			Future<Void> onConnected = p.getFuture();
-			self->ssl_sock.lowest_layer().async_connect(to, std::move(p) );
+			self->ssl_sock.next_layer().async_connect( to, std::move(p) );
 
 			wait( onConnected );
 			self->init();
@@ -802,16 +802,16 @@ private:
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
-		ssl_sock.lowest_layer().non_blocking(true);
-		ssl_sock.lowest_layer().set_option(boost::asio::ip::tcp::no_delay(true));
+		ssl_sock.next_layer().non_blocking(true);
+		ssl_sock.next_layer().set_option(boost::asio::ip::tcp::no_delay(true));
 		platform::setCloseOnExec(ssl_sock.lowest_layer().native_handle());
 	}
 
 	void closeSocket() {
 		boost::system::error_code cancelError;
-		ssl_sock.lowest_layer().cancel(cancelError);
+		ssl_sock.next_layer().cancel(cancelError);
 		boost::system::error_code closeError;
-		ssl_sock.lowest_layer().close(closeError);
+		ssl_sock.next_layer().close(closeError);
 		boost::system::error_code shutdownError;
 		ssl_sock.shutdown(shutdownError);
 	}
@@ -856,7 +856,7 @@ private:
 		try {
 			BindPromise p("N2_AcceptError", UID());
 			auto f = p.getFuture();
-			self->acceptor.async_accept( conn->getSSLSocket().lowest_layer(), peer_endpoint, std::move(p) );
+			self->acceptor.async_accept( conn->getSSLSocket().next_layer(), peer_endpoint, std::move(p) );
 			wait( f );
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes()) : IPAddress(peer_endpoint.address().to_v4().to_ulong());
 			
