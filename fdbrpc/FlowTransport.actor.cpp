@@ -467,12 +467,8 @@ ACTOR Future<Void> connectionWriter( Reference<Peer> self, Reference<IConnection
 		loop {
 			lastWriteTime = now();
 
-			// state int toSend = self->unsent.getUnsent()->unsentBytesInQueue(FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 			state size_t sent;
-
 			wait(conn->asyncWrite(self->unsent.getUnsent(), &sent, FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
-
-			// ASSERT_EQ(toSend, sent);
 
 			if (sent) {
 				self->bytesSent += sent;

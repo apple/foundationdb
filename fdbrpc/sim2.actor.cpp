@@ -87,6 +87,8 @@ void ISimulator::displayWorkers() const
 
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 
+ISimulator* g_pSimulator = 0;
+thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
 int openCount = 0;
 
 struct SimClogging {
@@ -187,7 +189,6 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 	virtual Future<Void> acceptHandshake() { return delay(0.01*deterministicRandom()->random01()); }
 	virtual Future<Void> connectHandshake() { return delay(0.01*deterministicRandom()->random01()); }
 
-	virtual Future<Void> onWritable() { return whenWritable(this); }
 	virtual Future<Void> onReadable() { return whenReadable(this); }
 
 	bool isPeerGone() {
@@ -212,11 +213,6 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		recvBuf.erase( recvBuf.begin(), recvBuf.begin() + toRead );
 		readBytes.set( readBytes.get() + toRead );
 		return toRead;
-	}
-
-	virtual int write( SendBuffer const* buffer, int limit) {
-		ASSERT(false);
-		return 0;
 	}
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)

@@ -364,11 +364,8 @@ namespace HTTP {
 
 				state int trySend = CLIENT_KNOBS->HTTP_SEND_SIZE;
 				wait(sendRate->getAllowance(trySend));
-				// state int len = pContent->getUnsent()->unsentBytesInQueue(trySend);
 				state size_t len;
 				wait(conn->asyncWrite(pContent->getUnsent(), &len, trySend));
-
-				// ASSERT(sent == len); // DO NOT COMMIT
 
 				if(pSent != nullptr)
 					*pSent += len;

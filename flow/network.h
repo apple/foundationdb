@@ -382,10 +382,6 @@ public:
 
 	virtual Future<Void> connectHandshake() = 0;
 
-	// Precondition: write() has been called and last returned 0
-	// returns when write() can write at least one byte (or may throw an error if the connection dies)
-	virtual Future<Void> onWritable() = 0;
-
 	// Precondition: read() has been called and last returned 0
 	// returns when read() can read at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onReadable() = 0;
@@ -393,15 +389,6 @@ public:
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
 	// (or may throw an error if the connection dies)
 	virtual int read( uint8_t* begin, uint8_t* end ) = 0;
-
-	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	// (or may throw an error if the connection dies)
-	// The SendBuffer chain cannot be empty, and the limit must be positive.
-	// Important non-obvious behavior:  The caller is committing to write the contents of the buffer chain up to the limit.  If all of those bytes could
-	// not be sent in this call to write() then further calls must be made to write the remainder.  An IConnection implementation can make decisions
-	// based on the entire byte set that the caller was attempting to write even if it is unable to write all of it immediately.
-	// Due to limitations of TLSConnection, callers must also avoid reallocations that reduce the amount of written data in the first buffer in the chain.
-	virtual int write( SendBuffer const* buffer, int limit = std::numeric_limits<int>::max()) = 0;
 
 	virtual Future<Void> asyncWrite( SendBuffer const* buffer, size_t * bytesTransferred, int limit = std::numeric_limits<int>::max()) = 0;
 	// Returns the network address and port of the other end of the connection.  In the case of an incoming connection, this may not

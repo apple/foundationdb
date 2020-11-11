@@ -380,15 +380,6 @@ public:
 
 	virtual Future<Void> connectHandshake() { return Void(); }
 
-	// returns when write() can write at least one byte
-	virtual Future<Void> onWritable() {
-		++g_net2->countWriteProbes;
-		BindPromise p("N2_WriteProbeError", id);
-		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
-		return f;
-	}
-
 	// returns when read() can read at least one byte
 	virtual Future<Void> onReadable() {
 		++g_net2->countReadProbes;
@@ -417,36 +408,6 @@ public:
 		ASSERT( size );  // If the socket is closed, we expect an 'eof' error, not a zero return value
 
 		return size;
-	}
-
-	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	virtual int write( SendBuffer const* data, int limit ) {
-		boost::system::error_code err;
-		++g_net2->countWrites;
-
-		size_t sent = socket.write_some( boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err );
-
-		if (err) {
-			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is positive so check explicitly.
-			ASSERT(limit > 0);
-			bool notEmpty = false;
-			for(auto p = data; p; p = p->next)
-				if(p->bytes_written - p->bytes_sent > 0) {
-					notEmpty = true;
-					break;
-				}
-			ASSERT(notEmpty);
-
-			if (err == boost::asio::error::would_block) {
-				++g_net2->countWouldBlock;
-				return 0;
-			}
-			onWriteError(err);
-			throw connection_failed();
-		}
-
-		ASSERT( sent );  // Make sure data was sent, and also this check will fail if the buffer chain was empty or the limit was not > 0.
-		return sent;
 	}
 
 	virtual Future<Void> asyncWrite(SendBuffer const* data, size_t * bytesTransferred, int limit) {
@@ -547,7 +508,7 @@ private:
 };
 
 #ifndef TLS_DISABLED
-typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
+typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_socket;
 
 struct SSLHandshakerThread : IThreadPoolReceiver {
 	SSLHandshakerThread() {}
@@ -600,7 +561,7 @@ public:
 	}
 
 	explicit SSLConnection( boost::asio::io_service& io_service, Reference<ReferencedObject<boost::asio::ssl::context>> context )
-		: id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()), sslContext(context)
+		: id(nondeterministicRandom()->randomUniqueID()), ssl_sock(boost::asio::ip::tcp::socket(io_service), context->mutate()), sslContext(context)
 	{
 	}
 
@@ -627,12 +588,12 @@ public:
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
 			Future<Void> onConnected = p.getFuture();
-			self->socket.async_connect( to, std::move(p) );
+			self->ssl_sock.lowest_layer().async_connect(to, std::move(p) );
 
 			wait( onConnected );
 			self->init();
 			return self;
-		} catch (Error& e) {
+		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
 			throw;
@@ -785,21 +746,12 @@ public:
 		return connectHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
 	}
 
-	// returns when write() can write at least one byte
-	virtual Future<Void> onWritable() {
-		++g_net2->countWriteProbes;
-		BindPromise p("N2_WriteProbeError", id);
-		auto f = p.getFuture();
-		socket.async_write_some( boost::asio::null_buffers(), std::move(p) );
-		return f;
-	}
-
 	// returns when read() can read at least one byte
 	virtual Future<Void> onReadable() {
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
-		socket.async_read_some( boost::asio::null_buffers(), std::move(p) );
+		ssl_sock.async_read_some( boost::asio::null_buffers(), std::move(p) );
 		return f;
 	}
 
@@ -824,40 +776,6 @@ public:
 		return size;
 	}
 
-	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	virtual int write( SendBuffer const* data, int limit ) {
-#ifdef __APPLE__
-		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a broken pipe error.
-		limit = std::min(limit, 2016);
-#endif
-		boost::system::error_code err;
-		++g_net2->countWrites;
-
-		size_t sent = ssl_sock.write_some( boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), err );
-
-		if (err) {
-			// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is positive so check explicitly.
-			ASSERT(limit > 0);
-			bool notEmpty = false;
-			for(auto p = data; p; p = p->next)
-				if(p->bytes_written - p->bytes_sent > 0) {
-					notEmpty = true;
-					break;
-				}
-			ASSERT(notEmpty);
-
-			if (err == boost::asio::error::would_block) {
-				++g_net2->countWouldBlock;
-				return 0;
-			}
-			onWriteError(err);
-			throw connection_failed();
-		}
-
-		ASSERT( sent );  // Make sure data was sent, and also this check will fail if the buffer chain was empty or the limit was not > 0.
-		return sent;
-	}
-
 	virtual Future<Void> asyncWrite(SendBuffer const* data, size_t * bytesTransferred, int limit) {
 		boost::system::error_code err;
 		++g_net2->countWrites;
@@ -872,28 +790,28 @@ public:
 
 	virtual UID getDebugID() { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	// tcp::socket& getSocket() { return socket; }
 
 	ssl_socket& getSSLSocket() { return ssl_sock; }
 private:
 	UID id;
-	tcp::socket socket;
+	// tcp::socket socket;
 	ssl_socket ssl_sock;
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
-		socket.non_blocking(true);
-		socket.set_option(boost::asio::ip::tcp::no_delay(true));
-		platform::setCloseOnExec(socket.native_handle());
+		ssl_sock.lowest_layer().non_blocking(true);
+		ssl_sock.lowest_layer().set_option(boost::asio::ip::tcp::no_delay(true));
+		platform::setCloseOnExec(ssl_sock.lowest_layer().native_handle());
 	}
 
 	void closeSocket() {
 		boost::system::error_code cancelError;
-		socket.cancel(cancelError);
+		ssl_sock.lowest_layer().cancel(cancelError);
 		boost::system::error_code closeError;
-		socket.close(closeError);
+		ssl_sock.lowest_layer().close(closeError);
 		boost::system::error_code shutdownError;
 		ssl_sock.shutdown(shutdownError);
 	}
@@ -938,7 +856,7 @@ private:
 		try {
 			BindPromise p("N2_AcceptError", UID());
 			auto f = p.getFuture();
-			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
+			self->acceptor.async_accept( conn->getSSLSocket().lowest_layer(), peer_endpoint, std::move(p) );
 			wait( f );
 			auto peer_address = peer_endpoint.address().is_v6() ? IPAddress(peer_endpoint.address().to_v6().to_bytes()) : IPAddress(peer_endpoint.address().to_v4().to_ulong());
 			
