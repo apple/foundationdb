@@ -66,7 +66,7 @@ struct ProxyStats {
 	double transactionRateAllowed, batchTransactionRateAllowed;
 	double transactionLimit, batchTransactionLimit;
 	// how much of the GRV requests queue was processed in one attempt to hand out read version.
-	double percentageOfGRVQueueProcessed;
+	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
 
 	LatencySample defaultTxnGRVTimeInQueue;
@@ -108,7 +108,7 @@ struct ProxyStats {
 	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    transactionRateAllowed(0), batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
-	    percentageOfGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0) {
+	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
@@ -118,7 +118,8 @@ struct ProxyStats {
 		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
 		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return this->transactionLimit; });
 		specialCounter(cc, "BatchTransactionLimit", [this]() { return this->batchTransactionLimit; });
-		specialCounter(cc, "PercentageOfGRVQueueProcessed", [this]() { return this->percentageOfGRVQueueProcessed; });
+		specialCounter(cc, "PercentageOfDefaultGRVQueueProcessed",
+		               [this]() { return this->percentageOfDefaultGRVQueueProcessed; });
 		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed",
 		               [this]() { return this->percentageOfBatchGRVQueueProcessed; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
@@ -1364,7 +1365,6 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 
 		int requestsToStart = 0;
 
-		uint32_t systemQueueSize = systemQueue.size();
 		uint32_t defaultQueueSize = defaultQueue.size();
 		uint32_t batchQueueSize = batchQueue.size();
 		while (requestsToStart < SERVER_KNOBS->START_TRANSACTION_MAX_REQUESTS_TO_START) {
@@ -1436,7 +1436,7 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 			g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "MasterProxyServer.masterProxyServerCore.Broadcast");
 		}
 
-		int nonBatchGRVProcessed = 0;
+		int defaultGRVProcessed = 0;
 		int batchGRVProcessed = 0;
 		for (int i = 0; i < start.size(); i++) {
 			if (start[i].size()) {
@@ -1447,11 +1447,11 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 				if (i == 0) { 
 					addActor.send(timeReply(readVersionReply, replyTimes));
 				}
-				nonBatchGRVProcessed += systemTransactionsStarted[i] + defaultPriTransactionsStarted[i];
+				defaultGRVProcessed += defaultPriTransactionsStarted[i];
 				batchGRVProcessed += batchPriTransactionsStarted[i];
 			}
 		}
-		stats->percentageOfGRVQueueProcessed = (double)nonBatchGRVProcessed / (systemQueueSize + defaultQueueSize);
+		stats->percentageOfDefaultGRVQueueProcessed = (double)defaultGRVProcessed / defaultQueueSize;
 		stats->percentageOfBatchGRVQueueProcessed = (double)batchGRVProcessed / batchQueueSize;
 	}
 }
