@@ -288,7 +288,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->logSystemType = lsConf.logSystemType;
 		return logSystem;
 	}
-
+	// Copy old generation's log system config to create the new log system
 	static Reference<ILogSystem> fromOldLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf ) {
 		ASSERT( lsConf.logSystemType == LogSystemType::tagPartitioned || (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()) );
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
@@ -484,9 +484,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return minVersionWhenReady( waitForAll(quorumResults), allReplies);
 	}
 
+	// Q: Can someone explain this function in comment?
 	Reference<IPeekCursor> peekAll( UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore ) {
 		int bestSet = 0;
-		std::vector<Reference<LogSet>> localSets;
+		std::vector<Reference<LogSet>>
+		    localSets; // LogSets that are considered as local for the peeked tag.
+		               // Example: primary tLog is a local LogSet for LogRouter tag or primary SS tag
 		Version lastBegin = 0;
 		bool foundSpecial = false;
 		for(auto& log : tLogs) {
@@ -884,6 +887,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// Peek at version 'begin' (inclusive) for the 'tag'
 	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) {
 		bool found = false;
 		for( auto& log : tLogs ) {

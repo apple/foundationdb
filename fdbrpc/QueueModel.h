@@ -45,8 +45,8 @@ public:
 	void endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion );
 	QueueData& getMeasurement( uint64_t id );
 	double addRequest( uint64_t id );
-	double secondMultiplier;
-	double secondBudget;
+	double secondMultiplier; // Decide how long we should wait before we send the second request
+	double secondBudget; // The number of requests that can send the second request
 	PromiseStream< Future<Void> > addActor;
 	Future<Void> laggingRequests; // requests for which a different recipient already answered
 	int laggingRequestCount;

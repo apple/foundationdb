@@ -52,6 +52,7 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 		}
 	}
 
+	// clean: it is a real answer (not a reply with error)
 	void release(bool clean, bool futureVersion, double penalty, bool measureLatency = true) {
 		if(model && !released) {
 			released = true;

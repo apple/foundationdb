@@ -2558,6 +2558,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		state double waitStartT = 0;
 		while ( data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES && data->durableVersion.get() < data->desiredOldestVersion.get() ) {
 			if (now() - waitStartT >= 1) {
+				// Change this name to StorageServerUpdateEmergencyBrake
 				TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					.detail("Version", data->version.get())
 					.detail("DurableVersion", data->durableVersion.get());

@@ -37,7 +37,7 @@ struct LogRouterData {
 	struct TagData : NonCopyable, public ReferenceCounted<TagData> {
 		std::deque<std::pair<Version, LengthPrefixedStringRef>> version_messages;
 		Version popped;
-		Version durableKnownCommittedVersion;
+		Version durableKnownCommittedVersion; // Q: min durable version among all 3 remote tLogs?
 		Tag tag;
 
 		TagData( Tag tag, Version popped, Version durableKnownCommittedVersion ) : tag(tag), popped(popped), durableKnownCommittedVersion(durableKnownCommittedVersion) {}
@@ -82,7 +82,7 @@ struct LogRouterData {
 	Version minKnownCommittedVersion;
 	Version poppedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
-	Tag routerTag;
+	Tag routerTag; // LR's tag. Message with the tag will be routed to the LR
 	bool allowPops;
 	LogSet logSet;
 	bool foundEpochEnd;
@@ -93,7 +93,7 @@ struct LogRouterData {
 	int64_t generation = -1;
 
 	struct PeekTrackerData {
-		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
+		std::map<int, Promise<std::pair<Version, bool>>> sequence_version; // first: sequence number, second: Q?
 		double lastUpdate;
 	};
 
@@ -275,6 +275,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					if( self->logSystem->get() ) {
 						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
 						self->primaryPeekLocation = r->getPrimaryPeekLocation();
+						// Q: Do we have a way to get all LogID -> location mapping?
 						TraceEvent("LogRouterPeekLocation", self->dbgid).detail("LogID", r->getPrimaryPeekLocation()).trackLatest(self->eventCacheHolder->trackingKey);
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
@@ -603,6 +604,8 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 			}
 		}
 		if (isDisplaced) {
+			// TODO: trace recoveryCount, recoveryState, db->get().logSystemConfig.hasLogRouter(myInterface.id()) for
+			// myInterface.id()
 			throw worker_removed();
 		}
 		wait(db->onChange());

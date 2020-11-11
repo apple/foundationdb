@@ -111,13 +111,13 @@ struct InitializeTLogRequest {
 	Version recoverAt;
 	Version knownCommittedVersion;
 	LogEpoch epoch;
-	std::vector<Tag> recoverTags;
+	std::vector<Tag> recoverTags; // Which tags the initialized tLog is responsible for
 	std::vector<Tag> allTags;
 	TLogVersion logVersion;
 	KeyValueStoreType storeType;
 	TLogSpillType spillType;
 	Tag remoteTag;
-	int8_t locality;
+	int8_t locality; // Which type of tLog to initialize
 	bool isPrimary;
 	Version startVersion;
 	int logRouterTags;
