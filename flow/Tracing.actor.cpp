@@ -1,5 +1,5 @@
 /*
- * Tracing.cpp
+ * Tracing.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,9 +21,10 @@
 #include "flow/Tracing.h"
 
 #include "flow/network.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 #include <functional>
+
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace {
 
@@ -71,7 +72,7 @@ struct TraceRequest {
 		write_bytes(&byte, 1);
 	}
 
-	void write_bytes(uint8_t* buf, std::size_t n) {
+	void write_bytes(const uint8_t* buf, std::size_t n) {
 		resize(n);
 		memcpy(buffer + data_size, buf, n);
 		data_size += n;
@@ -118,7 +119,7 @@ ACTOR Future<Void> simulationStartServer() {
 		// currently written as an array, so first byte should match msgpack
 		// array notation. In the future, the entire message should be
 		// deserialized to make sure all data is written correctly.
-		ASSERT(message[0] == (6 | 0b10010000));
+		ASSERT(message[0] == (5 | 0b10010000));
 	}
 }
 
@@ -143,6 +144,8 @@ ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<
 	}
 }
 
+// Runs on an interval, printing debug information and performing other
+// connection tasks.
 ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 	state bool sendErrorReset = false;
 
@@ -205,7 +208,8 @@ public:
 
 		// Serialize span fields as an array. If you change the serialization
 		// format here, make sure to update the fluentd filter to be able to
-		// correctly parse the updated format!
+		// correctly parse the updated format! See the msgpack specification
+		// for more info on the bit patterns used here.
 		uint8_t size = 5;
 		if (span.parents.size() == 0) --size;
 		request.write_byte(size | 0b10010000); // write as array
@@ -224,7 +228,7 @@ public:
 	}
 
 private:
-	// Writes the given value in big-endian order to the request. Sets the
+	// Writes the given value in big-endian format to the request. Sets the
 	// first byte to msgpack_type if it is supplied.
 	template <typename T>
 	inline void serialize_value(const T& val, TraceRequest& request, uint8_t msgpack_type = 0) {
@@ -240,26 +244,27 @@ private:
 
 	// Writes the given string to the request as a sequence of bytes. Inserts a
 	// format byte at the beginning of the string according to the its length,
-	// specified by the msgpack specification.
+	// as specified by the msgpack specification. String length must be greater
+	// than 0.
 	inline void serialize_string(const std::string& str, TraceRequest& request) {
 		int size = str.size();
 		ASSERT(size > 0);
 
 		if (size <= 31) {
-			request.write_byte((uint8_t) size | 0b10100000);
+			request.write_byte(static_cast<uint8_t>(size) | 0b10100000);
 		} else if (size <= 255) {
 			request.write_byte(0xd9);
-			request.write_byte((uint8_t) size);
+			request.write_byte(static_cast<uint8_t>(size));
 		} else {
 			// TODO: Add support for longer strings if necessary.
 			ASSERT(false);
 		}
 
-		request.write_bytes((uint8_t*) str.data(), size);
+		request.write_bytes(reinterpret_cast<const uint8_t*>(str.data()), size);
 	}
 
-	// Writes the given vector to the request. Assumes each element in the
-	// vector is a SpanID, and serializes as two big-endian 64-bit integers.
+	// Writes the given vector of SpanIDs to the request. If the vector is
+	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
 		int size = vec.size();
 		if (size == 0) {
@@ -267,11 +272,11 @@ private:
 		}
 
 		if (size <= 15) {
-			request.write_byte((uint8_t) size | 0b10010000);
+			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
 			request.write_byte(0xdc);
-			request.write_byte(((uint8_t*) &size)[1]);
-			request.write_byte(((uint8_t*) &size)[0]);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
 			// TODO: Add support for longer vectors if necessary.
 			ASSERT(false);
@@ -282,9 +287,9 @@ private:
 		}
 	}
 
-	// Sending data is asynchronous, so it is necessary to keep the buffer
+	// Sending data is asynchronous and it is necessary to keep the buffer
 	// around until the send completes. Therefore, multiple buffers may be
-	// needed at any one time to handle multiple trace calls.
+	// needed at any one time to handle multiple send calls.
 	std::queue<TraceRequest> buffers_;
 	int pending_messages_;
 	bool send_error_;
