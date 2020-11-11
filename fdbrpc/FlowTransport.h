@@ -135,6 +135,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int connectOutgoingCount;
 	int connectIncomingCount;
 	int connectFailedCount;
+	ContinuousSample<double> connectLatencies;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination)
 	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
@@ -142,7 +143,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
 	    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
 	    bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
-	    connectFailedCount(0) {}
+	    connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
