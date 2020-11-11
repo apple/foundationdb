@@ -2275,7 +2275,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 							splitMutations(data, data->shards, *u);
 						}
 
-						TEST( true );
+						TEST( true );  // fetchkeys has more
 						TEST( shard->updates.size() ); // Shard has updates
 						ASSERT( otherShard->updates.empty() );
 					}

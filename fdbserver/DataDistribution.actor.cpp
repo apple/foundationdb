@@ -3133,7 +3133,7 @@ ACTOR Future<Void> serverTeamRemover(DDTeamCollection* self) {
 			bool foundTeam = self->removeTeam(st);
 			ASSERT(foundTeam == true);
 			self->addTeam(st->getServers(), true, true);
-			TEST(true);
+			TEST(true); // Marked team as a bad team
 
 			self->doBuildTeams = true;
 

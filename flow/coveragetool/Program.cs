@@ -160,10 +160,14 @@ namespace coveragetool
                     } )
                 .ToArray();
             var comments = new Dictionary<string, CoverageCase>();
-            bool isUnique = true;
+            bool failed = false;
             foreach(var coverageCase in res) {
-                if (comments.ContainsKey(coverageCase.Comment)) {
-                    isUnique = false;
+                if (String.IsNullOrEmpty(coverageCase.Comment) || coverageCase.Comment.Trim() == "") {
+                    failed = true;
+                    Console.Error.WriteLine(String.Format("Error at {0}:{1}: Empty or missing comment", coverageCase.File, coverageCase.Line));
+                }
+                else if (comments.ContainsKey(coverageCase.Comment)) {
+                    failed = true;
                     var prev = comments[coverageCase.Comment];
                     Console.Error.WriteLine(String.Format("Error at {0}:{1}: {2} is not a unique comment", coverageCase.File, coverageCase.Line, coverageCase.Comment));
                     Console.Error.WriteLine(String.Format("\tPreviously seen in {0} at {1}", prev.File, prev.Line));
@@ -171,7 +175,7 @@ namespace coveragetool
                     comments.Add(coverageCase.Comment, coverageCase);
                 }
             }
-            if (!isUnique) {
+            if (failed) {
                 throw new ParseException();
             }
             return res;

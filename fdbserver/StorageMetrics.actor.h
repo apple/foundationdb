@@ -232,7 +232,7 @@ struct StorageServerMetrics {
 			auto& v = waitMetricsMap[key];
 			for(int i=0; i<v.size(); i++) {
 				if (g_network->isSimulated()) {
-					TEST(true);
+					TEST(true); // shard notify metrics
 				}
 				// ShardNotifyMetrics
 				v[i].send( notifyMetrics );
