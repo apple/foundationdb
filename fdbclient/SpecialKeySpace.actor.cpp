@@ -243,12 +243,12 @@ ACTOR Future<Standalone<RangeResultRef>> SpecialKeySpace::getRangeAggregationAct
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-		TEST(true);
+		TEST(true); // inverted range
 		return RangeResultRef(false, false);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (begin.getKey() == moduleBoundary.end || end.getKey() == moduleBoundary.begin) {
-		TEST(true);
+		TEST(true); // query touches begin or end
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =

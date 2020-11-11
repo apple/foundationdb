@@ -1196,7 +1196,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 			lastAvailable = std::max(lastAvailable, r->value());
 
 		if (lastAvailable != invalidVersion && lastAvailable >= data->oldestVersion.get()) {
-			TEST(true);
+			TEST(true); // wait for oldest version
 			wait( data->oldestVersion.whenAtLeast(lastAvailable+1) );
 		}
 
