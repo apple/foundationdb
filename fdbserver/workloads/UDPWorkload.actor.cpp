@@ -60,7 +60,7 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return name; }
+	virtual std::string description() const { return name; }
 	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
 		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
 		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1), true,
