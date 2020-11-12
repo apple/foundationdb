@@ -132,6 +132,7 @@ ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<
 			try {
 				if (!(*sendError)) {
 					int bytesSent = wait(socket->send(request.buffer, request.buffer + request.data_size));
+					TEST(bytesSent > 0);  // Successfully sent serialized trace
 				}
 				 --(*pendingMessages);
 				request.reset();
