@@ -2243,7 +2243,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
-// tLog pull data from LR
+// remote tLog pull data from log routers
 ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;

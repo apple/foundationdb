@@ -175,8 +175,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives, RequestStream<Request> Interface::*channel,
     Request request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
-    QueueModel* model = NULL) // Q: What does the function do differently when model = NULL?
-{
+    QueueModel* model = NULL) {
 	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Optional<REPLY_TYPE(Request)>> secondRequest;

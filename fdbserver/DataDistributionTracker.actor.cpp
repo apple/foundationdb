@@ -527,7 +527,6 @@ Future<Void> shardMerger(
 	//   becomes BandwidthStatusLow less than DD_LOW_BANDWIDTH_DELAY ago, the merging logic will stop at the shard;
 	// ShardCount: The number of non-splittable shards that are merged. Each shard is defined in self->shards may have
 	//   more than 1 shards.
-	// Q: Is ShardCount's definition correct?
 	TraceEvent("RelocateShardMergeMetrics", self->distributorId)
 	    .detail("OldKeys", keys)
 	    .detail("NewKeys", mergeRange)

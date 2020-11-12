@@ -42,7 +42,7 @@ enum {
 	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6, // Q: definition? I guess it is used by pseudo tags
+	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
 	tagLocalityInvalid = -99
 }; // The TLog and LogRouter require these number to be as compact as possible

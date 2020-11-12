@@ -2096,7 +2096,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
 
 					//FIXME: remove when we no longer support upgrades from 5.X
-					if (debug_getRangeRetries >= 100) { // Q: Is this the reason why fetch may fetch from primary
+					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
 						// TODO: Add SevWarnAlways to say it was disabled.
 					}
