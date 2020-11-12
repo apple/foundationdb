@@ -1789,7 +1789,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 		std::copy(begin, end, packet->begin());
 		wait( delay( .002 * deterministicRandom()->random01() ) );
 		peerSocket->recvBuffer.emplace_back(self->_localAddress, std::move(packet));
-		peerSocket->writtenPackets.set(self->writtenPackets.get() + 1);
+		peerSocket->writtenPackets.set(peerSocket->writtenPackets.get() + 1);
 		return Void();
 	}
 
