@@ -184,9 +184,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Optional<Version> recoveredAt;
 	Version knownCommittedVersion;
 	LocalityData locality;
+	// For each currently running popFromLog actor, outstandingPops is
+	// (logID, tag)->(max popped version, durableKnownCommittedVersion).
+	// Why do we need durableKnownCommittedVersion? knownCommittedVersion gives the lower bound of what data
+	// will need to be copied into the next generation to restore the replication factor.
+	// Guess: It probably serves as a minimum version of what data should be on a TLog in the next generation and
+	// sending a pop for anything less than durableKnownCommittedVersion for the TLog will be absurd.
 	std::map<std::pair<UID, Tag>, std::pair<Version, Version>> outstandingPops;
-	// For each currently running popFromLog actor, (logID, tag)->(max popped version, durableKnownCommittedVersion)
-	// Q: why do we need tag and durableKnownCommittedVersion?
+
 	Optional<PromiseStream<Future<Void>>> addActor;
 	ActorCollection popActors;
 	std::vector<OldLogData> oldLogData;
