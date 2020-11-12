@@ -40,3 +40,6 @@ testTitle = 'Clogged'
     machinesToLeave = 3
     reboot = true
     testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'LockDatabaseFrequently'

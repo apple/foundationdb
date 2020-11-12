@@ -9,7 +9,7 @@ Release Notes
 
 Features
 --------
-
+* Added a new API in all bindings that can be used to get a list of split points that will split the given range into (roughly) equally sized chunks. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
 
 
 Performance
@@ -34,7 +34,7 @@ Status
 
 Bindings
 --------
-
+* Python: The function ``get_estimated_range_size_bytes`` will now throw an error if the ``begin_key`` or ``end_key`` is ``None``. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
 
 
 Other Changes

@@ -461,8 +461,8 @@ namespace oldTLog_4_6 {
 		state Version stopVersion = logData->version.get();
 
 		TEST(true); // TLog stopped by recovering master
-		TEST( logData->stopped );
-		TEST( !logData->stopped );
+		TEST( logData->stopped ); // LogData already stopped
+		TEST( !logData->stopped ); // LogData not yet stopped
 
 		TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("IsStopped", logData->stopped).detail("QueueCommitted", logData->queueCommittedVersion.get());
 
@@ -1005,7 +1005,7 @@ namespace oldTLog_4_6 {
 			auto& sequenceData = trackerData.sequence_version[sequence+1];
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get() != reply.end) {
-					TEST(true); //tlog peek second attempt ended at a different version
+					TEST(true); //tlog peek second attempt ended at a different version (2)
 					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
@@ -1300,6 +1300,11 @@ namespace oldTLog_4_6 {
 			DUMPTOKEN( recruited.lock );
 			DUMPTOKEN( recruited.getQueuingMetrics );
 			DUMPTOKEN( recruited.confirmRunning );
+			DUMPTOKEN( recruited.waitFailure );
+			DUMPTOKEN( recruited.recoveryFinished );
+			DUMPTOKEN( recruited.disablePopRequest );
+			DUMPTOKEN( recruited.enablePopRequest );
+			DUMPTOKEN( recruited.snapRequest );
 
 			logData = Reference<LogData>( new LogData(self, recruited) );
 			logData->stopped = true;

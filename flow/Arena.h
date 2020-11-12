@@ -85,11 +85,12 @@ struct TrackIt {
 class NonCopyable
 {
   protected:
-	NonCopyable () {}
-	~NonCopyable () {} /// Protected non-virtual destructor
-  private:
-	NonCopyable (const NonCopyable &);
-	NonCopyable & operator = (const NonCopyable &);
+	NonCopyable()=default;
+	~NonCopyable()=default; /// Protected non-virtual destructor
+	NonCopyable(NonCopyable&&)=default;
+	NonCopyable &operator=(NonCopyable&&)=default;
+	NonCopyable(const NonCopyable&)=delete;
+	NonCopyable &operator=(const NonCopyable &)=delete;
 };
 
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
@@ -174,9 +175,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock>
 	static ArenaBlock* create(int dataSize, Reference<ArenaBlock>& next);
 	void destroy();
 	void destroyLeaf();
-
-private:
-	static void* operator new(size_t s); // not implemented
+	static void* operator new(size_t s)=delete;
 };
 
 inline void* operator new ( size_t size, Arena& p ) {
@@ -243,13 +242,17 @@ public:
 	}
 
 	bool present() const { return impl.has_value(); }
-	T& get() {
+	T& get() & {
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return impl.value();
 	}
-	T const& get() const {
+	T const& get() const& {
 		UNSTOPPABLE_ASSERT(impl.has_value());
 		return impl.value();
+	}
+	T&& get() && {
+		UNSTOPPABLE_ASSERT(impl.has_value());
+		return std::move(impl.value());
 	}
 	T orDefault(T const& default_value) const { return impl.value_or(default_value); }
 
@@ -563,7 +566,7 @@ public:
 		memcpy(dst, data, length);
 		return dst + length;
 	}
-
+	
 	std::vector<StringRef> splitAny(StringRef sep) const {
 		StringRef r = *this;
 		std::vector<StringRef> tokens;
@@ -683,7 +686,7 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	if (lhs.size() == 0 && rhs.size() == 0) {
 		return true;
 	}
-	return lhs.size() == rhs.size() && !memcmp(lhs.begin(), rhs.begin(), lhs.size());
+	return lhs.size() == rhs.size() && memcmp(lhs.begin(), rhs.begin(), lhs.size()) == 0;
 }
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {

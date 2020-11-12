@@ -46,7 +46,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 	PerfIntCounter bytesWritten;
 
 	AsyncFileWriteWorkload(WorkloadContext const& wcx)
-		: AsyncFileWorkload(wcx), bytesWritten("Bytes Written"), writeBuffer(NULL)
+		: AsyncFileWorkload(wcx), bytesWritten("Bytes Written"), writeBuffer(nullptr)
 	{
 		numParallelWrites = getOption(options, LiteralStringRef("numParallelWrites"), 0);
 		writeSize = getOption(options, LiteralStringRef("writeSize"), _PAGE_SIZE);
@@ -54,15 +54,9 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 		sequential = getOption(options, LiteralStringRef("sequential"), true);
 	}
 
-	virtual ~AsyncFileWriteWorkload(){ }
+	std::string description() const override { return "AsyncFileWrite"; }
 
-	virtual std::string description()
-	{
-		return "AsyncFileWrite";
-	}
-
-	virtual Future<Void> setup(Database const& cx)
-	{
+	Future<Void> setup(Database const& cx) override {
 		if(enabled)
 			return _setup(this);
 
@@ -91,8 +85,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx)
-	{
+	Future<Void> start(Database const& cx) override {
 		if(enabled)
 			return _start(this);
 
@@ -162,8 +155,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload
 		}
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m)
-	{
+	void getMetrics(vector<PerfMetric>& m) override {
 		if(enabled)
 		{
 			m.push_back(PerfMetric("Bytes written/sec", bytesWritten.getValue() / testDuration, false));

@@ -114,18 +114,20 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 }
 
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastCommitProxyUIDs;
+	state std::vector<CommitProxyInterface> lastCommitProxies;
+	state std::vector<UID> lastGrvProxyUIDs;
+	state std::vector<GrvProxyInterface> lastGrvProxies;
 	loop {
 		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 		info->set( ni );
 		wait( db->onChange() );
 	}
 }
 
 Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
-	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
+	auto info = makeReference<AsyncVar<ClientDBInfo>>();
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
 
@@ -351,6 +353,7 @@ struct TLogOptions {
 				"_LS_" + boost::lexical_cast<std::string>(spillType);
 			break;
 		case TLogVersion::V5:
+		case TLogVersion::V6:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
@@ -372,6 +375,7 @@ TLogFn tLogFnForOptions( TLogOptions options ) {
 			else
 				return oldTLog_6_2::tLog;
 		case TLogVersion::V5:
+		case TLogVersion::V6:
 			return tLog;
 		default:
 			ASSERT(false);
@@ -568,7 +572,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 			const char *path = (const char*)req.outputFile.begin();
 			ProfilerOptions *options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
-			options->filter_in_thread_arg = NULL;
+			options->filter_in_thread_arg = nullptr;
 			ProfilerStartWithOptions(path, options);
 			break;
 		}
@@ -704,6 +708,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
 		DUMPTOKEN(recruited.getReadHotRanges);
+		DUMPTOKEN(recruited.getRangeSplitPoints);
 		DUMPTOKEN(recruited.getStorageMetrics);
 		DUMPTOKEN(recruited.waitFailure);
 		DUMPTOKEN(recruited.getQueuingMetrics);
@@ -992,7 +997,8 @@ ACTOR Future<Void> workerServer(
 		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
-		DUMPTOKEN(recruited.masterProxy);
+		DUMPTOKEN(recruited.commitProxy);
+		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
@@ -1033,6 +1039,7 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
 				DUMPTOKEN(recruited.getReadHotRanges);
+				DUMPTOKEN(recruited.getRangeSplitPoints);
 				DUMPTOKEN(recruited.getStorageMetrics);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1255,6 +1262,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN( recruited.waitFailure );
 					DUMPTOKEN( recruited.getRateInfo );
 					DUMPTOKEN( recruited.haltRatekeeper );
+					DUMPTOKEN(recruited.reportCommitCostEstimation);
 
 					Future<Void> ratekeeperProcess = ratekeeper(recruited, dbInfo);
 					errorForwarders.add(
@@ -1343,6 +1351,7 @@ ACTOR Future<Void> workerServer(
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
 					DUMPTOKEN(recruited.getReadHotRanges);
+					DUMPTOKEN(recruited.getRangeSplitPoints);
 					DUMPTOKEN(recruited.getStorageMetrics);
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.getQueuingMetrics);
@@ -1364,15 +1373,15 @@ ACTOR Future<Void> workerServer(
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
-			when( InitializeMasterProxyRequest req = waitNext(interf.masterProxy.getFuture()) ) {
-				MasterProxyInterface recruited;
+			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
+				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
 				details["ForMaster"] = req.master.id().shortString();
-				startRole( Role::MASTER_PROXY, recruited.id(), interf.id(), details );
+				startRole(Role::COMMIT_PROXY, recruited.id(), interf.id(), details);
 
 				DUMPTOKEN(recruited.commit);
 				DUMPTOKEN(recruited.getConsistentReadVersion);
@@ -1381,9 +1390,29 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
 
-				//printf("Recruited as masterProxyServer\n");
-				errorForwarders.add( zombie(recruited, forwardError( errors, Role::MASTER_PROXY, recruited.id(),
-						masterProxyServer( recruited, req, dbInfo, whitelistBinPaths ) ) ) );
+				// printf("Recruited as commitProxyServer\n");
+				errorForwarders.add(
+				    zombie(recruited, forwardError(errors, Role::COMMIT_PROXY, recruited.id(),
+				                                   commitProxyServer(recruited, req, dbInfo, whitelistBinPaths))));
+				req.reply.send(recruited);
+			}
+			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
+				GrvProxyInterface recruited;
+				recruited.processId = locality.processId();
+				recruited.provisional = false;
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				details["ForMaster"] = req.master.id().shortString();
+				startRole( Role::GRV_PROXY, recruited.id(), interf.id(), details );
+
+				DUMPTOKEN(recruited.getConsistentReadVersion);
+				DUMPTOKEN(recruited.waitFailure);
+				DUMPTOKEN(recruited.getHealthMetrics);
+
+				//printf("Recruited as grvProxyServer\n");
+				errorForwarders.add( zombie(recruited, forwardError( errors, Role::GRV_PROXY, recruited.id(),
+						grvProxyServer( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
@@ -1416,6 +1445,11 @@ ACTOR Future<Void> workerServer(
 				DUMPTOKEN( recruited.lock );
 				DUMPTOKEN( recruited.getQueuingMetrics );
 				DUMPTOKEN( recruited.confirmRunning );
+				DUMPTOKEN( recruited.waitFailure );
+				DUMPTOKEN( recruited.recoveryFinished );
+				DUMPTOKEN( recruited.disablePopRequest );
+				DUMPTOKEN( recruited.enablePopRequest );
+				DUMPTOKEN( recruited.snapRequest );
 
 				errorForwarders.add( zombie(recruited, forwardError( errors, Role::LOG_ROUTER, recruited.id(),
 						logRouter( recruited, req, dbInfo ) ) ) );
@@ -1681,7 +1715,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 		if (leader.present()) {
 			if(leader.get().present()) {
 				if( leader.get().get().forward ) {
-					info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().get().serializedInfo.toString())));
+					info.intermediateConnFile = makeReference<ClusterConnectionFile>(
+					    connFile->getFilename(), ClusterConnectionString(leader.get().get().serializedInfo.toString()));
 					return info;
 				}
 				if(connFile != info.intermediateConnFile) {
@@ -1730,7 +1765,7 @@ template <class LeaderInterface>
 Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
 						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
@@ -1796,10 +1831,11 @@ ACTOR Future<Void> fdbd(
 		// Only one process can execute on a dataFolder from this point onwards
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
-		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
-		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
-		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
-		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
+		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
+		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
+		auto asyncPriorityInfo =
+		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
+		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
@@ -1829,7 +1865,8 @@ const Role Role::WORKER("Worker", "WK", false);
 const Role Role::STORAGE_SERVER("StorageServer", "SS");
 const Role Role::TRANSACTION_LOG("TLog", "TL");
 const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
-const Role Role::MASTER_PROXY("MasterProxyServer", "MP");
+const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
+const Role Role::GRV_PROXY("GrvProxyServer", "GP");
 const Role Role::MASTER("MasterServer", "MS");
 const Role Role::RESOLVER("Resolver", "RV");
 const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");

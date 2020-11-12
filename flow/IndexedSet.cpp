@@ -108,9 +108,9 @@ bool operator < (const char* l, std::string const& r) {
 }
 
 /*IndexedSet<int,int> concat_unbalanced( IndexedSet<int,int> &&a, int v, IndexedSet<int,int> && b ) {
-	IndexedSet<int,int>::Node* n = new IndexedSet<int,int>::Node( std::move(v), 1, NULL );
-	n->child[0] = a.root; a.root = NULL;
-	n->child[1] = b.root; b.root = NULL;
+	IndexedSet<int,int>::Node* n = new IndexedSet<int,int>::Node( std::move(v), 1, nullptr );
+	n->child[0] = a.root; a.root = nullptr;
+	n->child[1] = b.root; b.root = nullptr;
 	if (n->child[0]) n->child[0]->parent = n;
 	if (n->child[1]) n->child[1]->parent = n;
 	n->balance = ISGetHeight( n->child[1] ) - ISGetHeight( n->child[0] );

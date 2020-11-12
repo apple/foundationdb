@@ -76,7 +76,7 @@ struct AlternativeTLogQueueEntryRef {
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -680,8 +680,8 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 	state Version stopVersion = logData->version.get();
 
 	TEST(true); // TLog stopped by recovering master
-	TEST( logData->stopped );
-	TEST( !logData->stopped );
+	TEST( logData->stopped ); // logData already stopped
+	TEST( !logData->stopped ); // logData not yet stopped
 
 	TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("IsStopped", logData->stopped).detail("QueueCommitted", logData->queueCommittedVersion.get());
 
@@ -1689,7 +1689,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if(sequenceData.isSet()) {
 			trackerData.duplicatePeeks++;
 			if(sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); //tlog peek second attempt ended at a different version
+				TEST(true); //tlog peek second attempt ended at a different version (2)
 				req.reply.sendError(operation_obsolete());
 				return Void();
 			}

@@ -27,9 +27,14 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 
+import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.Ignore;
 
 /**
  * @author Ben
@@ -251,7 +256,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#bisectLeft(java.math.BigInteger[], java.math.BigInteger)}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testBisectLeft() {
 		fail("Not yet implemented");
 	}
@@ -259,7 +264,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#compareUnsigned(byte[], byte[])}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testCompare() {
 		fail("Not yet implemented");
 	}
@@ -267,7 +272,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#findNext(byte[], byte, int)}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testFindNext() {
 		fail("Not yet implemented");
 	}
@@ -275,7 +280,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#findTerminator(byte[], byte, byte, int)}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testFindTerminator() {
 		fail("Not yet implemented");
 	}
@@ -283,7 +288,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#copyOfRange(byte[], int, int)}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testCopyOfRange() {
 		fail("Not yet implemented");
 	}
@@ -291,7 +296,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#strinc(byte[])}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testStrinc() {
 		fail("Not yet implemented");
 	}
@@ -299,7 +304,7 @@ public class ArrayUtilTests {
 	/**
 	 * Test method for {@link ByteArrayUtil#printable(byte[])}.
 	 */
-	@Test
+	@Test @Ignore
 	public void testPrintable() {
 		fail("Not yet implemented");
 	}

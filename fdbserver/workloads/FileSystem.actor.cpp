@@ -63,22 +63,18 @@ struct FileSystemWorkload : TestWorkload {
 		loggingQueries = getOption( options, LiteralStringRef("loggingQueries"), false );
 	}
 
-	virtual std::string description() { return "ReadWrite"; }
+	std::string description() const override { return "ReadWrite"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return nodeSetup( cx, this );
-	}
+	Future<Void> setup(Database const& cx) override { return nodeSetup(cx, this); }
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start( cx, this );
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		double duration = testDuration * (discardEdgeMeasurements ? 0.75 : 1.0);
 		m.push_back( PerfMetric( "Measured Duration", duration, true ) );
 		m.push_back( PerfMetric( "Transactions/sec", queries.getValue() / duration, false ) );

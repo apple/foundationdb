@@ -49,20 +49,20 @@ struct BulkLoadWorkload : TestWorkload {
 		keyPrefix = unprintable( keyPrefix.toString() );
 	}
 
-	virtual std::string description() { return "BulkLoad"; }
+	std::string description() const override { return "BulkLoad"; }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		for(int c = 0; c < actorCount; c++)
 			clients.push_back( timeout( bulkLoadClient( cx, this, clientId, c ), testDuration, Void() ) );
 		return waitForAll( clients );
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 		m.push_back( PerfMetric( "Rows written", transactions.getValue() * writesPerTransaction, false ) );

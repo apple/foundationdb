@@ -1,2 +1,2 @@
-testTitle=RYOW_test
+testTitle=RYOW_Test
     testName=SelectorCorrectness

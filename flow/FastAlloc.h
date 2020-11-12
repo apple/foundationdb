@@ -35,6 +35,7 @@
 #if VALGRIND
 #include <drd.h>
 #include <memcheck.h>
+bool valgrindPrecise();
 #endif
 
 #include "flow/Hash3.h"
@@ -118,6 +119,7 @@ public:
 	static volatile int32_t pageCount;
 #endif
 
+	FastAllocator()=delete;
 private:
 #ifdef VALGRIND
 	static unsigned long vLock;
@@ -147,7 +149,6 @@ private:
 	}
 	static void* freelist;
 
-	FastAllocator();  // not implemented
 	static void initThread();
 	static void getMagazine();
 	static void releaseMagazine(void*);

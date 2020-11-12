@@ -18,7 +18,7 @@ if (RocksDB_FOUND)
                -DWITH_CORE_TOOLS=OFF
                -DWITH_BENCHMARK_TOOLS=OFF
                -DWITH_BZ2=OFF
-               -DWITH_LZ4=OFF
+               -DWITH_LZ4=ON
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
@@ -45,7 +45,7 @@ else()
                -DWITH_CORE_TOOLS=OFF
                -DWITH_BENCHMARK_TOOLS=OFF
                -DWITH_BZ2=OFF
-               -DWITH_LZ4=OFF
+               -DWITH_LZ4=ON
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
@@ -59,11 +59,14 @@ else()
   set(ROCKSDB_LIBRARIES
       ${BINARY_DIR}/librocksdb.a)
 
+  ExternalProject_Get_Property(rocksdb SOURCE_DIR)
+  set (ROCKSDB_INCLUDE_DIR "${SOURCE_DIR}/include")
+
   set(ROCKSDB_FOUND TRUE)
 endif()
 
 message(STATUS "Found RocksDB library: ${ROCKSDB_LIBRARIES}")
-message(STATUS "Found RocksDB includes: ${ROCKSDB_INCLUDE_DIRS}")
+message(STATUS "Found RocksDB includes: ${ROCKSDB_INCLUDE_DIR}")
 
 mark_as_advanced(
     ROCKSDB_LIBRARIES

@@ -60,10 +60,10 @@ public:
 
 	Future<Void> sync() { return m_f->sync(); }
 	Future<Void> flush() { return m_f->flush(); }
-	Future<int64_t> size() { return m_f->size(); }
-	std::string getFilename() { return m_f->getFilename(); }
+	Future<int64_t> size() const override { return m_f->size(); }
+	std::string getFilename() const override { return m_f->getFilename(); }
 	void releaseZeroCopy( void* data, int length, int64_t offset )  { return m_f->releaseZeroCopy(data, length, offset); }
-	int64_t debugFD() { return m_f->debugFD(); }
+	int64_t debugFD() const override { return m_f->debugFD(); }
 
 	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.

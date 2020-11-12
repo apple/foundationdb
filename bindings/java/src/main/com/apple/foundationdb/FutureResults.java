@@ -20,12 +20,14 @@
 
 package com.apple.foundationdb;
 
+import java.nio.ByteBuffer;
 import java.util.concurrent.Executor;
 
 class FutureResults extends NativeFuture<RangeResultInfo> {
-	FutureResults(long cPtr, Executor executor) {
+	FutureResults(long cPtr, boolean enableDirectBufferQueries, Executor executor) {
 		super(cPtr);
 		registerMarshalCallback(executor);
+		this.enableDirectBufferQueries = enableDirectBufferQueries;
 	}
 
 	@Override
@@ -44,26 +46,28 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 		return new RangeResultInfo(this);
 	}
 
-	public RangeResultSummary getSummary() {
-		try {
-			pointerReadLock.lock();
-			return FutureResults_getSummary(getPtr());
-		}
-		finally {
-			pointerReadLock.unlock();
-		}
-	}
-
 	public RangeResult getResults() {
+		ByteBuffer buffer = enableDirectBufferQueries
+			? DirectBufferPool.getInstance().poll()
+			: null;
 		try {
 			pointerReadLock.lock();
-			return FutureResults_get(getPtr());
-		}
-		finally {
+			if (buffer != null) {
+				try (DirectBufferIterator directIterator = new DirectBufferIterator(buffer)) {
+					FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
+					return new RangeResult(directIterator);
+				}
+			} else {
+				return FutureResults_get(getPtr());
+			}
+		} finally {
 			pointerReadLock.unlock();
 		}
 	}
 
-	private native RangeResultSummary FutureResults_getSummary(long ptr) throws FDBException;
+	private boolean enableDirectBufferQueries = false;
+
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
+	private native void FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
+		throws FDBException;
 }

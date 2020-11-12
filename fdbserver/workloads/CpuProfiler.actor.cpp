@@ -51,15 +51,9 @@ struct CpuProfilerWorkload : TestWorkload
 		success = true;
 	}
 
-	virtual std::string description()
-	{
-		return "CpuProfiler";
-	}
+	std::string description() const override { return "CpuProfiler"; }
 
-	virtual Future<Void> setup(Database const& cx)
-	{
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	//Turns the profiler on or off
 	ACTOR Future<Void> updateProfiler(bool enabled, Database cx, CpuProfilerWorkload *self)
@@ -110,10 +104,7 @@ struct CpuProfilerWorkload : TestWorkload
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx)
-	{
-		return _start(cx, this);
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload *self)
 	{
@@ -134,10 +125,7 @@ struct CpuProfilerWorkload : TestWorkload
 		return Void();
 	}
 
-	virtual Future<bool> check(Database const& cx)
-	{
-		return _check(cx, this);
-	}
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
 	ACTOR Future<bool> _check(Database cx, CpuProfilerWorkload *self)
 	{
@@ -152,10 +140,7 @@ struct CpuProfilerWorkload : TestWorkload
 		return self->success;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m )
-	{
-
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<CpuProfilerWorkload> CpuProfilerWorkloadFactory("CpuProfiler");

@@ -49,6 +49,7 @@ static const char* typeString[] = { "SetValue",
 	                                "MinV2",
 	                                "AndV2",
 	                                "CompareAndClear",
+	                                "Reserved_For_SpanContextMessage",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -75,6 +76,7 @@ struct MutationRef {
 		MinV2,
 		AndV2,
 		CompareAndClear,
+		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.

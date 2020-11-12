@@ -100,6 +100,7 @@ public:
 
 	std::map<UID, RestoreLoaderInterface> loadersInterf; // UID: loaderInterf's id
 	std::map<UID, RestoreApplierInterface> appliersInterf; // UID: applierInterf's id
+	Promise<Void> recruitedRoles; // sent when loaders and appliers are recruited
 
 	NotifiedVersion versionBatchId; // The index of the version batch that has been initialized and put into pipeline
 	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
@@ -123,6 +124,7 @@ public:
 	virtual std::string describeNode() = 0;
 };
 
+void updateProcessStats(Reference<RestoreRoleData> self);
 ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self);
 ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
 ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);

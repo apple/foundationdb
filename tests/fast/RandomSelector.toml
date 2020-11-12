@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'RYOW_test'
+testTitle = 'RYOW_Test'
 
     [[test.workload]]
     testName = 'RandomSelector'

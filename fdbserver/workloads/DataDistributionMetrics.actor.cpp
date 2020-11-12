@@ -71,8 +71,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	ACTOR Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				wait(delay(self->delayPerLoop));
@@ -138,8 +137,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		}
 		// TODO : find why this not work
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		try {
 			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
 			ASSERT(!result.more);
@@ -184,12 +182,12 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		return Void();
 	}
 
-	virtual std::string description() { return "DataDistributionMetrics"; }
-	virtual Future<Void> setup(Database const& cx) { return Void(); }
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
-	virtual Future<bool> check(Database const& cx) { return _check(cx, this); }
+	std::string description() const override { return "DataDistributionMetrics"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("NumShards", numShards, true));
 		m.push_back(PerfMetric("AvgBytes", avgBytes, true));
 		m.push_back(commits.getMetric());

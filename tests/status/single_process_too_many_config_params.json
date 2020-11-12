@@ -123,7 +123,7 @@
                     },
                     {
                         "id" : "242e27cd68b21c05",
-                        "role" : "proxy"
+                        "role" : "commit_proxy"
                     },
                     {
                         "id" : "faf07cf91f0ab29d",

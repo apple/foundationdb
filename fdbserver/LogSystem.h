@@ -24,11 +24,13 @@
 #include <set>
 #include <vector>
 
+#include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
 #include "flow/IndexedSet.h"
+#include "flow/Knobs.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Replication.h"
@@ -37,12 +39,22 @@ struct DBCoreState;
 struct TLogSet;
 struct CoreTLogSet;
 
+struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
+	double lastReset;
+	Future<Void> resetCheck;
+	int slowReplies;
+	int fastReplies;
+
+	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
+};
+
 // The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
 	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
+	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
@@ -668,7 +680,7 @@ struct ILogSystem {
 		// Never returns normally, but throws an error if the subsystem stops working
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, SpanID const& spanContext, Optional<UID> debugID = Optional<UID>() ) = 0;
 		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
 		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
 		// Changes the version number of the bundle to be version (unblocking the next push)
@@ -807,7 +819,7 @@ struct LengthPrefixedStringRef {
 	int expectedSize() const { ASSERT(length); return *length; }
 	uint32_t* getLengthPtr() const { return length; }
 
-	LengthPrefixedStringRef() : length(NULL) {}
+	LengthPrefixedStringRef() : length(nullptr) {}
 	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
 };
 
@@ -818,6 +830,18 @@ struct CompareFirst {
 	}
 };
 
+// Structure to store serialized mutations sent from the proxy to the
+// transaction logs. The serialization repeats with the following format:
+//
+// +----------------------+ +----------------------+ +----------+ +----------------+         +----------------------+
+// |     Message size     | |      Subsequence     | | # of tags| |      Tag       | . . . . |       Mutation       |
+// +----------------------+ +----------------------+ +----------+ +----------------+         +----------------------+
+// <------- 32 bits ------> <------- 32 bits ------> <- 16 bits-> <---- 24 bits --->         <---- variable bits --->
+//
+// `Mutation` can be a serialized MutationRef or a special metadata message
+// such as LogProtocolMessage or SpanContextMessage. The type of `Mutation` is
+// uniquely identified by its first byte -- a value from MutationRef::Type.
+//
 struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
@@ -849,7 +873,14 @@ struct LogPushData : NonCopyable {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
 	}
 
-	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
+	// Add transaction info to be written before the first mutation in the transaction.
+	void addTransactionInfo(SpanID const& context) {
+		TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
+		spanContext = context;
+		writtenLocations.clear();
+	}
+
+	void writeMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			if(logSystem->hasRemoteLogs()) {
@@ -865,15 +896,16 @@ struct LogPushData : NonCopyable {
 		uint32_t subseq = this->subsequence++;
 		uint32_t msgsize = rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size();
 		for(int loc : msg_locations) {
-			messagesWriter[loc] << msgsize << subseq << uint16_t(prev_tags.size());
+			BinaryWriter& wr = messagesWriter[loc];
+			wr << msgsize << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
-				messagesWriter[loc] << tag;
-			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
+				wr << tag;
+			wr.serializeBytes(rawMessageWithoutLength);
 		}
 	}
 
 	template <class T>
-	void addTypedMessage(T const& item, bool allLocations = false) {
+	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false) {
 		prev_tags.clear();
 		if(logSystem->hasRemoteLogs()) {
 			prev_tags.push_back( logSystem->getRandomRouterTag() );
@@ -885,12 +917,40 @@ struct LogPushData : NonCopyable {
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
 		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
+
+		// Metadata messages (currently LogProtocolMessage is the only metadata
+		// message) should be written before span information. If this isn't a
+		// metadata message, make sure all locations have had transaction info
+		// written to them.  Mutations may have different sets of tags, so it
+		// is necessary to check all tag locations each time a mutation is
+		// written.
+		if (!metadataMessage) {
+			uint32_t subseq = this->subsequence++;
+			bool updatedLocation = false;
+			for (int loc : msg_locations) {
+				updatedLocation = writeTransactionInfo(loc, subseq) || updatedLocation;
+			}
+			// If this message doesn't write to any new locations, the
+			// subsequence wasn't actually used and can be decremented.
+			if (!updatedLocation) {
+				this->subsequence--;
+				TEST(true);  // No new SpanContextMessage written to transaction logs
+				ASSERT(this->subsequence > 0);
+			}
+		} else {
+			// When writing a metadata message, make sure transaction state has
+			// been reset. If you are running into this assertion, make sure
+			// you are calling addTransactionInfo before each transaction.
+			ASSERT(writtenLocations.size() == 0);
+		}
+
 		uint32_t subseq = this->subsequence++;
 		bool first = true;
 		int firstOffset=-1, firstLength=-1;
 		for(int loc : msg_locations) {
+			BinaryWriter& wr = messagesWriter[loc];
+
 			if (first) {
-				BinaryWriter& wr = messagesWriter[loc];
 				firstOffset = wr.getLength();
 				wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 				for(auto& tag : prev_tags)
@@ -901,7 +961,6 @@ struct LogPushData : NonCopyable {
 				DEBUG_TAGS_AND_MESSAGE("ProxyPushLocations", invalidVersion, StringRef(((uint8_t*)wr.getData() + firstOffset), firstLength)).detail("PushLocations", msg_locations);
 				first = false;
 			} else {
-				BinaryWriter& wr = messagesWriter[loc];
 				BinaryWriter& from = messagesWriter[msg_locations[0]];
 				wr.serializeBytes( (uint8_t*)from.getData() + firstOffset, firstLength );
 			}
@@ -919,7 +978,37 @@ private:
 	std::vector<Tag> prev_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<int> msg_locations;
+	// Stores message locations that have had span information written to them
+	// for the current transaction. Adding transaction info will reset this
+	// field.
+	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
+	SpanID spanContext;
+
+	// Writes transaction info to the message stream at the given location if
+	// it has not already been written (for the current transaction). Returns
+	// true on a successful write, and false if the location has already been
+	// written.
+	bool writeTransactionInfo(int location, uint32_t subseq) {
+		if (!FLOW_KNOBS->WRITE_TRACING_ENABLED || logSystem->getTLogVersion() < TLogVersion::V6 || writtenLocations.count(location) != 0) {
+			return false;
+		}
+
+		TEST(true);  // Wrote SpanContextMessage to a transaction log
+		writtenLocations.insert(location);
+
+		BinaryWriter& wr = messagesWriter[location];
+		SpanContextMessage contextMessage(spanContext);
+
+		int offset = wr.getLength();
+		wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+		for(auto& tag : prev_tags)
+			wr << tag;
+		wr << contextMessage;
+		int length = wr.getLength() - offset;
+		*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
+		return true;
+	}
 };
 
 #endif

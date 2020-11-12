@@ -26,7 +26,7 @@
 #pragma region Static Members
 
 // Initialize the singleton service instance.
-CServiceBase *CServiceBase::s_service = NULL;
+CServiceBase *CServiceBase::s_service = nullptr;
 
 
 bool CServiceBase::Run(CServiceBase &service)
@@ -36,7 +36,7 @@ bool CServiceBase::Run(CServiceBase &service)
     SERVICE_TABLE_ENTRY serviceTable[] = 
     {
         { service.m_name, ServiceMain },
-        { NULL, NULL }
+        { nullptr, nullptr }
     };
 
     // Connects the main thread of a service process to the service control 
@@ -49,12 +49,12 @@ bool CServiceBase::Run(CServiceBase &service)
 
 void WINAPI CServiceBase::ServiceMain(DWORD argc, LPSTR *argv)
 {
-    assert(s_service != NULL);
+    assert(s_service != nullptr);
 
     // Register the handler function for the service
     s_service->m_statusHandle = RegisterServiceCtrlHandler(
         s_service->m_name, ServiceCtrlHandler);
-    if (s_service->m_statusHandle == NULL)
+    if (s_service->m_statusHandle == nullptr)
     {
         throw GetLastError();
     }
@@ -117,10 +117,10 @@ CServiceBase::CServiceBase(char *serviceName,
                            bool fCanShutdown, 
                            bool fCanPauseContinue)
 {
-    // Service name must be a valid string and cannot be NULL.
-    m_name = (serviceName == NULL) ? "" : serviceName;
+    // Service name must be a valid string and cannot be nullptr.
+    m_name = (serviceName == nullptr) ? "" : serviceName;
 
-    m_statusHandle = NULL;
+    m_statusHandle = nullptr;
 
     // The service runs in its own process.
     m_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
@@ -383,10 +383,10 @@ void CServiceBase::SetServiceStatus(DWORD dwCurrentState,
 //
 void CServiceBase::WriteEventLogEntry(const char *message, int wType)
 {
-    HANDLE hEventSource = NULL;
-    LPCSTR lpszStrings[2] = { NULL, NULL };
+    HANDLE hEventSource = nullptr;
+    LPCSTR lpszStrings[2] = { nullptr, nullptr };
 
-    hEventSource = RegisterEventSource(NULL, m_name);
+    hEventSource = RegisterEventSource(nullptr, m_name);
     if (hEventSource)
     {
         lpszStrings[0] = m_name;
@@ -396,11 +396,11 @@ void CServiceBase::WriteEventLogEntry(const char *message, int wType)
             wType,                 // Event type
             0,                     // Event category
             0,                     // Event identifier
-            NULL,                  // No security identifier
+            nullptr,                  // No security identifier
             2,                     // Size of lpszStrings array
             0,                     // No binary data
             lpszStrings,           // Array of strings
-            NULL                   // No binary data
+            nullptr                   // No binary data
             );
 
         DeregisterEventSource(hEventSource);

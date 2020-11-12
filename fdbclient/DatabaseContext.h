@@ -29,7 +29,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/MasterProxyInterface.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
@@ -68,7 +68,8 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	}
 };
 
-typedef ModelInterface<MasterProxyInterface> ProxyInfo;
+using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
+using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
 class ClientTagThrottleData : NonCopyable {
 private:
@@ -160,11 +161,14 @@ public:
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
 
-	bool sampleReadTags();
+	bool sampleReadTags() const;
+	bool sampleOnCost(uint64_t cost) const;
 
-	Reference<ProxyInfo> getMasterProxies(bool useProvisionalProxies);
-	Future<Reference<ProxyInfo>> getMasterProxiesFuture(bool useProvisionalProxies);
-	Future<Void> onMasterProxiesChanged();
+	void updateProxies();
+	Reference<CommitProxyInfo> getCommitProxies(bool useProvisionalProxies);
+	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(bool useProvisionalProxies);
+	Reference<GrvProxyInfo> getGrvProxies(bool useProvisionalProxies);
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 
 	// Update the watch counter for the database
@@ -213,11 +217,12 @@ public:
 
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile;
-	AsyncTrigger masterProxiesChangeTrigger;
-	Future<Void> monitorMasterProxiesInfoChange;
-	Reference<ProxyInfo> masterProxies;
-	bool provisional;
-	UID masterProxiesLastChange;
+	AsyncTrigger proxiesChangeTrigger;
+	Future<Void> monitorProxiesInfoChange;
+	Reference<CommitProxyInfo> commitProxies;
+	Reference<GrvProxyInfo> grvProxies;
+	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
+	UID proxiesLastChange;
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	bool enableLocalityLoadBalance;
@@ -305,6 +310,7 @@ public:
 	Counter transactionsResourceConstrained;
 	Counter transactionsProcessBehind;
 	Counter transactionsThrottled;
+	Counter transactionsExpensiveClearCostEstCount;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit, bytesPerCommit;
 
@@ -337,6 +343,7 @@ public:
 	HealthMetrics healthMetrics;
 	double healthMetricsLastUpdated;
 	double detailedHealthMetricsLastUpdated;
+	Smoother smoothMidShardSize;
 
 	UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaults;
 
@@ -345,7 +352,7 @@ public:
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeySpaceModule(SpecialKeySpace::MODULE module, SpecialKeySpace::IMPLTYPE type,
-	                                   std::unique_ptr<SpecialKeyRangeReadImpl> impl);
+	                                   std::unique_ptr<SpecialKeyRangeReadImpl> &&impl);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices; 

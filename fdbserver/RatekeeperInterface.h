@@ -30,6 +30,7 @@ struct RatekeeperInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct GetRateInfoRequest> getRateInfo;
 	RequestStream<struct HaltRatekeeperRequest> haltRatekeeper;
+	RequestStream<struct ReportCommitCostEstimationRequest> reportCommitCostEstimation;
 	struct LocalityData locality;
 	UID myId;
 
@@ -48,7 +49,7 @@ struct RatekeeperInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, getRateInfo, haltRatekeeper, locality, myId);
+		serializer(ar, waitFailure, getRateInfo, haltRatekeeper, reportCommitCostEstimation, locality, myId);
 	}
 };
 
@@ -76,28 +77,32 @@ struct ClientTagThrottleLimits {
 };
 
 struct TransactionCommitCostEstimation {
-	int numWrite = 0;
-	int numAtomicWrite = 0;
-	int numClear = 0;
-	int numClearShards = 0;
-	uint64_t bytesWrite = 0;
-	uint64_t bytesAtomicWrite = 0;
-	uint64_t bytesClearEst = 0;
+	int opsSum = 0;
+	uint64_t costSum = 0;
+
+	uint64_t getCostSum() const { return costSum; }
+	int getOpsSum() const { return opsSum; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, bytesWrite, bytesClearEst, bytesAtomicWrite, numWrite, numAtomicWrite, numClear, numClearShards);
+		serializer(ar, opsSum, costSum);
 	}
 
 	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
-		numWrite += other.numWrite;
-		numAtomicWrite += other.numAtomicWrite;
-		numClear += other.numClear;
-		bytesWrite += other.bytesWrite;
-		bytesAtomicWrite += other.numAtomicWrite;
-		numClearShards += other.numClearShards;
-		bytesClearEst += other.bytesClearEst;
+		opsSum += other.opsSum;
+		costSum += other.costSum;
 		return *this;
+	}
+};
+
+struct ClientTrCommitCostEstimation {
+	int opsCount = 0;
+	uint64_t writeCosts = 0;
+	std::deque<std::pair<int, uint64_t>> clearIdxCosts;
+	uint32_t expensiveCostEstCount = 0;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, opsCount, writeCosts, clearIdxCosts, expensiveCostEstCount);
 	}
 };
 
@@ -123,21 +128,20 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 
 	TransactionTagMap<uint64_t> throttledTagCounts;
-	TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
 	GetRateInfoRequest() {}
 	GetRateInfoRequest(UID const& requesterID, int64_t totalReleasedTransactions, int64_t batchReleasedTransactions,
-	                   TransactionTagMap<uint64_t> throttledTagCounts,
-	                   TransactionTagMap<TransactionCommitCostEstimation> throttledTagCommitCostEst, bool detailed)
+	                   TransactionTagMap<uint64_t> throttledTagCounts, bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
-	    throttledTagCommitCostEst(throttledTagCommitCostEst), detailed(detailed) {}
+	    detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply, throttledTagCommitCostEst);
+		serializer(ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed,
+		           reply);
 	}
 };
 
@@ -152,6 +156,21 @@ struct HaltRatekeeperRequest {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct ReportCommitCostEstimationRequest {
+	constexpr static FileIdentifier file_identifier = 8314904;
+	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
+	ReplyPromise<Void> reply;
+
+	ReportCommitCostEstimationRequest() {}
+	ReportCommitCostEstimationRequest(UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost)
+	  : ssTrTagCommitCost(ssTrTagCommitCost) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ssTrTagCommitCost, reply);
 	}
 };
 

@@ -56,15 +56,15 @@ struct UnitPerfWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
-	virtual std::string description() { return "UnitPerfWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { return Void(); }
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "UnitPerfWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled)
 			return unitPerfTest();
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<UnitPerfWorkload> UnitPerfWorkloadFactory("UnitPerf");

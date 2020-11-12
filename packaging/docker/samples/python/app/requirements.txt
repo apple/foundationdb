@@ -18,4 +18,4 @@
 #
 
 Flask==1.1.1
-foundationdb==6.1.11
+foundationdb==6.2.10

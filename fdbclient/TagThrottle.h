@@ -40,7 +40,7 @@ typedef Standalone<TransactionTagRef> TransactionTag;
 
 class TagSet {
 public:
-	typedef std::set<TransactionTagRef>::const_iterator const_iterator;
+	typedef std::vector<TransactionTagRef>::const_iterator const_iterator;
 
 	TagSet() : bytes(0) {}
 
@@ -54,51 +54,35 @@ public:
 	const_iterator end() const {
 		return tags.end();
 	}
+
 	void clear() {
 		tags.clear();
 		bytes = 0;
 	}
-//private:
-	Arena arena;
-	std::set<TransactionTagRef> tags;
-	size_t bytes;
-};
 
-template <>
-struct dynamic_size_traits<TagSet> : std::true_type {
-	// May be called multiple times during one serialization
 	template <class Context>
-	static size_t size(const TagSet& t, Context&) {
-		return t.tags.size() + t.bytes;
-	}
-
-	// Guaranteed to be called only once during serialization
-	template <class Context>
-	static void save(uint8_t* out, const TagSet& t, Context& c) {
+	void save(uint8_t* out, Context& c) const {
 		uint8_t *start = out;
-		for (const auto& tag : t.tags) {
+		for (const auto& tag : *this) {
 			*(out++) = (uint8_t)tag.size();
 
 			std::copy(tag.begin(), tag.end(), out);
 			out += tag.size();
 		}
 
-		ASSERT((size_t)(out-start) == size(t, c));
+		ASSERT((size_t)(out - start) == size() + bytes);
 	}
 
-	// Context is an arbitrary type that is plumbed by reference throughout the
-	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* data, size_t size, TagSet& t, Context& context) {
+	void load(const uint8_t* data, size_t size, Context& context) {
 		//const uint8_t *start = data;
 		const uint8_t *end = data + size;
 		while(data < end) {
 			uint8_t len = *(data++);
-			TransactionTagRef tag(context.tryReadZeroCopy(data, len), len);
+			// Tags are already deduplicated
+			const auto& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
 			data += len;
-
-			t.tags.insert(tag);
-			t.bytes += tag.size();
+			bytes += tag.size();
 		}
 
 		ASSERT(data == end);
@@ -106,13 +90,54 @@ struct dynamic_size_traits<TagSet> : std::true_type {
 		// Deserialized tag sets share the arena with the request that contained them
 		// For this reason, persisting a TagSet that shares memory with other request
 		// members should be done with caution.
-		t.arena = context.arena();
+		arena = context.arena();
+	}
+
+	size_t getBytes() const { return bytes; }
+
+	const Arena& getArena() const { return arena; }
+
+private:
+	size_t bytes;
+	Arena arena;
+	// Currently there are never >= 256 tags, so
+	// std::vector is faster than std::set. This may
+	// change if we allow more tags in the future.
+	std::vector<TransactionTagRef> tags;
+};
+
+template <>
+struct dynamic_size_traits<TagSet> : std::true_type {
+	// May be called multiple times during one serialization
+	template <class Context>
+	static size_t size(const TagSet& t, Context&) {
+		return t.size() + t.getBytes();
+	}
+
+	// Guaranteed to be called only once during serialization
+	template <class Context>
+	static void save(uint8_t* out, const TagSet& t, Context& c) {
+		t.save(out, c);
+	}
+
+	// Context is an arbitrary type that is plumbed by reference throughout the
+	// load call tree.
+	template <class Context>
+	static void load(const uint8_t* data, size_t size, TagSet& t, Context& context) {
+		t.load(data, size, context);
 	}
 };
 
 enum class TagThrottleType : uint8_t {
 	MANUAL,
 	AUTO
+};
+
+enum class TagThrottledReason: uint8_t {
+	UNSET = 0,
+	MANUAL,
+	BUSY_READ,
+	BUSY_WRITE
 };
 
 struct TagThrottleKey {
@@ -132,17 +157,26 @@ struct TagThrottleValue {
 	double tpsRate;
 	double expirationTime;
 	double initialDuration;
+	TagThrottledReason reason;
 
-	TagThrottleValue() : tpsRate(0), expirationTime(0), initialDuration(0) {}
-	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration) 
-		: tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration) {}
+	TagThrottleValue() : tpsRate(0), expirationTime(0), initialDuration(0), reason(TagThrottledReason::UNSET) {}
+	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason)
+		: tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
 	static TagThrottleValue fromValue(const ValueRef& value);
 
 	//To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be considered
 	template<class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tpsRate, expirationTime, initialDuration);
+		if(ar.protocolVersion().hasTagThrottleValueReason()) {
+			serializer(ar, tpsRate, expirationTime, initialDuration, reinterpret_cast<uint8_t&>(reason));
+		}
+		else if(ar.protocolVersion().hasTagThrottleValue()) {
+			serializer(ar, tpsRate, expirationTime, initialDuration);
+			if(ar.isDeserializing) {
+			    reason = TagThrottledReason::UNSET;
+			}
+		}
 	}
 };
 
@@ -153,12 +187,13 @@ struct TagThrottleInfo {
 	double tpsRate;
 	double expirationTime;
 	double initialDuration;
+	TagThrottledReason reason;
 
-	TagThrottleInfo(TransactionTag tag, TagThrottleType throttleType, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration)
-		: tag(tag), throttleType(throttleType), priority(priority), tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration) {}
+	TagThrottleInfo(TransactionTag tag, TagThrottleType throttleType, TransactionPriority priority, double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason = TagThrottledReason::UNSET)
+		: tag(tag), throttleType(throttleType), priority(priority), tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
-	TagThrottleInfo(TagThrottleKey key, TagThrottleValue value) 
-		: throttleType(key.throttleType), priority(key.priority), tpsRate(value.tpsRate), expirationTime(value.expirationTime), initialDuration(value.initialDuration) 
+	TagThrottleInfo(TagThrottleKey key, TagThrottleValue value)
+		: throttleType(key.throttleType), priority(key.priority), tpsRate(value.tpsRate), expirationTime(value.expirationTime), initialDuration(value.initialDuration), reason(value.reason)
 	{
 		ASSERT(key.tags.size() == 1); // Multiple tags per throttle is not currently supported
 		tag = *key.tags.begin();
@@ -166,10 +201,12 @@ struct TagThrottleInfo {
 };
 
 namespace ThrottleApi {
-	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit);
+	Future<std::vector<TagThrottleInfo>> getThrottledTags(Database const& db, int const& limit, bool const& containsRecommend = false);
+	Future<std::vector<TagThrottleInfo>> getRecommendedTags(Database const& db, int const& limit);
 
 	Future<Void> throttleTags(Database const& db, TagSet const& tags, double const& tpsRate, double const& initialDuration, 
-	                         TagThrottleType const& throttleType, TransactionPriority const& priority, Optional<double> const& expirationTime = Optional<double>());
+	                         TagThrottleType const& throttleType, TransactionPriority const& priority, Optional<double> const& expirationTime = Optional<double>(),
+                              Optional<TagThrottledReason> const& reason = Optional<TagThrottledReason>());
 
 	Future<bool> unthrottleTags(Database const& db, TagSet const& tags, Optional<TagThrottleType> const& throttleType, Optional<TransactionPriority> const& priority);
 
@@ -187,4 +224,6 @@ using TransactionTagMap = std::unordered_map<TransactionTag, Value, std::hash<Tr
 template<class Value>
 using PrioritizedTransactionTagMap = std::map<TransactionPriority, TransactionTagMap<Value>>;
 
+template <class Value>
+using UIDTransactionTagMap = std::unordered_map<UID, TransactionTagMap<Value>>;
 #endif

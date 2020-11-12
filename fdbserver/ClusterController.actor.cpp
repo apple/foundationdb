@@ -113,12 +113,13 @@ public:
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0), cachePopulated(false),
-			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ), dbInfoCount(0),
-			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
-			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
-		{
-		}
+		DBInfo()
+		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
+		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>()), dbInfoCount(0),
+		    serverInfo(new AsyncVar<ServerDBInfo>()),
+		    db(DatabaseContext::create(clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint,
+		                               true)) // SOMEDAY: Locality!
+		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -414,7 +415,6 @@ public:
 		TraceEvent("GetTLogTeamDone").detail("Completed", bCompleted).detail("Policy", policy->info()).detail("Results", results.size()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size())
 			.detail("Required", required).detail("Desired", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
 
-
 		return results;
 	}
 
@@ -514,20 +514,29 @@ public:
 		throw no_more_servers();
 	}
 
-	vector<WorkerDetails> getWorkersForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, int amount, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(), bool checkStable = false ) {
-		std::map<std::pair<ProcessClass::Fitness,int>, std::pair<vector<WorkerDetails>,vector<WorkerDetails>>> fitness_workers;
+	vector<WorkerDetails> getWorkersForRoleInDatacenter(
+	    Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, int amount,
+	    DatabaseConfiguration const& conf, std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(), bool checkStable = false) {
+		std::map<std::pair<ProcessClass::Fitness, int>, std::pair<vector<WorkerDetails>, vector<WorkerDetails>>>
+		    fitness_workers;
 		vector<WorkerDetails> results;
-		if(minWorker.present()) {
+		if (minWorker.present()) {
 			results.push_back(minWorker.get().worker);
 		}
 		if (amount <= results.size()) {
 			return results;
 		}
 
-		for( auto& it : id_worker ) {
+		for (auto& it : id_worker) {
 			auto fitness = it.second.details.processClass.machineClassFitness( role );
-			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.details.interf.addresses()) && it.second.details.interf.locality.dcId() == dcId &&
-			  ( !minWorker.present() || ( it.second.details.interf.id() != minWorker.get().worker.interf.id() && ( fitness < minWorker.get().fitness || (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used ) ) ) ) ) {
+			if (workerAvailable(it.second, checkStable) &&
+			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+			    it.second.details.interf.locality.dcId() == dcId &&
+			    (!minWorker.present() ||
+			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
+			      (fitness < minWorker.get().fitness ||
+			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
 				if (isLongLivedStateless(it.first)) {
 					fitness_workers[ std::make_pair(fitness, id_used[it.first]) ].second.push_back(it.second.details);
 				} else {
@@ -543,8 +552,7 @@ public:
 				for( int i=0; i < w.size(); i++ ) {
 					results.push_back(w[i]);
 					id_used[w[i].interf.locality.processId()]++;
-					if( results.size() == amount )
-						return results;
+					if (results.size() == amount) return results;
 				}
 			}
 		}
@@ -618,19 +626,27 @@ public:
 
 	struct RoleFitnessPair {
 		RoleFitness proxy;
+		RoleFitness grvProxy;
 		RoleFitness resolver;
 
 		RoleFitnessPair() {}
-		RoleFitnessPair(RoleFitness const& proxy, RoleFitness const& resolver) : proxy(proxy), resolver(resolver) {}
+		RoleFitnessPair(RoleFitness const& proxy, RoleFitness const& grvProxy, RoleFitness const& resolver)
+		  : proxy(proxy), grvProxy(grvProxy), resolver(resolver) {}
 
-		bool operator < (RoleFitnessPair const& r) const {
-			if(proxy.betterFitness(r.proxy)) {
+		bool operator<(RoleFitnessPair const& r) const {
+			if (proxy.betterFitness(r.proxy)) {
 				return true;
 			}
 			if(r.proxy.betterFitness(proxy)) {
 				return false;
 			}
-			if(resolver.betterFitness(r.resolver)) {
+			if (grvProxy.betterFitness(r.grvProxy)) {
+				return true;
+			}
+			if (r.grvProxy.betterFitness(grvProxy)) {
+				return false;
+			}
+			if (resolver.betterFitness(r.resolver)) {
 				return true;
 			}
 			if(r.resolver.betterFitness(resolver)) {
@@ -639,13 +655,18 @@ public:
 			if(proxy.count != r.proxy.count) {
 				return proxy.count > r.proxy.count;
 			}
+			if (grvProxy.count != r.grvProxy.count) {
+				return grvProxy.count > r.grvProxy.count;
+			}
 			return resolver.count > r.resolver.count;
 		}
 		bool operator>(RoleFitnessPair const& r) const { return r < *this; }
 		bool operator<=(RoleFitnessPair const& r) const { return !(*this > r); }
 		bool operator>=(RoleFitnessPair const& r) const { return !(*this < r); }
 
-		bool operator == (RoleFitnessPair const& r) const { return proxy == r.proxy && resolver == r.resolver; }
+		bool operator==(RoleFitnessPair const& r) const {
+			return proxy == r.proxy && grvProxy == r.grvProxy && resolver == r.resolver;
+		}
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
@@ -725,23 +746,32 @@ public:
 		}
 
 		std::vector<WorkerDetails> satelliteLogs;
-		if(region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1) {
-			satelliteLogs = getWorkersForSatelliteLogs( req.configuration, region, remoteRegion, id_used, result.satelliteFallback );
+		if (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1) {
+			satelliteLogs =
+			    getWorkersForSatelliteLogs(req.configuration, region, remoteRegion, id_used, result.satelliteFallback);
 			for(int i = 0; i < satelliteLogs.size(); i++) {
 				result.satelliteTLogs.push_back(satelliteLogs[i].interf);
 			}
 		}
 
-		auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used );
-		auto first_proxy = getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, id_used );
+		auto first_commit_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::CommitProxy,
+		                                                       ProcessClass::ExcludeFit, req.configuration, id_used);
+		auto first_grv_proxy = getWorkerForRoleInDatacenter(dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit,
+		                                                    req.configuration, id_used);
+		auto first_resolver = getWorkerForRoleInDatacenter(dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit,
+		                                                   req.configuration, id_used);
 
-		auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, id_used, first_proxy );
+		auto commit_proxies =
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::CommitProxy, req.configuration.getDesiredCommitProxies(),
+		                                  req.configuration, id_used, first_commit_proxy);
+		auto grv_proxies =
+		    getWorkersForRoleInDatacenter(dcId, ProcessClass::GrvProxy, req.configuration.getDesiredGrvProxies(),
+		                                  req.configuration, id_used, first_grv_proxy);
 		auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, id_used, first_resolver );
-
+		for (int i = 0; i < commit_proxies.size(); i++) result.commitProxies.push_back(commit_proxies[i].interf);
+		for (int i = 0; i < grv_proxies.size(); i++) result.grvProxies.push_back(grv_proxies[i].interf);
 		for(int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
-		for(int i = 0; i < proxies.size(); i++)
-			result.proxies.push_back(proxies[i].interf);
 
 		if(req.maxOldLogRouters > 0) {
 			if(tlogs.size() == 1) {
@@ -765,11 +795,22 @@ public:
 			               [](const WorkerDetails& w) { return w.interf; });
 		}
 
-		if( !goodRecruitmentTime.isReady() &&
-			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-			  ( region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId), ProcessClass::TLog).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
-			  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
-			  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(RoleFitness(resolvers, ProcessClass::Resolver)) ) ) {
+		if (!goodRecruitmentTime.isReady() &&
+		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
+		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
+		     (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 &&
+		      RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId),
+		                  ProcessClass::TLog)
+		          .betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog))) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_COMMIT_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
+		                 ProcessClass::CommitProxy)
+		         .betterCount(RoleFitness(commit_proxies, ProcessClass::CommitProxy)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS, req.configuration.getDesiredGrvProxies(),
+		                 ProcessClass::GrvProxy)
+		         .betterCount(RoleFitness(grv_proxies, ProcessClass::GrvProxy)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(),
+		                 ProcessClass::Resolver)
+		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver)))) {
 			return operation_failed();
 		}
 
@@ -848,15 +889,15 @@ public:
 				if(tlogs.size() == 1) {
 					result.oldLogRouters.push_back(tlogs[0].interf);
 				} else {
-					for(int i = 0; i < tlogs.size(); i++) {
-						if(tlogs[i].interf.locality.processId() != clusterControllerProcessId) {
+					for (int i = 0; i < tlogs.size(); i++) {
+						if (tlogs[i].interf.locality.processId() != clusterControllerProcessId) {
 							result.oldLogRouters.push_back(tlogs[i].interf);
 						}
 					}
 				}
 			}
 
-			if(req.recruitSeedServers) {
+			if (req.recruitSeedServers) {
 				auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy );
 				for(int i = 0; i < primaryStorageServers.size(); i++)
 					result.storageServers.push_back(primaryStorageServers[i].interf);
@@ -872,21 +913,37 @@ public:
 				try {
 					//SOMEDAY: recruitment in other DCs besides the clusterControllerDcID will not account for the processes used by the master and cluster controller properly.
 					auto used = id_used;
-					auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used );
-					auto first_proxy = getWorkerForRoleInDatacenter( dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, req.configuration, used );
+					auto first_commit_proxy = getWorkerForRoleInDatacenter(
+					    dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, req.configuration, used);
+					auto first_grv_proxy = getWorkerForRoleInDatacenter(
+					    dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, req.configuration, used);
+					auto first_resolver = getWorkerForRoleInDatacenter(
+					    dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, used);
 
-					auto proxies = getWorkersForRoleInDatacenter( dcId, ProcessClass::Proxy, req.configuration.getDesiredProxies(), req.configuration, used, first_proxy );
+					auto commit_proxies = getWorkersForRoleInDatacenter(dcId, ProcessClass::CommitProxy,
+					                                                    req.configuration.getDesiredCommitProxies(),
+					                                                    req.configuration, used, first_commit_proxy);
+					auto grv_proxies = getWorkersForRoleInDatacenter(dcId, ProcessClass::GrvProxy,
+					                                                 req.configuration.getDesiredGrvProxies(),
+					                                                 req.configuration, used, first_grv_proxy);
 					auto resolvers = getWorkersForRoleInDatacenter( dcId, ProcessClass::Resolver, req.configuration.getDesiredResolvers(), req.configuration, used, first_resolver );
 
-					RoleFitnessPair fitness( RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver) );
+					RoleFitnessPair fitness(RoleFitness(commit_proxies, ProcessClass::CommitProxy),
+					                        RoleFitness(grv_proxies, ProcessClass::GrvProxy),
+					                        RoleFitness(resolvers, ProcessClass::Resolver));
 
 					if(dcId == clusterControllerDcId) {
 						bestFitness = fitness;
 						bestDC = dcId;
-						for(int i = 0; i < resolvers.size(); i++)
+						for (int i = 0; i < resolvers.size(); i++) {
 							result.resolvers.push_back(resolvers[i].interf);
-						for(int i = 0; i < proxies.size(); i++)
-							result.proxies.push_back(proxies[i].interf);
+						}
+						for (int i = 0; i < commit_proxies.size(); i++) {
+							result.commitProxies.push_back(commit_proxies[i].interf);
+						}
+						for (int i = 0; i < grv_proxies.size(); i++) {
+							result.grvProxies.push_back(grv_proxies[i].interf);
+						}
 
 						if (req.configuration.backupWorkerEnabled) {
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
@@ -903,7 +960,8 @@ public:
 							bestFitness = fitness;
 							numEquivalent = 1;
 							bestDC = dcId;
-						} else if( fitness == bestFitness && deterministicRandom()->random01() < 1.0/++numEquivalent ) {
+						} else if (fitness == bestFitness &&
+						           deterministicRandom()->random01() < 1.0 / ++numEquivalent) {
 							bestDC = dcId;
 						}
 					}
@@ -922,15 +980,30 @@ public:
 			}
 			//If this cluster controller dies, do not prioritize recruiting the next one in the same DC
 			desiredDcIds.set(vector<Optional<Key>>());
-			TraceEvent("FindWorkersForConfig").detail("Replication", req.configuration.tLogReplicationFactor)
-				.detail("DesiredLogs", req.configuration.getDesiredLogs()).detail("ActualLogs", result.tLogs.size())
-				.detail("DesiredProxies", req.configuration.getDesiredProxies()).detail("ActualProxies", result.proxies.size())
-				.detail("DesiredResolvers", req.configuration.getDesiredResolvers()).detail("ActualResolvers", result.resolvers.size());
+			TraceEvent("FindWorkersForConfig")
+			    .detail("Replication", req.configuration.tLogReplicationFactor)
+			    .detail("DesiredLogs", req.configuration.getDesiredLogs())
+			    .detail("ActualLogs", result.tLogs.size())
+			    .detail("DesiredCommitProxies", req.configuration.getDesiredCommitProxies())
+			    .detail("ActualCommitProxies", result.commitProxies.size())
+			    .detail("DesiredGrvProxies", req.configuration.getDesiredGrvProxies())
+			    .detail("ActualGrvProxies", result.grvProxies.size())
+			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
+			    .detail("ActualResolvers", result.resolvers.size());
 
-			if( !goodRecruitmentTime.isReady() &&
-				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
-				  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies(), ProcessClass::Proxy).betterCount(bestFitness.proxy) ||
-				  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(), ProcessClass::Resolver).betterCount(bestFitness.resolver) ) ) {
+			if (!goodRecruitmentTime.isReady() &&
+			    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(),
+			                 ProcessClass::TLog)
+			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
+			     RoleFitness(SERVER_KNOBS->EXPECTED_COMMIT_PROXY_FITNESS, req.configuration.getDesiredCommitProxies(),
+			                 ProcessClass::CommitProxy)
+			         .betterCount(bestFitness.proxy) ||
+			     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS, req.configuration.getDesiredGrvProxies(),
+			                 ProcessClass::GrvProxy)
+			         .betterCount(bestFitness.grvProxy) ||
+			     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers(),
+			                 ProcessClass::Resolver)
+			         .betterCount(bestFitness.resolver))) {
 				throw operation_failed();
 			}
 
@@ -957,7 +1030,10 @@ public:
 			}
 
 			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
-			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
+			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit,
+			                             db.config, id_used, true);
+			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config,
+			                             id_used, true);
 
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
@@ -1026,15 +1102,14 @@ public:
 
 				if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 					satellite_tlogs.push_back(tlogWorker->second.details);
-				}
-				else if(logSet.isLocal) {
+				} else if (logSet.isLocal) {
 					tlogs.push_back(tlogWorker->second.details);
 				} else {
 					remote_tlogs.push_back(tlogWorker->second.details);
 				}
 			}
 
-			for( auto& it : logSet.logRouters ) {
+			for (auto& it : logSet.logRouters) {
 				auto tlogWorker = id_worker.find(it.interf().filteredLocality.processId());
 				if ( tlogWorker == id_worker.end() )
 					return false;
@@ -1057,15 +1132,24 @@ public:
 			}
 		}
 
-		// Get proxy classes
-		std::vector<WorkerDetails> proxyClasses;
-		for(auto& it : dbi.client.proxies ) {
-			auto proxyWorker = id_worker.find(it.processId);
-			if ( proxyWorker == id_worker.end() )
+		// Get commit proxy classes
+		std::vector<WorkerDetails> commitProxyClasses;
+		for (auto& it : dbi.client.commitProxies) {
+			auto commitProxyWorker = id_worker.find(it.processId);
+			if (commitProxyWorker == id_worker.end()) return false;
+			if (commitProxyWorker->second.priorityInfo.isExcluded) return true;
+			commitProxyClasses.push_back(commitProxyWorker->second.details);
+		}
+
+		// Get grv proxy classes
+		std::vector<WorkerDetails> grvProxyClasses;
+		for(auto& it : dbi.client.grvProxies ) {
+			auto grvProxyWorker = id_worker.find(it.processId);
+			if ( grvProxyWorker == id_worker.end() )
 				return false;
-			if ( proxyWorker->second.priorityInfo.isExcluded )
+			if ( grvProxyWorker->second.priorityInfo.isExcluded )
 				return true;
-			proxyClasses.push_back(proxyWorker->second.details);
+			grvProxyClasses.push_back(grvProxyWorker->second.details);
 		}
 
 		// Get resolver classes
@@ -1127,9 +1211,11 @@ public:
 		bool oldSatelliteFallback = false;
 
 		for(auto& logSet : dbi.logSystemConfig.tLogs) {
-			if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+			if(region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
-				ASSERT(!oldSatelliteFallback || logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info());
+				ASSERT(!oldSatelliteFallback ||
+				       (region.satelliteTLogPolicyFallback.isValid() &&
+				        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
 				break;
 			}
 		}
@@ -1146,7 +1232,7 @@ public:
 
 		int32_t oldSatelliteRegionFit = std::numeric_limits<int32_t>::max();
 		for(auto& it : satellite_tlogs) {
-			if(satellite_priority.count(it.interf.locality.dcId())) {
+			if (satellite_priority.count(it.interf.locality.dcId())) {
 				oldSatelliteRegionFit = std::min(oldSatelliteRegionFit, satellite_priority[it.interf.locality.dcId()]);
 			} else {
 				oldSatelliteRegionFit = -1;
@@ -1162,13 +1248,11 @@ public:
 			}
 		}
 
-		if(oldSatelliteFallback && !newSatelliteFallback)
-			return true;
+		if (oldSatelliteFallback && !newSatelliteFallback) return true;
 		if(!oldSatelliteFallback && newSatelliteFallback)
 			return false;
 
-		if(oldSatelliteRegionFit < newSatelliteRegionFit)
-			return true;
+		if (oldSatelliteRegionFit < newSatelliteRegionFit) return true;
 		if(oldSatelliteRegionFit > newSatelliteRegionFit)
 			return false;
 
@@ -1188,7 +1272,12 @@ public:
 		int oldRouterCount = oldTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,oldTLogFit.count));
 		int newRouterCount = newTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,newTLogFit.count));
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
-		RoleFitness newLogRoutersFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newRouterCount, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+		RoleFitness newLogRoutersFit(
+		    (db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED)
+		        ? getWorkersForRoleInDatacenter(*remoteDC.begin(), ProcessClass::LogRouter, newRouterCount, db.config,
+		                                        id_used, Optional<WorkerFitnessInfo>(), true)
+		        : log_routers,
+		    ProcessClass::LogRouter);
 
 		if(oldLogRoutersFit.count < oldRouterCount) {
 			oldLogRoutersFit.worstFit = ProcessClass::NeverAssign;
@@ -1197,17 +1286,31 @@ public:
 			newLogRoutersFit.worstFit = ProcessClass::NeverAssign;
 		}
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
-		// Check proxy/resolver fitness
-		RoleFitnessPair oldInFit(RoleFitness(proxyClasses, ProcessClass::Proxy), RoleFitness(resolverClasses, ProcessClass::Resolver));
 
-		auto first_resolver = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
-		auto first_proxy = getWorkerForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
+		// Check proxy/grvProxy/resolver fitness
+		RoleFitnessPair oldInFit(RoleFitness(commitProxyClasses, ProcessClass::CommitProxy),
+		                         RoleFitness(grvProxyClasses, ProcessClass::GrvProxy),
+		                         RoleFitness(resolverClasses, ProcessClass::Resolver));
 
-		auto proxies = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Proxy, db.config.getDesiredProxies(), db.config, id_used, first_proxy, true );
+		auto first_commit_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::CommitProxy,
+		                                                       ProcessClass::ExcludeFit, db.config, id_used, true);
+		auto first_grv_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::GrvProxy,
+		                                                    ProcessClass::ExcludeFit, db.config, id_used, true);
+		auto first_resolver = getWorkerForRoleInDatacenter(clusterControllerDcId, ProcessClass::Resolver,
+		                                                   ProcessClass::ExcludeFit, db.config, id_used, true);
+		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::CommitProxy,
+		                                                    db.config.getDesiredCommitProxies(), db.config, id_used,
+		                                                    first_commit_proxy, true);
+		auto grv_proxies =
+		    getWorkersForRoleInDatacenter(clusterControllerDcId, ProcessClass::GrvProxy,
+		                                  db.config.getDesiredGrvProxies(), db.config, id_used, first_grv_proxy, true);
 		auto resolvers = getWorkersForRoleInDatacenter( clusterControllerDcId, ProcessClass::Resolver, db.config.getDesiredResolvers(), db.config, id_used, first_resolver, true );
 
-		RoleFitnessPair newInFit(RoleFitness(proxies, ProcessClass::Proxy), RoleFitness(resolvers, ProcessClass::Resolver));
-		if(oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.resolver.betterFitness(newInFit.resolver)) {
+		RoleFitnessPair newInFit(RoleFitness(commit_proxies, ProcessClass::CommitProxy),
+		                         RoleFitness(grv_proxies, ProcessClass::GrvProxy),
+		                         RoleFitness(resolvers, ProcessClass::Resolver));
+		if (oldInFit.proxy.betterFitness(newInFit.proxy) || oldInFit.grvProxy.betterFitness(newInFit.grvProxy) ||
+		    oldInFit.resolver.betterFitness(newInFit.resolver)) {
 			return false;
 		}
 
@@ -1228,6 +1331,8 @@ public:
 			    .detail("NewTLogFit", newTLogFit.toString())
 			    .detail("OldProxyFit", oldInFit.proxy.toString())
 			    .detail("NewProxyFit", newInFit.proxy.toString())
+			    .detail("OldGrvProxyFit", oldInFit.grvProxy.toString())
+			    .detail("NewGrvProxyFit", newInFit.grvProxy.toString())
 			    .detail("OldResolverFit", oldInFit.resolver.toString())
 			    .detail("NewResolverFit", newInFit.resolver.toString())
 			    .detail("OldSatelliteFit", oldSatelliteTLogFit.toString())
@@ -1256,7 +1361,10 @@ public:
 				if (tlog.present() && tlog.interf().filteredLocality.processId() == processId) return true;
 			}
 		}
-		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
+		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
+			if (interf.processId == processId) return true;
+		}
+		for (const GrvProxyInterface& interf : dbInfo.client.grvProxies) {
 			if (interf.processId == processId) return true;
 		}
 		for (const ResolverInterface& interf: dbInfo.resolvers) {
@@ -1288,7 +1396,11 @@ public:
 				}
 			}
 		}
-		for (const MasterProxyInterface& interf : dbInfo.client.proxies) {
+		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
+			ASSERT(interf.processId.present());
+			idUsed[interf.processId]++;
+		}
+		for (const GrvProxyInterface& interf : dbInfo.client.grvProxies) {
 			ASSERT(interf.processId.present());
 			idUsed[interf.processId]++;
 		}
@@ -1825,7 +1937,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 
 ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData* self, RecruitRemoteFromConfigurationRequest req ) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); //ClusterController RecruitTLogsRequest
+	TEST(true); //ClusterController RecruitTLogsRequest Remote
 	loop {
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
@@ -1858,7 +1970,8 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	    .detail("Resolvers", req.resolvers.size())
 	    .detail("RecoveryState", (int)req.recoveryState)
 	    .detail("RegistrationCount", req.registrationCount)
-	    .detail("Proxies", req.proxies.size())
+	    .detail("CommitProxies", req.commitProxies.size())
+	    .detail("GrvProxies", req.grvProxies.size())
 	    .detail("RecoveryCount", req.recoveryCount)
 	    .detail("Stalled", req.recoveryStalled)
 	    .detail("OldestBackupEpoch", req.logSystemConfig.oldestBackupEpoch);
@@ -1912,11 +2025,13 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	// Construct the client information
-	if (db->clientInfo->get().proxies != req.proxies) {
+	if (db->clientInfo->get().commitProxies != req.commitProxies ||
+	    db->clientInfo->get().grvProxies != req.grvProxies) {
 		isChanged = true;
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
-		clientInfo.proxies = req.proxies;
+		clientInfo.commitProxies = req.commitProxies;
+		clientInfo.grvProxies = req.grvProxies;
 		clientInfo.clientTxnInfoSampleRate = db->clientInfo->get().clientTxnInfoSampleRate;
 		clientInfo.clientTxnInfoSizeLimit = db->clientInfo->get().clientTxnInfoSizeLimit;
 		db->clientInfo->set( clientInfo );
@@ -2074,7 +2189,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
-	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2102,7 +2217,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	wait(timeKeeperSetVersion(self));
 
 	loop {
-		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
 				if(!g_network->isSimulated()) {
@@ -2773,10 +2888,7 @@ ACTOR Future<Void> dbInfoUpdater( ClusterControllerData* self ) {
 		TraceEvent("DBInfoStartBroadcast", self->id);
 		choose {
 			when(std::vector<Endpoint> notUpdated = wait( broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, Optional<Endpoint>(), false) )) {
-				TraceEvent("DBInfoFinishBroadcast", self->id);
-				for(auto &it : notUpdated) {
-					TraceEvent("DBInfoNotUpdated", self->id).detail("Addr", it.getPrimaryAddress());
-				}
+				TraceEvent("DBInfoFinishBroadcast", self->id).detail("NotUpdated", notUpdated.size());
 				if(notUpdated.size()) {
 					self->updateDBInfoEndpoints.insert(notUpdated.begin(), notUpdated.end());
 					self->updateDBInfo.trigger();

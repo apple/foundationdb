@@ -2127,7 +2127,7 @@ eio__statvfsat (int dirfd, const char *path, struct statvfs *buf)
 static void ecb_noinline ecb_cold
 etp_proc_init (void)
 {
-#if HAVE_PRCTL_SET_NAME
+#if HAVE_PRCTL_SET_NAME && !defined(MEMORY_SANITIZER)
   /* provide a more sensible "thread name" */
   char name[16 + 1];
   const int namelen = sizeof (name) - 1;

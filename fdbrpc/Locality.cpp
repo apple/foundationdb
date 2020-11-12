@@ -63,14 +63,37 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		default:
 			return ProcessClass::NeverAssign;
 		}
-	case ProcessClass::Proxy:
+	case ProcessClass::CommitProxy:
 		switch( _class ) {
-		case ProcessClass::ProxyClass:
+		case ProcessClass::CommitProxyClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
+		case ProcessClass::GrvProxyClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::ResolutionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::TransactionClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::GrvProxy:
+		switch (_class) {
+		case ProcessClass::GrvProxyClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::CommitProxyClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
@@ -169,7 +192,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
 			return ProcessClass::OkayFit;
-		case ProcessClass::ProxyClass:
+		case ProcessClass::CommitProxyClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::GrvProxyClass:
 			return ProcessClass::OkayFit;
 		case ProcessClass::LogRouterClass:
 			return ProcessClass::OkayFit;

@@ -53,7 +53,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 60.0);
 	}
 
-	virtual std::string description() { return HealthMetricsApiWorkload::NAME; }
+	std::string description() const override { return HealthMetricsApiWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
 		if (!self->sendDetailedHealthMetrics) {
@@ -64,14 +64,14 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		}
 		return Void();
 	}
-	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
 		wait(timeout(healthMetricsChecker(cx, self), self->testDuration, Void()));
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (healthMetricsStoppedUpdating) {
 			TraceEvent(SevError, "HealthMetricsStoppedUpdating");
 			return false;
@@ -103,7 +103,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		return correctHealthMetricsState;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("WorstStorageQueue", worstStorageQueue, true));
 		m.push_back(PerfMetric("DetailedWorstStorageQueue", detailedWorstStorageQueue, true));
 		m.push_back(PerfMetric("WorstStorageDurabilityLag", worstStorageDurabilityLag, true));

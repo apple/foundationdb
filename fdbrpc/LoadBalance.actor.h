@@ -177,7 +177,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	Request request = Request(),
 	TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
-	QueueModel* model = NULL) 
+	QueueModel* model = nullptr) 
 {
 	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
 	state Optional<uint64_t> firstRequestEndpoint;
@@ -296,7 +296,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		}
 
 		// Find an alternative, if any, that is not failed, starting with nextAlt
-		state RequestStream<Request> const* stream = NULL;
+		state RequestStream<Request> const* stream = nullptr;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;
 			if( nextAlt == startAlt )
@@ -309,7 +309,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				break;
 			nextAlt = (nextAlt+1) % alternatives->size();
 			if(nextAlt == startAlt) triedAllOptions = true;
-			stream=NULL;
+			stream=nullptr;
 		}
 
 		if(!stream && !firstRequest.isValid() ) {
@@ -458,8 +458,8 @@ Future< REPLY_TYPE(Request) > loadBalance(
 // Subclasses must initialize all members in their default constructors
 // Subclasses must serialize all members
 struct BasicLoadBalancedReply {
-	int recentRequests;
-	BasicLoadBalancedReply() : recentRequests(0) {}
+	int processBusyTime;
+	BasicLoadBalancedReply() : processBusyTime(0) {}
 };
 
 Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const BasicLoadBalancedReply *reply);
@@ -493,7 +493,7 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 	state int useAlt;
 	loop {
 		// Find an alternative, if any, that is not failed, starting with nextAlt
-		state RequestStream<Request> const* stream = NULL;
+		state RequestStream<Request> const* stream = nullptr;
 		for(int alternativeNum=0; alternativeNum<alternatives->size(); alternativeNum++) {
 			useAlt = nextAlt;
 			if( nextAlt == startAlt )
@@ -505,7 +505,7 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed)
 				break;
 			nextAlt = (nextAlt+1) % alternatives->size();
-			stream=NULL;
+			stream=nullptr;
 		}
 
 		if(!stream) {
@@ -528,7 +528,7 @@ Future< REPLY_TYPE(Request) > basicLoadBalance(
 			if(result.present()) {
 				Optional<BasicLoadBalancedReply> loadBalancedReply = getBasicLoadBalancedReply(&result.get());
 				if(loadBalancedReply.present()) {
-					alternatives->updateRecent( useAlt, loadBalancedReply.get().recentRequests );
+					alternatives->updateRecent( useAlt, loadBalancedReply.get().processBusyTime );
 				}
 
 				return result.get();

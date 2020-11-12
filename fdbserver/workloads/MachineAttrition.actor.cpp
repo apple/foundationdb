@@ -112,11 +112,9 @@ struct MachineAttritionWorkload : TestWorkload {
 		return machines;
 	}
 
-	virtual std::string description() { return "MachineAttritionWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "MachineAttritionWorkload"; }
+	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			std::map<Optional<Standalone<StringRef>>,LocalityData> machineIDMap;
 			auto processes = getServers();
@@ -149,9 +147,8 @@ struct MachineAttritionWorkload : TestWorkload {
 			throw please_reboot();
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return ignoreSSFailures; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return ignoreSSFailures; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	static bool noSimIsViableKill(WorkerDetails worker) {
 		return (worker.processClass != ProcessClass::ClassType::TesterClass);

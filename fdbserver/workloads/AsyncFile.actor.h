@@ -90,9 +90,9 @@ struct AsyncFileWorkload : TestWorkload
 	{
 		state RandomByteGenerator rbg;
 
-		if(self->fileHandle.getPtr() != NULL)
+		if(self->fileHandle.getPtr() != nullptr)
 		{
-			self->fileHandle->file = Reference<IAsyncFile>(NULL);
+			self->fileHandle->file = Reference<IAsyncFile>(nullptr);
 			wait(delay(0.1));
 		}
 
@@ -117,8 +117,8 @@ struct AsyncFileWorkload : TestWorkload
 		try
 		{
 			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
-			if(self->fileHandle.getPtr() == NULL)
-				self->fileHandle = Reference<AsyncFileHandle>(new AsyncFileHandle(file, self->path, fileCreated));
+			if(self->fileHandle.getPtr() == nullptr)
+				self->fileHandle = makeReference<AsyncFileHandle>(file, self->path, fileCreated);
 			else
 				self->fileHandle->file = file;
 

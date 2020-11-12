@@ -170,11 +170,11 @@ void FileTraceLogWriter::open() {
 					.detail("Filename", finalname)
 					.detail("ErrorCode", errorNum)
 					.detail("Error", strerror(errorNum))
-					.trackLatest("TraceFileOpenError"); }, NULL);
+					.trackLatest("TraceFileOpenError"); }, nullptr);
 			threadSleep(FLOW_KNOBS->TRACE_RETRY_OPEN_INTERVAL);
 		}
 	}
-	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
+	onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, nullptr);
 	if (needsResolve) {
 		issues->resolveIssue("trace_log_could_not_create_file");
 	}

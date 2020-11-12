@@ -368,7 +368,7 @@ ClientCoordinators::ClientCoordinators( Key clusterKey, std::vector<NetworkAddre
 	for (const auto& coord : coordinators) {
 		clientLeaderServers.push_back( ClientLeaderRegInterface( coord ) );
 	}
-	ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile( ClusterConnectionString( coordinators, clusterKey ) ) );
+	ccf = makeReference<ClusterConnectionFile>(ClusterConnectionString(coordinators, clusterKey));
 }
 
 
@@ -477,7 +477,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 		if (leader.present()) {
 			if( leader.get().first.forward ) {
 				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString())));
+				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
+				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;
 			}
 			if(connFile != info.intermediateConnFile) {
@@ -505,7 +506,7 @@ template <class LeaderInterface>
 Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
 						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
@@ -623,7 +624,10 @@ ACTOR Future<Void> getClientInfoFromLeader( Reference<AsyncVar<Optional<ClusterC
 		req.knownClientInfoID = clientData->clientInfo->get().read().id;
 		choose {
 			when( ClientDBInfo ni = wait( brokenPromiseToNever( knownLeader->get().get().clientInterface.openDatabase.getReply( req ) ) ) ) {
-				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id()).detail("Proxy0", ni.proxies.size() ? ni.proxies[0].id() : UID()).detail("ClientID", ni.id);
+				TraceEvent("MonitorLeaderForProxiesGotClientInfo", knownLeader->get().get().clientInterface.id())
+				    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].id() : UID())
+				    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
+				    .detail("ClientID", ni.id);
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 			}
 			when( wait( knownLeader->onChange() ) ) {}
@@ -678,35 +682,57 @@ ACTOR Future<Void> monitorLeaderForProxies( Key clusterKey, vector<NetworkAddres
 	}
 }
 
-void shrinkProxyList( ClientDBInfo& ni, std::vector<UID>& lastProxyUIDs, std::vector<MasterProxyInterface>& lastProxies ) {
-	if(ni.proxies.size() > CLIENT_KNOBS->MAX_PROXY_CONNECTIONS) {
-		std::vector<UID> proxyUIDs;
-		for(auto& proxy : ni.proxies) {
-			proxyUIDs.push_back(proxy.id());
+void shrinkProxyList(ClientDBInfo& ni, std::vector<UID>& lastCommitProxyUIDs,
+                     std::vector<CommitProxyInterface>& lastCommitProxies, std::vector<UID>& lastGrvProxyUIDs,
+                     std::vector<GrvProxyInterface>& lastGrvProxies) {
+	if (ni.commitProxies.size() > CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS) {
+		std::vector<UID> commitProxyUIDs;
+		for (auto& commitProxy : ni.commitProxies) {
+			commitProxyUIDs.push_back(commitProxy.id());
 		}
-		if(proxyUIDs != lastProxyUIDs) {
-			lastProxyUIDs = proxyUIDs;
-			lastProxies = ni.proxies;
-			deterministicRandom()->randomShuffle(lastProxies);
-			lastProxies.resize(CLIENT_KNOBS->MAX_PROXY_CONNECTIONS);
-			for(int i = 0; i < lastProxies.size(); i++) {
-				TraceEvent("ConnectedProxy").detail("Proxy", lastProxies[i].id());
+		if (commitProxyUIDs != lastCommitProxyUIDs) {
+			lastCommitProxyUIDs.swap(commitProxyUIDs);
+			lastCommitProxies = ni.commitProxies;
+			deterministicRandom()->randomShuffle(lastCommitProxies);
+			lastCommitProxies.resize(CLIENT_KNOBS->MAX_COMMIT_PROXY_CONNECTIONS);
+			for (int i = 0; i < lastCommitProxies.size(); i++) {
+				TraceEvent("ConnectedCommitProxy").detail("CommitProxy", lastCommitProxies[i].id());
 			}
 		}
-		ni.firstProxy = ni.proxies[0];
-		ni.proxies = lastProxies;
+		ni.firstCommitProxy = ni.commitProxies[0];
+		ni.commitProxies = lastCommitProxies;
+	}
+	if(ni.grvProxies.size() > CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS) {
+		std::vector<UID> grvProxyUIDs;
+		for(auto& grvProxy : ni.grvProxies) {
+			grvProxyUIDs.push_back(grvProxy.id());
+		}
+		if(grvProxyUIDs != lastGrvProxyUIDs) {
+			lastGrvProxyUIDs.swap(grvProxyUIDs);
+			lastGrvProxies = ni.grvProxies;
+			deterministicRandom()->randomShuffle(lastGrvProxies);
+			lastGrvProxies.resize(CLIENT_KNOBS->MAX_GRV_PROXY_CONNECTIONS);
+			for(int i = 0; i < lastGrvProxies.size(); i++) {
+				TraceEvent("ConnectedGrvProxy").detail("GrvProxy", lastGrvProxies[i].id());
+			}
+		}
+		ni.grvProxies = lastGrvProxies;
 	}
 }
 
 // Leader is the process that will be elected by coordinators as the cluster controller
-ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info, Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
+ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
+    Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<ClientDBInfo>> clientInfo, MonitorLeaderInfo info,
+    Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions, Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnFile->getConnectionString();
 	state vector<NetworkAddress> addrs = cs.coordinators();
 	state int idx = 0;
 	state int successIdx = 0;
 	state Optional<double> incorrectTime;
-	state std::vector<UID> lastProxyUIDs;
-	state std::vector<MasterProxyInterface> lastProxies;
+	state std::vector<UID> lastCommitProxyUIDs;
+	state std::vector<CommitProxyInterface> lastCommitProxies;
+	state std::vector<UID> lastGrvProxyUIDs;
+	state std::vector<GrvProxyInterface> lastGrvProxies;
 
 	deterministicRandom()->randomShuffle(addrs);
 	loop {
@@ -758,7 +784,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration( Reference<ClusterCo
 			connFile->notifyConnected();
 
 			auto& ni = rep.get().mutate();
-			shrinkProxyList(ni, lastProxyUIDs, lastProxies);
+			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->set( ni );
 			successIdx = idx;
 		} else {

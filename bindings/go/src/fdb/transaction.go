@@ -40,6 +40,7 @@ type ReadTransaction interface {
 	GetDatabase() Database
 	Snapshot() Snapshot
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
+	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
 
 	ReadTransactor
 }
@@ -318,7 +319,7 @@ func (t *transaction) getEstimatedRangeSizeBytes(beginKey Key, endKey Key) Futur
 	}
 }
 
-// GetEstimatedRangeSizeBytes will get an estimate for the number of bytes
+// GetEstimatedRangeSizeBytes returns an estimate for the number of bytes
 // stored in the given range.
 // Note: the estimated size is calculated based on the sampling done by FDB server. The sampling
 // algorithm works roughly in this way: the larger the key-value pair is, the more likely it would
@@ -331,6 +332,31 @@ func (t Transaction) GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64 {
 	return t.getEstimatedRangeSizeBytes(
 		beginKey.FDBKey(),
 		endKey.FDBKey(),
+	)
+}
+
+func (t *transaction) getRangeSplitPoints(beginKey Key, endKey Key, chunkSize int64) FutureKeyArray {
+	return &futureKeyArray{
+		future: newFuture(C.fdb_transaction_get_range_split_points(
+			t.ptr,
+			byteSliceToPtr(beginKey),
+			C.int(len(beginKey)),
+			byteSliceToPtr(endKey),
+			C.int(len(endKey)),
+			C.int64_t(chunkSize),
+		)),
+	}
+}
+
+// GetRangeSplitPoints returns a list of keys that can split the given range
+// into (roughly) equally sized chunks based on chunkSize.
+// Note: the returned split points contain the start key and end key of the given range.
+func (t Transaction) GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray {
+	beginKey, endKey := r.FDBRangeKeys()
+	return t.getRangeSplitPoints(
+		beginKey.FDBKey(),
+		endKey.FDBKey(),
+		chunkSize,
 	)
 }
 

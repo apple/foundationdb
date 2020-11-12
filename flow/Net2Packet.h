@@ -69,7 +69,7 @@ public:
 	void discardAll();
 
 private:
-	PacketBuffer *unsent_first, *unsent_last;  // Both NULL, or inclusive range of PacketBuffers that haven't been sent.  The last one may have space for more packets to be written.
+	PacketBuffer *unsent_first, *unsent_last;  // Both nullptr, or inclusive range of PacketBuffers that haven't been sent.  The last one may have space for more packets to be written.
 };
 
 class ReliablePacketList : NonCopyable {

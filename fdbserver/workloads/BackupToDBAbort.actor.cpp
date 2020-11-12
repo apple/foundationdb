@@ -36,17 +36,15 @@ struct BackupToDBAbort : TestWorkload {
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}
 
-	virtual std::string description() override {
-		return "BackupToDBAbort";
-	}
+	std::string description() const override { return "BackupToDBAbort"; }
 
-	virtual Future<Void> setup(const Database& cx) override {
+	Future<Void> setup(const Database& cx) override {
 		if (clientId != 0) return Void();
 		return _setup(this, cx);
 	}
@@ -64,7 +62,7 @@ struct BackupToDBAbort : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) override {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) return Void();
 		return _start(this, cx);
 	}
@@ -100,11 +98,9 @@ struct BackupToDBAbort : TestWorkload {
 		return true;
 	}
 
-	virtual Future<bool> check(const Database& cx) override {
-		return _check(this, cx);
-	}
+	Future<bool> check(const Database& cx) override { return _check(this, cx); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 REGISTER_WORKLOAD(BackupToDBAbort);

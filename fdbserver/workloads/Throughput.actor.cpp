@@ -290,7 +290,7 @@ struct ThroughputWorkload : TestWorkload {
 	ThroughputWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), activeActors(0), totalLatencyIntegral(0), totalTransactionsIntegral(0)
 	{
-		Reference<MeasureMulti> multi( new MeasureMulti );
+		auto multi = makeReference<MeasureMulti>();
 		measurer = multi;
 
 		targetLatency = getOption( options, LiteralStringRef("targetLatency"), 0.05 );
@@ -335,13 +335,13 @@ struct ThroughputWorkload : TestWorkload {
 		//testDuration = getOption( options, LiteralStringRef("testDuration"), measureDelay + measureDuration );
 	}
 
-	virtual std::string description() { return "Throughput"; }
+	std::string description() const override { return "Throughput"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		return Void();  // No setup for now - use a separate workload to do setup
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		startT = now();
 		PromiseStream<Future<Void>> add;
 		Future<Void> ac = actorCollection( add.getFuture(), &activeActors );
@@ -351,7 +351,7 @@ struct ThroughputWorkload : TestWorkload {
 		return r;
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
 	ACTOR static Future<Void> throughputActor( Database db, ThroughputWorkload* self, PromiseStream<Future<Void>> add ) {
 		state double before = now();
@@ -388,8 +388,6 @@ struct ThroughputWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		measurer->getMetrics(m);
-	}
+	void getMetrics(vector<PerfMetric>& m) override { measurer->getMetrics(m); }
 };
 WorkloadFactory<ThroughputWorkload> ThroughputWorkloadFactory("Throughput");

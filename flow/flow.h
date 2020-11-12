@@ -339,6 +339,7 @@ struct Callback {
 	Callback<T> *prev, *next;
 
 	virtual void fire(T const&) {}
+	virtual void fire(T&&) {}
 	virtual void error(Error) {}
 	virtual void unwait() {}
 
@@ -433,10 +434,10 @@ public:
 	bool canBeSet() const { return int16_t(error_state.code()) == UNSET_ERROR_CODE; }
 	bool isError() const { return int16_t(error_state.code()) > SET_ERROR_CODE; }
 
-	T const& get() {
+	T const& get() const {
 		ASSERT(isSet());
 		if (isError()) throw error_state;
-		return value();
+		return *(T const*)&value_storage;
 	}
 
 	template <class U>
@@ -558,8 +559,8 @@ public:
 		cb->insertChain(this);
 	}
 
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -785,14 +786,15 @@ public:
 	void sendError(const E& exc) const { sav->sendError(exc); }
 
 	Future<T> getFuture() const { sav->addFutureRef(); return Future<T>(sav); }
-	bool isSet() { return sav->isSet(); }
-	bool canBeSet() { return sav->canBeSet(); }
-	bool isValid() const { return sav != NULL; }
+	bool isSet() const { return sav->isSet(); }
+	bool canBeSet() const { return sav->canBeSet(); }
+
+	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
 	Promise(const Promise& rhs) : sav(rhs.sav) {
 		sav->addPromiseRef();
 	}
-	Promise(Promise&& rhs) BOOST_NOEXCEPT : sav(rhs.sav) { rhs.sav = 0; }
+	Promise(Promise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 
 	~Promise() { if (sav) sav->delPromiseRef(); }
 
@@ -816,7 +818,7 @@ public:
 	}
 
 	// Beware, these operations are very unsafe
-	SAV<T>* extractRawPointer() { auto ptr = sav; sav = NULL; return ptr; }
+	SAV<T>* extractRawPointer() { auto ptr = sav; sav = nullptr; return ptr; }
 	explicit Promise<T>(SAV<T>* ptr) : sav(ptr) {}
 
 	int getFutureReferenceCount() const { return sav->getFutureReferenceCount(); }
@@ -844,7 +846,7 @@ public:
 		queue->addCallbackAndDelFutureRef(cb);
 		queue = 0;
 	}
-	FutureStream() : queue(NULL) {}
+	FutureStream() : queue(nullptr) {}
 	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() { if (queue) queue->delFutureRef(); }

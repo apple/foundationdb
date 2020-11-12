@@ -163,9 +163,11 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			}
 
 			for (auto const& itr : loggedDurations) {
+				// PriorityBusyX measures the amount of time spent busy at exactly priority X
 				n.detail(format("PriorityBusy%d", itr.first).c_str(), itr.second);
 			}
 
+			bool firstTracker = true;
 			for (auto &itr : g_network->networkInfo.metrics.starvationTrackers) {
 				if(itr.active) {
 					itr.duration += now() - itr.windowedTimer;
@@ -173,8 +175,16 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 					itr.windowedTimer = now();
 				}
 
+				// PriorityStarvedBelowX: how much of the elapsed time we were running tasks at a priority at or above X
+				// PriorityMaxStarvedBelowX: The longest single span of time that you were starved below that priority,
+				// which could tell you if you are doing work in bursts.
 				n.detail(format("PriorityStarvedBelow%d", itr.priority).c_str(), std::min(currentStats.elapsed, itr.duration));
 				n.detail(format("PriorityMaxStarvedBelow%d", itr.priority).c_str(), itr.maxDuration);
+
+				if(firstTracker) {
+					g_network->networkInfo.metrics.lastRunLoopBusyness = std::min(currentStats.elapsed, itr.duration)/currentStats.elapsed;
+					firstTracker = false;
+				}
 
 				itr.duration = 0;
 				itr.maxDuration = 0;
@@ -209,7 +219,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			for( auto i = allocInstr.begin(); i != allocInstr.end(); ++i ) {
 				std::string s;
 #ifdef __linux__
-				char *demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+				char *demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
 					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))

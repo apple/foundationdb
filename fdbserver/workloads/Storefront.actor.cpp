@@ -53,13 +53,11 @@ struct StorefrontWorkload : TestWorkload {
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption( options, LiteralStringRef("expectedRate"), 0.9 );
 	}
 
-	virtual std::string description() { return "StorefrontWorkload"; }
+	std::string description() const override { return "StorefrontWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
-		return bulkSetup( cx, this, itemCount, Promise<double>() );
-	}
+	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, itemCount, Promise<double>()); }
 
-	virtual Future<Void> start( Database const& cx ) { 
+	Future<Void> start(Database const& cx) override {
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				orderingClient( cx->clone(), this, actorCount / transactionsPerSecond ) );
@@ -70,7 +68,7 @@ struct StorefrontWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		int errors = 0;
 		for(int c=0; c<clients.size(); c++)
 			if( clients[c].isError() ) {
@@ -81,7 +79,7 @@ struct StorefrontWorkload : TestWorkload {
 		return inventoryCheck( cx->clone(), this, !errors );
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 		m.push_back( PerfMetric( "Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true ) );
@@ -159,7 +157,7 @@ struct StorefrontWorkload : TestWorkload {
 
 						// set value for the order
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
-						tr.set( orderKey, wr.toValue() );
+						tr.set(orderKey, wr.toValue());
 
 						wait( tr.commit() );
 						self->orders[id] = items; // save this in a local list to test durability
@@ -209,7 +207,7 @@ struct StorefrontWorkload : TestWorkload {
 					KeyRangeRef( Key(format("/orders/%x", c)), Key(format("/orders/%x", c+1)) ) ) );
 
 		Transaction tr(cx);
-		state Future<Standalone<RangeResultRef>> values = tr.getRange( 
+		state Future<Standalone<RangeResultRef>> values = tr.getRange(
 				KeyRangeRef( self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount+1 );
 
 		wait( waitForAll( accumulators ) );
@@ -251,7 +249,9 @@ struct StorefrontWorkload : TestWorkload {
 					}
 					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
 					if( wr.toValue() != val.get().toString() ) {
-						TraceEvent( SevError, "TestFailure").detail("Reason", "OrderContentsMismatch").detail("OrderID", id);
+						TraceEvent(SevError, "TestFailure")
+						    .detail("Reason", "OrderContentsMismatch")
+						    .detail("OrderID", id);
 						return false;
 					}
 				}

@@ -906,6 +906,7 @@ std::pair<MetricNameRef, KeyRef> decodeMetricConfKey( KeyRef const& prefix, KeyR
 const KeyRef maxUIDKey = LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
 
 const KeyRef databaseLockedKey = LiteralStringRef("\xff/dbLocked");
+const KeyRef databaseLockedKeyEnd = LiteralStringRef("\xff/dbLocked\x00");
 const KeyRef metadataVersionKey = LiteralStringRef("\xff/metadataVersion");
 const KeyRef metadataVersionKeyEnd = LiteralStringRef("\xff/metadataVersion\x00");
 const KeyRef metadataVersionRequiredValue = LiteralStringRef("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
@@ -1059,3 +1060,7 @@ const KeyRangeRef testOnlyTxnStateStorePrefixRange(
     LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
     LiteralStringRef("\xff/TESTONLYtxnStateStore0")
 );
+
+const KeyRef writeRecoveryKey = LiteralStringRef("\xff/writeRecovery");
+const ValueRef writeRecoveryKeyTrue = LiteralStringRef("1");
+const KeyRef snapshotEndVersionKey = LiteralStringRef("\xff/snapshotEndVersion");

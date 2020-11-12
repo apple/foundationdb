@@ -257,6 +257,7 @@ struct Traceable<std::set<T>> : std::true_type {
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
 std::string printable( const KeyRangeRef& range );
+std::string printable( const VectorRef<KeyRangeRef>& val);
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
@@ -289,6 +290,14 @@ struct KeyRangeRef {
 	bool contains( const KeyRef& key ) const { return begin <= key && key < end; }
 	bool contains( const KeyRangeRef& keys ) const { return begin <= keys.begin && keys.end <= end; }
 	bool intersects( const KeyRangeRef& keys ) const { return begin < keys.end && keys.begin < end; }
+	bool intersects(const VectorRef<KeyRangeRef>& keysVec) const {
+		for (const auto& keys : keysVec) {
+			if (intersects(keys)) {
+				return true;
+			}
+		}
+		return false;
+	}
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
@@ -745,14 +754,16 @@ struct TLogVersion {
 		// V3 was the introduction of spill by reference;
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
+		// V6 added span context to list of serialized mutations sent from proxy to tlogs
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
 		V5 = 5, // 6.3
+		V6 = 6, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V5,
-		MIN_RECRUITABLE = V4,
+		MAX_SUPPORTED = V6,
+		MIN_RECRUITABLE = V5,
 		DEFAULT = V5,
 	} version;
 
@@ -775,6 +786,7 @@ struct TLogVersion {
 		if (s == LiteralStringRef("3")) return V3;
 		if (s == LiteralStringRef("4")) return V4;
 		if (s == LiteralStringRef("5")) return V5;
+		if (s == LiteralStringRef("6")) return V6;
 		return default_error_or();
 	}
 };

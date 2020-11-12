@@ -96,7 +96,7 @@ ServerCoordinators::ServerCoordinators( Reference<ClusterConnectionFile> cf )
 // The coordination server wants to create its key value store only if it is actually used
 struct OnDemandStore {
 public:
-	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(NULL), myID(myID) {}
+	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(nullptr), myID(myID) {}
 	~OnDemandStore() { if (store) store->close(); }
 
 	IKeyValueStore* get() {
@@ -276,11 +276,12 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state Future<Void> notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
 	state ClientData clientData;
 	state int clientCount = 0;
-	state Reference<AsyncVar<bool>> hasConnectedClients = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
+	state Reference<AsyncVar<bool>> hasConnectedClients = makeReference<AsyncVar<bool>>(false);
 	state ActorCollection actors(false);
 	state Future<Void> leaderMon;
 	state AsyncVar<Value> leaderInterface;
-	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader = Reference<AsyncVar<Optional<LeaderInfo>>>( new AsyncVar<Optional<LeaderInfo>>() );
+	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
+	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {

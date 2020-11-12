@@ -31,21 +31,16 @@ struct SlowTaskWorkload : TestWorkload {
 	: TestWorkload(wcx) {
 	}
 
-	virtual std::string description() {
-		return "SlowTaskWorkload";
-	}
+	std::string description() const override { return "SlowTaskWorkload"; }
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		setupRunLoopProfiler();
 		return go();
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> go() {
 		wait( delay(1) );

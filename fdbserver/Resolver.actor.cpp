@@ -20,6 +20,7 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/ConflictSet.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -27,9 +28,9 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/Orderer.actor.h"
-#include "fdbserver/ConflictSet.h"
 #include "fdbserver/StorageMetrics.h"
 #include "fdbclient/SystemData.h"
+
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace {
@@ -44,7 +45,7 @@ struct ProxyRequestsInfo {
 namespace{
 struct Resolver : ReferenceCounted<Resolver> {
 	UID dbgid;
-	int proxyCount, resolverCount;
+	int commitProxyCount, resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 
@@ -77,8 +78,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Future<Void> logger;
 
-	Resolver( UID dbgid, int proxyCount, int resolverCount )
-		: dbgid(dbgid), proxyCount(proxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0),
+	Resolver( UID dbgid, int commitProxyCount, int resolverCount )
+		: dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), version(-1), conflictSet( newConflictSet() ), iopsSample( SERVER_KNOBS->KEY_BYTES_PER_SAMPLE ), debugMinRecentStateVersion(0),
 		  cc("Resolver", dbgid.toString()),
 		  resolveBatchIn("ResolveBatchIn", cc), resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc), resolvedBytes("ResolvedBytes", cc),
 		  resolvedReadConflictRanges("ResolvedReadConflictRanges", cc), resolvedWriteConflictRanges("ResolvedWriteConflictRanges", cc), transactionsAccepted("TransactionsAccepted", cc),
@@ -104,6 +105,7 @@ ACTOR Future<Void> resolveBatch(
 	ResolveTransactionBatchRequest req)
 {
 	state Optional<UID> debugID;
+	state Span span("R:resolveBatch"_loc, req.spanContext);
 
 	// The first request (prevVersion < 0) comes from the master
 	state NetworkAddress proxyAddress = req.prevVersion >= 0 ? req.reply.getEndpoint().getPrimaryAddress() : NetworkAddress();
@@ -238,12 +240,12 @@ ACTOR Future<Void> resolveBatch(
 		//TraceEvent("ResolveBatch", self->dbgid).detail("PrevVersion", req.prevVersion).detail("Version", req.version).detail("StateTransactionVersions", self->recentStateTransactionSizes.size()).detail("StateBytes", stateBytes).detail("FirstVersion", self->recentStateTransactionSizes.empty() ? -1 : self->recentStateTransactionSizes.front().first).detail("StateMutationsIn", req.txnStateTransactions.size()).detail("StateMutationsOut", reply.stateMutations.size()).detail("From", proxyAddress);
 
 		ASSERT(!proxyInfo.outstandingBatches.empty());
-		ASSERT(self->proxyInfoMap.size() <= self->proxyCount+1);
+		ASSERT(self->proxyInfoMap.size() <= self->commitProxyCount+1);
 		
 		// SOMEDAY: This is O(n) in number of proxies. O(log n) solution using appropriate data structure?
 		Version oldestProxyVersion = req.version;
 		for(auto itr = self->proxyInfoMap.begin(); itr != self->proxyInfoMap.end(); ++itr) {
-			//TraceEvent("ResolveBatchProxyVersion", self->dbgid).detail("Proxy", itr->first).detail("Version", itr->second.lastVersion);
+			//TraceEvent("ResolveBatchProxyVersion", self->dbgid).detail("CommitProxy", itr->first).detail("Version", itr->second.lastVersion);
 			if(itr->first.isValid()) { // Don't consider the first master request
 				oldestProxyVersion = std::min(itr->second.lastVersion, oldestProxyVersion);
 			}
@@ -257,7 +259,7 @@ ACTOR Future<Void> resolveBatch(
 		TEST(oldestProxyVersion != req.version); // The proxy that sent this request does not have the oldest current version
 
 		bool anyPopped = false;
-		if(firstUnseenVersion <= oldestProxyVersion && self->proxyInfoMap.size() == self->proxyCount+1) {
+		if(firstUnseenVersion <= oldestProxyVersion && self->proxyInfoMap.size() == self->commitProxyCount+1) {
 			TEST(true); // Deleting old state transactions
 			self->recentStateTransactions.erase( self->recentStateTransactions.begin(), self->recentStateTransactions.upper_bound( oldestProxyVersion ) );
 			self->debugMinRecentStateVersion = oldestProxyVersion + 1;
@@ -311,7 +313,7 @@ ACTOR Future<Void> resolverCore(
 	ResolverInterface resolver,
 	InitializeResolverRequest initReq)
 {
-	state Reference<Resolver> self( new Resolver(resolver.id(), initReq.proxyCount, initReq.resolverCount) );
+	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
 	state ActorCollection actors(false);
 	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
 	actors.add( waitFailureServer(resolver.waitFailure.getFuture()) );

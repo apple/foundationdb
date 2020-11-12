@@ -64,7 +64,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [grv_proxies=<N>] [commit_proxies=<N>] [resolvers=<N>] [logs=<N>]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -98,11 +98,12 @@ A FoundationDB cluster employs server processes of different types. It automatic
 
 For large clusters, you can manually set the allocated number of processes of a given type. Valid process types are:
 
-* ``proxies``
+* ``grv_proxies``
+* ``commit_proxies``
 * ``resolvers``
 * ``logs``
 
-Set the process using ``configure [proxies|resolvers|logs]=<N>``, where ``<N>`` is an integer greater than 0, or -1 to reset the value to its default.
+Set the process using ``configure [grv_proxies|commit_proxies|resolvers|logs]=<N>``, where ``<N>`` is an integer greater than 0, or -1 to reset the value to its default.
 
 For recommendations on appropriate values for process types in large clusters, see :ref:`guidelines-process-class-config`.
 
@@ -357,7 +358,7 @@ setclass
 
 The ``setclass`` command can be used to change the :ref:`process class <guidelines-process-class-config>` for a given process. Its syntax is ``setclass [<ADDRESS> <CLASS>]``. If no arguments are specified, then the process classes of all processes are listed. Setting the class to ``default`` to revert to the process class specified on the command line.
 
-The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
+The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``grv_proxy``, ``commit_proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
 
 sleep
 -----
@@ -456,16 +457,20 @@ disable
 
 ``throttle disable auto``
 
-Disables cluster auto-throttling for busy transaction tags. This does not disable any currently active throttles. To do so, run the following command after disabling auto-throttling::
-
-> throttle off auto
+Disables cluster auto-throttling for busy transaction tags. This may not disable currently active throttles immediately, seconds of delay is expected.
 
 list
 ^^^^
 
-``throttle list [LIMIT]``
+``throttle list [throttled|recommended|all] [LIMIT]``
 
-Prints a list of currently active transaction tag throttles.
+Prints a list of currently active transaction tag throttles, or recommended transaction tag throttles if auto-throttling is disabled.
+
+``throttled`` - list active transaction tag throttles.
+
+``recommended`` - list transaction tag throttles recommended by the ratekeeper, but not active yet.
+
+``all`` - list both active and recommended transaction tag throttles.
 
 ``LIMIT`` - The number of throttles to print. Defaults to 100.
 

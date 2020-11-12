@@ -166,7 +166,7 @@ static void networkTestnanosleep()
 		timespec tv;
 		tv.tv_sec = 0;
 		tv.tv_nsec = 10;
-		nanosleep(&tv, NULL);
+		nanosleep(&tv, nullptr);
 		double after = timer_monotonic();
 
 		printf(" %0.3lf", (after - before)*1e6);
@@ -181,7 +181,7 @@ static void networkTestnanosleep()
 		timespec tv;
 		tv.tv_sec = 0;
 		tv.tv_nsec = 10;
-		nanosleep(&tv, NULL);
+		nanosleep(&tv, nullptr);
 		double after = timer_monotonic();
 		printf(" %0.3lf", (after - before)*1e6);
 	}
@@ -192,7 +192,7 @@ static void networkTestnanosleep()
 		timespec tv;
 		tv.tv_sec = 0;
 		tv.tv_nsec = 20000;
-		nanosleep(&tv, NULL);
+		nanosleep(&tv, nullptr);
 		double after = timer_monotonic();
 
 		printf(" %0.3lf", (after - before)*1e6);
@@ -204,7 +204,7 @@ static void networkTestnanosleep()
 		timespec tv;
 		tv.tv_sec = 0;
 		tv.tv_nsec = 20000;
-		nanosleep(&tv, NULL);
+		nanosleep(&tv, nullptr);
 	}
 #endif
 

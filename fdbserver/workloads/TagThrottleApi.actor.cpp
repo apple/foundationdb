@@ -26,29 +26,31 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TagThrottleApiWorkload : TestWorkload {
+	bool autoThrottleEnabled;
 	double testDuration;
+
+	constexpr static const char* NAME = "TagThrottleApi";
 
 	TagThrottleApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		autoThrottleEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 	}
 
-	virtual std::string description() { return "TagThrottleApi"; }
+	std::string description() const override { return TagThrottleApiWorkload::NAME; }
 
-	virtual Future<Void> setup(Database const& cx) { 
+	Future<Void> setup(Database const& cx) override {
 		DatabaseContext::debugUseTags = true;
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (this->clientId != 0) return Void();
 		return timeout(runThrottleApi(this, cx), testDuration, Void());
 	}
 
-	virtual Future<bool> check(Database const& cx) { 
-		return true; 
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	static Optional<TagThrottleType> randomTagThrottleType() {
 		Optional<TagThrottleType> throttleType;
@@ -76,7 +78,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 		tagSet.addTag(tag);
 
 		try {
-			wait(ThrottleApi::throttleTags(cx, tagSet, rate, duration, TagThrottleType::MANUAL, priority));
+			wait(ThrottleApi::throttleTags(cx, tagSet, rate, duration, TagThrottleType::MANUAL, priority, Optional<double>(), TagThrottledReason::MANUAL));
 		}
 		catch(Error &e) {
 			state Error err = e;
@@ -88,7 +90,9 @@ struct TagThrottleApiWorkload : TestWorkload {
 			throw err;
 		}
 
-		manuallyThrottledTags->insert_or_assign(std::make_pair(tag, priority), TagThrottleInfo(tag, TagThrottleType::MANUAL, priority, rate, now() + duration, duration));
+		manuallyThrottledTags->insert_or_assign(
+		    std::make_pair(tag, priority), TagThrottleInfo(tag, TagThrottleType::MANUAL, priority, rate,
+		                                                   now() + duration, duration, TagThrottledReason::MANUAL));
 
 		return Void();
 	}
@@ -127,13 +131,16 @@ struct TagThrottleApiWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> getTags(Database cx, std::map<std::pair<TransactionTag, TransactionPriority>, TagThrottleInfo> const* manuallyThrottledTags) { 
+	ACTOR Future<Void> getTags(TagThrottleApiWorkload* self, Database cx, std::map<std::pair<TransactionTag, TransactionPriority>, TagThrottleInfo> const* manuallyThrottledTags) {
 		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getThrottledTags(cx, CLIENT_KNOBS->TOO_MANY));
 
 		int manualThrottledTags = 0;
 		int activeAutoThrottledTags = 0;
 		for(auto &tag : tags) {
-			if(tag.throttleType == TagThrottleType::MANUAL) {
+			if(tag.throttleType == TagThrottleType::AUTO) {
+				ASSERT(self->autoThrottleEnabled);
+			}
+			else if(tag.throttleType == TagThrottleType::MANUAL) {
 				ASSERT(manuallyThrottledTags->find(std::make_pair(tag.tag, tag.priority)) != manuallyThrottledTags->end());
 				++manualThrottledTags;
 			}
@@ -155,6 +162,15 @@ struct TagThrottleApiWorkload : TestWorkload {
 		}
 
 		ASSERT(manualThrottledTags >= minManualThrottledTags && manualThrottledTags <= maxManualThrottledTags);
+		return Void();
+	}
+
+	ACTOR Future<Void> getRecommendedTags(TagThrottleApiWorkload* self, Database cx) {
+		std::vector<TagThrottleInfo> tags = wait(ThrottleApi::getRecommendedTags(cx, CLIENT_KNOBS->TOO_MANY));
+
+		for(auto& tag : tags) {
+			ASSERT(tag.throttleType == TagThrottleType::AUTO);
+		}
 		return Void();
 	}
 
@@ -190,15 +206,17 @@ struct TagThrottleApiWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> enableAutoThrottling(Database cx) {
+	ACTOR Future<Void> enableAutoThrottling(TagThrottleApiWorkload* self, Database cx) {
 		if(deterministicRandom()->coinflip()) {
 			wait(ThrottleApi::enableAuto(cx, true));
+			self->autoThrottleEnabled = true;
 			if(deterministicRandom()->coinflip()) {
 				bool unthrottled = wait(ThrottleApi::unthrottleAll(cx, TagThrottleType::AUTO, Optional<TransactionPriority>()));
 			}
 		}
 		else {
 			wait(ThrottleApi::enableAuto(cx, false));
+			self->autoThrottleEnabled = false;
 		}
 
 		return Void();
@@ -210,7 +228,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 			double delayTime = deterministicRandom()->random01() * 5;
 			wait(delay(delayTime));
 
-			state int action = deterministicRandom()->randomInt(0, 5);
+			state int action = deterministicRandom()->randomInt(0, 6);
 
 			if(action == 0) {
 				wait(self->throttleTag(cx, &manuallyThrottledTags));
@@ -219,16 +237,19 @@ struct TagThrottleApiWorkload : TestWorkload {
 				wait(self->unthrottleTag(cx, &manuallyThrottledTags));
 			}
 			else if(action == 2) {
-				wait(self->getTags(cx, &manuallyThrottledTags));
+				wait(self->getTags(self, cx, &manuallyThrottledTags));
 			}
 			else if(action == 3) {
 				wait(self->unthrottleTagGroup(cx, &manuallyThrottledTags));
 			}
 			else if(action == 4) { 
-				wait(self->enableAutoThrottling(cx));
+				wait(self->enableAutoThrottling(self, cx));
+			}
+			else if(action == 5) {
+				wait(self->getRecommendedTags(self, cx));
 			}
 		}
 	}
 };
 
-WorkloadFactory<TagThrottleApiWorkload> TagThrottleApiWorkloadFactory("TagThrottleApi");
+WorkloadFactory<TagThrottleApiWorkload> TagThrottleApiWorkloadFactory(TagThrottleApiWorkload::NAME);
