@@ -1992,15 +1992,13 @@ void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& 
 		ASSERT(false);  // Unknown mutation type in splitMutations
 }
 
-constexpr double FETCH_KEY_TOO_LONG_TIME_CRITERIA = 300.0;
-
 ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
 	state double startTime = now();
 	loop {
 		state double waitSeconds = BUGGIFY ? 5.0 : 600.0;
 		wait(delay(waitSeconds));
 
-		const auto traceEventLevel = waitSeconds > FETCH_KEY_TOO_LONG_TIME_CRITERIA ? SevWarnAlways : SevInfo;
+		const auto traceEventLevel = waitSeconds > SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA ? SevWarnAlways : SevInfo;
 		TraceEvent(traceEventLevel, "FetchKeysTooLong")
 		    .detail("Duration", now() - startTime)
 		    .detail("Phase", shard->phase)
@@ -3589,7 +3587,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 		const auto longestRunningFetchKeys = self->currentRunningFetchKeys.longestTime();
 
 		auto level = SevInfo;
-		if (longestRunningFetchKeys.first >= FETCH_KEY_TOO_LONG_TIME_CRITERIA) {
+		if (longestRunningFetchKeys.first >= SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA) {
 			level = SevWarnAlways;
 		}
 
