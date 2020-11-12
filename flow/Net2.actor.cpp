@@ -573,17 +573,6 @@ public:
 
 	void close() override { closeSocket(); }
 
-	void send(StringRef packet) override {}
-
-	void sendTo(NetworkAddress const& addr, StringRef packet) override {}
-
-	int readFrom(NetworkAddress* outAddr, uint8_t* begin, uint8_t* end) override { return 0; }
-
-	int read(uint8_t* begin, uint8_t* end) override {
-		// boost::system::error_code err;
-		return 0;
-	};
-
 	Future<int> receive(uint8_t* begin, uint8_t* end) override {
 		++g_net2->countUDPReads;
 		ReadPromise p("N2_UDPReadError", id);
