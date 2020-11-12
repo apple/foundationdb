@@ -234,10 +234,15 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 		}
 		// bufferOffset tells us how many bytes to skip in the first remaining buffer.
 
+		if (!buffer) {
+			ASSERT(!bufferOffset); // attempt to write data past end of buffer!
+			return 0;
+		}
+
 		if (BUGGIFY) {
 			toSend = std::min(limit, buffer->bytes_unsent() - bufferOffset);
 		} else {
-			// bytes_unsent() will add bufferOfffset too many bytes the first time through the loop.
+			// bytes_unsent() will add bufferOffset too many bytes the first time through the loop.
 			// can't fixup after the loop, because we might hit limit.
 			toSend = -bufferOffset;
 			for(auto p = buffer; p; p=p->next) {
@@ -250,12 +255,10 @@ struct Sim2Conn : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 
-		ASSERT(toSend);
 		if (BUGGIFY) toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer) return toSend;
 		toSend = std::min( toSend, peer->availableSendBufferForPeer() );
-		ASSERT( toSend >= 0 );
 
 		int leftToSend = toSend;
 		for(auto p = buffer; p && leftToSend>0; p=p->next) {
