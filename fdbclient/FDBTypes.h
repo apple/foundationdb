@@ -143,6 +143,10 @@ static std::string describe( Reference<T> const& item ) {
 	return item->toString();
 }
 
+static std::string describe(UID const& item) {
+	return item.shortString();
+}
+
 template <class T>
 static std::string describe( T const& item ) {
 	return item.toString();

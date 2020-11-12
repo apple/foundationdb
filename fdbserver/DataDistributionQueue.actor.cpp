@@ -86,7 +86,7 @@ public:
 	vector<Reference<IDataDistributionTeam>> teams;
 	vector<UID> tempServerIDs;
 
-	ParallelTCInfo() { }
+	ParallelTCInfo() {}
 
 	void addTeam(Reference<IDataDistributionTeam> team) {
 		teams.push_back(team);
@@ -249,6 +249,15 @@ public:
 	virtual void addServers(const std::vector<UID>& servers) {
 		ASSERT(!teams.empty());
 		teams[0]->addServers(servers);
+	}
+
+	std::string getTeamID() override {
+		std::string id;
+		for (int i = 0; i < teams.size(); i++) {
+			auto const& team = teams[i];
+			id += (i == teams.size() - 1) ? team->getTeamID() : format("%s, ", team->getTeamID().c_str());
+		}
+		return id;
 	}
 };
 
@@ -1036,6 +1045,9 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			} else {
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("KeyBegin", rd.keys.begin)
+				    .detail("KeyEnd", rd.keys.end)
+				    .detail("SourceServers", describe(rd.src))
 				    .detail("DestinationTeam", describe(destIds))
 				    .detail("ExtraIds", describe(extraIds));
 			}

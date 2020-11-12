@@ -74,6 +74,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TOO_MANY_CONNECTIONS_CLOSED_TIMEOUT,                20.0 );
 	init( PING_LOGGING_INTERVAL,                               3.0 );
 	init( PING_SAMPLE_AMOUNT,                                  100 );
+	init( NETWORK_CONNECT_SAMPLE_AMOUNT,                       100 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );

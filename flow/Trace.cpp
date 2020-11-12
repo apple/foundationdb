@@ -676,6 +676,13 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
+
+	for (int i = 0; i < 5; i++) {
+		eventCounts[i] = ev.eventCounts[i];
+	}
+
+	networkThread = ev.networkThread;
 
 	ev.initialized = true;
 	ev.enabled = false;
@@ -684,6 +691,7 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 }
 
 TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
+	// Note: still broken if ev and this are the same memory address.
 	enabled = ev.enabled;
 	err = ev.err;
 	fields = std::move(ev.fields);
@@ -696,6 +704,13 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	tmpEventMetric = ev.tmpEventMetric;
 	trackingKey = ev.trackingKey;
 	type = ev.type;
+	timeIndex = ev.timeIndex;
+
+	for (int i = 0; i < 5; i++) {
+		eventCounts[i] = ev.eventCounts[i];
+	}
+
+	networkThread = ev.networkThread;
 
 	ev.initialized = true;
 	ev.enabled = false;

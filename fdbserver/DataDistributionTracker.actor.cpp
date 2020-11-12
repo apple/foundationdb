@@ -632,8 +632,10 @@ ACTOR Future<Void> shardTracker(
 			wait( delay(0, TaskPriority::DataDistribution) );
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled)
-			self->output.sendError(e);		// Propagate failure to dataDistributionTracker
+		// If e is broken_promise then self may have already been deleted
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
+			self->output.sendError(e); // Propagate failure to dataDistributionTracker
+		}
 		throw e;
 	}
 }

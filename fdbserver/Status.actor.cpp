@@ -504,6 +504,7 @@ struct RolesInfo {
 
 			obj["data_lag"] = getLagObject(versionLag);
 			obj["durability_lag"] = getLagObject(version - durableVersion);
+			dataLagSeconds = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)

@@ -127,15 +127,23 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastDataPacketSentTime;
 	int outstandingReplies;
 	ContinuousSample<double> pingLatencies;
+	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
+
+	// Cleared every time stats are logged for this peer.
+	int connectOutgoingCount;
+	int connectIncomingCount;
+	int connectFailedCount;
+	ContinuousSample<double> connectLatencies;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination)
 	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
 	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
 	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
-		pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
-		bytesSent(0), lastLoggedBytesSent(0) {}
+	    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
+	    bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
+	    connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {}
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
