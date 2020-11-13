@@ -19,7 +19,7 @@ Please verify that all things listed below were considered and check them. If an
 [] The code is properly formatted (consider running `git clang-format`).
 
 ### Performance
-[] All CP-hot paths are well optimized.
+[] All CPU-hot paths are well optimized.
 [] The proper containers are used (for example `std::vector` vs `VectorRef`).
 [] There are no new known `SlowTask` traces.
 
