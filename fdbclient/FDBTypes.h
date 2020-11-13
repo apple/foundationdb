@@ -997,7 +997,9 @@ struct HealthMetrics {
 	};
 
 	int64_t worstStorageQueue;
+	int64_t limitingStorageQueue;
 	int64_t worstStorageDurabilityLag;
+	int64_t limitingStorageDurabilityLag;
 	int64_t worstTLogQueue;
 	double tpsLimit;
 	bool batchLimited;
@@ -1005,17 +1007,15 @@ struct HealthMetrics {
 	std::map<UID, int64_t> tLogQueue;
 
 	HealthMetrics()
-		: worstStorageQueue(0)
-		, worstStorageDurabilityLag(0)
-		, worstTLogQueue(0)
-		, tpsLimit(0.0)
-		, batchLimited(false)
-	{}
+	  : worstStorageQueue(0), limitingStorageQueue(0), worstStorageDurabilityLag(0), limitingStorageDurabilityLag(0),
+	    worstTLogQueue(0), tpsLimit(0.0), batchLimited(false) {}
 
 	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput)
 	{
 		worstStorageQueue = hm.worstStorageQueue;
+		limitingStorageQueue = hm.limitingStorageQueue;
 		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
+		limitingStorageDurabilityLag = hm.limitingStorageDurabilityLag;
 		worstTLogQueue = hm.worstTLogQueue;
 		tpsLimit = hm.tpsLimit;
 		batchLimited = hm.batchLimited;
@@ -1030,19 +1030,16 @@ struct HealthMetrics {
 	}
 
 	bool operator==(HealthMetrics const& r) const {
-		return (
-			worstStorageQueue == r.worstStorageQueue &&
-			worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
-			worstTLogQueue == r.worstTLogQueue &&
-			storageStats == r.storageStats &&
-			tLogQueue == r.tLogQueue &&
-			batchLimited == r.batchLimited
-		);
+		return (worstStorageQueue == r.worstStorageQueue && limitingStorageQueue == r.limitingStorageQueue &&
+		        worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
+		        limitingStorageDurabilityLag == r.limitingStorageDurabilityLag && worstTLogQueue == r.worstTLogQueue &&
+		        storageStats == r.storageStats && tLogQueue == r.tLogQueue && batchLimited == r.batchLimited);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
+		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited,
+		           storageStats, tLogQueue, limitingStorageQueue, limitingStorageDurabilityLag);
 	}
 };
 
