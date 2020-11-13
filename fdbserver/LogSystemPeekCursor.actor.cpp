@@ -728,7 +728,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				c->advanceTo(messageVersion);
 				if( start <= messageVersion && messageVersion < c->version() ) {
 					advancedPast = true;
-					TEST(true); //Merge peek cursor advanced past desired sequence
+					TEST(true); //Merge peek cursor with logIdx advanced past desired sequence
 				}
 			}
 		}

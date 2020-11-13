@@ -2278,7 +2278,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				}
 
 				if (!more || locations[shard].first.empty()) {
-					TEST(true);
+					TEST(true); // getExactrange (!more || locations[shard].first.empty())
 					if(shard == locations.size()-1) {
 						const KeyRangeRef& range = locations[shard].first;
 						KeyRef begin = reverse ? keys.begin : range.end;

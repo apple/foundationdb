@@ -556,8 +556,8 @@ private:
 
 		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
 
-		INJECT_FAULT(io_timeout, "SimpleFile::read");
-		INJECT_FAULT(io_error, "SimpleFile::read");
+		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
+		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
 
 		return read_bytes;
 	}
@@ -594,8 +594,8 @@ private:
 
 		debugFileCheck("SimpleFileWrite", self->filename, (void*)data.begin(), offset, data.size());
 
-		INJECT_FAULT(io_timeout, "SimpleFile::write");
-		INJECT_FAULT(io_error, "SimpleFile::write");
+		INJECT_FAULT(io_timeout, "SimpleFile::write"); // SimpleFile::write inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::write"); // SimpleFile::write inject io_error
 
 		return Void();
 	}
@@ -621,8 +621,8 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFT2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		INJECT_FAULT( io_timeout, "SimpleFile::truncate" );
-		INJECT_FAULT( io_error, "SimpleFile::truncate" );
+		INJECT_FAULT( io_timeout, "SimpleFile::truncate" ); // SimpleFile::truncate inject io_timeout
+		INJECT_FAULT( io_error, "SimpleFile::truncate" ); // SimpleFile::truncate inject io_error
 
 		return Void();
 	}
@@ -654,8 +654,8 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFC2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		INJECT_FAULT( io_timeout, "SimpleFile::sync" );
-		INJECT_FAULT( io_error, "SimpleFile::sync" );
+		INJECT_FAULT( io_timeout, "SimpleFile::sync" ); // SimpleFile::sync inject io_timeout
+		INJECT_FAULT( io_error, "SimpleFile::sync" ); // SimpleFile::sync inject io_errot
 
 		return Void();
 	}
@@ -675,7 +675,7 @@ private:
 
 		if (randLog)
 			fprintf(randLog, "SFS2 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), pos);
-		INJECT_FAULT( io_error, "SimpleFile::size" );
+		INJECT_FAULT( io_error, "SimpleFile::size" ); // SimpleFile::size inject io_error
 
 		return pos;
 	}
@@ -1436,7 +1436,7 @@ public:
 
 		// Check if any processes on machine are rebooting
 		if ( processesOnMachine != processesPerMachine ) {
-			TEST(true); //Attempted reboot, but the target did not have all of its processes running
+			TEST(true); //Attempted reboot and kill, but the target did not have all of its processes running
 			TraceEvent(SevWarn, "AbortedKill").detail("KillType", kt).detail("MachineId", machineId).detail("Reason", "Machine processes does not match number of processes per machine").detail("Processes", processesOnMachine).detail("ProcessesPerMachine", processesPerMachine).backtrace();
 			if (ktFinal) *ktFinal = None;
 			return false;
@@ -1547,12 +1547,12 @@ public:
 			.detail("KilledDC", kt==ktMin);
 
 		TEST(kt != ktMin); // DataCenter kill was rejected by killMachine
-		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Resulted in a reboot and delete
-		TEST((kt==ktMin) && (kt == Reboot)); // Resulted in a reboot
-		TEST((kt==ktMin) && (kt == KillInstantly)); // Resulted in an instant kill
-		TEST((kt==ktMin) && (kt == InjectFaults));  // Resulted in a kill by injecting faults
-		TEST((kt==ktMin) && (kt != ktOrig)); // Kill request was downgraded
-		TEST((kt==ktMin) && (kt == ktOrig)); // Requested kill was done
+		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Datacenter kill Resulted in a reboot and delete
+		TEST((kt==ktMin) && (kt == Reboot)); // Datacenter kill Resulted in a reboot
+		TEST((kt==ktMin) && (kt == KillInstantly)); // Datacenter kill Resulted in an instant kill
+		TEST((kt==ktMin) && (kt == InjectFaults));  // Datacenter kill Resulted in a kill by injecting faults
+		TEST((kt==ktMin) && (kt != ktOrig)); // Datacenter Kill request was downgraded
+		TEST((kt==ktMin) && (kt == ktOrig)); // Datacenter kill - Requested kill was done
 
 		if (ktFinal) *ktFinal = ktMin;
 

@@ -1937,7 +1937,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 
 ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData* self, RecruitRemoteFromConfigurationRequest req ) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); //ClusterController RecruitTLogsRequest
+	TEST(true); //ClusterController RecruitTLogsRequest Remote
 	loop {
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
