@@ -2604,8 +2604,12 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 	state int traceEventsPrinted = 0;
 	state std::vector<const UID*> serverIDs;
 	state double lastPrintTime = 0;
+	state ReadYourWritesTransaction tr(self->cx);
 	loop {
-		wait(self->printDetailedTeamsInfo.onTrigger());
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+		wait(tr.commit());
+		wait(self->printDetailedTeamsInfo.onTrigger() || watchFuture);
 		if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
 			continue;
 		}
