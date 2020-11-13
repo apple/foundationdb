@@ -21,7 +21,6 @@
 #include <cinttypes>
 #include <deque>
 #include <memory>
-#include <sys/socket.h>
 #include <vector>
 
 #include "fdbrpc/simulator.h"
