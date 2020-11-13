@@ -157,7 +157,7 @@ If instead you pass a :class:`Transaction` for the :class:`TransactionContext` p
 Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the ``setRetryLimit`` or ``setTimeout`` transaction options or at the database level with the ``setTransactionRetryLimit`` or ``setTransactionTimeout`` database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling::
 
     db.options().setTransactionTimeout(60000);  // 60,000 ms = 1 minute
-    db.options().setRetryLimit(100);
+    db.options().setTransactionRetryLimit(100);
 
 Making some sample classes
 --------------------------
@@ -444,7 +444,7 @@ Here's the code for the scheduling tutorial:
       fdb = FDB.selectAPIVersion(620);
       db = fdb.open();
       db.options().setTransactionTimeout(60000);  // 60,000 ms = 1 minute
-      db.options().setRetryLimit(100);
+      db.options().setTransactionRetryLimit(100);
     }
 
     // Generate 1,620 classes like '9:00 chem for dummies'
