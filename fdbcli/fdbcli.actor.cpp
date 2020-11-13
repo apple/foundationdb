@@ -1707,7 +1707,7 @@ ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
 			printf("Triggered team info logging in data distribution.\n");
 			return Void();
 		} catch (Error& e) {
-			tr.onError(e);
+			wait(tr.onError(e));
 		}
 	}
 }
