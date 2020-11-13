@@ -311,7 +311,7 @@ public:
 		    bytes(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP, FETCH_KEYS_BYTES_HISTOGRAM,
 		                                  Histogram::Unit::bytes)),
 		    bandwidth(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP, FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM,
-		                                      Histogram::Unit::bytes)) {}
+		                                      Histogram::Unit::bytes_per_second)) {}
 	} fetchKeysHistograms;
 
 	class CurrentRunningFetchKeys {
