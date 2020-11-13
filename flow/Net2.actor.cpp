@@ -652,7 +652,6 @@ public:
 private:
 	UDPSocket(boost::asio::io_service& io_service, Optional<NetworkAddress> toAddress, bool isV6)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service, isV6 ? udp::v6() : udp::v4()) {
-		socket.non_blocking(true);
 	}
 
 	void closeSocket() {

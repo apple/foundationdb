@@ -1767,7 +1767,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	}
 
 	ACTOR static Future<Void> send(UDPSimSocket* self, Reference<UDPSimSocket> peerSocket, uint8_t const* begin,
-	                              uint8_t const* end) {
+	                               uint8_t const* end) {
 		state Packet packet(std::make_shared<std::vector<uint8_t>>());
 		packet->resize(end - begin);
 		std::copy(begin, end, packet->begin());
@@ -1899,40 +1899,40 @@ public:
 };
 
 Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
-		NetworkAddress localAddress;
-		auto process = g_simulator.getCurrentProcess();
-		if (process->address.ip.isV6()) {
-			IPAddress::IPAddressStore store = process->address.ip.toV6();
-			uint16_t* ipParts = (uint16_t*)store.data();
-			ipParts[7] += deterministicRandom()->randomInt(0, 256);
-			localAddress.ip = IPAddress(store);
-		} else {
-			localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
-		}
-		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
-		return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
+	NetworkAddress localAddress;
+	auto process = g_simulator.getCurrentProcess();
+	if (process->address.ip.isV6()) {
+		IPAddress::IPAddressStore store = process->address.ip.toV6();
+		uint16_t* ipParts = (uint16_t*)store.data();
+		ipParts[7] += deterministicRandom()->randomInt(0, 256);
+		localAddress.ip = IPAddress(store);
+	} else {
+		localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+	}
+	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
 }
 
 Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
-		NetworkAddress localAddress;
-		auto process = g_simulator.getCurrentProcess();
-		if (process->address.ip.isV6() == isV6) {
-			localAddress = process->address;
-		} else {
-		    ASSERT(process->addresses.secondaryAddress.present() &&
-		           process->addresses.secondaryAddress.get().isV6() == isV6);
-			localAddress = process->addresses.secondaryAddress.get();
-	    }
-	    if (localAddress.ip.isV6()) {
-			IPAddress::IPAddressStore store = localAddress.ip.toV6();
-			uint16_t* ipParts = (uint16_t*)store.data();
-			ipParts[7] += deterministicRandom()->randomInt(0, 256);
-			localAddress.ip = IPAddress(store);
-		} else {
-			localAddress.ip = IPAddress(localAddress.ip.toV4() + deterministicRandom()->randomInt(0, 256));
-		}
-		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
-		return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
+	NetworkAddress localAddress;
+	auto process = g_simulator.getCurrentProcess();
+	if (process->address.ip.isV6() == isV6) {
+		localAddress = process->address;
+	} else {
+		ASSERT(process->addresses.secondaryAddress.present() &&
+		       process->addresses.secondaryAddress.get().isV6() == isV6);
+		localAddress = process->addresses.secondaryAddress.get();
+	}
+	if (localAddress.ip.isV6()) {
+		IPAddress::IPAddressStore store = localAddress.ip.toV6();
+		uint16_t* ipParts = (uint16_t*)store.data();
+		ipParts[7] += deterministicRandom()->randomInt(0, 256);
+		localAddress.ip = IPAddress(store);
+	} else {
+		localAddress.ip = IPAddress(localAddress.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+	}
+	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
 }
 
 void startNewSimulator() {
