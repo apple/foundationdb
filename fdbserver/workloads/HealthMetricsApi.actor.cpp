@@ -79,8 +79,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			return false;
 		}
 		bool correctHealthMetricsState = true;
-		if (worstStorageQueue == 0 || worstLimitingStorageQueue == 0 || worstStorageDurabilityLag == 0 ||
-		    worstLimitingStorageDurabilityLag == 0 || worstTLogQueue == 0)
+		if (worstStorageQueue == 0 || worstStorageDurabilityLag == 0 || worstTLogQueue == 0)
 			correctHealthMetricsState = false;
 		if (sendDetailedHealthMetrics) {
 			if (detailedWorstStorageQueue == 0 || detailedWorstStorageDurabilityLag == 0 ||
