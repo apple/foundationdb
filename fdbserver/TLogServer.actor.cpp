@@ -40,6 +40,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "flow/Histogram.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::pair;
@@ -338,17 +339,22 @@ struct TLogData : NonCopyable {
 	Reference<AsyncVar<bool>> degraded;
 	std::vector<TagsAndMessage> tempTagMessages;
 
-	TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
-			: dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
-			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
-			  dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0), queueCommitEnd(0),
-			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
-			  peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
-			  concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS),
-			  ignorePopRequest(false), ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped()
-		{
-			cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
-		}
+	Reference<Histogram> commitLatencyDist;
+
+	TLogData(UID dbgid, UID workerID, IKeyValueStore* persistentData, IDiskQueue* persistentQueue,
+	         Reference<AsyncVar<ServerDBInfo>> dbInfo, Reference<AsyncVar<bool>> degraded, std::string folder)
+	  : dbgid(dbgid), workerID(workerID), instanceID(deterministicRandom()->randomUniqueID().first()),
+	    persistentData(persistentData), rawPersistentQueue(persistentQueue),
+	    persistentQueue(new TLogQueue(persistentQueue, dbgid)), dbInfo(dbInfo), degraded(degraded), queueCommitBegin(0),
+	    queueCommitEnd(0), diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0),
+	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
+	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
+	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopRequest(false),
+	    ignorePopDeadline(), ignorePopUid(), dataFolder(folder), toBePopped(),
+	    commitLatencyDist(Histogram::getHistogram(LiteralStringRef("tLog"), LiteralStringRef("commit"),
+	                                              Histogram::Unit::microseconds)) {
+		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, true, true);
+	}
 };
 
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
@@ -1824,7 +1830,11 @@ ACTOR Future<Void> tLogCommit(
 		return Void();
 	}
 
-	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on critical section between here self->version.set() below!)
+	state double beforeCommitT = now();
+
+	// Not a duplicate (check relies on critical section between here self->version.set() below!)
+	state bool isNotDuplicate = (logData->version.get() == req.prevVersion);
+	if (isNotDuplicate) {
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
@@ -1860,6 +1870,10 @@ ACTOR Future<Void> tLogCommit(
 		ASSERT(logData->stopped);
 		req.reply.sendError( tlog_stopped() );
 		return Void();
+	}
+
+	if (isNotDuplicate) {
+		self->commitLatencyDist->sampleSeconds(now() - beforeCommitT);
 	}
 
 	if(req.debugID.present())
