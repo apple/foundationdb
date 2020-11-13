@@ -1241,8 +1241,10 @@ private:
 					openTracer(TracerType::DISABLED);
 				} else if (tracer == "logfile" || tracer == "file" || tracer == "log_file") {
 					openTracer(TracerType::LOG_FILE);
-				} else if (tracer == "udp") {
-					openTracer(TracerType::UDP);
+				} else if (tracer == "network_async") {
+					openTracer(TracerType::NETWORK_ASYNC);
+				} else if (tracer == "network_lossy") {
+					openTracer(TracerType::NETWORK_LOSSY);
 				} else {
 					fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", args.OptionArg());
 					printHelpTeaser(argv[0]);

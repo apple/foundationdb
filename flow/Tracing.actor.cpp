@@ -74,7 +74,7 @@ struct TraceRequest {
 
 	void write_bytes(const uint8_t* buf, std::size_t n) {
 		resize(n);
-		memcpy(buffer + data_size, buf, n);
+		std::copy(buf, buf + n, buffer + data_size);
 		data_size += n;
 	}
 
@@ -166,51 +166,15 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 	}
 }
 
-struct UDPTracer : ITracer {
-public:
-	~UDPTracer() override {
-		while (!buffers_.empty()) {
-			auto& request = buffers_.front();
-			buffers_.pop();
-			free(request.buffer);
-		}
-	}
-
-	TracerType type() const override { return TracerType::UDP; }
-
-	// Serializes the given span to msgpack format and sends the data via UDP.
-	void trace(Span const& span) override {
-		static std::once_flag once;
-		std::call_once(once, [&]() {
-			send_actor_ = traceSend(stream_.getFuture(), &buffers_, &pending_messages_, &send_error_);
-			log_actor_ = traceLog(&pending_messages_, &send_error_);
-			if (g_network->isSimulated()) {
-				udp_server_actor_ = simulationStartServer();
-			}
-		});
-
-		if (span.location.name.size() == 0) {
-			return;
-		}
-
-		// ASSERT(!send_actor_.isReady());
-		// ASSERT(!log_actor_.isReady());
-
-		if (buffers_.empty()) {
-			buffers_.push(TraceRequest{
-				.buffer = new uint8_t[kTraceBufferSize],
-				.data_size = 0,
-				.buffer_size = kTraceBufferSize
-			});
-		}
-
-		auto request = buffers_.front();
-		buffers_.pop();
-
-		// Serialize span fields as an array. If you change the serialization
-		// format here, make sure to update the fluentd filter to be able to
-		// correctly parse the updated format! See the msgpack specification
-		// for more info on the bit patterns used here.
+struct UDPTracer : public ITracer {
+protected:
+	// Serializes span fields as an array into the supplied TraceRequest
+	// buffer.
+	void serialize_span(const Span& span, TraceRequest& request) {
+		// If you change the serialization format here, make sure to update the
+		// fluentd filter to be able to correctly parse the updated format! See
+		// the msgpack specification for more info on the bit patterns used
+		// here.
 		uint8_t size = 5;
 		if (span.parents.size() == 0) --size;
 		request.write_byte(size | 0b10010000); // write as array
@@ -223,19 +187,14 @@ public:
 		serialize_string(span.location.name.toString(), request);
 
 		serialize_vector(span.parents, request);
-
-		++pending_messages_;
-		stream_.send(request);
 	}
 
 private:
 	// Writes the given value in big-endian format to the request. Sets the
-	// first byte to msgpack_type if it is supplied.
+	// first byte to msgpack_type.
 	template <typename T>
-	inline void serialize_value(const T& val, TraceRequest& request, uint8_t msgpack_type = 0) {
-		if (msgpack_type) {
-			request.write_byte(msgpack_type);
-		}
+	inline void serialize_value(const T& val, TraceRequest& request, uint8_t msgpack_type) {
+		request.write_byte(msgpack_type);
 
 		const uint8_t* p = reinterpret_cast<const uint8_t*>(std::addressof(val));
 		for (size_t i = 0; i < sizeof(T); ++i) {
@@ -287,7 +246,56 @@ private:
 			serialize_string(parentContext.toString(), request);
 		}
 	}
+};
 
+struct AsyncUDPTracer : public UDPTracer {
+public:
+	~AsyncUDPTracer() override {
+		while (!buffers_.empty()) {
+			auto& request = buffers_.front();
+			buffers_.pop();
+			free(request.buffer);
+		}
+	}
+
+	TracerType type() const override { return TracerType::NETWORK_ASYNC; }
+
+	// Serializes the given span to msgpack format and sends the data via UDP.
+	void trace(Span const& span) override {
+		static std::once_flag once;
+		std::call_once(once, [&]() {
+			send_actor_ = traceSend(stream_.getFuture(), &buffers_, &pending_messages_, &send_error_);
+			log_actor_ = traceLog(&pending_messages_, &send_error_);
+			if (g_network->isSimulated()) {
+				udp_server_actor_ = simulationStartServer();
+			}
+		});
+
+		if (span.location.name.size() == 0) {
+			return;
+		}
+
+		// ASSERT(!send_actor_.isReady());
+		// ASSERT(!log_actor_.isReady());
+
+		if (buffers_.empty()) {
+			buffers_.push(TraceRequest{
+				.buffer = new uint8_t[kTraceBufferSize],
+				.data_size = 0,
+				.buffer_size = kTraceBufferSize
+			});
+		}
+
+		auto request = buffers_.front();
+		buffers_.pop();
+
+		serialize_span(span, request);
+
+		++pending_messages_;
+		stream_.send(request);
+	}
+
+private:
 	// Sending data is asynchronous and it is necessary to keep the buffer
 	// around until the send completes. Therefore, multiple buffers may be
 	// needed at any one time to handle multiple send calls.
@@ -297,6 +305,72 @@ private:
 
 	PromiseStream<TraceRequest> stream_;
 	Future<Void> send_actor_;
+	Future<Void> log_actor_;
+	Future<Void> udp_server_actor_;
+};
+
+ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages) {
+	loop {
+		TraceEvent("TracingSpanStats").detail("UnreadyMessages", *unreadyMessages).detail("FailedMessages", *failedMessages).detail("TotalMessages", *totalMessages);
+		wait(delay(kQueueSizeLogInterval));
+	}
+}
+
+struct FastUDPTracer : public UDPTracer {
+	FastUDPTracer() {
+		request_ = TraceRequest{
+			.buffer = new uint8_t[kTraceBufferSize],
+			.data_size = 0,
+			.buffer_size = kTraceBufferSize
+		};
+	}
+
+	~FastUDPTracer() {
+		free(request_.buffer);
+	}
+
+	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
+
+	void trace(Span const& span) override {
+		static std::once_flag once;
+		std::call_once(once, [&]() {
+			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_);
+			if (g_network->isSimulated()) {
+				udp_server_actor_ = simulationStartServer();
+			}
+
+			NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
+			socket_ = INetworkConnections::net()->createUDPSocket(localAddress);
+		});
+
+		if (span.location.name.size() == 0) {
+			return;
+		}
+
+		++total_messages_;
+		if (!socket_.isReady()) {
+			++unready_socket_messages_;
+			return;
+		}
+
+		serialize_span(span, request_);
+
+		int bytesSent = socket_.get()->sendSynchronous(request_.buffer, request_.buffer + request_.data_size);
+		if (bytesSent == -1) {
+			++failed_messages_;
+		}
+		request_.reset();
+	}
+
+private:
+	TraceRequest request_;
+
+	// Temporary debugging messages. TODO: Remove
+	int unready_socket_messages_;
+	int failed_messages_;
+	int total_messages_;
+
+	Future<Reference<IUDPSocket>> socket_;
 	Future<Void> log_actor_;
 	Future<Void> udp_server_actor_;
 };
@@ -317,8 +391,11 @@ void openTracer(TracerType type) {
 	case TracerType::LOG_FILE:
 		g_tracer = new LogfileTracer{};
 		break;
-	case TracerType::UDP:
-		g_tracer = new UDPTracer{};
+	case TracerType::NETWORK_ASYNC:
+		g_tracer = new AsyncUDPTracer{};
+		break;
+	case TracerType::NETWORK_LOSSY:
+		g_tracer = new FastUDPTracer{};
 		break;
 	}
 }

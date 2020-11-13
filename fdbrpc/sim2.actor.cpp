@@ -1818,6 +1818,11 @@ public:
 	void addref() override { ReferenceCounted<UDPSimSocket>::addref(); }
 	void delref() override { ReferenceCounted<UDPSimSocket>::delref(); }
 
+	int sendSynchronous(uint8_t const* begin, uint8_t const* end) override {
+		// TODO: Implement!
+		return 0;
+	}
+
 	Future<int> send(uint8_t const* begin, uint8_t const* end) override {
 		int sz = int(end - begin);
 		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
