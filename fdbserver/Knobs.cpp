@@ -540,6 +540,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs, bool isSimula
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
+	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );
 
 	// IPager
 	init( PAGER_RESERVED_PAGES,                                    1 );

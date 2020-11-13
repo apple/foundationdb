@@ -373,6 +373,14 @@ void failAfter( Future<Void> trigger, Endpoint e ) {
 		failAfter( trigger, g_simulator.getProcess( e ) );
 }
 
+ACTOR Future<Void> histogramReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+
+		GetHistogramRegistry().logReport();
+	}
+}
+
 void testSerializationSpeed() {
 	double tstart;
 	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
@@ -1658,6 +1666,8 @@ int main(int argc, char* argv[]) {
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", testFile);
 
+			auto histogramReportActor = histogramReport();
+
 			clientKnobs->trace();
 			flowKnobs->trace();
 			serverKnobs->trace();
@@ -1788,6 +1798,7 @@ int main(int argc, char* argv[]) {
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
+			actors.push_back(histogramReport());
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );
