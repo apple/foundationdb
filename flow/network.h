@@ -548,6 +548,26 @@ protected:
 	~INetwork() {}	// Please don't try to delete through this interface!
 };
 
+class IUDPSocket {
+public:
+	//  see https://en.wikipedia.org/wiki/User_Datagram_Protocol - the max size of a UDP packet
+	// This is enforced in simulation
+	constexpr static size_t MAX_PACKET_SIZE = 65535;
+	virtual ~IUDPSocket();
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
+	virtual void close() = 0;
+	virtual Future<int> send(uint8_t const* begin, uint8_t const* end) = 0;
+	virtual Future<int> sendTo(uint8_t const* begin, uint8_t const* end, NetworkAddress const& peer) = 0;
+	virtual Future<int> receive(uint8_t* begin, uint8_t* end) = 0;
+	virtual Future<int> receiveFrom(uint8_t* begin, uint8_t* end, NetworkAddress* sender) = 0;
+	virtual void bind(NetworkAddress const& addr) = 0;
+
+	virtual UID getDebugID() const = 0;
+	virtual NetworkAddress localAddress() const = 0;
+};
+
 class INetworkConnections {
 public:
 	// Methods for making and accepting network connections.  Logically this is part of the INetwork abstraction
@@ -556,6 +576,11 @@ public:
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of connection problems!
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host = "") = 0;
+
+	// Make an outgoing udp connection and connect to the passed address.
+	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;
+	// Make an outgoing udp connection without establishing a connection
+	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) = 0;
 
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service ) = 0;
