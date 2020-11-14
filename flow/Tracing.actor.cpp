@@ -309,9 +309,19 @@ private:
 	Future<Void> udp_server_actor_;
 };
 
-ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages) {
+ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
+	state bool sendErrorReset = false;
+
 	loop {
 		TraceEvent("TracingSpanStats").detail("UnreadyMessages", *unreadyMessages).detail("FailedMessages", *failedMessages).detail("TotalMessages", *totalMessages);
+
+		if (sendErrorReset) {
+			sendErrorReset = false;
+			*sendError = false;
+		} else if (*sendError) {
+			sendErrorReset = true;
+		}
+
 		wait(delay(kQueueSizeLogInterval));
 	}
 }
@@ -334,7 +344,7 @@ struct FastUDPTracer : public UDPTracer {
 	void trace(Span const& span) override {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
-			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_);
+			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_, &send_error_);
 			if (g_network->isSimulated()) {
 				udp_server_actor_ = simulationStartServer();
 			}
@@ -353,11 +363,15 @@ struct FastUDPTracer : public UDPTracer {
 			return;
 		}
 
+		if (send_error_) {
+			return;
+		}
+
 		serialize_span(span, request_);
 
 		int bytesSent = socket_.get()->sendSynchronous(request_.buffer, request_.buffer + request_.data_size);
 		if (bytesSent == -1) {
-			++failed_messages_;
+			send_error_ = true;
 		}
 		request_.reset();
 	}
@@ -369,6 +383,8 @@ private:
 	int unready_socket_messages_;
 	int failed_messages_;
 	int total_messages_;
+
+	bool send_error_;
 
 	Future<Reference<IUDPSocket>> socket_;
 	Future<Void> log_actor_;
