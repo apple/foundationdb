@@ -875,7 +875,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						break;
 					}
 					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					// get read version
+					// force the cluster to recover at v2
 					tx->set(SpecialKeySpace::getManagementApiCommandPrefix("advanceversion"), std::to_string(v2));
 					wait(tx->commit());
 					ASSERT(false); // Should fail with commit_unknown_result
