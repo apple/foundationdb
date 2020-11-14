@@ -939,8 +939,6 @@ const KeyRef JSONSchemas::storageHealthSchema = LiteralStringRef(R"""(
 const KeyRef JSONSchemas::aggregateHealthSchema = LiteralStringRef(R"""(
 {
   "batch_limited": false,
-  "limiting_storage_durability_lag": 5050809,
-  "limiting_storage_queue": 2030,
   "tps_limit": 457082.8105811302,
   "worst_storage_durability_lag": 5050809,
   "worst_storage_queue": 2030,

@@ -866,7 +866,7 @@ Some of this information is also available in ``\xff\xff/status/json``, but thes
   >>> for k, v in db.get_range_startswith('\xff\xff/metrics/health/'):
   ...     print(k, v)
   ...
-  ('\xff\xff/metrics/health/aggregate', '{"batch_limited":false,"limiting_storage_durability_lag":5000000,"limiting_storage_queue":1000,"tps_limit":483988.66315011407,"worst_storage_durability_lag":5000001,"worst_storage_queue":2036,"worst_log_queue":300}')
+  ('\xff\xff/metrics/health/aggregate', '{"batch_limited":false,"tps_limit":483988.66315011407,"worst_storage_durability_lag":5000001,"worst_storage_queue":2036,"worst_log_queue":300}')
   ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"log_queue":300}')
   ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpu_usage":2.398696781487125,"disk_usage":0.059995917598039405,"storage_durability_lag":5000001,"storage_queue":2036}')
 
@@ -874,17 +874,15 @@ Some of this information is also available in ``\xff\xff/status/json``, but thes
 
 Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.
 
-=================================== ======== ===============
-**Field**                           **Type** **Description**
-----------------------------        -------- ---------------
-batch_limited                       boolean  Whether or not the cluster is limiting batch priority transactions
-limiting_storage_durability_lag     number   storage_durability_lag that ratekeeper is using to determing throttling (see the description for storage_durability_lag)
-limiting_storage_queue              number   storage_queue that ratekeeper is using to determing throttling (see the description for storage_queue)
-tps_limit                           number   The rate at which normal priority transactions are allowed to start
-worst_storage_durability_lag        number   See the description for storage_durability_lag
-worst_storage_queue                 number   See the description for storage_queue
-worst_log_queue                     number   See the description for log_queue
-============================        ======== ===============
+============================ ======== ===============
+**Field**                    **Type** **Description**
+---------------------------- -------- ---------------
+batch_limited                boolean  Whether or not the cluster is limiting batch priority transactions
+tps_limit                    number   The rate at which normal priority transactions are allowed to start
+worst_storage_durability_lag number   See the description for storage_durability_lag
+worst_storage_queue          number   See the description for storage_queue
+worst_log_queue              number   See the description for log_queue
+============================ ======== ===============
 
 ``\xff\xff/metrics/health/log/<id>``
 
