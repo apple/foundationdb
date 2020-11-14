@@ -188,7 +188,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 struct ShardMetrics {
 	StorageMetrics metrics;
 	double lastLowBandwidthStartTime;
-	int shardCount;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
 
 	bool operator==(ShardMetrics const& rhs) const {
 		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&

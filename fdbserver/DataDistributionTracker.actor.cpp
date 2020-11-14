@@ -189,6 +189,7 @@ ACTOR Future<Void> trackShardBytes(
 
 			loop {
 				Transaction tr(self->cx);
+				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 				std::pair<Optional<StorageMetrics>, int> metrics = wait( tr.waitStorageMetrics( keys, bounds.min, bounds.max, bounds.permittedError, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, shardCount ) );
 				if(metrics.first.present()) {
 					BandwidthStatus newBandwidthStatus = getBandwidthStatus( metrics.first.get() );
@@ -486,6 +487,8 @@ Future<Void> shardMerger(
 		shardsMerged++;
 
 		auto shardBounds = getShardSizeBounds( merged, maxShardSize );
+		// If we just recently get the current shard's metrics (i.e., less than DD_LOW_BANDWIDTH_DELAY ago), it means
+		// the shard's metric may not be stable yet. So we cannot continue merging in this direction.
 		if( endingStats.bytes >= shardBounds.min.bytes ||
 				getBandwidthStatus( endingStats ) != BandwidthStatusLow ||
 				now() - lastLowBandwidthStartTime < SERVER_KNOBS->DD_LOW_BANDWIDTH_DELAY ||
@@ -516,13 +519,21 @@ Future<Void> shardMerger(
 	//restarting shard tracker will derefenced values in the shard map, so make a copy
 	KeyRange mergeRange = merged;
 
+	// OldKeys: Shards in the key range are merged as one shard defined by NewKeys;
+	// NewKeys: New key range after shards are merged;
+	// EndingSize: The new merged shard size in bytes;
+	// BatchedMerges: The number of shards merged. Each shard is defined in self->shards;
+	// LastLowBandwidthStartTime: When does a shard's bandwidth status becomes BandwidthStatusLow. If a shard's status
+	//   becomes BandwidthStatusLow less than DD_LOW_BANDWIDTH_DELAY ago, the merging logic will stop at the shard;
+	// ShardCount: The number of non-splittable shards that are merged. Each shard is defined in self->shards may have
+	//   more than 1 shards.
 	TraceEvent("RelocateShardMergeMetrics", self->distributorId)
-		.detail("OldKeys", keys)
-		.detail("NewKeys", mergeRange)
-		.detail("EndingSize", endingStats.bytes)
-		.detail("BatchedMerges", shardsMerged)
-		.detail("LastLowBandwidthStartTime", lastLowBandwidthStartTime)
-		.detail("ShardCount", shardCount);
+	    .detail("OldKeys", keys)
+	    .detail("NewKeys", mergeRange)
+	    .detail("EndingSize", endingStats.bytes)
+	    .detail("BatchedMerges", shardsMerged)
+	    .detail("LastLowBandwidthStartTime", lastLowBandwidthStartTime)
+	    .detail("ShardCount", shardCount);
 
 	if(mergeRange.begin < systemKeys.begin) {
 		self->systemSizeEstimate -= systemBytes;

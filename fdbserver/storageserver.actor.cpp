@@ -1677,7 +1677,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady()) checkFatalError.get();
 
-	//TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
+	// TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
@@ -2192,8 +2192,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
 
 					//FIXME: remove when we no longer support upgrades from 5.X
-					if(debug_getRangeRetries >= 100) {
+					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
+						// TODO: Add SevWarnAlways to say it was disabled.
 					}
 
 					debug_getRangeRetries++;
@@ -3110,7 +3111,9 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 void StorageServerDisk::makeVersionDurable( Version version ) {
 	storage->set( KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())) );
 
-	//TraceEvent("MakeDurable", data->thisServerID).detail("FromVersion", prevStorageVersion).detail("ToVersion", version);
+	// TraceEvent("MakeDurable", data->thisServerID)
+	//     .detail("FromVersion", prevStorageVersion)
+	//     .detail("ToVersion", version);
 }
 
 void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion protocol) {
