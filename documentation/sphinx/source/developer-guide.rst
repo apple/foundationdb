@@ -876,7 +876,7 @@ Aggregate stats about cluster health. Reading this key alone is slightly cheaper
 
 =================================== ======== ===============
 **Field**                           **Type** **Description**
-----------------------------        -------- ---------------
+----------------------------------- -------- ---------------
 batch_limited                       boolean  Whether or not the cluster is limiting batch priority transactions
 limiting_storage_durability_lag     number   storage_durability_lag that ratekeeper is using to determing throttling (see the description for storage_durability_lag)
 limiting_storage_queue              number   storage_queue that ratekeeper is using to determing throttling (see the description for storage_queue)
@@ -884,7 +884,7 @@ tps_limit                           number   The rate at which normal priority t
 worst_storage_durability_lag        number   See the description for storage_durability_lag
 worst_storage_queue                 number   See the description for storage_queue
 worst_log_queue                     number   See the description for log_queue
-============================        ======== ===============
+=================================== ======== ===============
 
 ``\xff\xff/metrics/health/log/<id>``
 
