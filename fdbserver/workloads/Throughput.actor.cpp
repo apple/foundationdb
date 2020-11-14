@@ -290,7 +290,7 @@ struct ThroughputWorkload : TestWorkload {
 	ThroughputWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx), activeActors(0), totalLatencyIntegral(0), totalTransactionsIntegral(0)
 	{
-		Reference<MeasureMulti> multi( new MeasureMulti );
+		auto multi = makeReference<MeasureMulti>();
 		measurer = multi;
 
 		targetLatency = getOption( options, LiteralStringRef("targetLatency"), 0.05 );

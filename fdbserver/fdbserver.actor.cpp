@@ -1444,13 +1444,12 @@ private:
 					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
 					throw;
 				}
-				connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile, ccs));
+				auto connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
 			} else {
 				std::pair<std::string, bool> resolvedClusterFile;
 				try {
 					resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
-					connectionFile =
-					    Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+					connectionFile = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 				} catch (Error& e) {
 					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 					throw;

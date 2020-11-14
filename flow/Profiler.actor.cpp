@@ -185,7 +185,7 @@ struct Profiler {
 
 	ACTOR static Future<Void> profile(Profiler* self, int period, std::string outfn) {
 		// Open and truncate output file
-		state Reference<SyncFileForSim> outFile = Reference<SyncFileForSim>(new SyncFileForSim(outfn));
+		state Reference<SyncFileForSim> outFile = makeReference<SyncFileForSim>(outfn);
 		if(!outFile->isOpen()) {
 			TraceEvent(SevWarn, "FailedToOpenProfilingOutputFile").detail("Filename", outfn).GetLastError();
 			return Void();

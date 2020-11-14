@@ -172,11 +172,11 @@ public:
 
 	static Future<Void> async_fdatasync( int fd ) {
 		// Used by AsyncFileKAIO, since kernel AIO doesn't really implement fdatasync yet
-		return sync_impl( fd, Reference<ErrorInfo>(new ErrorInfo) );
+		return sync_impl(fd, makeReference<ErrorInfo>());
 	}
 	static Future<Void> async_fsync( int fd ) {
 		// Used by AsyncFileKAIO, since kernel AIO doesn't really implement fsync yet
-		return sync_impl( fd, Reference<ErrorInfo>(new ErrorInfo), true );
+		return sync_impl(fd, makeReference<ErrorInfo>(), true);
 	}
 	ACTOR static Future<Void> waitAndAtomicRename( Future<Void> fsync, std::string part_filename, std::string final_filename ) {
 		// First wait for the data in the part file to be durable

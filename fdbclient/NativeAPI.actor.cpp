@@ -84,12 +84,6 @@ using std::pair;
 
 namespace {
 
-ACTOR template <class T, class Fun>
-Future<T> runAfter(Future<T> in, Fun func) {
-	T res = wait(in);
-	return func(res);
-}
-
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
 	DatabaseContext* ctx, const Reference<LocationInfo> alternatives, RequestStream<Request> Interface::*channel,
@@ -99,13 +93,14 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	if (alternatives->hasCaches) {
 		return loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model);
 	}
-	return runAfter(loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model),
-					[ctx](auto res) {
-						if (res.cached) {
-							ctx->updateCache.trigger();
-						}
-						return res;
-	                });
+	return fmap(
+	    [ctx](auto const& res) {
+		    if (res.cached) {
+			    ctx->updateCache.trigger();
+		    }
+		    return res;
+	    },
+	    loadBalance(alternatives->locations(), channel, request, taskID, atMostOnce, model));
 }
 } // namespace
 
@@ -521,9 +516,9 @@ void updateLocationCacheWithCaches(DatabaseContext* self, const std::map<UID, St
 				}
 			}
 			for (const auto& p : added) {
-				interfaces.emplace_back(Reference<ReferencedInterface<StorageServerInterface>>{new ReferencedInterface<StorageServerInterface>{p.second}});
+				interfaces.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(p.second));
 			}
-			iter->value() = Reference<LocationInfo>{ new LocationInfo(interfaces, true) };
+			iter->value() = makeReference<LocationInfo>(interfaces, true);
 		}
 	}
 }
@@ -536,7 +531,7 @@ Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
 		interfaces.emplace_back((*loc)[i]);
 	}
 	interfaces.insert(interfaces.end(), other.begin(), other.end());
-	return Reference<LocationInfo>{ new LocationInfo{ interfaces, true } };
+	return makeReference<LocationInfo>(interfaces, true);
 }
 
 ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, StorageServerInterface>* cacheServers) {
@@ -556,8 +551,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
 				cacheInterfaces.reserve(cacheServers->size());
 				for (const auto& p : *cacheServers) {
-					cacheInterfaces.emplace_back(Reference<ReferencedInterface<StorageServerInterface>>{
-					    new ReferencedInterface<StorageServerInterface>{ p.second } });
+					cacheInterfaces.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(p.second));
 				}
 				bool currCached = false;
 				KeyRef begin, end;
@@ -1114,7 +1108,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 	}
 
 	int maxEvictionAttempts = 100, attempts = 0;
-	Reference<LocationInfo> loc = Reference<LocationInfo>( new LocationInfo(serverRefs) );
+	auto loc = makeReference<LocationInfo>(serverRefs);
 	while( locationCache.size() > locationCacheSize && attempts < maxEvictionAttempts) {
 		TEST( true ); // NativeAPI storage server locationCache entry evicted
 		attempts++;
@@ -1190,10 +1184,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			case FDBDatabaseOptions::MACHINE_ID:
 				clientLocality = LocalityData( clientLocality.processId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>(), clientLocality.machineId(), clientLocality.dcId() );
 			    if (clientInfo->get().commitProxies.size())
-				    commitProxies = Reference<CommitProxyInfo>(new CommitProxyInfo(clientInfo->get().commitProxies, false));
+				    commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
 			    if( clientInfo->get().grvProxies.size() )
-					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies, true) );
-				server_interf.clear();
+				    grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+			    server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
 			case FDBDatabaseOptions::MAX_WATCHES:
@@ -1202,10 +1196,10 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			case FDBDatabaseOptions::DATACENTER_ID:
 				clientLocality = LocalityData(clientLocality.processId(), clientLocality.zoneId(), clientLocality.machineId(), value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
 			    if (clientInfo->get().commitProxies.size())
-				    commitProxies = Reference<CommitProxyInfo>( new CommitProxyInfo(clientInfo->get().commitProxies, false));
+				    commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
 			    if( clientInfo->get().grvProxies.size() )
-					grvProxies = Reference<GrvProxyInfo>( new GrvProxyInfo( clientInfo->get().grvProxies, true));
-				server_interf.clear();
+				    grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+			    server_interf.clear();
 				locationCache.insert( allKeys, Reference<LocationInfo>() );
 				break;
 			case FDBDatabaseOptions::SNAPSHOT_RYW_ENABLE:
@@ -1346,8 +1340,8 @@ Database Database::createDatabase( Reference<ClusterConnectionFile> connFile, in
 
 	g_network->initTLS();
 
-	Reference<AsyncVar<ClientDBInfo>> clientInfo(new AsyncVar<ClientDBInfo>());
-	Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile(new AsyncVar<Reference<ClusterConnectionFile>>());
+	auto clientInfo = makeReference<AsyncVar<ClientDBInfo>>();
+	auto connectionFile = makeReference<AsyncVar<Reference<ClusterConnectionFile>>>();
 	connectionFile->set(connFile);
 	Future<Void> clientInfoMonitor = monitorProxies(connectionFile, clientInfo, networkOptions.supportedVersions, StringRef(networkOptions.traceLogGroup));
 
@@ -1590,11 +1584,11 @@ void DatabaseContext::updateProxies() {
 	grvProxies.clear();
 	bool commitProxyProvisional = false, grvProxyProvisional = false;
 	if (clientInfo->get().commitProxies.size()) {
-		commitProxies = Reference<CommitProxyInfo>(new CommitProxyInfo(clientInfo->get().commitProxies, false));
+		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
 		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = Reference<GrvProxyInfo>(new GrvProxyInfo(clientInfo->get().grvProxies, true));
+		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
 	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
@@ -2284,7 +2278,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 				}
 
 				if (!more || locations[shard].first.empty()) {
-					TEST(true);
+					TEST(true); // getExactrange (!more || locations[shard].first.empty())
 					if(shard == locations.size()-1) {
 						const KeyRangeRef& range = locations[shard].first;
 						KeyRef begin = reverse ? keys.begin : range.end;
@@ -3784,8 +3778,8 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				}
 			}
 			else {
-				trLogInfo = Reference<TransactionLogInfo>(new TransactionLogInfo(value.get().printable(), TransactionLogInfo::DONT_LOG));
-				trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
+			    trLogInfo = makeReference<TransactionLogInfo>(value.get().printable(), TransactionLogInfo::DONT_LOG);
+			    trLogInfo->maxFieldLength = options.maxTransactionLoggingFieldLength;
 			}
 			if (info.debugID.present()) {
 				TraceEvent(SevInfo, "TransactionBeingTraced")
@@ -4467,7 +4461,6 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx, KeyRange keys,
                                                                                int shardLimit) {
-	state Future<Void> clientTimeout = delay(5.0);
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
@@ -4479,7 +4472,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 				}
 				return rep.get().storageMetricsList;
 			}
-			when(wait(clientTimeout)) { throw timed_out(); }
 		}
 	}
 }
@@ -4609,7 +4601,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	if(!cx->isError()) {
 		double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && deterministicRandom()->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
-			return Reference<TransactionLogInfo>(new TransactionLogInfo(TransactionLogInfo::DATABASE));
+			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}
 

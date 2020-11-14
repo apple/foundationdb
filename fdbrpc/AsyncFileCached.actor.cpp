@@ -60,7 +60,8 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl( std::string filename, 
 		if(cacheItr == simulatorPageCaches.end()) {
 			int64_t pageCacheSize4k = (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K;
 			int64_t pageCacheSize64k = (BUGGIFY) ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_64K : FLOW_KNOBS->SIM_PAGE_CACHE_64K;
-			auto caches = std::make_pair(Reference<EvictablePageCache>(new EvictablePageCache(4096, pageCacheSize4k)), Reference<EvictablePageCache>(new EvictablePageCache(65536, pageCacheSize64k)));
+			auto caches = std::make_pair(makeReference<EvictablePageCache>(4096, pageCacheSize4k),
+			                             makeReference<EvictablePageCache>(65536, pageCacheSize64k));
 			simulatorPageCaches[g_network->getLocalAddress()] = caches;
 			pageCache = (flags & IAsyncFile::OPEN_LARGE_PAGES) ? caches.second : caches.first;
 		}
@@ -69,10 +70,10 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl( std::string filename, 
 	}
 	else {
 		if(flags & IAsyncFile::OPEN_LARGE_PAGES) {
-			if(!pc64k.present()) pc64k = Reference<EvictablePageCache>(new EvictablePageCache(65536, FLOW_KNOBS->PAGE_CACHE_64K));
+			if (!pc64k.present()) pc64k = makeReference<EvictablePageCache>(65536, FLOW_KNOBS->PAGE_CACHE_64K);
 			pageCache = pc64k.get();
 		} else {
-			if(!pc4k.present()) pc4k = Reference<EvictablePageCache>(new EvictablePageCache(4096, FLOW_KNOBS->PAGE_CACHE_4K));
+			if (!pc4k.present()) pc4k = makeReference<EvictablePageCache>(4096, FLOW_KNOBS->PAGE_CACHE_4K);
 			pageCache = pc4k.get();
 		}
 	}

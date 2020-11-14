@@ -191,7 +191,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					    tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(conflictingKeyRangesFuture.isReady());
 
-					tr2 = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+					tr2 = makeReference<ReadYourWritesTransaction>(cx);
 
 					const Standalone<RangeResultRef> conflictingKeyRanges = conflictingKeyRangesFuture.get();
 					ASSERT(conflictingKeyRanges.size() &&

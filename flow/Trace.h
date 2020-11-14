@@ -47,6 +47,9 @@ inline static bool TRACE_SAMPLE() { return false; }
 
 extern thread_local int g_allocation_tracing_disabled;
 
+// Each major level of severity has 10 levels of minor levels, which are not all
+// used. when the numbers of severity events in each level are counted, they are
+// grouped by the major level.
 enum Severity {
 	SevVerbose = 0,
 	SevSample = 1,
@@ -58,6 +61,8 @@ enum Severity {
 	SevMaxUsed = SevError,
 	SevMax = 1000000
 };
+
+const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 
 class TraceEventFields {
 public:
@@ -510,7 +515,7 @@ private:
 
 	void setSizeLimits();
 
-	static unsigned long eventCounts[5];
+	static unsigned long eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS];
 	static thread_local bool networkThread;
 
 	bool init();

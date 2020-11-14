@@ -74,9 +74,7 @@ public:
 			when( wait(success( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() )) ) {
 				throw io_error().asInjectedFault();
 			}
-			when( Reference<IAsyncFile> f = wait( wrappedFile ) ) {
-				return Reference<AsyncFileDetachable>( new AsyncFileDetachable(f) );
-			}
+			when(Reference<IAsyncFile> f = wait(wrappedFile)) { return makeReference<AsyncFileDetachable>(f); }
 		}
 	}
 

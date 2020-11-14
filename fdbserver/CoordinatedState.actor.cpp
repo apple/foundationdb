@@ -239,7 +239,7 @@ struct MovableCoordinatedStateImpl {
 		}
 		// SOMEDAY: If moveState.mode == MovingFrom, read (without locking) old state and assert that it corresponds with our state and is ReallyTo(coordinators)
 		if (moveState.mode == MovableValue::MaybeTo) {
-			TEST(true);
+			TEST(true); // Maybe moveto state
 			ASSERT( moveState.other.present() );
 			wait( self->moveTo( self, &self->cs, ClusterConnectionString( moveState.other.get().toString() ), moveState.value ) );
 		}

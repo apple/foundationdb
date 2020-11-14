@@ -298,7 +298,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		// Attempt decode the first few blocks of log files until beginVersion is consumed
 		std::vector<Future<Void>> fileDecodes;
 		for (int i = 0; i < asyncFiles.size(); i++) {
-			Reference<FileProgress> fp(new FileProgress(asyncFiles[i].get(), i));
+			auto fp = makeReference<FileProgress>(asyncFiles[i].get(), i);
 			progress->fileProgress.push_back(fp);
 			fileDecodes.push_back(
 			    decodeToVersion(fp, progress->beginVersion, progress->endVersion, progress->getLogFile(i)));

@@ -484,7 +484,7 @@ public:
 				TEST(true); // Tracking tag on storage server
 				double cost = costFunction(bytes);
 				for(auto& tag : tags.get()) {
-					int64_t &count = intervalCounts[TransactionTag(tag, tags.get().arena)];
+					int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
 					count += cost;
 					if(count > busiestTagCount) {
 						busiestTagCount = count;
@@ -2275,8 +2275,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 							splitMutations(data, data->shards, *u);
 						}
 
-						TEST( true );
-						TEST( shard->updates.size() );
+						TEST( true );  // fetchkeys has more
+						TEST( shard->updates.size() ); // Shard has updates
 						ASSERT( otherShard->updates.empty() );
 					}
 				}

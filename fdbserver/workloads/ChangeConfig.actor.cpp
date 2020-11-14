@@ -54,7 +54,7 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload *self) {
 		if (g_network->isSimulated() && g_simulator.extraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 			state Database extraDB = Database::createDatabase(extraFile, -1);
 
 			wait(delay(5*deterministicRandom()->random01()));

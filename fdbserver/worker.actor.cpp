@@ -127,7 +127,7 @@ ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> d
 }
 
 Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, TaskPriority taskID, bool enableLocalityLoadBalance, bool lockAware ) {
-	Reference<AsyncVar<ClientDBInfo>> info( new AsyncVar<ClientDBInfo> );
+	auto info = makeReference<AsyncVar<ClientDBInfo>>();
 	return DatabaseContext::create( info, extractClientInfo(db, info), enableLocalityLoadBalance ? db->get().myLocality : LocalityData(), enableLocalityLoadBalance, taskID, lockAware );
 }
 
@@ -1715,7 +1715,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderRemotelyOneGeneration( Reference<Cl
 		if (leader.present()) {
 			if(leader.get().present()) {
 				if( leader.get().get().forward ) {
-					info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().get().serializedInfo.toString())));
+					info.intermediateConnFile = makeReference<ClusterConnectionFile>(
+					    connFile->getFilename(), ClusterConnectionString(leader.get().get().serializedInfo.toString()));
 					return info;
 				}
 				if(connFile != info.intermediateConnFile) {
@@ -1764,7 +1765,7 @@ template <class LeaderInterface>
 Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
 						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
@@ -1830,10 +1831,11 @@ ACTOR Future<Void> fdbd(
 		// Only one process can execute on a dataFolder from this point onwards
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
-		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
-		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
-		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
-		Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo()) );
+		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
+		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
+		auto asyncPriorityInfo =
+		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
+		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {

@@ -108,7 +108,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 	ASSERT(controllerWorker.isValid());
 	ASSERT(controllerWorker->controllerInterf.present());
 	state Reference<RestoreControllerData> self =
-	    Reference<RestoreControllerData>(new RestoreControllerData(controllerWorker->controllerInterf.get().id()));
+	    makeReference<RestoreControllerData>(controllerWorker->controllerInterf.get().id());
 	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	try {
@@ -373,8 +373,8 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 		    .detail("BatchSize", versionBatch->size)
 		    .detail("RunningVersionBatches", self->runningVersionBatches.get())
 		    .detail("VersionBatches", versionBatches.size());
-		self->batch[batchIndex] = Reference<ControllerBatchData>(new ControllerBatchData());
-		self->batchStatus[batchIndex] = Reference<ControllerBatchStatus>(new ControllerBatchStatus());
+		self->batch[batchIndex] = makeReference<ControllerBatchData>();
+		self->batchStatus[batchIndex] = makeReference<ControllerBatchStatus>();
 		fBatches.push_back(distributeWorkloadPerVersionBatch(self, batchIndex, cx, request, *versionBatch));
 		// Wait a bit to give the current version batch a head start from the next version batch
 		wait(delay(SERVER_KNOBS->FASTRESTORE_VB_LAUNCH_DELAY));
