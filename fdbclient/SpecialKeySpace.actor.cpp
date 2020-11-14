@@ -48,7 +48,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck", singleKeyRange(LiteralStringRef("consistency_check_suspended"))
-	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	                          .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "advanceversion", singleKeyRange(LiteralStringRef("min_required_commit_version"))
+	                        .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
@@ -1252,5 +1254,65 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().set(fdbShouldConsistencyCheckBeSuspended,
 	                          BinaryWriter::toValue(entry.present(), Unversioned()));
+	return Optional<std::string>();
+}
+
+ACTOR Future<Standalone<RangeResultRef>> getMinCommitVersionActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	Optional<Value> val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
+	Standalone<RangeResultRef> result;
+	if (val.present()) {
+		Version minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+		ValueRef version(result.arena(), std::to_string(minRequiredCommitVersion));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	}
+	return result;
+}
+
+AdvanceVersionImpl::AdvanceVersionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<Standalone<RangeResultRef>> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	// single key range, the queried range should always be the same as the underlying range
+	ASSERT(kr == getKeyRange());
+	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")];
+	if (!ryw->readYourWritesDisabled() && entry.first) {
+		// ryw enabled and we have written to the special key
+		Standalone<RangeResultRef> result;
+		if (entry.second.present()) {
+			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, entry.second.get()));
+		}
+		return result;
+	} else {
+		return getMinCommitVersionActor(ryw, kr);
+	}
+}
+
+ACTOR Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	Version rv = wait(ryw->getTransaction().getReadVersion());
+	if (rv <= v) {
+		ryw->getTransaction().set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
+	} else {
+		return ManagementAPIError::toJsonString(false, "advanceversion",
+		                                        "Current read version is larger than the given version");
+	}
+	return Optional<std::string>();
+}
+
+Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransaction* ryw) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	auto minCommitVersion =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")].second;
+	if (minCommitVersion.present()) {
+		try {
+			// Version is int64_t, a long long should be enough to save the result
+			Version v = std::stoll(minCommitVersion.get().toString());
+			return advanceVersionCommitActor(ryw, v);
+		} catch (const std::invalid_argument& e) {
+			return Optional<std::string>(ManagementAPIError::toJsonString(
+			    false, "advanceversion", "Invalid version(int64_t) argument: " + minCommitVersion.get().toString()));
+		}
+	} else {
+		ryw->getTransaction().clear(minRequiredCommitVersionKey);
+	}
 	return Optional<std::string>();
 }

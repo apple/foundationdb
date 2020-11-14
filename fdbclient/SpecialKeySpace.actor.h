@@ -319,5 +319,12 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
+class AdvanceVersionImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit AdvanceVersionImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
 #include "flow/unactorcompiler.h"
 #endif
