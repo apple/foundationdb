@@ -245,7 +245,9 @@ ACTOR Future<Void> waitForVersion( LogRouterData *self, Version ver ) {
 		return Void();
 	}
 	if(!self->foundEpochEnd) {
-		// Why it only needs to wait for (ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), instead of ver?
+		// Similar to proxy that does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions oustanding;
+		// Log router does not keep more than MAX_READ_TRANSACTION_LIFE_VERSIONS transactions outstanding because
+		// remote SS cannot roll back to more than MAX_READ_TRANSACTION_LIFE_VERSIONS ago.
 		wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 	} else {
 		while(self->minPopped.get() + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < ver) {
