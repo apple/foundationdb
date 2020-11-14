@@ -1118,7 +1118,9 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 	}
 
 	self->healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
+	self->healthMetrics.limitingStorageQueue = limitingStorageQueueStorageServer;
 	self->healthMetrics.worstStorageDurabilityLag = worstDurabilityLag;
+	self->healthMetrics.limitingStorageDurabilityLag = limitingDurabilityLag;
 
 	double writeToReadLatencyLimit = 0;
 	Version worstVersionLag = 0;

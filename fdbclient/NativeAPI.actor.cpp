@@ -760,7 +760,9 @@ static Standalone<RangeResultRef> healthMetricsToKVPairs(const HealthMetrics& me
 		statsObj["batch_limited"] = metrics.batchLimited;
 		statsObj["tps_limit"] = metrics.tpsLimit;
 		statsObj["worst_storage_durability_lag"] = metrics.worstStorageDurabilityLag;
+		statsObj["limiting_storage_durability_lag"] = metrics.limitingStorageDurabilityLag;
 		statsObj["worst_storage_queue"] = metrics.worstStorageQueue;
+		statsObj["limiting_storage_queue"] = metrics.limitingStorageQueue;
 		statsObj["worst_log_queue"] = metrics.worstTLogQueue;
 		std::string statsString =
 		    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
