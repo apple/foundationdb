@@ -203,7 +203,6 @@ enum class LogSystemType {
 	empty = 0, // Never used.
 	tagPartitioned = 2,
 };
-BINARY_SERIALIZABLE(LogSystemType);
 
 struct LogSystemConfig {
 	constexpr static FileIdentifier file_identifier = 16360847;

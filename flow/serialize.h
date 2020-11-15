@@ -40,9 +40,11 @@
 // A more intelligent SFINAE that does "binarySerialize if POD and no serialize() is defined" could
 // replace the usage of is_binary_serializable.
 template <class T>
-struct is_binary_serializable { enum { value = 0 }; };
+struct is_binary_serializable : std::false_type {};
 
-#define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
+#define BINARY_SERIALIZABLE(T)                                                                                         \
+	template <>                                                                                                        \
+	struct is_binary_serializable<T> : std::true_type {};
 
 BINARY_SERIALIZABLE( int8_t );
 BINARY_SERIALIZABLE( uint8_t );
@@ -142,10 +144,19 @@ inline void save( Archive& ar, const std::string& value ) {
 }
 
 template <class Archive, class T>
-class Serializer< Archive, T, typename std::enable_if< is_binary_serializable<T>::value >::type> {
+class Serializer<Archive, T, typename std::enable_if_t<is_binary_serializable<T>::value>> {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		ar.serializeBinaryItem(t);
+	}
+};
+
+template <class Archive, class T>
+class Serializer<Archive, T, typename std::enable_if_t<std::is_enum_v<T>>> {
+public:
+	static void serialize(Archive& ar, T& t) {
+		static_assert(is_binary_serializable<std::underlying_type_t<T>>::value);
+		ar.serializeBinaryItem(reinterpret_cast<std::underlying_type_t<T>&>(t));
 	}
 };
 

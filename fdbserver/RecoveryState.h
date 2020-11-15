@@ -28,7 +28,6 @@
 // is slightly more detailed and is used by the status infrastructure.  But I'm scared to make changes to the former so close to 1.0 release, so I'm making the latter.
 
 enum class RecoveryState { UNINITIALIZED = 0, READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, ACCEPTING_COMMITS = 6, ALL_LOGS_RECRUITED = 7, STORAGE_RECOVERED = 8, FULLY_RECOVERED = 9 };
-BINARY_SERIALIZABLE( RecoveryState );
 
 namespace RecoveryStatus {
 	enum RecoveryStatus {
