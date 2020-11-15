@@ -31,7 +31,8 @@
 #include <map>
 #include <stdexcept>
 
-#include "Arena.h"
+#include "flow/Arena.h"
+#include "flow/IKeyValueContainer.h"
 
 // forward declaration
 const int LEAF_BYTE = -1;

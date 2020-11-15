@@ -20,8 +20,8 @@
 
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/IDiskQueue.h"
+#include "fdbserver/RadixTree.h"
 #include "flow/IKeyValueContainer.h"
-#include "flow/RadixTree.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
