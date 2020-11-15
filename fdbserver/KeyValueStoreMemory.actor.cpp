@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/IDiskQueue.h"
-#include "fdbserver/RadixTree.h"
-#include "flow/IKeyValueContainer.h"
-#include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbserver/DeltaTree.h"
+#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/IKeyValueContainer.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/RadixTree.h"
+#include "flow/ActorCollection.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 
