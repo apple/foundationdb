@@ -46,6 +46,8 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
+  MetricLogger.actor.cpp
+  MetricLogger.h
   CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
