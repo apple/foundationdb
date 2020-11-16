@@ -211,7 +211,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards);
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           bool const* trackerCancelled);
 
 ACTOR Future<Void> dataDistributionQueue(
     Database cx, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input,
