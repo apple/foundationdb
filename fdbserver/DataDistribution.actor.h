@@ -58,7 +58,7 @@ struct IDataDistributionTeam {
 	virtual bool isWrongConfiguration() const = 0;
 	virtual void setWrongConfiguration(bool) = 0;
 	virtual void addServers(const vector<UID> &servers) = 0;
-	virtual std::string getTeamID() = 0;
+	virtual std::string getTeamID() const = 0;
 
 	std::string getDesc() const {
 		const auto& servers = getLastKnownServerInterfaces();

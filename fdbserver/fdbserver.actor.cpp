@@ -1898,7 +1898,7 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == Test) {
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.dcId opts.zoneId, opts.zoneId);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(),
 			                       opts.localities));
 			g_network->run();

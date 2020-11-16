@@ -685,11 +685,10 @@ struct SendBuffer {
 
 struct PacketBuffer : SendBuffer {
 private:
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 	int reference_count;
 	uint32_t const size_;
 	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 
 public:
 	double const enqueue_time;

@@ -368,11 +368,8 @@ public:
 	virtual Future<int64_t> read() = 0;
 };
 
-struct SendBuffer {
-	uint8_t const* data;
-	SendBuffer* next;
-	int bytes_written, bytes_sent;
-};
+// forward declare SendBuffer, declared in serialize.h
+struct SendBuffer;
 
 class IConnection {
 public:

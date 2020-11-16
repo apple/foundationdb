@@ -85,12 +85,6 @@ class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDist
 	vector<Reference<IDataDistributionTeam>> teams;
 	vector<UID> tempServerIDs;
 
-	ParallelTCInfo() {}
-
-	void addTeam(Reference<IDataDistributionTeam> team) {
-		teams.push_back(team);
-	}
-
 	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
 		for (const auto& team : teams) {
@@ -242,7 +236,7 @@ public:
 		teams[0]->addServers(servers);
 	}
 
-	std::string getTeamID() override {
+	std::string getTeamID() const override {
 		std::string id;
 		for (int i = 0; i < teams.size(); i++) {
 			auto const& team = teams[i];

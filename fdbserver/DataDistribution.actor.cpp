@@ -178,7 +178,7 @@ public:
 		}
 	}
 
-	std::string getTeamID() override { return id.shortString(); }
+	std::string getTeamID() const override { return id.shortString(); }
 
 	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
 		vector<StorageServerInterface> v;
@@ -3188,6 +3188,27 @@ ACTOR Future<Void> zeroServerLeftLogger_impl(DDTeamCollection* self, Reference<T
 	    .detail("TotalBytesLost", bytesLost);
 
 	return Void();
+}
+
+bool teamContainsFailedServer(DDTeamCollection* self, Reference<TCTeamInfo> team) {
+	auto ssis = team->getLastKnownServerInterfaces();
+	for (const auto &ssi : ssis) {
+		AddressExclusion addr(ssi.address().ip, ssi.address().port);
+		AddressExclusion ipaddr(ssi.address().ip);
+		if (self->excludedServers.get(addr) == DDTeamCollection::Status::FAILED ||
+		    self->excludedServers.get(ipaddr) == DDTeamCollection::Status::FAILED) {
+			return true;
+		}
+		if(ssi.secondaryAddress().present()) {
+			AddressExclusion saddr(ssi.secondaryAddress().get().ip, ssi.secondaryAddress().get().port);
+			AddressExclusion sipaddr(ssi.secondaryAddress().get().ip);
+			if (self->excludedServers.get(saddr) == DDTeamCollection::Status::FAILED ||
+				self->excludedServers.get(sipaddr) == DDTeamCollection::Status::FAILED) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 // Track a team and issue RelocateShards when the level of degradation changes
