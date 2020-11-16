@@ -659,9 +659,13 @@ public:
 	void addref() override { ReferenceCounted<UDPSocket>::addref(); }
 	void delref() override { ReferenceCounted<UDPSocket>::delref(); }
 
-	NetworkAddress localAddress() const {
+	NetworkAddress localAddress() const override {
 		auto endpoint = socket.local_endpoint();
 		return NetworkAddress(toIPAddress(endpoint.address()), endpoint.port(), isPublic, false);
+	}
+
+	boost::asio::ip::udp::socket::native_handle_type native_handle() override {
+		return socket.native_handle();
 	}
 
 private:

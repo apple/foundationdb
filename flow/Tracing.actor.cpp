@@ -327,7 +327,7 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 }
 
 struct FastUDPTracer : public UDPTracer {
-	FastUDPTracer() {
+	FastUDPTracer() : socket_fd_(-1) {
 		request_ = TraceRequest{
 			.buffer = new uint8_t[kTraceBufferSize],
 			.data_size = 0,
@@ -361,6 +361,8 @@ struct FastUDPTracer : public UDPTracer {
 		if (!socket_.isReady()) {
 			++unready_socket_messages_;
 			return;
+		} else if (socket_fd_ == -1) {
+			socket_fd_ = socket_.get()->native_handle();
 		}
 
 		if (send_error_) {
@@ -369,8 +371,10 @@ struct FastUDPTracer : public UDPTracer {
 
 		serialize_span(span, request_);
 
-		int bytesSent = socket_.get()->sendSynchronous(request_.buffer, request_.buffer + request_.data_size);
+		int bytesSent = send(socket_fd_, request_.buffer, request_.data_size, MSG_DONTWAIT);
 		if (bytesSent == -1) {
+			// Will forgo checking errno here, and assume all error messages
+			// should be treated the same.
 			send_error_ = true;
 		}
 		request_.reset();
@@ -384,6 +388,7 @@ private:
 	int failed_messages_;
 	int total_messages_;
 
+	int socket_fd_;
 	bool send_error_;
 
 	Future<Reference<IUDPSocket>> socket_;
