@@ -259,8 +259,7 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker::SafeAccessor self, K
 			}
 		}
 	} catch( Error &e ) {
-		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise &&
-		    e.code() != error_code_dd_tracker_cancelled) {
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
@@ -659,8 +658,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self, KeyR
 		}
 	} catch (Error& e) {
 		// If e is broken_promise then self may have already been deleted
-		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise &&
-		    e.code() != error_code_dd_tracker_cancelled) {
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
