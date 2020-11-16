@@ -25,6 +25,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
   IDiskQueue.h
+  IKeyValueContainer.h
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
@@ -46,6 +47,8 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
+  MetricLogger.actor.cpp
+  MetricLogger.h
   CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
@@ -63,6 +66,7 @@ set(FDBSERVER_SRCS
   pubsub.h
   QuietDatabase.actor.cpp
   QuietDatabase.h
+  RadixTree.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
