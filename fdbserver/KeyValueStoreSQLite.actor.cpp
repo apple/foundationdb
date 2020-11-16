@@ -24,6 +24,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/xxhash64.h"
 #include "flow/Hash3.h"
 
 extern "C" {
@@ -94,23 +95,32 @@ struct PageChecksumCodec {
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
 		if (write) {
-			// Always write a CRC32 checksum for new pages
-			pSumInPage->part1 = 0; // Indicates CRC32 is being used
-			pSumInPage->part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			// Always write a xxhash64 checksum for new pages
+			auto xxHash64 = XXHash64::hash(data, pageLen, 0xfdbeefdb);
+			pSumInPage->part1 = static_cast<uint32_t>(xxHash64 >> 32);
+			pSumInPage->part2 = static_cast<uint32_t>(xxHash64 && 0xffffffff);
 			return true;
 		}
 
-		SumType sum;
+		SumType crc32Sum;
 		if (pSumInPage->part1 == 0) {
 			// part1 being 0 indicates with high probability that a CRC32 checksum
 			// was used, so check that first. If this checksum fails, there is still
 			// some chance the page was written with hashlittle2, so fall back to checking
 			// hashlittle2
-			sum.part1 = 0;
-			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			if (sum == *pSumInPage) return true;
+			crc32Sum.part1 = 0;
+			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			if (crc32Sum == *pSumInPage) return true;
 		}
 
+		// Try xxhash64
+		SumType xxHash64Sum;
+		auto xxHash64 = XXHash64::hash(data, dataLen, 0xfdbeefdb);
+		xxHash64Sum.part1 = static_cast<uint32_t>(xxHash64 >> 32);
+		xxHash64Sum.part2 = static_cast<uint32_t>(xxHash64 & 0xffffffff);
+		if (xxHash64Sum == *pSumInPage) return true;
+
+		// Try hashlittle2
 		SumType hashLittle2Sum;
 		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
@@ -126,8 +136,9 @@ struct PageChecksumCodec {
 			    .detail("PageNumber", pageNumber)
 			    .detail("PageSize", pageLen)
 			    .detail("ChecksumInPage", pSumInPage->toString())
+			    .detail("ChecksumCalculatedXXHash64", xxHash64Sum.toString())
 			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
-			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", crc32Sum.toString());
 		}
 		return false;
 	}
