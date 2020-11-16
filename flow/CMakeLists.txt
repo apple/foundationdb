@@ -24,6 +24,8 @@ set(FLOW_SRCS
   FileTraceLogWriter.h
   Hash3.c
   Hash3.h
+  Histogram.cpp
+  Histogram.h
   IDispatched.h
   IRandom.h
   IThreadPool.cpp

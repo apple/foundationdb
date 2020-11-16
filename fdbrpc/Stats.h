@@ -146,7 +146,9 @@ struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable 
 template <class F>
 static void specialCounter(CounterCollection& collection, std::string const& name, F && f) { new SpecialCounter<F>(collection, name, std::move(f)); }
 
-Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
+Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval,
+                           CounterCollection* const& counters, std::string const& trackLatestName = std::string(),
+                           std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
 
 class LatencyBands {
 public:

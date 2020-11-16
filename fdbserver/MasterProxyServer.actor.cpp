@@ -864,7 +864,10 @@ ACTOR Future<Void> commitBatch(
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
 
 	if(localBatchNumber-self->latestLocalCommitBatchResolving.get()>SERVER_KNOBS->RESET_MASTER_BATCHES && now()-self->lastMasterReset>SERVER_KNOBS->RESET_MASTER_DELAY) {
-		TraceEvent(SevWarnAlways, "ResetMasterNetwork").detail("CurrentBatch", localBatchNumber).detail("InProcessBatch", self->latestLocalCommitBatchResolving.get());
+		TraceEvent(SevWarnAlways, "ConnectionResetMaster", self->dbgid)
+		    .detail("PeerAddress", self->master.address())
+		    .detail("CurrentBatch", localBatchNumber)
+		    .detail("InProcessBatch", self->latestLocalCommitBatchResolving.get());
 		FlowTransport::transport().resetConnection(self->master.address());
 		self->lastMasterReset=now();
 	}
@@ -929,9 +932,14 @@ ACTOR Future<Void> commitBatch(
 	    std::move(requests.txReadConflictRangeIndexMap); // used to report conflicting keys
 	state Future<Void> releaseFuture = releaseResolvingAfter(self, releaseDelay, localBatchNumber);
 
-	if(localBatchNumber-self->latestLocalCommitBatchLogging.get()>SERVER_KNOBS->RESET_RESOLVER_BATCHES && now()-self->lastResolverReset>SERVER_KNOBS->RESET_RESOLVER_DELAY) {
-		TraceEvent(SevWarnAlways, "ResetResolverNetwork").detail("CurrentBatch", localBatchNumber).detail("InProcessBatch", self->latestLocalCommitBatchLogging.get());
+	if (localBatchNumber - self->latestLocalCommitBatchLogging.get() > SERVER_KNOBS->RESET_RESOLVER_BATCHES &&
+	    now() - self->lastResolverReset > SERVER_KNOBS->RESET_RESOLVER_DELAY) {
+
 		for (int r = 0; r<self->resolvers.size(); r++) {
+			TraceEvent(SevWarnAlways, "ConnectionResetResolver", self->dbgid)
+			    .detail("PeerAddr", self->resolvers[r].address())
+			    .detail("CurrentBatch", localBatchNumber)
+			    .detail("InProcessBatch", self->latestLocalCommitBatchLogging.get());
 			FlowTransport::transport().resetConnection(self->resolvers[r].address());
 		}
 		self->lastResolverReset=now();
