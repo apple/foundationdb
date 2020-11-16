@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.27',
+        VERSION:     '6.2.28',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -281,7 +281,7 @@
 <p>If instead you pass a <code class="xref py py-class docutils literal"><span class="pre">Transaction</span></code> for the <code class="docutils literal"><span class="pre">db_or_tr</span></code> parameter, the transaction will be used directly, and it is assumed that the caller implements appropriate retry logic for errors. This permits functions using this pattern to be composed into larger transactions.</p>
 <p>Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the <code class="docutils literal"><span class="pre">set_retry_limit</span></code> or <code class="docutils literal"><span class="pre">set_timeout</span></code> transaction options or at the database level with the <code class="docutils literal"><span class="pre">set_transaction_retry_limit</span></code> or <code class="docutils literal"><span class="pre">set_transaction_timeout</span></code> database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="nd">@db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_timeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="c1"># 60,000 ms = 1 minute</span>
-<span class="nd">@db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_retry_limit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+<span class="nd">@db</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_transaction_retry_limit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -657,7 +657,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 14, 2020.<br/>
+      Last updated on Nov 16, 2020.<br/>
     </p>
   </div>
 </footer>

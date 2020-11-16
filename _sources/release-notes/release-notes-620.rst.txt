@@ -4,6 +4,12 @@
 Release Notes
 #############
 
+6.2.28
+======
+* Log detailed team collection information when median available space ratio of all teams is too low. `(PR #3912) <https://github.com/apple/foundationdb/pull/3912>`_
+* Bug fix, blob client did not support authentication key sizes over 64 bytes.  `(PR #3964) <https://github.com/apple/foundationdb/pull/3964>`_
+
+
 6.2.27
 ======
 * For clusters with a large number of shards, avoid slow tasks in the data distributor by adding yields to the shard map destruction. `(PR #3834) <https://github.com/apple/foundationdb/pull/3834>`_

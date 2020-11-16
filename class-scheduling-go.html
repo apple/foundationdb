@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.2.27',
+        VERSION:     '6.2.28',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -377,7 +377,7 @@
 <p>Furthermore, this version can only be called with a <code class="docutils literal"><span class="pre">Database</span></code>, making it impossible to compose larger transactional functions by calling one from another.</p>
 <p>Note that by default, the operation will be retried an infinite number of times and the transaction will never time out. It is therefore recommended that the client choose a default transaction retry limit or timeout value that is suitable for their application. This can be set either at the transaction level using the <code class="docutils literal"><span class="pre">SetRetryLimit</span></code> or <code class="docutils literal"><span class="pre">SetTimeout</span></code> transaction options or at the database level with the <code class="docutils literal"><span class="pre">SetTransactionRetryLimit</span></code> or <code class="docutils literal"><span class="pre">SetTransactionTimeout</span></code> database options. For example, one can set a one minute timeout on each transaction and a default retry limit of 100 by calling:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">Options</span><span class="p">()</span><span class="o">.</span><span class="n">SetTransactionTimeout</span><span class="p">(</span><span class="mi">60000</span><span class="p">)</span>  <span class="o">//</span> <span class="mi">60</span><span class="p">,</span><span class="mi">000</span> <span class="n">ms</span> <span class="o">=</span> <span class="mi">1</span> <span class="n">minute</span>
-<span class="n">db</span><span class="o">.</span><span class="n">Options</span><span class="p">()</span><span class="o">.</span><span class="n">SetRetryLimit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+<span class="n">db</span><span class="o">.</span><span class="n">Options</span><span class="p">()</span><span class="o">.</span><span class="n">SetTransactionRetryLimit</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -912,7 +912,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Oct 14, 2020.<br/>
+      Last updated on Nov 16, 2020.<br/>
     </p>
   </div>
 </footer>
