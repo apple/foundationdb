@@ -97,6 +97,7 @@ struct DataDistributionTracker {
 
 		DataDistributionTracker* operator()() {
 			if (trackerCancelled) {
+				TEST(true); // Trying to access DataDistributionTracker after tracker has been cancelled
 				throw dd_tracker_cancelled();
 			}
 			return &tracker;
