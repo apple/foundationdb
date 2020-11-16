@@ -99,9 +99,9 @@ struct PageChecksumCodec {
 			// First 8 bits are set to 0 so that with high probability,
 			// checksums written with hashlittle2 don't require calculating
 			// an xxHash64 checksum on read
-			auto xxHash64 = XXHash64::hash(data, pageLen, 0xfdbeefdb);
+			auto xxHash64 = XXHash64::hash(data, dataLen, 0xfdbeefdbfdbeefdb);
 			pSumInPage->part1 = static_cast<uint32_t>((xxHash64 >> 32) & 0x00ffffff);
-			pSumInPage->part2 = static_cast<uint32_t>(xxHash64 && 0xffffffff);
+			pSumInPage->part2 = static_cast<uint32_t>(xxHash64 & 0xffffffff);
 			return true;
 		}
 
@@ -117,12 +117,12 @@ struct PageChecksumCodec {
 
 		// Try xxhash64
 		SumType xxHash64Sum;
-		if ((pSumInPage->part1 & 0xff000000) == 0) {
+		if ((pSumInPage->part1 >> 24) == 0) {
 			// The first 8 bits of part1 being 0 indicates with high probability that an
 			// xxHash64 checksum was used, so check that next. If this checksum fails, there is
 			// still some change the page was written with hashlittle2, so fall back to checking
 			// hashlittle2
-			auto xxHash64 = XXHash64::hash(data, dataLen, 0xfdbeefdb);
+			auto xxHash64 = XXHash64::hash(data, dataLen, 0xfdbeefdbfdbeefdb);
 			xxHash64Sum.part1 = static_cast<uint32_t>((xxHash64 >> 32) & 0x00ffffff);
 			xxHash64Sum.part2 = static_cast<uint32_t>(xxHash64 & 0xffffffff);
 			if (xxHash64Sum == *pSumInPage) return true;
@@ -148,7 +148,7 @@ struct PageChecksumCodec {
 			if (pSumInPage->part1 == 0) {
 				trEvent.detail("ChecksumCalculatedCRC", crc32Sum.toString());
 			}
-			if (pSumInPage->part1 & 0xff000000 == 0) {
+			if (pSumInPage->part1 >> 24 == 0) {
 				trEvent.detail("ChecksumCalculatedXXHash64", xxHash64Sum.toString());
 			}
 		}
