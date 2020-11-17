@@ -2606,180 +2606,187 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 	state double lastPrintTime = 0;
 	state ReadYourWritesTransaction tr(self->cx);
 	loop {
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
-		wait(tr.commit());
-		wait(self->printDetailedTeamsInfo.onTrigger() || watchFuture);
-		if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
-			continue;
-		}
-		lastPrintTime = now();
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+			wait(tr.commit());
+			wait(self->printDetailedTeamsInfo.onTrigger() || watchFuture);
+			tr.reset();
+			if (now() - lastPrintTime < SERVER_KNOBS->DD_TEAMS_INFO_PRINT_INTERVAL) {
+				continue;
+			}
+			lastPrintTime = now();
 
-		traceEventsPrinted = 0;
+			traceEventsPrinted = 0;
 
-		double snapshotStart = now();
+			double snapshotStart = now();
 
-		configuration = self->configuration;
-		server_info = self->server_info;
-		teams = self->teams;
-		machine_info = self->machine_info;
-		machineTeams = self->machineTeams;
-		// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
-		// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
-		// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
-		std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
-		serverIDs = _uids;
+			configuration = self->configuration;
+			server_info = self->server_info;
+			teams = self->teams;
+			machine_info = self->machine_info;
+			machineTeams = self->machineTeams;
+			// internedLocalityRecordKeyNameStrings = self->machineLocalityMap._keymap->_lookuparray;
+			// machineLocalityMapEntryArraySize = self->machineLocalityMap.size();
+			// machineLocalityMapRecordArray = self->machineLocalityMap.getRecordArray();
+			std::vector<const UID*> _uids = self->machineLocalityMap.getObjects();
+			serverIDs = _uids;
 
-		auto const& keys = self->server_status.getKeys();
-		for (auto const& key : keys) {
-			server_status.emplace(key, self->server_status.get(key));
-		}
+			auto const& keys = self->server_status.getKeys();
+			for (auto const& key : keys) {
+				server_status.emplace(key, self->server_status.get(key));
+			}
 
-		TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
-		    .detail("SnapshotSpeed", now() - snapshotStart)
-		    .detail("Primary", self->primary);
+			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
+			    .detail("SnapshotSpeed", now() - snapshotStart)
+			    .detail("Primary", self->primary);
 
-		// Print to TraceEvents
-		TraceEvent("DDConfig", self->distributorId)
-		    .detail("StorageTeamSize", configuration.storageTeamSize)
-		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
-		    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
-		    .detail("Primary", self->primary);
+			// Print to TraceEvents
+			TraceEvent("DDConfig", self->distributorId)
+			    .detail("StorageTeamSize", configuration.storageTeamSize)
+			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
+			    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
+			    .detail("Primary", self->primary);
 
-		TraceEvent("ServerInfo", self->distributorId)
-		    .detail("Size", server_info.size())
-		    .detail("Primary", self->primary);
-		state int i;
-		state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
-		for (i = 0; i < server_info.size(); i++) {
 			TraceEvent("ServerInfo", self->distributorId)
-			    .detail("ServerInfoIndex", i)
-			    .detail("ServerID", server->first.toString())
-			    .detail("ServerTeamOwned", server->second->teams.size())
-			    .detail("MachineID", server->second->machine->machineID.contents().toString())
+			    .detail("Size", server_info.size())
 			    .detail("Primary", self->primary);
-			server++;
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
-
-		server = server_info.begin();
-		for (i = 0; i < server_info.size(); i++) {
-			const UID& uid = server->first;
-			TraceEvent("ServerStatus", self->distributorId)
-			    .detail("ServerUID", uid)
-			    .detail("Healthy", !server_status.at(uid).isUnhealthy())
-			    .detail("MachineIsValid", server_info[uid]->machine.isValid())
-			    .detail("MachineTeamSize",
-			            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
-			    .detail("Primary", self->primary);
-			server++;
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
-
-		TraceEvent("ServerTeamInfo", self->distributorId).detail("Size", teams.size()).detail("Primary", self->primary);
-		for (i = 0; i < teams.size(); i++) {
-			const auto& team = teams[i];
-			TraceEvent("ServerTeamInfo", self->distributorId)
-			    .detail("TeamIndex", i)
-			    .detail("Healthy", team->isHealthy())
-			    .detail("TeamSize", team->size())
-			    .detail("MemberIDs", team->getServerIDsStr())
-			    .detail("Primary", self->primary);
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
-
-		TraceEvent("MachineInfo", self->distributorId)
-		    .detail("Size", machine_info.size())
-		    .detail("Primary", self->primary);
-		state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
-		state bool isMachineHealthy = false;
-		for (i = 0; i < machine_info.size(); i++) {
-			Reference<TCMachineInfo> _machine = machine->second;
-			if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
-			    _machine->serversOnMachine.empty()) {
-				isMachineHealthy = false;
-			}
-
-			// Healthy machine has at least one healthy server
-			for (auto& server : _machine->serversOnMachine) {
-				if (!server_status.at(server->id).isUnhealthy()) {
-					isMachineHealthy = true;
+			state int i;
+			state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
+			for (i = 0; i < server_info.size(); i++) {
+				TraceEvent("ServerInfo", self->distributorId)
+				    .detail("ServerInfoIndex", i)
+				    .detail("ServerID", server->first.toString())
+				    .detail("ServerTeamOwned", server->second->teams.size())
+				    .detail("MachineID", server->second->machine->machineID.contents().toString())
+				    .detail("Primary", self->primary);
+				server++;
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
 				}
 			}
 
-			isMachineHealthy = false;
+			server = server_info.begin();
+			for (i = 0; i < server_info.size(); i++) {
+				const UID& uid = server->first;
+				TraceEvent("ServerStatus", self->distributorId)
+				    .detail("ServerUID", uid)
+				    .detail("Healthy", !server_status.at(uid).isUnhealthy())
+				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
+				    .detail("MachineTeamSize",
+				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
+				    .detail("Primary", self->primary);
+				server++;
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
+			}
+
+			TraceEvent("ServerTeamInfo", self->distributorId)
+			    .detail("Size", teams.size())
+			    .detail("Primary", self->primary);
+			for (i = 0; i < teams.size(); i++) {
+				const auto& team = teams[i];
+				TraceEvent("ServerTeamInfo", self->distributorId)
+				    .detail("TeamIndex", i)
+				    .detail("Healthy", team->isHealthy())
+				    .detail("TeamSize", team->size())
+				    .detail("MemberIDs", team->getServerIDsStr())
+				    .detail("Primary", self->primary);
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
+			}
+
 			TraceEvent("MachineInfo", self->distributorId)
-			    .detail("MachineInfoIndex", i)
-			    .detail("Healthy", isMachineHealthy)
-			    .detail("MachineID", machine->first.contents().toString())
-			    .detail("MachineTeamOwned", machine->second->machineTeams.size())
-			    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
-			    .detail("ServersID", machine->second->getServersIDStr())
+			    .detail("Size", machine_info.size())
 			    .detail("Primary", self->primary);
-			machine++;
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
-			}
-		}
+			state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
+			state bool isMachineHealthy = false;
+			for (i = 0; i < machine_info.size(); i++) {
+				Reference<TCMachineInfo> _machine = machine->second;
+				if (!_machine.isValid() || machine_info.find(_machine->machineID) == machine_info.end() ||
+				    _machine->serversOnMachine.empty()) {
+					isMachineHealthy = false;
+				}
 
-		TraceEvent("MachineTeamInfo", self->distributorId)
-		    .detail("Size", machineTeams.size())
-		    .detail("Primary", self->primary);
-		for (i = 0; i < machineTeams.size(); i++) {
-			const auto& team = machineTeams[i];
+				// Healthy machine has at least one healthy server
+				for (auto& server : _machine->serversOnMachine) {
+					if (!server_status.at(server->id).isUnhealthy()) {
+						isMachineHealthy = true;
+					}
+				}
+
+				isMachineHealthy = false;
+				TraceEvent("MachineInfo", self->distributorId)
+				    .detail("MachineInfoIndex", i)
+				    .detail("Healthy", isMachineHealthy)
+				    .detail("MachineID", machine->first.contents().toString())
+				    .detail("MachineTeamOwned", machine->second->machineTeams.size())
+				    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
+				    .detail("ServersID", machine->second->getServersIDStr())
+				    .detail("Primary", self->primary);
+				machine++;
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
+			}
+
 			TraceEvent("MachineTeamInfo", self->distributorId)
-			    .detail("TeamIndex", i)
-			    .detail("MachineIDs", team->getMachineIDsStr())
-			    .detail("ServerTeams", team->serverTeams.size())
+			    .detail("Size", machineTeams.size())
 			    .detail("Primary", self->primary);
-			if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-				wait(yield());
+			for (i = 0; i < machineTeams.size(); i++) {
+				const auto& team = machineTeams[i];
+				TraceEvent("MachineTeamInfo", self->distributorId)
+				    .detail("TeamIndex", i)
+				    .detail("MachineIDs", team->getMachineIDsStr())
+				    .detail("ServerTeams", team->serverTeams.size())
+				    .detail("Primary", self->primary);
+				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+					wait(yield());
+				}
 			}
+
+			// TODO: re-enable the following logging or remove them.
+			// TraceEvent("LocalityRecordKeyName", self->distributorId)
+			//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
+			//     .detail("Primary", self->primary);
+			// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
+			// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
+			// 	    .detail("KeyIndex", i)
+			// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
+			// 	    .detail("Primary", self->primary);
+			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+			// 		wait(yield());
+			// 	}
+			// }
+
+			// TraceEvent("MachineLocalityMap", self->distributorId)
+			//     .detail("Size", machineLocalityMapEntryArraySize)
+			//     .detail("Primary", self->primary);
+			// for (i = 0; i < serverIDs.size(); i++) {
+			// 	const auto& serverID = serverIDs[i];
+			// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
+			// 	if (record.isValid()) {
+			// 		TraceEvent("MachineLocalityMap", self->distributorId)
+			// 		    .detail("LocalityIndex", i)
+			// 		    .detail("UID", serverID->toString())
+			// 		    .detail("LocalityRecord", record->toString())
+			// 		    .detail("Primary", self->primary);
+			// 	} else {
+			// 		TraceEvent("MachineLocalityMap", self->distributorId)
+			// 		    .detail("LocalityIndex", i)
+			// 		    .detail("UID", serverID->toString())
+			// 		    .detail("LocalityRecord", "[NotFound]")
+			// 		    .detail("Primary", self->primary);
+			// 	}
+			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
+			// 		wait(yield());
+			// 	}
+			// }
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
-
-		// TODO: re-enable the following logging or remove them.
-		// TraceEvent("LocalityRecordKeyName", self->distributorId)
-		//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
-		//     .detail("Primary", self->primary);
-		// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
-		// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
-		// 	    .detail("KeyIndex", i)
-		// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
-		// 	    .detail("Primary", self->primary);
-		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-		// 		wait(yield());
-		// 	}
-		// }
-
-		// TraceEvent("MachineLocalityMap", self->distributorId)
-		//     .detail("Size", machineLocalityMapEntryArraySize)
-		//     .detail("Primary", self->primary);
-		// for (i = 0; i < serverIDs.size(); i++) {
-		// 	const auto& serverID = serverIDs[i];
-		// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
-		// 	if (record.isValid()) {
-		// 		TraceEvent("MachineLocalityMap", self->distributorId)
-		// 		    .detail("LocalityIndex", i)
-		// 		    .detail("UID", serverID->toString())
-		// 		    .detail("LocalityRecord", record->toString())
-		// 		    .detail("Primary", self->primary);
-		// 	} else {
-		// 		TraceEvent("MachineLocalityMap", self->distributorId)
-		// 		    .detail("LocalityIndex", i)
-		// 		    .detail("UID", serverID->toString())
-		// 		    .detail("LocalityRecord", "[NotFound]")
-		// 		    .detail("Primary", self->primary);
-		// 	}
-		// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
-		// 		wait(yield());
-		// 	}
-		// }
 	}
 }
 
