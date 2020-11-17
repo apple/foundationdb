@@ -175,9 +175,11 @@ protected:
 		// fluentd filter to be able to correctly parse the updated format! See
 		// the msgpack specification for more info on the bit patterns used
 		// here.
-		uint8_t size = 5;
+		uint8_t size = 6;
 		if (span.parents.size() == 0) --size;
 		request.write_byte(size | 0b10010000); // write as array
+
+		serialize_string(g_network->getLocalAddress().toString(), request);
 
 		serialize_string(span.context.toString(), request);
 
