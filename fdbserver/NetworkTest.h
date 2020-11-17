@@ -35,22 +35,32 @@ struct NetworkTestInterface {
 
 struct NetworkTestReply {
 	constexpr static FileIdentifier file_identifier = 14465374;
+	static uint32_t accumulativeIndex;
+
+	uint32_t index;
 	Value value;
-	NetworkTestReply() {}
-	NetworkTestReply( Value value ) : value(value) {}
+
+	NetworkTestReply() : index(++accumulativeIndex) {}
+	NetworkTestReply( Value value ) : index(++accumulativeIndex), value(value) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, value);
+		serializer(ar, index, value);
 	}
 };
 
 struct NetworkTestRequest {
 	constexpr static FileIdentifier file_identifier = 4146513;
+	static uint32_t accumulativeIndex;
+
+	uint32_t index;
 	Key key;
 	uint32_t replySize;
 	ReplyPromise<struct NetworkTestReply> reply;
-	NetworkTestRequest(){}
-	NetworkTestRequest( Key key, uint32_t replySize ) : key(key), replySize(replySize) {}
+
+	NetworkTestRequest() : index(++accumulativeIndex) {}
+	NetworkTestRequest( Key key, uint32_t replySize ) : index(++accumulativeIndex), key(key), replySize(replySize) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, replySize, reply);

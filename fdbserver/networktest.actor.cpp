@@ -18,8 +18,14 @@
  * limitations under the License.
  */
 
+#include <iostream>
+#include <fstream>
+
 #include "fdbserver/NetworkTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+
+uint32_t NetworkTestReply::accumulativeIndex = 0;
+uint32_t NetworkTestRequest::accumulativeIndex = 0;
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
 
@@ -33,21 +39,38 @@ NetworkTestInterface::NetworkTestInterface( INetwork* local )
 	test.makeWellKnownEndpoint( WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint );
 }
 
+constexpr double startingDelay = 5.0;
+constexpr int packetSize = 155 * 1024;	// slightly larger than 150K limit
+constexpr int NUM_PARALLEL_CLIENT = 32;
+
+void generateReplyString(std::string& output, const int length) {
+	std::ifstream ifs("/dev/random");
+	output.resize(length);
+	ifs.read(&output[0], length);
+}
+
 ACTOR Future<Void> networkTestServer() {
 	state NetworkTestInterface interf( g_network );
 	state Future<Void> logging = delay( 1.0 );
 	state double lastTime = now();
 	state int sent = 0;
 
+	wait(delay(startingDelay));
+
 	loop {
 		choose {
 			when( NetworkTestRequest req = waitNext( interf.test.getFuture() ) ) {
-				req.reply.send( NetworkTestReply( Value( std::string( req.replySize, '.' ) ) ) );
+				std::string reply;
+				generateReplyString(reply, req.replySize);
+				auto networkTestReply = NetworkTestReply(Value(reply));
+				req.reply.send(networkTestReply);
 				sent++;
+				std::cout << "Req index = " << req.index << " Resp index = " << networkTestReply.index << std::endl;
 			}
+
 			when( wait( logging ) ) {
 				auto spd = sent / (now() - lastTime);
-				fprintf( stderr, "responses per second: %f (%f us)\n", spd, 1e6/spd );
+				std::cerr << "responses per second: " << spd << " (" << 1e6 / spd << " us)" << std::endl;
 				lastTime = now();
 				sent = 0;
 				logging = delay( 1.0 );
@@ -58,7 +81,13 @@ ACTOR Future<Void> networkTestServer() {
 
 ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* sent ) {
 	loop {
-		NetworkTestReply rep = wait(  retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test, NetworkTestRequest( LiteralStringRef("."), 600000 ) ) );
+		state NetworkTestRequest request = NetworkTestRequest(LiteralStringRef("."), packetSize);
+		state NetworkTestReply rep = wait(retryBrokenPromise(
+			interfs[deterministicRandom()->randomInt(0, interfs.size())].test,
+			request));
+
+		std::cout << "Req index = " << request.index << " Resp index = " << rep.index << std::endl;
+
 		(*sent)++;
 	}
 }
@@ -68,7 +97,7 @@ ACTOR Future<Void> logger( int* sent ) {
 	loop {
 		wait( delay(1.0) );
 		auto spd = *sent / (now() - lastTime);
-		fprintf( stderr, "messages per second: %f\n", spd);
+		std::cerr << "messages per second: " << spd << std::endl;
 		lastTime = now();
 		*sent = 0;
 	}
@@ -133,11 +162,7 @@ static void networkTestnanosleep()
 }
 
 ACTOR Future<Void> networkTestClient( std:: string testServers ) {
-	if (testServers == "nanosleep") {
-		networkTestnanosleep();
-		//return Void();
-	}
-
+	wait(delay(startingDelay));
 
 	state std::vector<NetworkTestInterface> interfs;
 	state std::vector<NetworkAddress> servers = NetworkAddress::parseList(testServers);
@@ -148,7 +173,7 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 	}
 
 	state std::vector<Future<Void>> clients;
-	for( int i = 0; i < 30; i++ )
+	for( int i = 0; i < NUM_PARALLEL_CLIENT; i++ )
 		clients.push_back( testClient( interfs, &sent ) );
 	clients.push_back( logger( &sent ) );
 
