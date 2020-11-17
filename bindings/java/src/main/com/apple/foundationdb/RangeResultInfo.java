@@ -21,6 +21,10 @@
 package com.apple.foundationdb;
 
 class RangeResultInfo {
+	RangeResultSummary getSummary() {
+		return f.getSummary();
+	}
+
 	RangeResult get() {
 		return f.getResults();
 	}
