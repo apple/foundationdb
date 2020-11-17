@@ -112,7 +112,10 @@ struct PageChecksumCodec {
 			// some chance the page was written with another checksum algorithm
 			crc32Sum.part1 = 0;
 			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			if (crc32Sum == *pSumInPage) return true;
+			if (crc32Sum == *pSumInPage) {
+				TEST(true); // Read CRC32 checksum
+				return true;
+			}
 		}
 
 		// Try xxhash64
@@ -133,7 +136,10 @@ struct PageChecksumCodec {
 		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
-		if (hashLittle2Sum == *pSumInPage) return true;
+		if (hashLittle2Sum == *pSumInPage) {
+			TEST(true); // Read HashLittle2 checksum
+			return true;
+		}
 
 		if (!silent) {
 			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
