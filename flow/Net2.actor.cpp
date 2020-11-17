@@ -138,6 +138,7 @@ public:
 	// INetwork interface
 	virtual double now() const override { return currentTime; };
 	virtual double timer() override { return ::timer(); };
+	double timer_monotonic() override { return ::timer_monotonic(); };
 	virtual Future<Void> delay(double seconds, TaskPriority taskId) override;
 	virtual Future<class Void> yield(TaskPriority taskID) override;
 	virtual bool check_yield(TaskPriority taskId) override;

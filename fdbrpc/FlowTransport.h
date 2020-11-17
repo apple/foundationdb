@@ -145,8 +145,14 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastDataPacketSentTime;
 	int outstandingReplies;
 	ContinuousSample<double> pingLatencies;
+	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
+	// Cleared every time stats are logged for this peer.
+	int connectOutgoingCount;
+	int connectIncomingCount;
+	int connectFailedCount;
+	ContinuousSample<double> connectLatencies;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 

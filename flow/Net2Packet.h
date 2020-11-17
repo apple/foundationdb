@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include "flow/Histogram.h"
 
 // PacketWriter and PacketBuffer are in serialize.h because they are needed by the SerializeSource<> template
 
@@ -40,8 +41,17 @@ struct ReliablePacket : FastAllocated<ReliablePacket> {
 
 class UnsentPacketQueue : NonCopyable {
 public:
-	UnsentPacketQueue() : unsent_first(0), unsent_last(0) {}
-	~UnsentPacketQueue() { discardAll(); }
+	UnsentPacketQueue()
+	  : unsent_first(0), unsent_last(0),
+	    sendQueueLatencyHistogram(Histogram::getHistogram(
+	        LiteralStringRef("UnsentPacketQueue"), LiteralStringRef("QueueWait"), Histogram::Unit::microseconds)) {}
+
+	~UnsentPacketQueue() {
+		discardAll();
+		unsent_first = (PacketBuffer*)0xDEADBEEF;
+		unsent_last = (PacketBuffer*)0xCAFEBABE;
+		sendQueueLatencyHistogram = Reference<Histogram>(nullptr);
+	}
 
 	// Get a PacketBuffer to write new packets into
 	PacketBuffer* getWriteBuffer(size_t sizeHint = 0) {
@@ -70,6 +80,7 @@ public:
 
 private:
 	PacketBuffer *unsent_first, *unsent_last;  // Both nullptr, or inclusive range of PacketBuffers that haven't been sent.  The last one may have space for more packets to be written.
+	Reference<Histogram> sendQueueLatencyHistogram;
 };
 
 class ReliablePacketList : NonCopyable {

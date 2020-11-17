@@ -94,8 +94,6 @@ void ISimulator::displayWorkers() const
 
 const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 
-ISimulator* g_pSimulator = 0;
-thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
 int openCount = 0;
 
 struct SimClogging {
@@ -748,6 +746,8 @@ public:
 		timerTime += deterministicRandom()->random01()*(time+0.1-timerTime)/2.0;
 		return timerTime;
 	}
+
+	double timer_monotonic() override { return timer(); }
 
 	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);

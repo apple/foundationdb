@@ -507,7 +507,7 @@ public:
 		return f;
 	}
 
-	void retriveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
+	void retrieveTraceLogIssues(std::set<std::string>& out) { return issues->retrieveIssues(out); }
 
 	~TraceLog() {
 		close();
@@ -727,6 +727,12 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 	type = ev.type;
 	timeIndex = ev.timeIndex;
 
+	for (int i = 0; i < 5; i++) {
+		eventCounts[i] = ev.eventCounts[i];
+	}
+
+	networkThread = ev.networkThread;
+
 	ev.initialized = true;
 	ev.enabled = false;
 	ev.logged = true;
@@ -734,6 +740,7 @@ TraceEvent::TraceEvent(TraceEvent &&ev) {
 }
 
 TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
+	// Note: still broken if ev and this are the same memory address.
 	enabled = ev.enabled;
 	err = ev.err;
 	fields = std::move(ev.fields);
@@ -748,6 +755,12 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	type = ev.type;
 	timeIndex = ev.timeIndex;
 
+	for (int i = 0; i < 5; i++) {
+		eventCounts[i] = ev.eventCounts[i];
+	}
+
+	networkThread = ev.networkThread;
+
 	ev.initialized = true;
 	ev.enabled = false;
 	ev.logged = true;
@@ -756,8 +769,8 @@ TraceEvent& TraceEvent::operator=(TraceEvent &&ev) {
 	return *this;
 }
 
-void retriveTraceLogIssues(std::set<std::string>& out) {
-	return g_traceLog.retriveTraceLogIssues(out);
+void retrieveTraceLogIssues(std::set<std::string>& out) {
+	return g_traceLog.retrieveTraceLogIssues(out);
 }
 
 Future<Void> pingTraceLogWriterThread() {
