@@ -139,8 +139,20 @@ ACTOR Future<Void> resetChecker( ILogSystem::ServerPeekCursor* self, NetworkAddr
 	self->unknownReplies = 0;
 	self->fastReplies = 0;
 	wait(delay(SERVER_KNOBS->PEEK_STATS_INTERVAL));
-	TraceEvent("SlowPeekStats").detail("PeerAddress", addr).detail("SlowReplies", self->slowReplies).detail("FastReplies", self->fastReplies).detail("UnknownReplies", self->unknownReplies);
-	if(self->slowReplies >= SERVER_KNOBS->PEEK_STATS_SLOW_AMOUNT && self->slowReplies/double(self->slowReplies+self->fastReplies) >= SERVER_KNOBS->PEEK_STATS_SLOW_RATIO) {
+	TraceEvent("SlowPeekStats", self->randomID)
+	    .detail("PeerAddress", addr)
+	    .detail("SlowReplies", self->slowReplies)
+	    .detail("FastReplies", self->fastReplies)
+	    .detail("UnknownReplies", self->unknownReplies);
+
+	if (self->slowReplies >= SERVER_KNOBS->PEEK_STATS_SLOW_AMOUNT &&
+	    self->slowReplies / double(self->slowReplies + self->fastReplies) >= SERVER_KNOBS->PEEK_STATS_SLOW_RATIO) {
+
+		TraceEvent("ConnectionResetSlowPeek", self->randomID)
+		    .detail("PeerAddress", addr)
+		    .detail("SlowReplies", self->slowReplies)
+		    .detail("FastReplies", self->fastReplies)
+		    .detail("UnknownReplies", self->unknownReplies);
 		FlowTransport::transport().resetConnection(addr);
 		self->lastReset = now();
 	}

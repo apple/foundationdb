@@ -30,6 +30,7 @@
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/network.h"
 #include <algorithm>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
@@ -685,16 +686,18 @@ struct SendBuffer {
 struct PacketBuffer : SendBuffer {
 private:
 	int reference_count;
-	uint32_t size_;
+	uint32_t const size_;
 	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 
 public:
+	double const enqueue_time;
+
 	uint8_t* data() { return const_cast<uint8_t*>(static_cast<SendBuffer*>(this)->data); }
 	size_t size() { return size_; }
 
 private:
-	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
+	explicit PacketBuffer(size_t size) : reference_count(1), size_(size), enqueue_time(g_network->now()) {
 		next = 0;
 		bytes_written = bytes_sent = 0;
 		((SendBuffer*)this)->data = reinterpret_cast<uint8_t*>(this + 1);

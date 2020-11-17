@@ -30,8 +30,9 @@
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
 #endif
-#include "flow/serialize.h"
+#include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 
 enum class TaskPriority {
 	Max = 1000000,
@@ -119,8 +120,6 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 }
 
 class Void;
-
-template<class T> class Optional;
 
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
@@ -368,6 +367,9 @@ public:
 	virtual int getFD() = 0;
 	virtual Future<int64_t> read() = 0;
 };
+
+// forward declare SendBuffer, declared in serialize.h
+struct SendBuffer;
 
 class IConnection {
 public:

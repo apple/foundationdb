@@ -193,6 +193,7 @@ public:
 	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
 	int DD_TEAMS_INFO_PRINT_INTERVAL;
 	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
+	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
