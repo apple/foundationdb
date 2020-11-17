@@ -38,7 +38,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "fdbclient/BlobStore.h"
+#include "fdbclient/S3BlobStore.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "flow/Platform.h"
@@ -1460,12 +1460,12 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	o.create("configured_workers") = CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
 
 	if(exe == EXE_AGENT) {
-		static BlobStoreEndpoint::Stats last_stats;
+		static S3BlobStoreEndpoint::Stats last_stats;
 		static double last_ts = 0;
-		BlobStoreEndpoint::Stats current_stats = BlobStoreEndpoint::s_stats;
+		S3BlobStoreEndpoint::Stats current_stats = S3BlobStoreEndpoint::s_stats;
 		JSONDoc blobstats = o.create("blob_stats");
 		blobstats.create("total") = current_stats.getJSON();
-		BlobStoreEndpoint::Stats diff = current_stats - last_stats;
+		S3BlobStoreEndpoint::Stats diff = current_stats - last_stats;
 		json_spirit::mObject diffObj = diff.getJSON();
 		if(last_ts > 0)
 			diffObj["bytes_per_second"] = double(current_stats.bytes_sent - last_stats.bytes_sent) / (now() - last_ts);
@@ -3790,7 +3790,7 @@ int main(int argc, char* argv[]) {
 		auto initCluster = [&](bool quiet = false) {
 			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
 			try {
-				ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+				ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 			}
 			catch (Error& e) {
 				if(!quiet)
@@ -3813,7 +3813,7 @@ int main(int argc, char* argv[]) {
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
-				sourceCcf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedSourceClusterFile.first));
+				sourceCcf = makeReference<ClusterConnectionFile>(resolvedSourceClusterFile.first);
 			}
 			catch (Error& e) {
 				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());

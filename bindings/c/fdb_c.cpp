@@ -123,9 +123,18 @@ fdb_error_t fdb_run_network() {
 	CATCH_AND_RETURN( API->runNetwork(); );
 }
 
+#ifdef ADDRESS_SANITIZER
+extern "C" void __lsan_do_leak_check();
+#endif
+
 extern "C" DLLEXPORT
 fdb_error_t fdb_stop_network() {
-	CATCH_AND_RETURN( API->stopNetwork(); );
+#ifdef ADDRESS_SANITIZER
+	// fdb_stop_network intentionally leaks a bunch of memory, so let's do the
+	// leak check before that so it's meaningful
+	__lsan_do_leak_check();
+#endif
+	CATCH_AND_RETURN(API->stopNetwork(););
 }
 
 extern "C" DLLEXPORT

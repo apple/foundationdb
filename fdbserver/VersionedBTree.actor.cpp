@@ -2224,10 +2224,10 @@ Reference<IPagerSnapshot> DWALPager::getReadSnapshot(Version v) {
 
 void DWALPager::addLatestSnapshot() {
 	Promise<Void> expired;
-	snapshots.push_back({ pLastCommittedHeader->committedVersion, expired,
-	                      Reference<DWALPagerSnapshot>(new DWALPagerSnapshot(this, pLastCommittedHeader->getMetaKey(),
-	                                                                         pLastCommittedHeader->committedVersion,
-	                                                                         expired.getFuture())) });
+	snapshots.push_back(
+	    { pLastCommittedHeader->committedVersion, expired,
+	      makeReference<DWALPagerSnapshot>(this, pLastCommittedHeader->getMetaKey(),
+	                                       pLastCommittedHeader->committedVersion, expired.getFuture()) });
 }
 
 // TODO: Move this to a flow header once it is mature.
@@ -4996,7 +4996,7 @@ public:
 			  : parent(toCopy.parent), pageID(toCopy.pageID), page(toCopy.page), cursor(toCopy.cursor) {}
 
 			// Convenience method for copying a PageCursor
-			Reference<PageCursor> copy() const { return Reference<PageCursor>(new PageCursor(*this)); }
+			Reference<PageCursor> copy() const { return makeReference<PageCursor>(*this); }
 
 			const BTreePage* btPage() const { return (const BTreePage*)page->begin(); }
 
@@ -5026,7 +5026,7 @@ public:
 				}
 
 				return map(child, [=](Reference<const IPage> page) {
-					return Reference<PageCursor>(new PageCursor(id, page, Reference<PageCursor>::addRef(this)));
+					return makeReference<PageCursor>(id, page, Reference<PageCursor>::addRef(this));
 				});
 			}
 
@@ -5102,7 +5102,7 @@ public:
 			// Otherwise read the root page
 			Future<Reference<const IPage>> root = readPage(pager, rootPageID, &dbBegin, &dbEnd);
 			return map(root, [=](Reference<const IPage> p) {
-				pageCursor = Reference<PageCursor>(new PageCursor(rootPageID, p));
+				pageCursor = makeReference<PageCursor>(rootPageID, p);
 				return Void();
 			});
 		}

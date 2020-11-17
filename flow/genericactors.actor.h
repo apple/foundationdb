@@ -21,6 +21,7 @@
 #pragma once
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+#include <utility>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 	#define FLOW_GENERICACTORS_ACTOR_G_H
 	#include "flow/genericactors.actor.g.h"
@@ -308,9 +309,8 @@ Future<U> mapAsync(Future<T> what, F actorFunc) {
 }
 
 //maps a vector of futures with an asynchronous function
-template<class T, class F>
-std::vector<Future<std::invoke_result_t<F, T>>> mapAsync(std::vector<Future<T>> const& what, F const& actorFunc)
-{
+template <class T, class F>
+auto mapAsync(std::vector<Future<T>> const& what, F const& actorFunc) {
 	std::vector<std::invoke_result_t<F, T>> ret;
 	ret.reserve(what.size());
 	for (const auto& f : what) ret.push_back(mapAsync(f, actorFunc));
@@ -367,9 +367,8 @@ Future<std::invoke_result_t<F, T>> map(Future<T> what, F func)
 }
 
 //maps a vector of futures
-template<class T, class F>
-std::vector<Future<std::invoke_result_t<F, T>>> map(std::vector<Future<T>> const& what, F const& func)
-{
+template <class T, class F>
+auto map(std::vector<Future<T>> const& what, F const& func) {
 	std::vector<Future<std::invoke_result_t<F, T>>> ret;
 	ret.reserve(what.size());
 	for (const auto& f : what) ret.push_back(map(f, func));
@@ -443,9 +442,7 @@ Future<Void> asyncFilter( FutureStream<T> input, F actorPred, PromiseStream<T> o
 	loop {
 		try {
 			choose {
-				when ( T nextInput = waitNext(input) ) {
-					futures.push_back( std::pair<T, Future<bool>>(nextInput, actorPred(nextInput)) );
-				}
+				when(T nextInput = waitNext(input)) { futures.emplace_back(nextInput, actorPred(nextInput)); }
 				when ( bool pass = wait( futures.size() == 0 ? Never() : futures.front().second ) ) {
 					if(pass) output.send(futures.front().first);
 					futures.pop_front();
@@ -667,13 +664,9 @@ class ReferencedObject : NonCopyable, public ReferenceCounted<ReferencedObject<V
 			value = std::move(v);
 		}
 
-		static Reference<ReferencedObject<V>> from(V const& v) {
-			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(v));
-		}
+	    static Reference<ReferencedObject<V>> from(V const& v) { return makeReference<ReferencedObject<V>>(v); }
 
-		static Reference<ReferencedObject<V>> from(V&& v) {
-			return Reference<ReferencedObject<V>>(new ReferencedObject<V>(std::move(v)));
-		}
+	    static Reference<ReferencedObject<V>> from(V&& v) { return makeReference<ReferencedObject<V>>(std::move(v)); }
 
 	private:
 		V value;
@@ -1309,7 +1302,8 @@ private:
 	Promise<Void> broken_on_destruct;
 
 	ACTOR static Future<Void> takeActor(FlowLock* lock, TaskPriority taskID, int64_t amount) {
-		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it = lock->takers.insert(lock->takers.end(), std::make_pair(Promise<Void>(), amount));
+		state std::list<std::pair<Promise<Void>, int64_t>>::iterator it =
+		    lock->takers.emplace(lock->takers.end(), Promise<Void>(), amount);
 
 		try {
 			wait( it->first.getFuture() );
@@ -1366,7 +1360,7 @@ struct NotifiedInt {
 	Future<Void> whenAtLeast( int64_t limit ) {
 		if (val >= limit) return Void();
 		Promise<Void> p;
-		waiting.push( std::make_pair(limit,p) );
+		waiting.emplace(limit, p);
 		return p.getFuture();
 	}
 
@@ -1809,6 +1803,37 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	return Void();
 }
 
+// Monad
+
+ACTOR template <class Fun, class T>
+Future<decltype(std::declval<Fun>()(std::declval<T>()))> fmap(Fun fun, Future<T> f) {
+	T val = wait(f);
+	return fun(val);
+}
+
+ACTOR template <class T, class Fun>
+Future<decltype(std::declval<Fun>()(std::declval<T>()).getValue())> runAfter(Future<T> lhs, Fun rhs) {
+	T val1 = wait(lhs);
+	decltype(std::declval<Fun>()(std::declval<T>()).getValue()) res = wait(rhs(val1));
+	return res;
+}
+
+ACTOR template <class T, class U>
+Future<U> runAfter(Future<T> lhs, Future<U> rhs) {
+	T val1 = wait(lhs);
+	U res = wait(rhs);
+	return res;
+}
+
+template <class T, class Res>
+Future<Res> operator>>=(Future<T> lhs, std::function<Future<Res>(T const&)> rhs) {
+	return runAfter(lhs, rhs);
+}
+
+template <class T, class U>
+Future<U> operator>> (Future<T> const& lhs, Future<U> const& rhs) {
+	return runAfter(lhs, rhs);
+}
 
 #include "flow/unactorcompiler.h"
 

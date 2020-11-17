@@ -28,7 +28,9 @@
 struct HealthMetricsApiWorkload : TestWorkload {
 	// Performance Metrics
 	int64_t worstStorageQueue = 0;
+	int64_t worstLimitingStorageQueue = 0;
 	int64_t worstStorageDurabilityLag = 0;
+	int64_t worstLimitingStorageDurabilityLag = 0;
 	int64_t worstTLogQueue = 0;
 	int64_t detailedWorstStorageQueue = 0;
 	int64_t detailedWorstStorageDurabilityLag = 0;
@@ -91,7 +93,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		if (!correctHealthMetricsState) {
 			TraceEvent(SevError, "IncorrectHealthMetricsState")
 			    .detail("WorstStorageQueue", worstStorageQueue)
+			    .detail("WorstLimitingStorageQueue", worstLimitingStorageQueue)
 			    .detail("WorstStorageDurabilityLag", worstStorageDurabilityLag)
+			    .detail("WorstLimitingStorageDurabilityLag", worstLimitingStorageDurabilityLag)
 			    .detail("WorstTLogQueue", worstTLogQueue)
 			    .detail("DetailedWorstStorageQueue", detailedWorstStorageQueue)
 			    .detail("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag)
@@ -128,13 +132,19 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			healthMetrics = newHealthMetrics;
 
 			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
+			self->worstLimitingStorageQueue =
+			    std::max(self->worstLimitingStorageQueue, healthMetrics.limitingStorageQueue);
 			self->worstStorageDurabilityLag =
 			    std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
+			self->worstLimitingStorageDurabilityLag =
+			    std::max(self->worstLimitingStorageDurabilityLag, healthMetrics.limitingStorageDurabilityLag);
 			self->worstTLogQueue = std::max(self->worstTLogQueue, healthMetrics.worstTLogQueue);
 
 			TraceEvent("HealthMetrics")
 			    .detail("WorstStorageQueue", healthMetrics.worstStorageQueue)
+			    .detail("LimitingStorageQueue", healthMetrics.limitingStorageQueue)
 			    .detail("WorstStorageDurabilityLag", healthMetrics.worstStorageDurabilityLag)
+			    .detail("LimitingStorageDurabilityLag", healthMetrics.limitingStorageDurabilityLag)
 			    .detail("WorstTLogQueue", healthMetrics.worstTLogQueue)
 			    .detail("TpsLimit", healthMetrics.tpsLimit);
 

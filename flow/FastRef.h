@@ -161,6 +161,11 @@ private:
 	P *ptr;
 };
 
+template <class P, class... Args>
+Reference<P> makeReference(Args&&... args) {
+	return Reference<P>(new P(std::forward<Args>(args)...));
+}
+
 template <class P>
 bool operator==( const Reference<P>& lhs, const Reference<P>& rhs ) {
 	return lhs.getPtr() == rhs.getPtr();

@@ -1320,8 +1320,8 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_type_t whatToRun, test_location_t at, 
 		int minTestersExpected, std::string fileName, StringRef startingConfiguration, LocalityData locality ) {
 	state vector<TestSpec> testSpecs;
-	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
-	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
+	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
+	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	vector<Future<Void>> actors;
 	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
 	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
@@ -1368,7 +1368,7 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 
 	Future<Void> tests;
 	if (at == TEST_HERE) {
-		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
+		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		vector<TesterInterface> iTesters(1);
 		actors.push_back( reportErrors(monitorServerDBInfo( cc, LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
 		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );

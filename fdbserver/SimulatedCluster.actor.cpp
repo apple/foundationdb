@@ -92,7 +92,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 	if (g_simulator.drAgents == ISimulator::BackupToDB) {
 		Database cx = Database::createDatabase(connFile, -1);
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		state Database extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents").detail("ConnFile", connFile->getConnectionString().toString()).detail("ExtraString", extraFile->getConnectionString().toString());
@@ -267,10 +267,11 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<ClusterConnec
 
 			if(!useSeedFile) {
 				writeFile(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
-				connFile = Reference<ClusterConnectionFile>( new ClusterConnectionFile( joinPath( *dataFolder, "fdb.cluster" )));
+				connFile = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"));
 			}
 			else {
-				connFile = Reference<ClusterConnectionFile>( new ClusterConnectionFile( joinPath( *dataFolder, "fdb.cluster" ), connStr.toString() ) );
+				connFile =
+				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 			}
 		}
 		else {
@@ -642,7 +643,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>>* systemActors, st
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true,
-			                     i == useSeedForMachine, enableExtraDB ? AgentAddition : AgentNone,
+			                     i == useSeedForMachine, AgentAddition,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
@@ -755,7 +756,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 		break;
 	}
 	case 3: {
-		TEST(true); // Simulated cluster using radix-tree storage engine
+		TEST(true); // Simulated cluster using redwood storage engine
 		set_config("ssd-redwood-experimental");
 		break;
 		}
@@ -856,7 +857,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 				int satellite_replication_type = deterministicRandom()->randomInt(0,3);
 				switch (satellite_replication_type) {
 				case 0: {
-					TEST( true );  // Simulated cluster using no satellite redundancy mode
+					TEST( true );  // Simulated cluster using no satellite redundancy mode (>4 datacenters)
 					break;
 				}
 				case 1: {
@@ -883,7 +884,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 					break;
 				}
 				case 1: {
-					TEST( true );  // Simulated cluster using no satellite redundancy mode
+					TEST( true );  // Simulated cluster using no satellite redundancy mode (<4 datacenters)
 					break;
 				}
 				case 2: {
@@ -1137,8 +1138,8 @@ void setupSimulatedSystem(vector<Future<Void>>* systemActors, std::string baseFo
 
 	// Use IPv6 25% of the time
 	bool useIPv6 = deterministicRandom()->random01() < 0.25;
-	TEST( useIPv6 );
-	TEST( !useIPv6 );
+	TEST( useIPv6 ); // Use IPv6
+	TEST( !useIPv6 ); // Use IPv4
 
 	vector<NetworkAddress> coordinatorAddresses;
 	if(minimumRegions > 1) {
@@ -1423,10 +1424,9 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		std::string clusterFileDir = joinPath( dataFolder, deterministicRandom()->randomUniqueID().toString() );
 		platform::createDirectory( clusterFileDir );
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
-		wait(timeoutError(runTests(Reference<ClusterConnectionFile>(
-									   new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))),
-								   TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration),
-						  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
+		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
+		                           TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration),
+		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}

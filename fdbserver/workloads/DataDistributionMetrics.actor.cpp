@@ -71,8 +71,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	ACTOR Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				wait(delay(self->delayPerLoop));
@@ -138,8 +137,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		}
 		// TODO : find why this not work
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
-		state Reference<ReadYourWritesTransaction> tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		try {
 			state Standalone<RangeResultRef> result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->SHARD_COUNT_LIMIT));
 			ASSERT(!result.more);

@@ -233,7 +233,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time
+			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time - stopDifferential not ready
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
 
@@ -387,7 +387,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
 
-		// Increment the backup agent requets
+		// Increment the backup agent requests
 		if (self->agentRequest) {
 			BackupAndRestoreCorrectnessWorkload::backupAgentRequests ++;
 		}
@@ -604,7 +604,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n", now(), randomID.toString().c_str(), waitCycles, (long long) taskCount);
 
 						wait(delay(5.0));
-						tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+						tr = makeReference<ReadYourWritesTransaction>(cx);
 						int64_t _taskCount = wait( backupAgent.getTaskCount(tr) );
 						taskCount = _taskCount;
 

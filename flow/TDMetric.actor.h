@@ -266,7 +266,7 @@ struct MetricUtil {
 		// If we don't have a valid metric reference yet and the create flag was set then create one and possibly put it in the map
 		if(!m && create) {
 			// Metric not found in collection but create is set then create it in the map
-			m = Reference<T>(new T(mname, initial));
+			m = makeReference<T>(mname, initial);
 			if(useMap) {
 				collection->metricMap[mname] = m.template castTo<BaseMetric>();
 				collection->metricAdded.trigger();
