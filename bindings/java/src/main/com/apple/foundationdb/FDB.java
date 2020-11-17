@@ -20,6 +20,8 @@
 
 package com.apple.foundationdb;
 
+import java.math.BigInteger;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -393,6 +395,52 @@ public class FDB {
 	}
 
 	/**
+	 * Initializes networking if required and returns the protocol version of the cluster specified by the default cluster path.<br>
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a BigInteger
+	 */
+	public CompletableFuture<BigInteger> getServerProtocol() throws FDBException {
+		return getServerProtocol(null);
+	}
+
+	/**
+	 * Initializes networking if required and returns the protocol version of the cluster specified by {@code clusterFilePath}.<br>
+	 *
+	 * @param clusterFilePath the
+	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  defining the FoundationDB cluster. This can be {@code null} if the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  is to be used.
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a BigInteger
+	 */
+	public CompletableFuture<BigInteger> getServerProtocol(String clusterFilePath) throws FDBException {
+		return getServerProtocol(clusterFilePath, DEFAULT_EXECUTOR);
+	}
+	
+	/**
+	 * Initializes networking if required and returns the protocol version of the cluster specified by {@code clusterFilePath}.<br>
+	 *
+	 * @param clusterFilePath the
+	 *  <a href="/foundationdb/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  defining the FoundationDB cluster. This can be {@code null} if the
+	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  is to be used.
+	 * @param e the {@link Executor} to use to execute asynchronous callbacks
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a BigInteger
+	 */
+	public CompletableFuture<BigInteger> getServerProtocol(String clusterFilePath, Executor e) throws FDBException {
+		synchronized(this) {
+			if(!isConnected()) {
+				startNetwork();
+			}
+		}
+
+		return new FutureBigInt(Database_getServerProtocol(clusterFilePath), e);
+	}
+
+	/**
 	 * Initializes networking. Can only be called once. This version of
 	 * {@code startNetwork()} will create a new thread and execute the networking
 	 * event loop on that thread. This method is called upon {@link Database}
@@ -538,4 +586,6 @@ public class FDB {
 	private native boolean Error_predicate(int predicate, int code);
 
 	private native long Database_create(String clusterFilePath) throws FDBException;
+
+	private native long Database_getServerProtocol(String clusterFilePath) throws FDBException;
 }

@@ -340,6 +340,34 @@ func createDatabase(clusterFile string) (Database, error) {
 	return Database{db}, nil
 }
 
+// GetServerProtocol returns a FutureUInt64 that holds the protocol version of the cluster
+// identified by clusterFile
+func GetServerProtocol(clusterFile string) (FutureUInt64, error) {
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+
+	if !networkStarted {
+		e := startNetwork()
+		if e != nil {
+			return &futureUInt64{future: nil}, e
+		}
+	}
+
+	var cf *C.char
+	if len(clusterFile) != 0 {
+		cf = C.CString(clusterFile)
+		defer C.free(unsafe.Pointer(cf))
+	}
+
+	return &futureUInt64{future: newFuture(C.fdb_get_server_protocol(cf))}, nil
+}
+
+// GetServerProtocolDefault returns a FutureUInt64 that holds the protocol version of the cluster
+// identified by the DefaultClusterFile on the current machine.
+func GetServerProtocolDefault() (FutureUInt64, error) {
+	return GetServerProtocol(DefaultClusterFile)
+}
+
 // Deprecated: Use OpenDatabase instead.
 // CreateCluster returns a cluster handle to the FoundationDB cluster identified
 // by the provided cluster file.

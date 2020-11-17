@@ -267,6 +267,23 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get
 	return (jlong)value;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureBigInt_FutureBigInt_1get(JNIEnv *jenv, jobject, jlong future) {
+	if (!future) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBFuture *f = (FDBFuture *)future;
+
+	uint64_t value = 0;
+	fdb_error_t err = fdb_future_get_uint64(f, &value);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+
+	return (jlong)value;
+}
+
 JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
@@ -962,6 +979,24 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 		return 0;
 	}
 	FDBFuture* f = fdb_transaction_get_approximate_size((FDBTransaction*)tPtr);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1getServerProtocol(JNIEnv *jenv, jobject, jstring clusterFileName) {
+	const char* fileName = nullptr;
+	if(clusterFileName != JNI_NULL) {
+		fileName = jenv->GetStringUTFChars(clusterFileName, JNI_NULL);
+		if(jenv->ExceptionOccurred()) {
+			return 0;
+		}
+	}
+
+	FDBFuture* f = fdb_get_server_protocol(fileName);
+
+	if(clusterFileName != JNI_NULL) {
+		jenv->ReleaseStringUTFChars(clusterFileName, fileName);
+	}
+
 	return (jlong)f;
 }
 

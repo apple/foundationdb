@@ -585,6 +585,12 @@ class Tester:
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
+                        protocol_future = fdb.get_server_protocol()
+                        protocol_future.wait()
+                        protocol = protocol_future.result()
+                        # hex(protocol) returns '0xfdb...'
+                        assert hex(protocol)[2:5] == 'fdb'
+
                         test_db_options(db)
                         test_options(db)
                         test_watches(db)

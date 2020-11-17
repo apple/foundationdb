@@ -170,6 +170,12 @@ Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. T
 
    Returns ``FDB_API_VERSION``, the current version of the FoundationDB C API.  This is the maximum version that may be passed to :func:`fdb_select_api_version()`.
 
+.. function:: FDBFuture* fdb_get_server_protocol(const char* cluster_file_path)
+
+   |future-return0| the protocol version of the cluster specified by ``clusterFilePath``.
+   
+   If ``cluster_file_path`` is NULL or an empty string, then the :ref:`default cluster file <default-cluster-file>` will be used.
+
 Network
 =======
 
@@ -298,6 +304,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
    Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
+.. function:: fdb_error_t fdb_future_get_uint64(FDBFuture* future, uint64_t* out)
+
+   Extracts an unsigned 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``uint64_t``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
