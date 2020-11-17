@@ -28,11 +28,12 @@
 #include "flow/IRandom.h"
 #include "fdbclient/VersionedMap.actor.h"
 
-// PTree is a persistent balanced binary tree implementation. It is based on a treap as a way to guarantee O(1) space for node insertion (rotating is asymptotically cheap), 
-// but the constant factors are very large.
+// PTree is a persistent balanced binary tree implementation. It is based on a treap as a way to guarantee O(1) space
+// for node insertion (rotating is asymptotically cheap), but the constant factors are very large.
 //
-// Each node has three pointers - the first two are its left and right children, respectively, and the third can be set to point to a newer version of the node. 
-// This third pointer allows us to maintain persistence without full path copying, and is employed to achieve O(1) space node insertion.
+// Each node has three pointers - the first two are its left and right children, respectively, and the third can be set
+// to point to a newer version of the node. This third pointer allows us to maintain persistence without full path
+// copying, and is employed to achieve O(1) space node insertion.
 //
 // PTree also supports efficient finger searches.
 namespace PTreeImpl {
@@ -51,8 +52,8 @@ namespace PTreeImpl {
 		Reference<PTree> child(bool which, Version at) const {
 			if (updated && lastUpdateVersion<=at && which == replacedPointer)
 				return pointer[2];
-			else 
-				return pointer[which];
+		    else
+			    return pointer[which];
 		}
 		Reference<PTree> left(Version at) const { return child(false, at); }
 		Reference<PTree> right(Version at) const { return child(true, at); }
@@ -162,39 +163,42 @@ namespace PTreeImpl {
 		}
 	}
 
-	template<class T, class X>
-	bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
-		if (!p) return false;
-		int cmp = compare(x, p->data);
-		bool less = cmp < 0;
-		if (cmp == 0) return true;
-		return contains(p->child(!less, at), at, x);
-	}
+    template <class T, class X>
+    bool contains(const Reference<PTree<T>>& start, Version at, const X& x) {
+	    Reference<PTree<T>> p = start;
+	    while (p) {
+		    int cmp = compare(x, p->data);
+		    bool less = cmp < 0;
+		    if (cmp == 0) return true;
+		    p = p->child(!less, at);
+	    }
+	    return false;
+    }
 
 	// TODO: Remove the number of invocations of operator<, and replace with something closer to memcmp.
 	// and same for upper_bound.
     template <class T, class X>
-    void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
-	    if (!p) {
-		    f.trim_to_bound();
-		    return;
-		}
-		int cmp = compare(x, p->data);
-		bool less = cmp < 0;
-	    f.push_for_bound(p.getPtr(), less);
-	    if (cmp == 0) return;
-	    lower_bound(p->child(!less, at), at, x, f);
+    void lower_bound(const Reference<PTree<T>>& start, Version at, const X& x, PTreeFinger<T>& f) {
+	    Reference<PTree<T>> p = start;
+	    while (p) {
+		    int cmp = compare(x, p->data);
+		    bool less = cmp < 0;
+		    f.push_for_bound(p.getPtr(), less);
+		    if (cmp == 0) return;
+		    p = p->child(!less, at);
+	    }
+	    f.trim_to_bound();
     }
 
     template <class T, class X>
-    void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
-	    if (!p) {
-		    f.trim_to_bound();
-		    return;
-		}
-		bool less = x < p->data;
-	    f.push_for_bound(p.getPtr(), less);
-	    upper_bound(p->child(!less, at), at, x, f);
+    void upper_bound(const Reference<PTree<T>>& start, Version at, const X& x, PTreeFinger<T>& f) {
+	    Reference<PTree<T>> p = start;
+	    while (p) {
+		    bool less = x < p->data;
+		    f.push_for_bound(p.getPtr(), less);
+		    p = p->child(!less, at);
+	    }
+	    f.trim_to_bound();
     }
 
     template <class T, bool forward>
@@ -268,13 +272,19 @@ namespace PTreeImpl {
     // Modifies p to point to a PTree with x inserted
 	template<class T>
 	void insert(Reference<PTree<T>>& p, Version at, const T& x) {
-		if (!p){
-			p = Reference<PTree<T>>(new PTree<T>(x, at));
-		} else {
-			bool direction = !(x < p->data);
-			Reference<PTree<T>> child = p->child(direction, at);
-			insert(child, at, x);
-			p = update(p, direction, child, at);
+	    std::vector<std::pair<Reference<PTree<T>>, bool>> path;
+	    while (p) {
+		    bool direction = !(x < p->data);
+		    path.push_back(std::make_pair(p, direction));
+		    p = p->child(direction, at);
+	    }
+	    p = Reference<PTree<T>>(new PTree<T>(x, at));
+	    while (!path.empty()) {
+		    Reference<PTree<T>> child = p;
+		    p = path.back().first;
+		    bool direction = path.back().second;
+		    path.pop_back();
+		    p = update(p, direction, child, at);
 			if (p->child(direction, at)->priority > p->priority)
 				rotate(p, at, !direction);
 		}
@@ -411,9 +421,9 @@ namespace PTreeImpl {
 
 		bool higherDirection = priority[1] > priority[0];
 
-		if (priority[higherDirection] < p->priority) return; 
+	    if (priority[higherDirection] < p->priority) return;
 
-		// else, child(higherDirection) is a greater priority than us and the other child...
+	    // else, child(higherDirection) is a greater priority than us and the other child...
 		rotate(p, at, !higherDirection);
 		Reference<PTree<T>> child = p->child(!higherDirection, at);
 		demoteRoot(child, at);
@@ -756,9 +766,9 @@ public:
 
 		// Returns x such that key==*x, or end()
 		template <class X>
-		iterator find(const X &key) const { 
-			iterator i(root,at); 
-			PTreeImpl::lower_bound( root, at, key, i.finger ); 
+		iterator find(const X& key) const {
+			iterator i(root, at);
+			PTreeImpl::lower_bound(root, at, key, i.finger);
 			if (i && i.key() == key)
 				return i;
 			else
@@ -768,7 +778,7 @@ public:
 		// Returns the smallest x such that *x>=key, or end()
 		template <class X>
 		iterator lower_bound(const X &key) const {
-			iterator i(root,at); 
+			iterator i(root, at);
 			PTreeImpl::lower_bound( root, at, key, i.finger );
 			return i;
 		}
@@ -776,7 +786,7 @@ public:
 		// Returns the smallest x such that *x>key, or end()
 		template <class X>
 		iterator upper_bound(const X &key) const {
-			iterator i(root,at); 
+			iterator i(root, at);
 			PTreeImpl::upper_bound( root, at, key, i.finger );
 			return i;
 		}
@@ -784,7 +794,7 @@ public:
 		// Returns the largest x such that *x<=key, or end()
 		template <class X>
 		iterator lastLessOrEqual( const X &key ) const {
-			iterator i(root,at); 
+			iterator i(root, at);
 			PTreeImpl::upper_bound( root, at, key, i.finger );
 			--i;
 			return i;
@@ -793,7 +803,7 @@ public:
 		// Returns the largest x such that *x<key, or end()
 		template <class X>
 		iterator lastLess( const X &key ) const {
-			iterator i(root,at); 
+			iterator i(root, at);
 			PTreeImpl::lower_bound( root, at, key, i.finger );
 			--i;
 			return i;
