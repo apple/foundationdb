@@ -63,7 +63,7 @@ struct NetworkTestRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, replySize, reply);
+		serializer(ar, index, key, replySize, reply);
 	}
 };
 
