@@ -30,6 +30,9 @@ struct NoopTracer : ITracer {
 struct LogfileTracer : ITracer {
 	TracerType type() const { return TracerType::LOG_FILE; }
 	void trace(Span const& span) override {
+		if (g_network->isSimulated()) {
+			return;
+		}
 		TraceEvent te(SevInfo, "TracingSpan", span.context);
 		te.detail("Location", span.location.name)
 			.detail("Begin", format("%.6f", span.begin))
