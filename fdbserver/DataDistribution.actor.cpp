@@ -4975,16 +4975,16 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			    "DDQueue", self->ddId, &normalDDQueueErrors()));
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = makeReference<DDTeamCollection>(new DDTeamCollection(
+			primaryTeamCollection = makeReference<DDTeamCollection>(
 			    cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, primaryDcId,
 			    configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), readyToStart.getFuture(),
-			    zeroHealthyTeams[0], true, processingUnhealthy, getShardMetrics));
+			    zeroHealthyTeams[0], true, processingUnhealthy, getShardMetrics);
 			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
 			if (configuration.usableRegions > 1) {
-				remoteTeamCollection = makeReference<DDTeamCollection>(new DDTeamCollection(
+				remoteTeamCollection = makeReference<DDTeamCollection>(
 				    cx, self->ddId, lock, output, shardsAffectedByTeamFailure, configuration, remoteDcIds,
 				    Optional<std::vector<Optional<Key>>>(), readyToStart.getFuture() && remoteRecovered(self->dbInfo),
-				    zeroHealthyTeams[1], false, processingUnhealthy, getShardMetrics));
+				    zeroHealthyTeams[1], false, processingUnhealthy, getShardMetrics);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
 				actors.push_back(

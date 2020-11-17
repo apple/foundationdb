@@ -719,7 +719,6 @@ private:
 public:
 	double const enqueue_time;
 
-	uint8_t* data() { return const_cast<uint8_t*>(static_cast<SendBuffer*>(this)->data); }
 	size_t size() const { return size_; }
 
 private:
