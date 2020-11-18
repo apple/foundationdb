@@ -98,7 +98,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( PEEK_STATS_SLOW_RATIO,                                 0.5 );
 	init( PUSH_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PUSH_RESET_INTERVAL = 20.0;
 	init( PUSH_MAX_LATENCY,                                      0.5 ); if ( randomize && BUGGIFY ) PUSH_MAX_LATENCY = 0.0;
-	init( PUSH_STATS_INTERVAL,                                  10.0 ); 
+	init( PUSH_STATS_INTERVAL,                                  10.0 );
 	init( PUSH_STATS_SLOW_AMOUNT,                                  2 );
 	init( PUSH_STATS_SLOW_RATIO,                                 0.5 );
 
@@ -318,7 +318,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          0 );
+	init( ROCKSDB_READ_PARALLELISM,                                4 );
 	init( ROCKSDB_MEMTABLE_BYTES,                  512 * 1024 * 1024 );
+	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
+	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;

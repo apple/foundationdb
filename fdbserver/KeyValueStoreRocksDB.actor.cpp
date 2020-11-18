@@ -27,6 +27,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = true;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
+		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	}
 	// Compact sstables when there's too much deleted stuff.
 	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
 	return options;
@@ -52,7 +55,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		explicit Writer(DB& db, UID id) : db(db), id(id) {}
 
-		~Writer() {
+		~Writer() override {
 			if (db) {
 				delete db;
 			}
@@ -85,6 +88,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
 			} else {
+				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
 				a.done.send(Void());
 			}
 		}
@@ -96,7 +100,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 		void action(CommitAction& a) {
 			rocksdb::WriteOptions options;
-			options.sync = true;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
@@ -114,6 +118,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
+			if (db == nullptr) {
+				a.done.send(Void());
+				return;
+			}
 			auto s = db->Close();
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
@@ -121,8 +129,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
-				rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				if (!s.ok()) {
+					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+				} else {
+					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
+				}
 			}
+			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
 	};
@@ -266,7 +280,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -278,7 +291,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
 		writeThread->addThread(new Writer(db, id));
-		for (unsigned i = 0; i < nReaders; ++i) {
+		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db));
 		}
 	}
@@ -372,16 +385,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() override {
+		uint64_t live = 0;
+		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kEstimateLiveDataSize, &live));
+
 		int64_t free;
 		int64_t total;
-
-		uint64_t sstBytes = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize, &sstBytes));
-		uint64_t memtableBytes = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kSizeAllMemTables, &memtableBytes));
 		g_network->getDiskBytes(path, free, total);
 
-		return StorageBytes(free, total, sstBytes + memtableBytes, free);
+		return StorageBytes(free, total, live, free);
 	}
 };
 
