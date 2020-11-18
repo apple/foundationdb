@@ -24,8 +24,8 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/xxhash64.h"
 #include "flow/Hash3.h"
+#include "flow/xxhash64.h"
 
 extern "C" {
 #include "fdbserver/sqlite/sqliteInt.h"

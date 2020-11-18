@@ -223,7 +223,6 @@ set(FDBSERVER_SRCS
   workloads/WriteBandwidth.actor.cpp
   workloads/WriteDuringRead.actor.cpp
   workloads/WriteTagThrottling.actor.cpp
-  xxhash64.h
 )
 
 add_library(fdb_sqlite STATIC
