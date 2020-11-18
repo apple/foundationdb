@@ -382,16 +382,19 @@ ACTOR Future<Void> changeSizes( DataDistributionTracker* self, KeyRange keys, in
 }
 
 struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
-	explicit HasBeenTrueFor( Optional<ShardMetrics> value ) {
+	explicit HasBeenTrueFor(const Optional<ShardMetrics>& value) {
 		if(value.present()) {
 			trigger = delayJittered(std::max(0.0, SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + value.get().lastLowBandwidthStartTime - now()), TaskPriority::DataDistributionLow ) || cleared.getFuture();
 		}
 	}
 
-	Future<Void> set() {
+	Future<Void> set(double lastLowBandwidthStartTime) {
 		if( !trigger.isValid() ) {
 			cleared = Promise<Void>();
-			trigger = delayJittered( SERVER_KNOBS->DD_MERGE_COALESCE_DELAY, TaskPriority::DataDistributionLow ) || cleared.getFuture();
+			trigger =
+			    delayJittered(SERVER_KNOBS->DD_MERGE_COALESCE_DELAY + std::max(lastLowBandwidthStartTime - now(), 0.0),
+			                  TaskPriority::DataDistributionLow) ||
+			    cleared.getFuture();
 		}
 		return trigger;
 	}
@@ -629,7 +632,7 @@ ACTOR Future<Void> shardEvaluator(
 
 	// Every invocation must set this or clear it
 	if(shouldMerge && !self->anyZeroHealthyTeams->get()) {
-		auto whenLongEnough = wantsToMerge->set();
+		auto whenLongEnough = wantsToMerge->set(shardSize->get().get().lastLowBandwidthStartTime);
 		if( !wantsToMerge->hasBeenTrueForLongEnough() ) {
 			onChange = onChange || whenLongEnough;
 		}
