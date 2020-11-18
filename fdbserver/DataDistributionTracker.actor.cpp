@@ -76,14 +76,43 @@ struct DataDistributionTracker {
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
+	// The reference to trackerCancelled must be extracted by actors,
+	// because by the time (trackerCancelled == true) this memory cannot
+	// be accessed
+	bool const& trackerCancelled;
+
+	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
+	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
+	// object, we must guard against memory errors by using a GetTracker functor to access
+	// the DataDistributionTracker object.
+	class SafeAccessor {
+		bool const& trackerCancelled;
+		DataDistributionTracker& tracker;
+
+	public:
+		SafeAccessor(DataDistributionTracker* tracker)
+		  : trackerCancelled(tracker->trackerCancelled), tracker(*tracker) {
+			ASSERT(!trackerCancelled);
+		}
+
+		DataDistributionTracker* operator()() {
+			if (trackerCancelled) {
+				TEST(true); // Trying to access DataDistributionTracker after tracker has been cancelled
+				throw dd_tracker_cancelled();
+			}
+			return &tracker;
+		}
+	};
+
 	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart,
 	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams, KeyRangeMap<ShardTrackedData>& shards)
+	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams, KeyRangeMap<ShardTrackedData>& shards,
+	                        bool const& trackerCancelled)
 	  : cx(cx), distributorId(distributorId), dbSizeEstimate(new AsyncVar<int64_t>()), systemSizeEstimate(0),
 	    maxShardSize(new AsyncVar<Optional<int64_t>>()), sizeChanges(false), readyToStart(readyToStart), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams),
-	    shards(shards) {}
+	    shards(shards), trackerCancelled(trackerCancelled) {}
 
 	~DataDistributionTracker()
 	{
@@ -134,11 +163,8 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 		(int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
-ACTOR Future<Void> trackShardBytes(
-		DataDistributionTracker* self,
-		KeyRange keys,
-		Reference<AsyncVar<Optional<ShardMetrics>>> shardSize)
-{
+ACTOR Future<Void> trackShardBytes(DataDistributionTracker::SafeAccessor self, KeyRange keys,
+                                   Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
 	state BandwidthStatus bandwidthStatus = shardSize->get().present() ? getBandwidthStatus( shardSize->get().get().metrics ) : BandwidthStatusNormal;
 	state double lastLowBandwidthStartTime = shardSize->get().present() ? shardSize->get().get().lastLowBandwidthStartTime : now();
 	state int shardCount = shardSize->get().present() ? shardSize->get().get().shardCount : 1;
@@ -188,7 +214,7 @@ ACTOR Future<Void> trackShardBytes(
 			bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 
 			loop {
-				Transaction tr(self->cx);
+				Transaction tr(self()->cx);
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 				std::pair<Optional<StorageMetrics>, int> metrics = wait( tr.waitStorageMetrics( keys, bounds.min, bounds.max, bounds.permittedError, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, shardCount ) );
 				if(metrics.first.present()) {
@@ -212,9 +238,11 @@ ACTOR Future<Void> trackShardBytes(
 						.detail("TrackerID", trackerID);*/
 
 					if( shardSize->get().present() ) {
-						self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.first.get().bytes - shardSize->get().get().metrics.bytes );
+						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
+						                            shardSize->get().get().metrics.bytes);
 						if(keys.begin >= systemKeys.begin) {
-							self->systemSizeEstimate += metrics.first.get().bytes - shardSize->get().get().metrics.bytes;
+							self()->systemSizeEstimate +=
+							    metrics.first.get().bytes - shardSize->get().get().metrics.bytes;
 						}
 					}
 
@@ -231,8 +259,9 @@ ACTOR Future<Void> trackShardBytes(
 			}
 		}
 	} catch( Error &e ) {
-		if (e.code() != error_code_actor_cancelled)
-			self->output.sendError(e);		// Propagate failure to dataDistributionTracker
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
+			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
+		}
 		throw e;
 	}
 }
@@ -595,18 +624,14 @@ ACTOR Future<Void> shardEvaluator(
 	return Void();
 }
 
-ACTOR Future<Void> shardTracker(
-		DataDistributionTracker* self,
-		KeyRange keys,
-		Reference<AsyncVar<Optional<ShardMetrics>>> shardSize)
-{
-	wait( yieldedFuture(self->readyToStart.getFuture()) );
+ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self, KeyRange keys,
+                                Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
+	wait(yieldedFuture(self()->readyToStart.getFuture()));
 
 	if( !shardSize->get().present() )
 		wait( shardSize->onChange() );
 
-	if( !self->maxShardSize->get().present() )
-		wait( yieldedFuture(self->maxShardSize->onChange()) );
+	if (!self()->maxShardSize->get().present()) wait(yieldedFuture(self()->maxShardSize->onChange()));
 
 	// Since maxShardSize will become present for all shards at once, avoid slow tasks with a short delay
 	wait( delay( 0, TaskPriority::DataDistribution ) );
@@ -614,27 +639,26 @@ ACTOR Future<Void> shardTracker(
 	// Survives multiple calls to shardEvaluator and keeps merges from happening too quickly.
 	state Reference<HasBeenTrueFor> wantsToMerge( new HasBeenTrueFor( shardSize->get() ) );
 
-	/*TraceEvent("ShardTracker", self->distributorId)
-		.detail("Begin", keys.begin)
-		.detail("End", keys.end)
-		.detail("TrackerID", trackerID)
-		.detail("MaxBytes", self->maxShardSize->get().get())
-		.detail("ShardSize", shardSize->get().get().bytes)
-		.detail("BytesPerKSec", shardSize->get().get().bytesPerKSecond);*/
+	/*TraceEvent("ShardTracker", self()->distributorId)
+	    .detail("Begin", keys.begin)
+	    .detail("End", keys.end)
+	    .detail("TrackerID", trackerID)
+	    .detail("MaxBytes", self()->maxShardSize->get().get())
+	    .detail("ShardSize", shardSize->get().get().bytes)
+	    .detail("BytesPerKSec", shardSize->get().get().bytesPerKSecond);*/
 
 	try {
 		loop {
 			// Use the current known size to check for (and start) splits and merges.
-			wait( shardEvaluator( self, keys, shardSize, wantsToMerge ) );
+			wait(shardEvaluator(self(), keys, shardSize, wantsToMerge));
 
 			// We could have a lot of actors being released from the previous wait at the same time. Immediately calling
 			// delay(0) mitigates the resulting SlowTask
 			wait( delay(0, TaskPriority::DataDistribution) );
 		}
 	} catch (Error& e) {
-		// If e is broken_promise then self may have already been deleted
-		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
-			self->output.sendError(e); // Propagate failure to dataDistributionTracker
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
+			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
 	}
@@ -666,8 +690,8 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 
 		ShardTrackedData data;
 		data.stats = shardSize;
-		data.trackShard = shardTracker( self, ranges[i], shardSize );
-		data.trackBytes = trackShardBytes( self, ranges[i], shardSize );
+		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardSize);
+		data.trackBytes = trackShardBytes(DataDistributionTracker::SafeAccessor(self), ranges[i], shardSize);
 		self->shards.insert( ranges[i], data );
 	}
 }
@@ -741,9 +765,10 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
                                            Promise<Void> readyToStart, Reference<AsyncVar<bool>> anyZeroHealthyTeams,
-                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards) {
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           bool const* trackerCancelled) {
 	state DataDistributionTracker self(cx, distributorId, readyToStart, output, shardsAffectedByTeamFailure,
-	                                   anyZeroHealthyTeams, *shards);
+	                                   anyZeroHealthyTeams, *shards, *trackerCancelled);
 	state Future<Void> loggingTrigger = Void();
 	try {
 		wait( trackInitialShards( &self, initData ) );

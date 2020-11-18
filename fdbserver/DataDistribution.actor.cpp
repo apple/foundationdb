@@ -4418,7 +4418,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 	state DatabaseConfiguration configuration;
 	state Reference<InitialDataDistribution> initData;
 	state MoveKeysLock lock;
+	state bool trackerCancelled;
 	loop {
+		trackerCancelled = false;
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4579,11 +4581,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back(
-			    reportErrorsExcept(dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure,
-			                                               getShardMetrics, getAverageShardBytes.getFuture(),
-			                                               readyToStart, anyZeroHealthyTeams, self->ddId, &shards),
-			                       "DDTracker", self->ddId, &normalDDQueueErrors()));
+			actors.push_back(reportErrorsExcept(
+			    dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics,
+			                            getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId,
+			                            &shards, &trackerCancelled),
+			    "DDTracker", self->ddId, &normalDDQueueErrors()));
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
@@ -4612,6 +4614,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self)
 		}
 		catch( Error &e ) {
 			state Error err = e;
+			trackerCancelled = true;
 			wait(shards.clearAsync());
 			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
