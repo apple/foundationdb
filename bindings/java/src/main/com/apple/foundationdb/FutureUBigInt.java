@@ -1,5 +1,5 @@
 /*
- * FutureBigInt.java
+ * FutureUBigInt.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,15 +23,15 @@ package com.apple.foundationdb;
 import java.math.BigInteger;
 import java.util.concurrent.Executor;
 
-class FutureBigInt extends NativeFuture<BigInteger> {
-	FutureBigInt(long cPtr, Executor executor) {
+class FutureUBigInt extends NativeFuture<BigInteger> {
+	FutureUBigInt(long cPtr, Executor executor) {
 		super(cPtr);
 		registerMarshalCallback(executor);
 	}
 
 	@Override
 	protected BigInteger getIfDone_internal(long cPtr) throws FDBException {
-		long versionLong = FutureBigInt_get(cPtr);
+		long versionLong = FutureUBigInt_get(cPtr);
         
         if(versionLong >= 0L) {
             return BigInteger.valueOf(versionLong);
@@ -45,5 +45,5 @@ class FutureBigInt extends NativeFuture<BigInteger> {
 
 	}
 
-	private native long FutureBigInt_get(long cPtr) throws FDBException;
+	private native long FutureUBigInt_get(long cPtr) throws FDBException;
 }

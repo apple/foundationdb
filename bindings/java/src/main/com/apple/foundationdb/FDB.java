@@ -437,7 +437,7 @@ public class FDB {
 			}
 		}
 
-		return new FutureBigInt(Database_getServerProtocol(clusterFilePath), e);
+		return new FutureUBigInt(Database_getServerProtocol(clusterFilePath), e);
 	}
 
 	/**
