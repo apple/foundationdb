@@ -1951,7 +1951,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 	state Transaction tr(self->cx);
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
-	state MutationRef privatized;
+	state Standalone<MutationRef> privatized;
 	privatized.type = MutationRef::SetValue;
 	state Version readVersion;
 	try {
@@ -1969,7 +1969,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 					ASSERT(currCached == (kv.value == falseValue));
 					if (kv.value == trueValue) {
 						begin = kv.key;
-						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param1 = begin.withPrefix(systemKeys.begin, privatized.arena());
 						privatized.param2 = serverKeysTrue;
 						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).
 						//	detail("BeginKey", begin.substr(storageCacheKeys.begin.size())).
@@ -1979,7 +1979,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 					} else {
 						currCached = false;
 						end = kv.key;
-						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param1 = begin.withPrefix(systemKeys.begin, privatized.arena());
 						privatized.param2 = serverKeysFalse;
 						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).detail("EndKey", end.substr(storageCacheKeys.begin.size())).
 						//	detail("ReadVersion", readVersion).detail("DataVersion", self->version.get());
