@@ -560,7 +560,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTr
 			return result;
 		} catch (Error& e) {
 			state Error err(e);
-			if (e.code() == error_code_operation_failed) {
+			if (e.code() == error_code_dd_not_found) {
 				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
 				    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
 				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
