@@ -161,6 +161,7 @@ else()
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
   add_compile_options(-fsanitize-coverage=trace-pc-guard)
+  add_link_options(-L${CMAKE_BINARY_DIR} -lvoidstar)
   if(USE_ASAN)
     add_compile_options(
       -fsanitize=address
