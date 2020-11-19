@@ -160,6 +160,7 @@ else()
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
+  add_compile_options(-fsanitize-coverage=trace-pc-guard)
   if(USE_ASAN)
     add_compile_options(
       -fsanitize=address
