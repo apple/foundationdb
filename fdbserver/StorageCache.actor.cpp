@@ -1951,7 +1951,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 	state Transaction tr(self->cx);
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
-	state MutationRef privatized;
+	state Standalone<MutationRef> privatized;
 	privatized.type = MutationRef::SetValue;
 	state Version readVersion;
 	try {
