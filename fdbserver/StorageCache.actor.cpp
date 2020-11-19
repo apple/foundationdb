@@ -1969,7 +1969,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 					ASSERT(currCached == (kv.value == falseValue));
 					if (kv.value == trueValue) {
 						begin = kv.key;
-						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param1 = begin.withPrefix(systemKeys.begin, privatized.arena());
 						privatized.param2 = serverKeysTrue;
 						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).
 						//	detail("BeginKey", begin.substr(storageCacheKeys.begin.size())).
@@ -1979,7 +1979,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 					} else {
 						currCached = false;
 						end = kv.key;
-						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param1 = begin.withPrefix(systemKeys.begin, privatized.arena());
 						privatized.param2 = serverKeysFalse;
 						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).detail("EndKey", end.substr(storageCacheKeys.begin.size())).
 						//	detail("ReadVersion", readVersion).detail("DataVersion", self->version.get());
