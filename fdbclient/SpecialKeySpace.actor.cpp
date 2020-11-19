@@ -560,10 +560,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTr
 			return result;
 		} catch (Error& e) {
 			state Error err(e);
-			// dd_not_found is introduced in 700, and operation_failed is used in previous version
-			auto err_code =
-			    ryw->getDatabase()->apiVersionAtLeast(700) ? error_code_dd_not_found : error_code_operation_failed;
-			if (e.code() == err_code) {
+			if (e.code() == error_code_dd_not_found) {
 				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
 				    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
 				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
