@@ -375,16 +375,6 @@ struct SpecialTraceMetricType
 
 TRACE_METRIC_TYPE(double, double);
 
-struct RealTimePrinter {
-	using Clock = std::chrono::system_clock;
-
-	Clock::time_point beginTime;
-	double flowBeginTime;
-
-	RealTimePrinter();
-	std::string toString(double now);
-};
-
 struct TraceEvent {
 	TraceEvent();
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
@@ -513,7 +503,6 @@ private:
 
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
-	static thread_local RealTimePrinter realTimePrinter;
 
 	bool init();
 	bool init( struct TraceInterval& );

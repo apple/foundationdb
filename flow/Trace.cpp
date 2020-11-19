@@ -1101,13 +1101,29 @@ double TraceEvent::getCurrentTime() {
 	}
 }
 
+// converts the given flow time into a string
+// with format: %Y-%m-%dT%H:%M:%S
+// This only has second-resolution for the simple reason
+// that std::put_time does not support higher resolution.
+// This is fine since we always log the flow time as well.
 std::string TraceEvent::printRealTime(double time) {
-	if (g_network != nullptr) {
-		static RealTimePrinter realTimePrinter;
-		return realTimePrinter.toString(time);
-	} else {
-		return "0";
+	using Clock = std::chrono::system_clock;
+	time_t ts = Clock::to_time_t(Clock::time_point(
+	    std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double, std::ratio<1>>(time))));
+	if (g_network && g_network->isSimulated()) {
+		// The clock is simulated, so return the real time
+		ts = Clock::to_time_t(Clock::now());
 	}
+	std::stringstream ss;
+#ifdef _WIN32
+	// MSVC gmtime is threadsafe
+	ss << std::put_time(::gmtime(&ts), "%Y-%m-%dT%H:%M:%SZ");
+#else
+	// use threadsafe gmt
+	struct tm result;
+	ss << std::put_time(::gmtime_r(&ts, &result), "%Y-%m-%dT%H:%M:%SZ");
+#endif
+	return ss.str();
 }
 
 TraceInterval& TraceInterval::begin() {
@@ -1403,34 +1419,4 @@ std::string traceableStringToString(const char* value, size_t S) {
 	}
 
 	return std::string(value, S - 1); // Exclude trailing \0 byte
-}
-
-RealTimePrinter::RealTimePrinter() : beginTime(Clock::now()), flowBeginTime(g_network->now()) {}
-
-// converts the given flow time into a
-// string. now has to be larger
-// then flowBeginTime.
-// %Y-%m-%dT%H:%M:%SZ
-// This only has second-resolution for the simple reason
-// that std::put_time does not support higher resolution.
-// As we always also log the flow time and this is only for
-// human readability, this is good enough for now.
-std::string RealTimePrinter::toString(double now) {
-	time_t n = Clock::to_time_t(beginTime + std::chrono::microseconds(std::lround(1e6 * (now - flowBeginTime))));
-	if (g_network->isSimulated()) {
-		// in simulation, the clock is simulated as well. Therefore,
-		// actual time might be very different from simulated time.
-		n = Clock::to_time_t(Clock::now());
-	}
-	std::stringstream ss;
-
-#ifdef _WIN32
-	// MSVC gmtime is threadsafe
-	ss << std::put_time(::gmtime(&n), "%Y-%m-%dT%H:%M:%SZ");
-#else
-	// use threadsafe gmt
-	struct tm result;
-	ss << std::put_time(::gmtime_r(&n, &result), "%Y-%m-%dT%H:%M:%SZ");
-#endif
-	return ss.str();
 }
