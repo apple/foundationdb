@@ -652,7 +652,7 @@ public:
 	double REDWOOD_LOGGING_INTERVAL;
 
 	// Server request latency measurement
-	int LATENCY_SAMPLE_SIZE;
+	double LATENCY_SKETCH_ACCURACY;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs();

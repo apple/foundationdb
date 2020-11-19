@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -32,7 +32,6 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const int sampleSize = 10000;
 static Future<Version> nextRV;
 static Version lastRV = invalidVersion;
 
@@ -109,7 +108,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter aTransactions, bTransactions, retries;
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
 	double readLatencyTotal;
 	int readLatencyCount;
 
@@ -121,8 +120,8 @@ struct ReadWriteWorkload : KVWorkload {
 	bool doSetup;
 
 	ReadWriteWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), latencies(sampleSize), readLatencies(sampleSize), fullReadLatencies(sampleSize),
-	    commitLatencies(sampleSize), GRVLatencies(sampleSize), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0),
+	  : KVWorkload(wcx), latencies(), readLatencies(), fullReadLatencies(),
+	    commitLatencies(), GRVLatencies(), readLatencyTotal(0), readLatencyCount(0), loadTime(0.0),
 	    dependentReads(false), adjacentReads(false), adjacentWrites(false), clientBegin(0),
 	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"),
 	    totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),

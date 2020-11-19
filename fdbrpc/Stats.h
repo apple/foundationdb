@@ -37,7 +37,7 @@ MyCounters() : foo("foo", cc), bar("bar", cc), baz("baz", cc) {}
 #include <cstddef>
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 
 struct ICounter {
 	// All counters have a name and value
@@ -229,25 +229,25 @@ private:
 	UID id;
 	double sampleStart;
 
-	ContinuousSample<double> sample;
+	DDSketch<double> sketch;
 	Future<Void> logger;
 
 	void logSample() {
 		TraceEvent(name.c_str(), id)
-		    .detail("Count", sample.getPopulationSize())
-		    .detail("Elapsed", now() - sampleStart)
-		    .detail("Min", sample.min())
-		    .detail("Max", sample.max())
-		    .detail("Mean", sample.mean())
-		    .detail("Median", sample.median())
-		    .detail("P25", sample.percentile(0.25))
-		    .detail("P90", sample.percentile(0.9))
-		    .detail("P95", sample.percentile(0.95))
-		    .detail("P99", sample.percentile(0.99))
-		    .detail("P99.9", sample.percentile(0.999))
-		    .trackLatest(id.toString() + "/" + name);
+			.detail("Count", sketch.getPopulationSize())
+			.detail("Elapsed", now() - sampleStart)
+			.detail("Min", sketch.min())
+			.detail("Max", sketch.max())
+			.detail("Mean", sketch.mean())
+			.detail("Median", sketch.median())
+			.detail("P25", sketch.percentile(0.25))
+			.detail("P90", sketch.percentile(0.9))
+			.detail("P95", sketch.percentile(0.95))
+			.detail("P99", sketch.percentile(0.99))
+			.detail("P99.9", sketch.percentile(0.999))
+			.trackLatest(id.toString() + "/" + name);
 
-		sample.clear();
+		sketch.clear();
 		sampleStart = now();
 	}
 };

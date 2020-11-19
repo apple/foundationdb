@@ -367,7 +367,7 @@ public:
 	Counter transactionsThrottled;
 	Counter transactionsExpensiveClearCostEstCount;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;
 
 	int outstandingWatches;

@@ -29,7 +29,7 @@
 #include "flow/FileIdentifier.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -148,7 +148,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int64_t bytesSent;
 	double lastDataPacketSentTime;
 	int outstandingReplies;
-	ContinuousSample<double> pingLatencies;
+	DDSketch<double> pingLatencies;
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;

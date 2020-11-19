@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -32,10 +32,10 @@ struct DDBalanceWorkload : TestWorkload {
 
 	vector<Future<Void>> clients;
 	PerfIntCounter bin_shifts, operations, retries;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	DDBalanceWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), latencies(2000), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries") {
+	  : TestWorkload(wcx), latencies(), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		binCount = getOption(options, LiteralStringRef("binCount"), 1000);
 		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1);

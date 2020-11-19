@@ -18,24 +18,22 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const int sampleSize = 10000;
-
 struct WatchesWorkload : TestWorkload {
 	int nodes, keyBytes, extraPerNode;
 	double testDuration;
 	vector<Future<Void>> clients;
 	PerfIntCounter cycles;
-	ContinuousSample<double> cycleLatencies;
+	DDSketch<double> cycleLatencies;
 	std::vector<int> nodeOrder;
 
-	WatchesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), cycles("Cycles"), cycleLatencies(sampleSize) {
+	WatchesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), cycles("Cycles"), cycleLatencies() {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
 		nodes = getOption(options, LiteralStringRef("nodeCount"), 100);
 		extraPerNode = getOption(options, LiteralStringRef("extraPerNode"), 1000);

@@ -19,7 +19,7 @@
  */
 #include <vector>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -36,10 +36,10 @@ struct QueuePushWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
-	ContinuousSample<double> commitLatencies, GRVLatencies;
+	DDSketch<double> commitLatencies, GRVLatencies;
 
 	QueuePushWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), commitLatencies(2000), GRVLatencies(2000), transactions("Transactions"), retries("Retries") {
+	  : TestWorkload(wcx), commitLatencies(), GRVLatencies(), transactions("Transactions"), retries("Retries") {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
 		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
 
