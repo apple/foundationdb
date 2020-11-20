@@ -249,6 +249,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	void setCurrentTask(TaskPriority taskID) override { baseNetwork->setCurrentTask(taskID); }
 	double now() const override { return baseNetwork->now(); }
 	double timer() override { return baseNetwork->timer(); }
+	double timer_monotonic() override { return baseNetwork->timer_monotonic(); }
 	void stop() override { return baseNetwork->stop(); }
 	void addStopCallback(std::function<void()> fn) override {
 		ASSERT(false);

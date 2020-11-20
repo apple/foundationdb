@@ -887,7 +887,7 @@ ACTOR Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string
 			}
 		}
 		std::set<std::string> _issues;
-		retriveTraceLogIssues(_issues);
+		retrieveTraceLogIssues(_issues);
 		if (pingTimeout) {
 			// Ping trace log writer thread timeout.
 			_issues.insert("trace_log_writer_thread_unresponsive");
@@ -989,7 +989,8 @@ ACTOR Future<Void> workerServer(
 
 	filesClosed.add(stopping.getFuture());
 
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(folder, locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
+	initializeSystemMonitorMachineState(SystemMonitorMachineState(
+	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
 
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define

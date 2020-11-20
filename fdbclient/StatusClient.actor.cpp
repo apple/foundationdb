@@ -463,7 +463,7 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	state int coordinatorsFaultTolerance = 0;
 
 	try {
-		state int64_t clientTime = time(0);
+		state int64_t clientTime = g_network->timer();
 
 		StatusObject _statusObjClient = wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
 		statusObjClient = _statusObjClient;
