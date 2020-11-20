@@ -1,5 +1,5 @@
 /*
- * FutureUBigInt.java
+ * FutureUInt64.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,27 +23,18 @@ package com.apple.foundationdb;
 import java.math.BigInteger;
 import java.util.concurrent.Executor;
 
-class FutureUBigInt extends NativeFuture<BigInteger> {
-	FutureUBigInt(long cPtr, Executor executor) {
+class FutureUInt64 extends NativeFuture<BigInteger> {
+	FutureUInt64(long cPtr, Executor executor) {
 		super(cPtr);
 		registerMarshalCallback(executor);
 	}
 
 	@Override
 	protected BigInteger getIfDone_internal(long cPtr) throws FDBException {
-		long versionLong = FutureUBigInt_get(cPtr);
-        
-        if(versionLong >= 0L) {
-            return BigInteger.valueOf(versionLong);
-		}
-		
-		int upper = (int) (versionLong >>> 32);
-		int lower = (int) versionLong;
-
-		return (BigInteger.valueOf(Integer.toUnsignedLong(upper))).shiftLeft(32).
-				add(BigInteger.valueOf(Integer.toUnsignedLong(lower)));
-
+		long versionLong = FutureUInt64_get(cPtr);
+		BigInteger bigIntVersion = BigInteger.valueOf(versionLong);
+		return versionLong < 0L ? bigIntVersion.add(BigInteger.valueOf(2).pow(64)) : bigIntVersion;
 	}
 
-	private native long FutureUBigInt_get(long cPtr) throws FDBException;
+	private native long FutureUInt64_get(long cPtr) throws FDBException;
 }

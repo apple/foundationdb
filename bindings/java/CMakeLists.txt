@@ -30,7 +30,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
   src/main/com/apple/foundationdb/FDBTransaction.java
-  src/main/com/apple/foundationdb/FutureUBigInt.java
+  src/main/com/apple/foundationdb/FutureUInt64.java
   src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureKeyArray.java

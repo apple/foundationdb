@@ -267,7 +267,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get
 	return (jlong)value;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureUBigInt_FutureUBigInt_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureUInt64_FutureUInt64_1get(JNIEnv *jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return 0;

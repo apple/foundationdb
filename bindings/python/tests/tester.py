@@ -588,8 +588,7 @@ class Tester:
                         protocol_future = fdb.get_server_protocol()
                         protocol_future.wait()
                         protocol = protocol_future.result()
-                        # hex(protocol) returns '0xfdb...'
-                        assert hex(protocol)[2:5] == 'fdb'
+                        assert hex(protocol)[0:5] == '0xfdb'
 
                         test_db_options(db)
                         test_options(db)
