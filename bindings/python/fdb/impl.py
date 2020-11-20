@@ -995,6 +995,11 @@ class Database(_FDBBase):
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
+    
+    def reboot_worker(self, address, check, duration):
+        """Reboot the specified process"""
+        addr = paramToBytes(address)
+        return FutureInt64(self.capi.fdb_database_reboot_worker(self.dpointer, addr, len(addr), check, duration))
 
     def _set_option(self, option, param, length):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
@@ -1455,6 +1460,9 @@ def init_c_api():
     _capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     _capi.fdb_database_set_option.restype = ctypes.c_int
     _capi.fdb_database_set_option.errcheck = check_error_code
+
+    _capi.fdb_database_reboot_worker.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    _capi.fdb_database_reboot_worker.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_destroy.restype = None

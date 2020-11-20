@@ -169,9 +169,10 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_database_create_transaction( FDBDatabase* d,
                                      FDBTransaction** out_transaction );
-    
+
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
-    fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* value, int value_length, fdb_bool_t check, int duration);
+    fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* address,
+                                int address_length, fdb_bool_t check, int duration);
 
     DLLEXPORT void fdb_transaction_destroy( FDBTransaction* tr);
 

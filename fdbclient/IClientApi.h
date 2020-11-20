@@ -85,7 +85,7 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	virtual ThreadFuture<bool> rebootWorker(const ValueRef& value, bool check, uint32_t duration) = 0;
+	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
 };
 
 class IClientApi {

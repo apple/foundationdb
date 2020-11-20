@@ -208,7 +208,7 @@ public:
 
 	// Management API
 	// Attempt to kill or suspend a process 
-	Future<bool> rebootWorker(ValueRef addr, bool check = false, uint32_t duration = 0);
+	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,

@@ -384,8 +384,8 @@ fdb_error_t fdb_database_create_transaction( FDBDatabase* d,
 }
 
 extern "C" DLLEXPORT
-FDBFuture* fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* value, int value_length, fdb_bool_t check, int duration) {
-	return (FDBFuture*) (DB(db)->rebootWorker(ValueRef(value, value_length), check, duration).extractPtr());
+FDBFuture* fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* address, int address_length, fdb_bool_t check, int duration) {
+	return (FDBFuture*) (DB(db)->rebootWorker(StringRef(address, address_length), check, duration).extractPtr());
 }
 
 

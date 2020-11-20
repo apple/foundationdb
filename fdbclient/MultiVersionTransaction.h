@@ -65,7 +65,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase *database, FDBTransaction **tr);
 	fdb_error_t (*databaseSetOption)(FDBDatabase *database, FDBDatabaseOptions::Option option, uint8_t const *value, int valueLength);
 	void (*databaseDestroy)(FDBDatabase *database);
-	FDBFuture* (*databaseRebootWorker)(FDBDatabase *database, uint8_t const *value, int valueLength, fdb_bool_t check, int duration);
+	FDBFuture* (*databaseRebootWorker)(FDBDatabase *database, uint8_t const *address, int addressLength, fdb_bool_t check, int duration);
 
 	//Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction *tr, FDBTransactionOptions::Option option, uint8_t const *value, int valueLength);
@@ -193,7 +193,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
-	ThreadFuture<bool> rebootWorker(const ValueRef& value, bool check, uint32_t duration) override;
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -325,7 +325,7 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
-	ThreadFuture<bool> rebootWorker(const ValueRef& value, bool check, uint32_t duration);
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration);
 
 private:
 	struct DatabaseState;

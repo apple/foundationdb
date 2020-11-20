@@ -67,10 +67,10 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	}, &db->deferredError );
 }
 
-ThreadFuture<bool> ThreadSafeDatabase::rebootWorker(const ValueRef& value, bool check, uint32_t duration) {
+ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	DatabaseContext *db = this->db;
-	return onMainThread( [db, value, check, duration]() -> Future<bool> {
-		return db->rebootWorker(value, check, duration);
+	return onMainThread( [db, address, check, duration]() -> Future<int64_t> {
+		return db->rebootWorker(address, check, duration);
 	} );
 }
 

@@ -4717,8 +4717,7 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 	choose {
 		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
 			StringRef ip_port =
-			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
-			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+				kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
 			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
 
 			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
@@ -4733,10 +4732,13 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 	return Void();
 }
 
-ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check) {
+ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check) {
 	// fetch the addresses of all workers
 	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
-	state Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	// TODO : find out when this is invalid
+	if (!cx->getConnectionFile())
+		return 0;
+	Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
 	ASSERT(!kvs.more);
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 	std::vector<Future<Void>> addInterfs;
@@ -4745,14 +4747,14 @@ ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool ch
 	}
 	wait( waitForAll(addInterfs) );
 	if (!address_interface.count(addr))
-		return false;
+		return 0;
 	if (check)
 		BinaryReader::fromStringRef<ClientWorkerInterface>(addr, IncludeVersion()).reboot.send( RebootRequest(false, true));
 	else
 		BinaryReader::fromStringRef<ClientWorkerInterface>(addr, IncludeVersion()).reboot.send( RebootRequest());
-	return true;
+	return 1;
 }
 
-Future<bool> DatabaseContext::rebootWorker(ValueRef addr, bool check, uint32_t duration) {
+Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	return rebootWorkerActor(this, addr, check);
 }
