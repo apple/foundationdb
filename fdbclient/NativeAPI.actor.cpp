@@ -4195,21 +4195,16 @@ ACTOR Future<ProtocolVersion> waitConnectPktVersions(std::vector<Reference<Async
 			}
 		}
 
-		Optional<ProtocolVersion> protocolVersionOptional = Optional<ProtocolVersion>();
 		if(protocolCount.size() > 0) {
 			auto maxElementItr = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
 				return l.second < r.second;
 			});
 
 			if(maxElementItr->second >= peerProtocolAsyncVars.size() / 2 + 1) {
-				protocolVersionOptional = ProtocolVersion(maxElementItr->first);
+				return ProtocolVersion(maxElementItr->first);
 			}
 		}
 		
-		if(protocolVersionOptional.present()) {
-			return protocolVersionOptional.get();
-		}
-
 		// if there is no protocol that a majority of coordinators agree on, wait for peerProtocolAsyncVars change
 		state vector<Future<Void>> peerProtocolVersionFutures;
 		peerProtocolVersionFutures.reserve(peerProtocolAsyncVars.size());
@@ -4223,7 +4218,6 @@ ACTOR Future<ProtocolVersion> waitConnectPktVersions(std::vector<Reference<Async
 }
 
 ACTOR Future<ProtocolVersion> getConnectPktVersions(Reference<ClusterConnectionFile> f) {
-
 	std::vector<Reference<AsyncVar<Optional<ProtocolVersion>>>> peerProtocolAsyncVars = getPeerProtocolAsyncVars(f);
 	ProtocolVersion connectPktVersion = wait(waitConnectPktVersions(peerProtocolAsyncVars));
 	return connectPktVersion;

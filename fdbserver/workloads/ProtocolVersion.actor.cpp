@@ -54,6 +54,7 @@ struct ProtocolVersionWorkload : TestWorkload {
 	}
 
     ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
+        state ISimulator::ProcessInfo* currProcess = g_pSimulator->getCurrentProcess();
         state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
         state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess = find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p){
             return p->protocolVersion != currentProtocolVersion;
@@ -61,11 +62,14 @@ struct ProtocolVersionWorkload : TestWorkload {
         
         ASSERT(diffVersionProcess != allProcesses.end());
 
-        RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { (*diffVersionProcess)->addresses }, WLTOKEN_PROTOCOL_INFO } };
-        ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-        
-        ASSERT(reply.version != g_network->protocolVersion());
-		return Void();
+        wait(g_pSimulator->onProcess(*diffVersionProcess));
+        uint64_t version = wait(getCoordinatorProtocols(cx->getConnectionFile()));
+        ASSERT(version != g_network->protocolVersion().version());
+
+        // switch back to protocol-compatible process for consistency check
+        wait(g_pSimulator->onProcess(currProcess));
+
+        return Void();
 	}
 
     Future<bool> check(Database const& cx) override {
