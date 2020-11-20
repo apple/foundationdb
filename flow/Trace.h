@@ -26,6 +26,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
+#include <chrono>
 #include <map>
 #include <type_traits>
 #include "flow/IRandom.h"
@@ -388,6 +389,7 @@ struct TraceEvent {
 	static bool isNetworkThread();
 
 	static double getCurrentTime();
+	static std::string printRealTime(double time);
 
 	//Must be called directly after constructing the trace event
 	TraceEvent& error(const class Error& e, bool includeCancelled=false) {
