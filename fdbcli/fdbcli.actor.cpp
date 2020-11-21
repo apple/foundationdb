@@ -2833,19 +2833,13 @@ struct CLIOptions {
 			return;
 		}
 
-		delete FLOW_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs;
-		FLOW_KNOBS = flowKnobs;
-
-		delete CLIENT_KNOBS;
-		ClientKnobs* clientKnobs = new ClientKnobs;
-		CLIENT_KNOBS = clientKnobs;
+		createGlobalFlowKnobs();
+		createGlobalClientKnobs();
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
-				if (!flowKnobs->setKnob( k->first, k->second ) &&
-					!clientKnobs->setKnob( k->first, k->second ))
-				{
+				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
+				    !globalClientKnobs->setKnob(k->first, k->second)) {
 					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
@@ -2863,8 +2857,8 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		flowKnobs->initialize(true);
-		clientKnobs->initialize(true);
+		globalFlowKnobs->initialize(true);
+		globalClientKnobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {

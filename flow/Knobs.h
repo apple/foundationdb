@@ -32,7 +32,7 @@
 class Knobs {
 public:
 	bool setKnob( std::string const& name, std::string const& value ); // Returns true if the knob name is known, false if it is unknown
-	void trace();
+	void trace() const;
 
 protected:
 	void initKnob( double& knob, double value, std::string const& name );
@@ -253,6 +253,9 @@ public:
 	void initialize(bool randomize = false, bool isSimulated = false);
 };
 
+extern std::unique_ptr<FlowKnobs> globalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
+
+void createGlobalFlowKnobs();
 
 #endif

@@ -624,6 +624,9 @@ public:
 	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
 };
 
+extern std::unique_ptr<ServerKnobs> globalServerKnobs;
 extern ServerKnobs const* SERVER_KNOBS;
+
+void createGlobalServerKnobs();
 
 #endif

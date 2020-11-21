@@ -23,7 +23,8 @@
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
-ClientKnobs const* CLIENT_KNOBS = new ClientKnobs();
+std::unique_ptr<ClientKnobs> globalClientKnobs{};
+ClientKnobs const* CLIENT_KNOBS = nullptr;
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
@@ -243,6 +244,11 @@ void ClientKnobs::initialize(bool randomize) {
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 
 	// clang-format on
+}
+
+void createGlobalClientKnobs() {
+	globalClientKnobs = std::make_unique<ClientKnobs>();
+	CLIENT_KNOBS = globalClientKnobs.get();
 }
 
 TEST_CASE("/fdbclient/knobs/initialize") {
