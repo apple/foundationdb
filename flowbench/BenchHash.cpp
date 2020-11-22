@@ -26,37 +26,44 @@
 
 #include <stdint.h>
 
-static void bench_hash_hashlittle2(benchmark::State& state) {
+enum class HashType {
+	HashLittle2,
+	CRC32C,
+	XXHash3,
+};
+
+template <HashType hashType>
+inline void hash(const KeyRef& key, size_t length) {}
+
+template <>
+inline void hash<HashType::HashLittle2>(const KeyRef& key, size_t length) {
+	uint32_t part1;
+	uint32_t part2;
+	hashlittle2(key.begin(), length, &part1, &part2);
+	benchmark::DoNotOptimize(part1);
+	benchmark::DoNotOptimize(part2);
+}
+
+template <>
+inline void hash<HashType::CRC32C>(const KeyRef& key, size_t length) {
+	benchmark::DoNotOptimize(crc32c_append(0xfdbeefdb, key.begin(), length));
+}
+
+template <>
+inline void hash<HashType::XXHash3>(const KeyRef& key, size_t length) {
+	benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
+}
+
+template <HashType hashType>
+static void bench_hash(benchmark::State& state) {
 	auto length = 1 << state.range(0);
 	auto key = getKey(length);
 	while (state.KeepRunning()) {
-		uint32_t part1;
-		uint32_t part2;
-		hashlittle2(key.begin(), length, &part1, &part2);
-		benchmark::DoNotOptimize(part1);
-		benchmark::DoNotOptimize(part2);
+		hash<hashType>(key, length);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
-static void bench_hash_crc32c(benchmark::State& state) {
-	auto length = 1 << state.range(0);
-	auto key = getKey(length);
-	while (state.KeepRunning()) {
-		benchmark::DoNotOptimize(crc32c_append(0xfdbeefdb, key.begin(), length));
-	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
-}
-
-static void bench_hash_xxhash3(benchmark::State& state) {
-	auto length = 1 << state.range(0);
-	auto key = getKey(length);
-	while (state.KeepRunning()) {
-		benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
-	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
-}
-
-BENCHMARK(bench_hash_crc32c)->DenseRange(2, 18)->ReportAggregatesOnly(true);
-BENCHMARK(bench_hash_hashlittle2)->DenseRange(2, 18)->ReportAggregatesOnly(true);
-BENCHMARK(bench_hash_xxhash3)->DenseRange(2, 18)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_hash, HashType::CRC32C)->DenseRange(2, 18)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_hash, HashType::HashLittle2)->DenseRange(2, 18)->ReportAggregatesOnly(true);
+BENCHMARK_TEMPLATE(bench_hash, HashType::XXHash3)->DenseRange(2, 18)->ReportAggregatesOnly(true);
