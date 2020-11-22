@@ -23,8 +23,8 @@
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
 
-std::unique_ptr<ClientKnobs> globalClientKnobs{};
-ClientKnobs const* CLIENT_KNOBS = nullptr;
+std::unique_ptr<ClientKnobs> globalClientKnobs = std::make_unique<ClientKnobs>();
+ClientKnobs const* CLIENT_KNOBS = globalClientKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 

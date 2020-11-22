@@ -23,8 +23,8 @@
 #include <cmath>
 #include <cinttypes>
 
-std::unique_ptr<FlowKnobs> globalFlowKnobs{};
-FlowKnobs const* FLOW_KNOBS = nullptr;
+std::unique_ptr<FlowKnobs> globalFlowKnobs = std::make_unique<FlowKnobs>();
+FlowKnobs const* FLOW_KNOBS = globalFlowKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
