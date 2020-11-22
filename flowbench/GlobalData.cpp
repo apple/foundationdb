@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/IRandom.h"
 
-static constexpr size_t globalDataSize = 1 << 16;
+static constexpr size_t globalDataSize = 1 << 20;
 static uint8_t* globalData = nullptr;
 
 static inline void initGlobalData() {

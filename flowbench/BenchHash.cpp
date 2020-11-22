@@ -21,7 +21,7 @@
 #include "benchmark/benchmark.h"
 #include "flow/crc32c.h"
 #include "flow/Hash3.h"
-#include "flow/xxhash64.h"
+#include "flow/xxhash.h"
 #include "flowbench/GlobalData.h"
 
 #include <stdint.h>
@@ -48,25 +48,15 @@ static void bench_hash_crc32c(benchmark::State& state) {
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
-static void bench_hash_xxhash64(benchmark::State& state) {
+static void bench_hash_xxhash3(benchmark::State& state) {
 	auto length = 1 << state.range(0);
 	auto key = getKey(length);
 	while (state.KeepRunning()) {
-		benchmark::DoNotOptimize(XXHash64::hash(key.begin(), length, 0xfdbeefdbfdbeefdb));
+		benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
-static void bench_hash_xxhash64_unaligned(benchmark::State& state) {
-	auto length = 1 << state.range(0);
-	auto key = getKey(length + 1);
-	while (state.KeepRunning()) {
-		benchmark::DoNotOptimize(XXHash64::hash(key.begin() + 1, length, 0xfdbeefdbfdbeefdb));
-	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
-}
-
-BENCHMARK(bench_hash_crc32c)->DenseRange(2, 16)->ReportAggregatesOnly(true);
-BENCHMARK(bench_hash_hashlittle2)->DenseRange(2, 16)->ReportAggregatesOnly(true);
-BENCHMARK(bench_hash_xxhash64)->DenseRange(2, 16)->ReportAggregatesOnly(true);
-BENCHMARK(bench_hash_xxhash64_unaligned)->DenseRange(2, 16)->ReportAggregatesOnly(true);
+BENCHMARK(bench_hash_crc32c)->DenseRange(2, 18)->ReportAggregatesOnly(true);
+BENCHMARK(bench_hash_hashlittle2)->DenseRange(2, 18)->ReportAggregatesOnly(true);
+BENCHMARK(bench_hash_xxhash3)->DenseRange(2, 18)->ReportAggregatesOnly(true);

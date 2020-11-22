@@ -25,7 +25,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
-#include "flow/xxhash64.h"
+#include "flow/xxhash.h"
 
 extern "C" {
 #include "fdbserver/sqlite/sqliteInt.h"
@@ -95,13 +95,13 @@ struct PageChecksumCodec {
 		SumType *pSumInPage = (SumType *)(pData + dataLen);
 
 		if (write) {
-			// Always write a xxhash64 checksum for new pages
+			// Always write a xxHash3 checksum for new pages
 			// First 8 bits are set to 0 so that with high probability,
 			// checksums written with hashlittle2 don't require calculating
-			// an xxHash64 checksum on read
-			auto xxHash64 = XXHash64::hash(data, dataLen, 0xfdbeefdbfdbeefdb);
-			pSumInPage->part1 = static_cast<uint32_t>((xxHash64 >> 32) & 0x00ffffff);
-			pSumInPage->part2 = static_cast<uint32_t>(xxHash64 & 0xffffffff);
+			// an xxHash3 checksum on read
+			auto xxHash3 = XXH3_64bits(data, dataLen);
+			pSumInPage->part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
+			pSumInPage->part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
 			return true;
 		}
 
@@ -118,17 +118,17 @@ struct PageChecksumCodec {
 			}
 		}
 
-		// Try xxhash64
-		SumType xxHash64Sum;
+		// Try xxhash3
+		SumType xxHash3Sum;
 		if ((pSumInPage->part1 >> 24) == 0) {
 			// The first 8 bits of part1 being 0 indicates with high probability that an
-			// xxHash64 checksum was used, so check that next. If this checksum fails, there is
+			// xxHash3 checksum was used, so check that next. If this checksum fails, there is
 			// still some change the page was written with hashlittle2, so fall back to checking
 			// hashlittle2
-			auto xxHash64 = XXHash64::hash(data, dataLen, 0xfdbeefdbfdbeefdb);
-			xxHash64Sum.part1 = static_cast<uint32_t>((xxHash64 >> 32) & 0x00ffffff);
-			xxHash64Sum.part2 = static_cast<uint32_t>(xxHash64 & 0xffffffff);
-			if (xxHash64Sum == *pSumInPage) return true;
+			auto xxHash3 = XXH3_64bits(data, dataLen);
+			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
+			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
+			if (xxHash3Sum == *pSumInPage) return true;
 		}
 
 		// Try hashlittle2
@@ -155,7 +155,7 @@ struct PageChecksumCodec {
 				trEvent.detail("ChecksumCalculatedCRC", crc32Sum.toString());
 			}
 			if (pSumInPage->part1 >> 24 == 0) {
-				trEvent.detail("ChecksumCalculatedXXHash64", xxHash64Sum.toString());
+				trEvent.detail("ChecksumCalculatedXXHash3", xxHash3Sum.toString());
 			}
 		}
 		return false;
