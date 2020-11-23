@@ -123,7 +123,7 @@ struct PageChecksumCodec {
 		if ((pSumInPage->part1 >> 24) == 0) {
 			// The first 8 bits of part1 being 0 indicates with high probability that an
 			// xxHash3 checksum was used, so check that next. If this checksum fails, there is
-			// still some change the page was written with hashlittle2, so fall back to checking
+			// still some chance the page was written with hashlittle2, so fall back to checking
 			// hashlittle2
 			auto xxHash3 = XXH3_64bits(data, dataLen);
 			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
