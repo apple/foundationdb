@@ -162,12 +162,16 @@ struct MetricUpdateBatch {
 	}
 };
 
-template<typename T>
-inline const StringRef metricTypeName() {
+template <typename T>
+inline StringRef metricTypeName() {
 	// If this function does not compile then T is not a supported metric type
 	return T::metric_field_type();
 }
-#define MAKE_TYPENAME(T, S) template<> inline const StringRef metricTypeName<T>() { return LiteralStringRef(S); }
+#define MAKE_TYPENAME(T, S)                                                                                            \
+	template <>                                                                                                        \
+	inline StringRef metricTypeName<T>() {                                                                             \
+		return LiteralStringRef(S);                                                                                    \
+	}
 MAKE_TYPENAME(bool, "Bool")
 MAKE_TYPENAME(int64_t, "Int64")
 MAKE_TYPENAME(double, "Double")
@@ -211,7 +215,7 @@ public:
 	Standalone<StringRef> address;
 
 	void checkRoll(uint64_t t, int64_t usedBytes);
-	bool canLog(int level);
+	bool canLog(int level) const;
 };
 
 struct MetricData {
@@ -743,9 +747,7 @@ struct BaseMetric {
 
 	// Combines checking this metric's configured minimum level and any collection-wide throttling
 	// This should only be called after it is determined that a metric is enabled.
-	bool canLog(int level) {
-		return level >= minLevel && pCollection->canLog(level);
-	}
+	bool canLog(int level) const { return level >= minLevel && pCollection->canLog(level); }
 
 	Standalone<MetricNameRef> metricName;
 
@@ -777,27 +779,24 @@ struct BaseEventMetric : BaseMetric {
 	// is Void and set does nothing.
 	void set(Void const &val) {}
 
-	virtual StringRef getTypeName() = 0;
+	virtual StringRef getTypeName() const = 0;
 };
 
 template <class E>
-struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric<E>>, BaseEventMetric {
+struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric<E>>, BaseEventMetric {
 	EventField<int64_t, TimeDescriptor> time;
 	bool latestRecorded;
 	decltype( tuple_map( MakeEventField(), typename Descriptor<E>::fields() ) ) values;
 
-	virtual void addref() { ReferenceCounted<EventMetric<E>>::addref(); }
-	virtual void delref() { ReferenceCounted<EventMetric<E>>::delref(); }
+	void addref() override { ReferenceCounted<EventMetric<E>>::addref(); }
+	void delref() override { ReferenceCounted<EventMetric<E>>::delref(); }
 
 	EventMetric( MetricNameRef const &name, Void) : BaseEventMetric(name), latestRecorded(false) {
 	}
 
-	virtual ~EventMetric() {
-	}
+	StringRef getTypeName() const override { return Descriptor<E>::typeName(); }
 
-	virtual StringRef getTypeName() { return Descriptor<E>::typeName(); }
-
-	void onEnable() {
+	void onEnable() override {
 		// Must initialize fields, previously knobs may not have been set.
 		time.init();
 		initFields( typename Descriptor<E>::field_indexes());
@@ -866,7 +865,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 #endif
 	}
 
-	virtual void flushData(MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch) {
+	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
 		time.flushField( mk, rollTime, batch );
 		flushFields( typename Descriptor<E>::field_indexes(), mk, rollTime, batch );
 		if(!latestRecorded) {
@@ -885,7 +884,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 #endif
 	}
 
-	virtual void rollMetric( uint64_t t ) {
+	void rollMetric(uint64_t t) override {
 		time.rollMetric(t);
 		rollFields( typename Descriptor<E>::field_indexes(), t );
 	}
@@ -900,7 +899,7 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 #endif
 	}
 
-	virtual void registerFields( MetricKeyRef const &mk, std::vector<Standalone<StringRef>>& fieldKeys ) {
+	void registerFields(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) override {
 		time.registerField( mk, fieldKeys );
 		registerFields( typename Descriptor<E>::field_indexes(), mk, fieldKeys );
 	}
@@ -914,8 +913,9 @@ struct EventMetric : E, ReferenceCounted<EventMetric<E>>, MetricUtil<EventMetric
 		(void)_;
 #endif
 	}
-protected:
-    bool it;
+
+private:
+	bool it;
 };
 
 // A field Descriptor compatible with EventField but with name set at runtime
@@ -934,8 +934,8 @@ struct DynamicField;
 struct DynamicFieldBase {
 	virtual ~DynamicFieldBase() {}
 
-	virtual StringRef fieldName() = 0;
-	virtual const StringRef getDerivedTypeName() = 0;
+	virtual StringRef fieldName() const = 0;
+	virtual StringRef getDerivedTypeName() const = 0;
 	virtual void init() = 0;
 	virtual void clear() = 0;
 	virtual void log(uint64_t t, int64_t l, bool& overflow, int64_t& bytes ) = 0;
@@ -966,46 +966,37 @@ struct DynamicFieldBase {
 	}
 };
 
-template<typename T>
-struct DynamicField : public DynamicFieldBase, EventField<T, DynamicDescriptor> {
+template <typename T>
+struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescriptor> {
 	typedef EventField<T, DynamicDescriptor> EventFieldType;
 	DynamicField(const char *name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
-	virtual ~DynamicField() {}
 
-	StringRef fieldName() { return EventFieldType::name(); }
+	StringRef fieldName() const override { return EventFieldType::name(); }
 
 	// Get the field's datatype, this is used as a form of RTTI by DynamicFieldBase::safe_downcast()
-	const StringRef getDerivedTypeName() { return metricTypeName<T>(); }
+	StringRef getDerivedTypeName() const override { return metricTypeName<T>(); }
 
 	// Pure virtual implementations
-	void clear() { value = T(); }
+	void clear() override { value = T(); }
 
-	void log(uint64_t t, int64_t l, bool& overflow, int64_t& bytes) {
+	void log(uint64_t t, int64_t l, bool& overflow, int64_t& bytes) override {
 		return EventFieldType::log(value, t, l, overflow, bytes);
 	}
 
 	// Redirects to EventFieldType methods
-	void nextKey( uint64_t t, int level ) {
-		return EventFieldType::nextKey(t, level);
-	}
-	void nextKeyAllLevels( uint64_t t) {
-		return EventFieldType::nextKeyAllLevels(t);
-	}
-	void rollMetric( uint64_t t ) {
-		return EventFieldType::rollMetric(t);
-	}
-	void flushField(MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch) {
+	void nextKey(uint64_t t, int level) override { return EventFieldType::nextKey(t, level); }
+	void nextKeyAllLevels(uint64_t t) override { return EventFieldType::nextKeyAllLevels(t); }
+	void rollMetric(uint64_t t) override { return EventFieldType::rollMetric(t); }
+	void flushField(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
 		return EventFieldType::flushField(mk, rollTime, batch);
 	}
-	void registerField(MetricKeyRef const &mk, std::vector<Standalone<StringRef>>& fieldKeys) {
+	void registerField(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) override {
 		return EventFieldType::registerField(mk, fieldKeys);
 	}
-	void init() {
-		return EventFieldType::init();
-	}
+	void init() override { return EventFieldType::init(); }
 
 	// Set this field's value to the value of another field of exactly the same type.
-	void setValueFrom(DynamicFieldBase *src, StringRef eventType) {
+	void setValueFrom(DynamicFieldBase* src, StringRef eventType) override {
 		DynamicField<T> *s = src->safe_downcast<T>(eventType);
 		if(s != nullptr)
 			set(s->value);
@@ -1013,7 +1004,7 @@ struct DynamicField : public DynamicFieldBase, EventField<T, DynamicDescriptor> 
 			clear();  // Not really necessary with proper use but just in case it is better to clear than use an old value.
 	}
 
-	DynamicFieldBase * createNewWithValue(const char *name) {
+	DynamicFieldBase* createNewWithValue(const char* name) override {
 		DynamicField<T> *n = new DynamicField<T>(name);
 		n->set(value);
 		return n;
@@ -1027,7 +1018,9 @@ private:
 };
 
 // A DynamicEventMetric is an EventMetric whose field set can be modified at runtime.
-struct DynamicEventMetric : ReferenceCounted<DynamicEventMetric>, MetricUtil<DynamicEventMetric>, BaseEventMetric {
+struct DynamicEventMetric final : ReferenceCounted<DynamicEventMetric>,
+                                  MetricUtil<DynamicEventMetric>,
+                                  BaseEventMetric {
 private:
 	EventField<int64_t, TimeDescriptor> time;
 	bool latestRecorded;
@@ -1057,8 +1050,8 @@ public:
 	DynamicEventMetric(MetricNameRef const &name, Void = Void());
     ~DynamicEventMetric();
 
-	virtual void addref() { ReferenceCounted<DynamicEventMetric>::addref(); }
-	virtual void delref() { ReferenceCounted<DynamicEventMetric>::delref(); }
+	void addref() override { ReferenceCounted<DynamicEventMetric>::addref(); }
+	void delref() override { ReferenceCounted<DynamicEventMetric>::delref(); }
 
 	void onEnable() {
 		// Must initialize fields, previously knobs may not have been set.
@@ -1116,7 +1109,7 @@ public:
 		return log(explicitTime);
 	}
 
-	StringRef getTypeName() { return metricName.name; }
+	StringRef getTypeName() const override { return metricName.name; }
 
 	// Set all of the fields to their default values.
 	void clearFields() {
@@ -1127,9 +1120,9 @@ public:
 	uint64_t log(uint64_t explicitTime = 0);
 
 	// Virtual function implementations
-	void flushData(MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch);
-	void rollMetric( uint64_t t );
-	void registerFields(MetricKeyRef const &mk, std::vector<Standalone<StringRef>>& fieldKeys);
+	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) override;
+	void rollMetric(uint64_t t) override;
+	void registerFields(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) override;
 };
 
 // Continuous metrics are a single-field metric using an EventField<TimeAndValue<T>>
@@ -1140,7 +1133,7 @@ struct TimeAndValue {
 	T value;
 
 	// The metric field type for TimeAndValue is just the Value type.
-	static inline const StringRef metric_field_type() { return metricTypeName<T>(); }
+	static inline StringRef metric_field_type() { return metricTypeName<T>(); }
 };
 
 // FieldHeader for continuous metrics, works for T = int, double, bool
@@ -1220,7 +1213,10 @@ struct FieldValueBlockEncoding<TimeAndValue<bool>> {
 };
 
 template <typename T>
-struct ContinuousMetric: NonCopyable, ReferenceCounted<ContinuousMetric<T>>, MetricUtil<ContinuousMetric<T>, T>, BaseMetric {
+struct ContinuousMetric final : NonCopyable,
+                                ReferenceCounted<ContinuousMetric<T>>,
+                                MetricUtil<ContinuousMetric<T>, T>,
+                                BaseMetric {
 	// Needed for MetricUtil
 	static const StringRef metricType;
 
@@ -1235,14 +1231,14 @@ public:
 		tv.value = initial;
 	}
 
-	virtual void addref() { ReferenceCounted<ContinuousMetric<T>>::addref(); }
-	virtual void delref() { ReferenceCounted<ContinuousMetric<T>>::delref(); }
+	void addref() override { ReferenceCounted<ContinuousMetric<T>>::addref(); }
+	void delref() override { ReferenceCounted<ContinuousMetric<T>>::delref(); }
 
 	T getValue() const {
 		return tv.value;
 	}
 
-	void flushData(const MetricKeyRef &mk, uint64_t rollTime, MetricUpdateBatch &batch) {
+	void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricUpdateBatch& batch) override {
 		if( !recorded ) {
 			batch.updates.push_back(std::make_pair(mk.packLatestKey(), getLatestAsValue()));
 			recorded = true;
@@ -1251,11 +1247,9 @@ public:
 		field.flushField(mk, rollTime, batch);
 	}
 
-	void rollMetric(uint64_t t) {
-		field.rollMetric(t);
-	}
+	void rollMetric(uint64_t t) override { field.rollMetric(t); }
 
-	Standalone<StringRef> getLatestAsValue() {
+	Standalone<StringRef> getLatestAsValue() const {
 		FieldValueBlockEncoding< TimeAndValue< T > > enc;
 		BinaryWriter wr(AssumeVersion(currentProtocolVersion));
 		// Write a header so the client can treat this value like a normal data value block.
@@ -1265,14 +1259,12 @@ public:
 		return wr.toValue();
 	}
 
-	void onEnable() {
+	void onEnable() override {
 		field.init();
 		change();
 	}
 
-	void onDisable() {
-		change();
-	}
+	void onDisable() override { change(); }
 
 	void set(const T &v) {
 		if(v != tv.value) {
@@ -1412,9 +1404,7 @@ struct Traceable<MetricHandle<T>> : Traceable<typename T::ValueType> {
 template<class T>
 struct SpecialTraceMetricType<MetricHandle<T>> : SpecialTraceMetricType<typename T::ValueType> {
 	using parent = SpecialTraceMetricType<typename T::ValueType>;
-	static auto getValue(const MetricHandle<T>& value) -> decltype(parent::getValue(value.getValue())) {
-		return parent::getValue(value.getValue());
-	}
+	static auto getValue(const MetricHandle<T>& value) { return parent::getValue(value.getValue()); }
 };
 
 typedef MetricHandle<Int64Metric> Int64MetricHandle;

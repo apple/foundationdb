@@ -115,7 +115,7 @@ const Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
 	return wr.toValue();
 }
 
-bool TDMetricCollection::canLog(int level) {
+bool TDMetricCollection::canLog(int level) const {
 	// Whether a given level can be logged or not depends on the length of the rollTimes queue.
 
 	// No restriction until queue size reaches METRIC_LIMIT_START_QUEUE_SIZE
