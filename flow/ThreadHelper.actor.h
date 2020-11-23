@@ -539,7 +539,7 @@ struct CompletionCallback : public ThreadCallback, ReferenceCounted<CompletionCa
 //FIXME: does not support cancellation
 template<class T>
 Future<T> unsafeThreadFutureToFuture(ThreadFuture<T> threadFuture) {
-	Reference<CompletionCallback<T>> callback = Reference<CompletionCallback<T>>(new CompletionCallback<T>(threadFuture));
+	auto callback = makeReference<CompletionCallback<T>>(threadFuture);
 	callback->self = callback;
 	threadFuture.callOrSetAsCallback(callback.getPtr(), callback->userParam, 0);
 	return callback->promise.getFuture();

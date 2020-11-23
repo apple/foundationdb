@@ -75,7 +75,8 @@ struct SayHelloTaskFunc : TaskFuncBase {
 
 			if( currTaskNumber < subtaskCount - 1 ) {
 				state std::vector<Reference<TaskFuture>> vectorFuture;
-				Reference<Task> new_task(new Task(SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2)));
+				auto new_task = makeReference<Task>(SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(),
+				                                    deterministicRandom()->randomInt(0, 2));
 				new_task->params[LiteralStringRef("name")] = StringRef(format("task_%d", currTaskNumber + 1));
 				new_task->params[LiteralStringRef("chained")] = task->params[LiteralStringRef("chained")];
 				new_task->params[LiteralStringRef("subtaskCount")] = task->params[LiteralStringRef("subtaskCount")];
@@ -99,7 +100,7 @@ REGISTER_TASKFUNC(SayHelloTaskFunc);
 
 struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 	static StringRef name;
-	static const uint32_t version = 1;
+	static constexpr uint32_t version = 1;
 
 	StringRef getName() const { return name; };
 	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -114,7 +115,8 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 			subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
 		}
 		for (int i = 0; i < subtaskCount; ++i) {
-			Reference<Task> new_task(new Task(SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2)));
+			auto new_task = makeReference<Task>(SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(),
+			                                    deterministicRandom()->randomInt(0, 2));
 			new_task->params[LiteralStringRef("name")] = StringRef(format("task_%d", i));
 			new_task->params[LiteralStringRef("chained")] = task->params[LiteralStringRef("chained")];
 			new_task->params[LiteralStringRef("subtaskCount")] = task->params[LiteralStringRef("subtaskCount")];
@@ -140,7 +142,7 @@ REGISTER_TASKFUNC(SayHelloToEveryoneTaskFunc);
 
 struct SaidHelloTaskFunc : TaskFuncBase {
 	static StringRef name;
-	static const uint32_t version = 1;
+	static constexpr uint32_t version = 1;
 
 	StringRef getName() const { return name; };
 	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -187,12 +189,14 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		tr->set(addedInitKey, LiteralStringRef("true"));
 
 		Reference<TaskFuture> allDone = futureBucket->future(tr);
-		Reference<Task> task(new Task(SayHelloToEveryoneTaskFunc::name, SayHelloToEveryoneTaskFunc::version, allDone->key, deterministicRandom()->randomInt(0, 2)));
+		auto task = makeReference<Task>(SayHelloToEveryoneTaskFunc::name, SayHelloToEveryoneTaskFunc::version,
+		                                allDone->key, deterministicRandom()->randomInt(0, 2));
 
 		task->params[LiteralStringRef("chained")] = chained ? LiteralStringRef("true") : LiteralStringRef("false");
 		task->params[LiteralStringRef("subtaskCount")] = StringRef(format("%d", subtaskCount));
 		taskBucket->addTask(tr, task);
-		Reference<Task> taskDone(new Task(SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2)));
+		auto taskDone = makeReference<Task>(SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(),
+		                                    deterministicRandom()->randomInt(0, 2));
 		wait(allDone->onSetAddTask(tr, taskBucket, taskDone));
 		return Void();
 	}

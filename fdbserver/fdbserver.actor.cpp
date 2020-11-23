@@ -436,8 +436,10 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 void memoryTest();
 void skipListTest();
 
-Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
+Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> dcId,
+                                Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
+	initializeSystemMonitorMachineState(
+	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
 	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
@@ -1445,13 +1447,12 @@ private:
 					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
 					throw;
 				}
-				connectionFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile, ccs));
+				auto connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
 			} else {
 				std::pair<std::string, bool> resolvedClusterFile;
 				try {
 					resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
-					connectionFile =
-					    Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+					connectionFile = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 				} catch (Error& e) {
 					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 					throw;
@@ -1637,6 +1638,7 @@ int main(int argc, char* argv[]) {
 			//startOldSimulator();
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED), static_cast<int>(TracerType::END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback( Net2FileSystem::stop );
@@ -1908,14 +1910,14 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == Test) {
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(),
 			                       opts.localities));
 			g_network->run();
 		} else if (role == ConsistencyCheck) {
 			setupRunLoopProfiler();
 
-			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,
 			                       StringRef(), opts.localities));
 			g_network->run();

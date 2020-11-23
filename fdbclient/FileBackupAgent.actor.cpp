@@ -99,6 +99,11 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	}
 }
 
+Key FileBackupAgent::getPauseKey() {
+	FileBackupAgent backupAgent;
+	return backupAgent.taskBucket->getPauseKey();
+}
+
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
@@ -1398,8 +1403,8 @@ namespace fileBackup {
 					else {
 						ASSERT(snapshotBatchSize.present());
 						// Batch future key exists in the config so create future from it
-						snapshotBatchFuture = Reference<TaskFuture>(new TaskFuture(futureBucket, snapshotBatchFutureKey.get()));
-					}
+					    snapshotBatchFuture = makeReference<TaskFuture>(futureBucket, snapshotBatchFutureKey.get());
+				    }
 
 					break;
 				} catch(Error &e) {

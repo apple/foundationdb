@@ -153,7 +153,7 @@ void ConfigureSSLContext( const LoadedTLSConfig& loaded, boost::asio::ssl::conte
 		context->set_verify_mode(boost::asio::ssl::context::verify_peer | boost::asio::ssl::verify_fail_if_no_peer_cert);
 
 		if (loaded.isTLSEnabled()) {
-			Reference<TLSPolicy> tlsPolicy = Reference<TLSPolicy>(new TLSPolicy(loaded.getEndpointType()));
+			auto tlsPolicy = makeReference<TLSPolicy>(loaded.getEndpointType());
 			tlsPolicy->set_verify_peers({ loaded.getVerifyPeers() });
 
 			context->set_verify_callback([policy=tlsPolicy, onPolicyFailure](bool preverified, boost::asio::ssl::verify_context& ctx) {

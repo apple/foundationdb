@@ -25,6 +25,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
   IDiskQueue.h
+  IKeyValueContainer.h
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
@@ -46,6 +47,8 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
+  MetricLogger.actor.cpp
+  MetricLogger.h
   CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
@@ -63,6 +66,7 @@ set(FDBSERVER_SRCS
   pubsub.h
   QuietDatabase.actor.cpp
   QuietDatabase.h
+  RadixTree.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
@@ -215,6 +219,7 @@ set(FDBSERVER_SRCS
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
+  workloads/UDPWorkload.actor.cpp
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
@@ -240,6 +245,10 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
+  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
+  # statically, so find the static library here.
+  find_library(lz4_STATIC_LIBRARIES
+    NAMES liblz4.a REQUIRED)
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -260,7 +269,7 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()

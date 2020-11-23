@@ -233,7 +233,7 @@ static double getProcessorTimeGeneric(int who) {
 #endif
 
 double getProcessorTimeThread() {
-	INJECT_FAULT( platform_error, "getProcessorTimeThread" );
+	INJECT_FAULT( platform_error, "getProcessorTimeThread" ); // Get Thread CPU Time failed
 #if defined(_WIN32)
 	FILETIME ftCreate, ftExit, ftKernel, ftUser;
 	if (!GetThreadTimes(GetCurrentThread(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
@@ -260,7 +260,7 @@ double getProcessorTimeThread() {
 }
 
 double getProcessorTimeProcess() {
-	INJECT_FAULT( platform_error, "getProcessorTimeProcess" );
+	INJECT_FAULT( platform_error, "getProcessorTimeProcess" ); // Get CPU Process Time failed
 #if defined(_WIN32)
 	FILETIME ftCreate, ftExit, ftKernel, ftUser;
 	if (!GetProcessTimes(GetCurrentProcess(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
@@ -584,7 +584,7 @@ Error systemErrorCodeToError() {
 }
 
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
-	INJECT_FAULT( platform_error, "getDiskBytes" );
+	INJECT_FAULT( platform_error, "getDiskBytes" ); // Get disk bytes failed
 #if defined(__unixish__)
 #if defined (__linux__) || defined (__FreeBSD__)
 	struct statvfs buf;
@@ -634,7 +634,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 
 #ifdef __unixish__
 const char* getInterfaceName(const IPAddress& _ip) {
-	INJECT_FAULT( platform_error, "getInterfaceName" );
+	INJECT_FAULT( platform_error, "getInterfaceName" ); // Get interface name failed
 	static char iname[20];
 
 	struct ifaddrs* interfaces = nullptr;
@@ -680,7 +680,7 @@ const char* getInterfaceName(const IPAddress& _ip) {
 #if defined(__linux__)
 void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
                        uint64_t& retransSegs) {
-	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
+	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // getNetworkTraffic: Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
 	const char* ifa_name = nullptr;
 	try {
 		ifa_name = getInterfaceName(ip);
@@ -748,7 +748,7 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 }
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
-	INJECT_FAULT( platform_error, "getMachineLoad" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
+	INJECT_FAULT( platform_error, "getMachineLoad" ); // getMachineLoad: Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
 	std::ifstream stat_stream("/proc/stat", std::ifstream::in);
 
 	std::string ignore;
@@ -765,7 +765,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 }
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
-	INJECT_FAULT( platform_error, "getDiskStatistics" );
+	INJECT_FAULT( platform_error, "getDiskStatistics" ); // Getting disks statistics failed
 	currentIOs = 0;
 
 	struct stat buf;
@@ -888,7 +888,7 @@ dev_t getDeviceId(std::string path) {
 #if defined(__FreeBSD__)
 void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
-	INJECT_FAULT( platform_error, "getNetworkTraffic" );
+	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Get Network traffic failed
 
 	const char* ifa_name = nullptr;
 	try {
@@ -955,7 +955,7 @@ void getNetworkTraffic(const IPAddress ip, uint64_t& bytesSent, uint64_t& bytesR
 }
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
-	INJECT_FAULT( platform_error, "getMachineLoad" );
+	INJECT_FAULT( platform_error, "getMachineLoad" ); // Getting machine load failed
 
 	long cur[CPUSTATES], last[CPUSTATES];
 	size_t cur_sz = sizeof cur;
@@ -988,7 +988,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 }
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
-	INJECT_FAULT( platform_error, "getDiskStatistics" );
+	INJECT_FAULT( platform_error, "getDiskStatistics" ); // getting disk stats failed
 	currentIOs = 0;
 	busyTicks = 0;
 	reads = 0;
@@ -1078,7 +1078,7 @@ dev_t getDeviceId(std::string path) {
 #ifdef __APPLE__
 void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& outSegs,
                        uint64_t& retransSegs) {
-	INJECT_FAULT( platform_error, "getNetworkTraffic" );
+	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Get network traffic failed (macOS)
 
 	const char* ifa_name = nullptr;
 	try {
@@ -1141,7 +1141,7 @@ void getNetworkTraffic(const IPAddress& ip, uint64_t& bytesSent, uint64_t& bytes
 }
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
-	INJECT_FAULT( platform_error, "getMachineLoad" );
+	INJECT_FAULT( platform_error, "getMachineLoad" ); // Getting machine load filed (macOS)
 	mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
 	host_cpu_load_info_data_t r_load;
 
@@ -1155,7 +1155,7 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 }
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
-	INJECT_FAULT( platform_error, "getDiskStatistics" );
+	INJECT_FAULT( platform_error, "getDiskStatistics" ); // Getting disk stats failed (macOS)
 	currentIOs = 0;
 	busyTicks = 0;
 	writeSectors = 0;
@@ -1716,7 +1716,7 @@ void setMemoryQuota( size_t limit ) {
 	// ASAN doesn't work with memory quotas: https://github.com/google/sanitizers/wiki/AddressSanitizer#ulimit--v
 	return;
 #endif
-	INJECT_FAULT( platform_error, "setMemoryQuota" );
+	INJECT_FAULT( platform_error, "setMemoryQuota" ); // setting memory quota failed
 #if defined(_WIN32)
 	HANDLE job = CreateJobObject( nullptr, nullptr );
 	if (!job) {
@@ -1920,7 +1920,7 @@ void setAffinity(int proc) {
 namespace platform {
 
 int getRandomSeed() {
-	INJECT_FAULT( platform_error, "getRandomSeed" );
+	INJECT_FAULT( platform_error, "getRandomSeed" ); // getting a random seed failed
 	int randomSeed;
 	int retryCount = 0;
 
@@ -1963,11 +1963,11 @@ std::string joinPath( std::string const& directory, std::string const& filename 
 }
 
 void renamedFile() {
-	INJECT_FAULT( io_error, "renameFile" );
+	INJECT_FAULT( io_error, "renameFile" ); // renaming file failed
 }
 
 void renameFile( std::string const& fromPath, std::string const& toPath ) {
-	INJECT_FAULT( io_error, "renameFile" );
+	INJECT_FAULT( io_error, "renameFile" ); // rename file failed
 #ifdef _WIN32
 	if (MoveFile( fromPath.c_str(), toPath.c_str() )) {
 		//renamedFile();
@@ -1997,7 +1997,7 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
-		INJECT_FAULT( io_error, "atomicReplace" );
+		INJECT_FAULT( io_error, "atomicReplace" ); // atomic rename failed
 
 		std::string tempfilename = joinPath(parentDirectory(path), deterministicRandom()->randomUniqueID().toString() + ".tmp");
 		f = textmode ? fopen( tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE ) : fopen(tempfilename.c_str(), "wb");
@@ -2081,7 +2081,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 	#error Port me!
 	#endif
 
-		INJECT_FAULT( io_error, "atomicReplace" );
+		INJECT_FAULT( io_error, "atomicReplace" ); // io_error after atomic rename
 	}
 	catch(Error &e) {
 		TraceEvent(SevWarn, "AtomicReplace").error(e).detail("Path", path).GetLastError();
@@ -2091,12 +2091,12 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 }
 
 static bool deletedFile() {
-	INJECT_FAULT( platform_error, "deleteFile" );
+	INJECT_FAULT( platform_error, "deleteFile" ); // delete file failed
 	return true;
 }
 
 bool deleteFile( std::string const& filename ) {
-	INJECT_FAULT( platform_error, "deleteFile" );
+	INJECT_FAULT( platform_error, "deleteFile" ); // file deletion failed
 #ifdef _WIN32
 	if (DeleteFile(filename.c_str()))
 		return deletedFile();
@@ -2115,12 +2115,14 @@ bool deleteFile( std::string const& filename ) {
 	throw e;
 }
 
-static void createdDirectory() { INJECT_FAULT( platform_error, "createDirectory" ); }
+static void createdDirectory() {
+	INJECT_FAULT( platform_error, "createDirectory" ); // create dir (noargs) failed
+}
 
 namespace platform {
 
 bool createDirectory( std::string const& directory ) {
-	INJECT_FAULT( platform_error, "createDirectory" );
+	INJECT_FAULT( platform_error, "createDirectory" ); // create dir failed
 
 #ifdef _WIN32
 	if (CreateDirectory( directory.c_str(), nullptr )) {
@@ -2261,7 +2263,7 @@ std::string abspath( std::string const& path, bool resolveLinks, bool mustExist 
 	}
 
 	// Returns an absolute path canonicalized to use only CANONICAL_PATH_SEPARATOR
-	INJECT_FAULT( platform_error, "abspath" );
+	INJECT_FAULT( platform_error, "abspath" ); // abspath failed
 
 	if(!resolveLinks) {
 		// TODO:  Not resolving symbolic links does not yet behave well on Windows because of drive letters
@@ -2367,7 +2369,7 @@ bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& nam
 
 ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
                                              bool directoryOnly, bool async) {
-	INJECT_FAULT( platform_error, "findFiles" );
+	INJECT_FAULT( platform_error, "findFiles" ); // findFiles failed (Win32)
 	state vector<std::string> result;
 	state int64_t tsc_begin = __rdtsc();
 
@@ -2417,7 +2419,7 @@ bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& nam
 
 ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string extension,
                                              bool directoryOnly, bool async) {
-	INJECT_FAULT( platform_error, "findFiles" );
+	INJECT_FAULT( platform_error, "findFiles" ); // findFiles failed
 	state vector<std::string> result;
 	state int64_t tsc_begin = __rdtsc();
 

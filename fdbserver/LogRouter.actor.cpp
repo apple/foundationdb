@@ -30,6 +30,8 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbclient/Atomic.h"
+#include "flow/Arena.h"
+#include "flow/Histogram.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -77,6 +79,7 @@ struct LogRouterData {
 
 	const UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
+	Optional<UID> primaryPeekLocation;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
 	const Version startVersion;
@@ -91,6 +94,8 @@ struct LogRouterData {
 	double maxWaitForVersionTime = 0;
 	double getMoreTime = 0;
 	double maxGetMoreTime = 0;
+	int64_t generation = -1;
+	Reference<Histogram> peekLatencyDist;
 
 	struct PeekTrackerData {
 		std::map<int, Promise<std::pair<Version, bool>>> sequence_version;
@@ -116,14 +121,19 @@ struct LogRouterData {
 
 	//only callable after getTagData returns a null reference
 	Reference<TagData> createTagData(Tag tag, Version popped, Version knownCommittedVersion) {
-		Reference<TagData> newTagData(new TagData(tag, popped, knownCommittedVersion));
+		auto newTagData = makeReference<TagData>(tag, popped, knownCommittedVersion);
 		tag_data[tag.id] = newTagData;
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), 
-	  version(req.startVersion-1), minPopped(0), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
-		cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc), getMoreBlockedCount("GetMoreBlockedCount", cc) {
+	LogRouterData(UID dbgid, const InitializeLogRouterRequest& req)
+	  : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()),
+	    version(req.startVersion - 1), minPopped(0), generation(req.recoveryCount), startVersion(req.startVersion),
+	    allowPops(false), minKnownCommittedVersion(0), poppedVersion(0), foundEpochEnd(false),
+	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
+	    getMoreBlockedCount("GetMoreBlockedCount", cc),
+	    peekLatencyDist(Histogram::getHistogram(LiteralStringRef("LogRouter"), LiteralStringRef("PeekTLogLatency"),
+	                                            Histogram::Unit::microseconds)) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -138,7 +148,7 @@ struct LogRouterData {
 			}
 		}
 
-		eventCacheHolder = Reference<EventCacheHolder>( new EventCacheHolder(dbgid.shortString() + ".PeekLocation") );
+		eventCacheHolder = makeReference<EventCacheHolder>(dbgid.shortString() + ".PeekLocation");
 
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
 		specialCounter(cc, "MinPopped", [this](){ return this->minPopped.get(); });
@@ -150,7 +160,12 @@ struct LogRouterData {
 		specialCounter(cc, "WaitForVersionMaxMS", [this](){ double val = this->maxWaitForVersionTime; this->maxWaitForVersionTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMS", [this](){ double val = this->getMoreTime; this->getMoreTime = 0; return 1000*val; });
 		specialCounter(cc, "GetMoreMaxMS", [this](){ double val = this->maxGetMoreTime; this->maxGetMoreTime = 0; return 1000*val; });
-		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LogRouterMetrics");
+		specialCounter(cc, "Generation", [this]() { return this->generation; });
+		logger = traceCounters("LogRouterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc,
+		                       "LogRouterMetrics", [this](TraceEvent& te) {
+			                       te.detail("PrimaryPeekLocation", this->primaryPeekLocation);
+			                       te.detail("RouterTag", this->routerTag.toString());
+		                       });
 	}
 };
 
@@ -257,13 +272,16 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			state double startTime = now();
 			choose {
 				when(wait( getMoreF ) ) {
-					self->getMoreTime += now() - startTime;
-					self->maxGetMoreTime = std::max(self->maxGetMoreTime, now() - startTime);
+					double peekTime = now() - startTime;
+					self->peekLatencyDist->sampleSeconds(peekTime);
+					self->getMoreTime += peekTime;
+					self->maxGetMoreTime = std::max(self->maxGetMoreTime, peekTime);
 					break;
 				}
 				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
 					if( self->logSystem->get() ) {
 						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
+						self->primaryPeekLocation = r->getPrimaryPeekLocation();
 						TraceEvent("LogRouterPeekLocation", self->dbgid).detail("LogID", r->getPrimaryPeekLocation()).trackLatest(self->eventCacheHolder->trackingKey);
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();

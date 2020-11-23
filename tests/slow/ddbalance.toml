@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'DDBalance_test'
+testTitle = 'DDBalance_Test'
 
     [[test.workload]]
     testName = 'DDBalance'

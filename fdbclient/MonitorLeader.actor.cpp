@@ -368,7 +368,7 @@ ClientCoordinators::ClientCoordinators( Key clusterKey, std::vector<NetworkAddre
 	for (const auto& coord : coordinators) {
 		clientLeaderServers.push_back( ClientLeaderRegInterface( coord ) );
 	}
-	ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile( ClusterConnectionString( coordinators, clusterKey ) ) );
+	ccf = makeReference<ClusterConnectionFile>(ClusterConnectionString(coordinators, clusterKey));
 }
 
 ClientLeaderRegInterface::ClientLeaderRegInterface( NetworkAddress remote )
@@ -473,7 +473,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 		if (leader.present()) {
 			if( leader.get().first.forward ) {
 				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString())));
+				info.intermediateConnFile = makeReference<ClusterConnectionFile>(
+				    connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				return info;
 			}
 			if(connFile != info.intermediateConnFile) {
@@ -501,7 +502,7 @@ template <class LeaderInterface>
 Future<Void> monitorLeaderRemotely(Reference<ClusterConnectionFile> const& connFile,
 						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = monitorLeaderRemotelyInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
 }

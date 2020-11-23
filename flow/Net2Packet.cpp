@@ -153,6 +153,8 @@ void UnsentPacketQueue::sent(int bytes) {
 		bytes -= b->bytes_written - b->bytes_sent;
 		b->bytes_sent = b->bytes_written;
 		ASSERT(b->bytes_written <= b->size());
+		double queue_time = now() - b->enqueue_time;
+		sendQueueLatencyHistogram->sampleSeconds(queue_time);
 		unsent_first = b->nextPacketBuffer();
 		if (!unsent_first) unsent_last = nullptr;
 		b->delref();

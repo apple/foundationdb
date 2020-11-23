@@ -19,8 +19,13 @@
  */
 
 #include <cinttypes>
+#include <deque>
+#include <memory>
+#include <vector>
 
 #include "fdbrpc/simulator.h"
+#include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
@@ -30,6 +35,8 @@
 #include "flow/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -86,8 +93,6 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-ISimulator* g_pSimulator = 0;
-thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
 int openCount = 0;
 
 struct SimClogging {
@@ -425,8 +430,10 @@ public:
 
 	static bool should_poll() { return false; }
 
-	ACTOR static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode,
-													Reference<DiskParameters> diskParameters = Reference<DiskParameters>(new DiskParameters(25000, 150000000)), bool delayOnWrite = true ) {
+	ACTOR static Future<Reference<IAsyncFile>> open(
+	    std::string filename, int flags, int mode,
+	    Reference<DiskParameters> diskParameters = makeReference<DiskParameters>(25000, 150000000),
+	    bool delayOnWrite = true) {
 		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 		state TaskPriority currentTaskID = g_network->getCurrentTask();
 
@@ -553,8 +560,8 @@ private:
 
 		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
 
-		INJECT_FAULT(io_timeout, "SimpleFile::read");
-		INJECT_FAULT(io_error, "SimpleFile::read");
+		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
+		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
 
 		return read_bytes;
 	}
@@ -591,8 +598,8 @@ private:
 
 		debugFileCheck("SimpleFileWrite", self->filename, (void*)data.begin(), offset, data.size());
 
-		INJECT_FAULT(io_timeout, "SimpleFile::write");
-		INJECT_FAULT(io_error, "SimpleFile::write");
+		INJECT_FAULT(io_timeout, "SimpleFile::write"); // SimpleFile::write inject io_timeout
+		INJECT_FAULT(io_error, "SimpleFile::write"); // SimpleFile::write inject io_error
 
 		return Void();
 	}
@@ -618,8 +625,8 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFT2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		INJECT_FAULT( io_timeout, "SimpleFile::truncate" );
-		INJECT_FAULT( io_error, "SimpleFile::truncate" );
+		INJECT_FAULT( io_timeout, "SimpleFile::truncate" ); // SimpleFile::truncate inject io_timeout
+		INJECT_FAULT( io_error, "SimpleFile::truncate" ); // SimpleFile::truncate inject io_error
 
 		return Void();
 	}
@@ -651,8 +658,8 @@ private:
 		if (randLog)
 			fprintf( randLog, "SFC2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
 
-		INJECT_FAULT( io_timeout, "SimpleFile::sync" );
-		INJECT_FAULT( io_error, "SimpleFile::sync" );
+		INJECT_FAULT( io_timeout, "SimpleFile::sync" ); // SimpleFile::sync inject io_timeout
+		INJECT_FAULT( io_error, "SimpleFile::sync" ); // SimpleFile::sync inject io_errot
 
 		return Void();
 	}
@@ -672,7 +679,7 @@ private:
 
 		if (randLog)
 			fprintf(randLog, "SFS2 %s %s %s %" PRId64 "\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str(), pos);
-		INJECT_FAULT( io_error, "SimpleFile::size" );
+		INJECT_FAULT( io_error, "SimpleFile::size" ); // SimpleFile::size inject io_error
 
 		return pos;
 	}
@@ -739,6 +746,8 @@ public:
 		return timerTime;
 	}
 
+	double timer_monotonic() override { return timer(); }
+
 	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
@@ -792,8 +801,8 @@ public:
 			return waitForProcessAndConnect( toAddr, this );
 		}
 		auto peerp = getProcessByAddress(toAddr);
-		Reference<Sim2Conn> myc( new Sim2Conn( getCurrentProcess() ) );
-		Reference<Sim2Conn> peerc( new Sim2Conn( peerp ) );
+		auto myc = makeReference<Sim2Conn>(getCurrentProcess());
+		auto peerc = makeReference<Sim2Conn>(peerp);
 
 		myc->connect(peerc, toAddr);
 		IPAddress localIp;
@@ -810,7 +819,11 @@ public:
 		((Sim2Listener*)peerp->getListener(toAddr).getPtr())->incomingConnection( 0.5*deterministicRandom()->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
 	}
-	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string host, std::string service) override {
+
+	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
+
+  Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string host, std::string service) override {
 		throw lookup_failed();
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
@@ -1434,7 +1447,7 @@ public:
 
 		// Check if any processes on machine are rebooting
 		if ( processesOnMachine != processesPerMachine ) {
-			TEST(true); //Attempted reboot, but the target did not have all of its processes running
+			TEST(true); //Attempted reboot and kill, but the target did not have all of its processes running
 			TraceEvent(SevWarn, "AbortedKill").detail("KillType", kt).detail("MachineId", machineId).detail("Reason", "Machine processes does not match number of processes per machine").detail("Processes", processesOnMachine).detail("ProcessesPerMachine", processesPerMachine).backtrace();
 			if (ktFinal) *ktFinal = None;
 			return false;
@@ -1545,12 +1558,12 @@ public:
 			.detail("KilledDC", kt==ktMin);
 
 		TEST(kt != ktMin); // DataCenter kill was rejected by killMachine
-		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Resulted in a reboot and delete
-		TEST((kt==ktMin) && (kt == Reboot)); // Resulted in a reboot
-		TEST((kt==ktMin) && (kt == KillInstantly)); // Resulted in an instant kill
-		TEST((kt==ktMin) && (kt == InjectFaults));  // Resulted in a kill by injecting faults
-		TEST((kt==ktMin) && (kt != ktOrig)); // Kill request was downgraded
-		TEST((kt==ktMin) && (kt == ktOrig)); // Requested kill was done
+		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Datacenter kill Resulted in a reboot and delete
+		TEST((kt==ktMin) && (kt == Reboot)); // Datacenter kill Resulted in a reboot
+		TEST((kt==ktMin) && (kt == KillInstantly)); // Datacenter kill Resulted in an instant kill
+		TEST((kt==ktMin) && (kt == InjectFaults));  // Datacenter kill Resulted in a kill by injecting faults
+		TEST((kt==ktMin) && (kt != ktOrig)); // Datacenter Kill request was downgraded
+		TEST((kt==ktMin) && (kt == ktOrig)); // Datacenter kill - Requested kill was done
 
 		if (ktFinal) *ktFinal = ktMin;
 
@@ -1729,6 +1742,202 @@ public:
 	int yield_limit;  // how many more times yield may return false before next returning true
 };
 
+class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
+	using Packet = std::shared_ptr<std::vector<uint8_t>>;
+	UID id;
+	ISimulator::ProcessInfo* process;
+	Optional<NetworkAddress> peerAddress;
+	Optional<ISimulator::ProcessInfo*> peerProcess;
+	Optional<Reference<UDPSimSocket>> peerSocket;
+	ActorCollection actors;
+	Promise<Void> closed;
+	std::deque<std::pair<NetworkAddress, Packet>> recvBuffer;
+	AsyncVar<int64_t> writtenPackets;
+	NetworkAddress _localAddress;
+	bool randomDropPacket() {
+		auto res = deterministicRandom()->random01() < .000001;
+		TEST(res); // UDP packet drop
+		return res;
+	}
+
+	bool isClosed() const { return closed.getFuture().isReady(); }
+	Future<Void> onClosed() const { return closed.getFuture(); }
+
+	ACTOR static Future<Void> cleanupPeerSocket(UDPSimSocket* self) {
+		wait(self->peerSocket.get()->onClosed());
+		self->peerSocket.reset();
+		return Void();
+	}
+
+	ACTOR static Future<Void> send(UDPSimSocket* self, Reference<UDPSimSocket> peerSocket, uint8_t const* begin,
+	                               uint8_t const* end) {
+		state Packet packet(std::make_shared<std::vector<uint8_t>>());
+		packet->resize(end - begin);
+		std::copy(begin, end, packet->begin());
+		wait( delay( .002 * deterministicRandom()->random01() ) );
+		peerSocket->recvBuffer.emplace_back(self->_localAddress, std::move(packet));
+		peerSocket->writtenPackets.set(peerSocket->writtenPackets.get() + 1);
+		return Void();
+	}
+
+	ACTOR static Future<int> receiveFrom(UDPSimSocket* self, uint8_t* begin, uint8_t* end, NetworkAddress* sender) {
+		state TaskPriority currentTaskID = g_sim2.getCurrentTask();
+		wait(self->writtenPackets.onChange());
+		wait(g_sim2.onProcess(self->process, currentTaskID));
+		auto packet = self->recvBuffer.front().second;
+		int sz = packet->size();
+		ASSERT(sz <= end - begin);
+		if (sender) {
+			*sender = self->recvBuffer.front().first;
+		}
+		std::copy(packet->begin(), packet->end(), begin);
+		self->recvBuffer.pop_front();
+		return sz;
+	}
+
+public:
+	UDPSimSocket(NetworkAddress const& localAddress, Optional<NetworkAddress> const& peerAddress)
+	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator.getCurrentProcess()), peerAddress(peerAddress),
+	    actors(false), _localAddress(localAddress) {
+		g_sim2.addressMap.emplace(_localAddress, process);
+		process->boundUDPSockets.emplace(localAddress, this);
+	}
+	~UDPSimSocket() {
+		if (!closed.getFuture().isReady()) {
+			close();
+			closed.send(Void());
+		}
+		actors.clear(true);
+	}
+	void close() override {
+		process->boundUDPSockets.erase(_localAddress);
+		g_sim2.addressMap.erase(_localAddress);
+	}
+	UID getDebugID() const override { return id; }
+	void addref() override { ReferenceCounted<UDPSimSocket>::addref(); }
+	void delref() override { ReferenceCounted<UDPSimSocket>::delref(); }
+
+	Future<int> send(uint8_t const* begin, uint8_t const* end) override {
+		int sz = int(end - begin);
+		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+		ASSERT(sz <= IUDPSocket::MAX_PACKET_SIZE);
+		ASSERT(peerAddress.present());
+		if (!peerProcess.present()) {
+			auto iter = g_sim2.addressMap.find(peerAddress.get());
+			if (iter == g_sim2.addressMap.end()) {
+				return res;
+			}
+			peerProcess = iter->second;
+		}
+		if (!peerSocket.present() || peerSocket.get()->isClosed()) {
+			peerSocket.reset();
+			auto iter = peerProcess.get()->boundUDPSockets.find(peerAddress.get());
+			if (iter == peerProcess.get()->boundUDPSockets.end()) {
+				return fmap([sz](Void){ return sz; }, delay(0.0));
+			}
+			peerSocket = iter->second.castTo<UDPSimSocket>();
+			// the notation of leaking connections doesn't make much sense in the context of UDP
+			// so we simply handle those in the simulator
+			actors.add(cleanupPeerSocket(this));
+		}
+		if (randomDropPacket()) {
+			return res;
+		}
+		actors.add(send(this, peerSocket.get(), begin, end));
+		return res;
+	}
+	Future<int> sendTo(uint8_t const* begin, uint8_t const* end, NetworkAddress const& peer) override {
+		int sz = int(end - begin);
+		auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+		ASSERT(sz <= MAX_PACKET_SIZE);
+		ISimulator::ProcessInfo* peerProcess = nullptr;
+		Reference<UDPSimSocket> peerSocket;
+		{
+			auto iter = g_sim2.addressMap.find(peer);
+			if (iter == g_sim2.addressMap.end()) {
+				return res;
+			}
+			peerProcess = iter->second;
+		}
+		{
+			auto iter = peerProcess->boundUDPSockets.find(peer);
+			if (iter == peerProcess->boundUDPSockets.end()) {
+				return res;
+			}
+			peerSocket = iter->second.castTo<UDPSimSocket>();
+		}
+		actors.add(send(this, peerSocket, begin, end));
+		return res;
+	}
+	Future<int> receive(uint8_t* begin, uint8_t* end) override {
+		return receiveFrom(begin, end, nullptr);
+	}
+	Future<int> receiveFrom(uint8_t* begin, uint8_t* end, NetworkAddress* sender) override {
+		if (!recvBuffer.empty()) {
+			auto buf = recvBuffer.front().second;
+			if (sender) {
+				*sender = recvBuffer.front().first;
+			}
+			int sz = buf->size();
+			ASSERT(sz <= end - begin);
+			std::copy(buf->begin(), buf->end(), begin);
+			auto res = fmap([sz](Void){ return sz; }, delay(0.0));
+			recvBuffer.pop_front();
+			return res;
+		}
+		return receiveFrom(this, begin, end, sender);
+	}
+	void bind(NetworkAddress const& addr) override {
+		g_sim2.addressMap.erase(_localAddress);
+		process->boundUDPSockets.erase(_localAddress);
+		process->boundUDPSockets.emplace(addr, Reference<UDPSimSocket>::addRef(this));
+		_localAddress = addr;
+		g_sim2.addressMap.emplace(_localAddress, process);
+	}
+
+	NetworkAddress localAddress() const override {
+		return _localAddress;
+	}
+
+};
+
+Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
+	NetworkAddress localAddress;
+	auto process = g_simulator.getCurrentProcess();
+	if (process->address.ip.isV6()) {
+		IPAddress::IPAddressStore store = process->address.ip.toV6();
+		uint16_t* ipParts = (uint16_t*)store.data();
+		ipParts[7] += deterministicRandom()->randomInt(0, 256);
+		localAddress.ip = IPAddress(store);
+	} else {
+		localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+	}
+	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
+}
+
+Future<Reference<IUDPSocket>> Sim2::createUDPSocket(bool isV6) {
+	NetworkAddress localAddress;
+	auto process = g_simulator.getCurrentProcess();
+	if (process->address.ip.isV6() == isV6) {
+		localAddress = process->address;
+	} else {
+		ASSERT(process->addresses.secondaryAddress.present() &&
+		       process->addresses.secondaryAddress.get().isV6() == isV6);
+		localAddress = process->addresses.secondaryAddress.get();
+	}
+	if (localAddress.ip.isV6()) {
+		IPAddress::IPAddressStore store = localAddress.ip.toV6();
+		uint16_t* ipParts = (uint16_t*)store.data();
+		ipParts[7] += deterministicRandom()->randomInt(0, 256);
+		localAddress.ip = IPAddress(store);
+	} else {
+		localAddress.ip = IPAddress(localAddress.ip.toV4() + deterministicRandom()->randomInt(0, 256));
+	}
+	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, Optional<NetworkAddress>{}));
+}
+
 void startNewSimulator() {
 	ASSERT( !g_network );
 	g_network = g_pSimulator = new Sim2();
@@ -1847,7 +2056,8 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 			}
 			// Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.
 			// This way, they can both keep up with the time to start the next operation
-			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
+			auto diskParameters =
+			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
 			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
 		}
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );

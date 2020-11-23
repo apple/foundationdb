@@ -41,8 +41,6 @@ set(FDBCLIENT_SRCS
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
   CommitProxyInterface.h
-  MetricLogger.actor.cpp
-  MetricLogger.h
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
