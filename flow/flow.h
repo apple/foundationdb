@@ -775,8 +775,7 @@ private:
 };
 
 template <class T>
-class Promise sealed
-{
+class Promise final {
 public:
 	template <class U>
 	void send(U && value) const {
@@ -827,7 +826,6 @@ public:
 private:
 	SAV<T> *sav;
 };
-
 
 template <class T>
 class FutureStream {

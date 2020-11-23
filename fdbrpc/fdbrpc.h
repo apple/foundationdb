@@ -104,7 +104,7 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 };
 
 template <class T>
-class ReplyPromise sealed : public ComposedIdentifier<T, 1> {
+class ReplyPromise final : public ComposedIdentifier<T, 1> {
 public:
 	template <class U>
 	void send(U&& value) const {

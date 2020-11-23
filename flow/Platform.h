@@ -88,17 +88,6 @@
 #endif
 
 /*
- * Visual Studio 2005 and beyond allow virtual and sealed while
- * targetting native code, and we get better error messages at compile
- * time with it where appropriate. Not supported with any other
- * compiler.
- */
-#if _MSC_VER < 1400
-#define sealed
-#define override
-#endif
-
-/*
  * Visual Studio (.NET 2003 and beyond) has an __assume compiler
  * intrinsic to hint to the compiler that a given condition is true
  * and will remain true until the expression is altered. This can be
