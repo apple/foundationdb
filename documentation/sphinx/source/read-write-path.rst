@@ -12,7 +12,7 @@ We first discuss the read path and the write path separately for a single transa
 
 The content is based on FDB 6.2 and is true for FDB 6.3.  A new timestamp proxy role is introduced in FDB 6.4+, which affects the read path. We will discuss the timestamp proxy role in the future version of this document.
 
-.. image:: /images/FDB-read-path.png
+.. image:: /images/FDB_read_path.png
 
 Components
 =================
@@ -98,7 +98,7 @@ Write path of a transaction
 
 Suppose a client has a write-only transaction. Fig. 2 below shows the write path in a non-HA cluster. We will discuss how a transaction with both read and write works in the next section.
 
-.. image:: /images/FDB-write-path.png
+.. image:: /images/FDB_write_path.png
 
 To simplify the explanation, the steps below do not include transaction batching on proxy, which is a typical database technique to increase transaction throughput.
 
