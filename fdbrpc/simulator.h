@@ -86,7 +86,7 @@ public:
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
 		bool isExcluded() const { return excluded; }
 		bool isCleared() const { return cleared; }
-		std::string getReliableInfo() {
+		std::string getReliableInfo() const {
 			std::stringstream ss;
 			ss << "failed:" << failed << " fault_injection_p1:" << fault_injection_p1
 			   << " fault_injection_p2:" << fault_injection_p2;
@@ -176,12 +176,12 @@ public:
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 
-	virtual void addRole(NetworkAddress const& address, std::string const& role) {
+	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
 		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
 	}
 
-	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
+	void removeRole(NetworkAddress const& address, std::string const& role) {
 		auto addressIt = roleAddresses.find(address);
 		if (addressIt != roleAddresses.end()) {
 			auto rolesIt = addressIt->second.find(role);
@@ -210,7 +210,7 @@ public:
 		}
 	}
 
-	virtual std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
+	std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
 		auto addressIt = roleAddresses.find(address);
 		std::string roleText;
 		if (addressIt != roleAddresses.end()) {
@@ -224,20 +224,20 @@ public:
 		return roleText;
 	}
 
-	virtual void clearAddress(NetworkAddress const& address) {
+	void clearAddress(NetworkAddress const& address) {
 		clearedAddresses[address]++;
 		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
 	}
-	virtual bool isCleared(NetworkAddress const& address) const {
+	bool isCleared(NetworkAddress const& address) const {
 		return clearedAddresses.find(address) != clearedAddresses.end();
 	}
 
-	virtual void excludeAddress(NetworkAddress const& address) {
+	void excludeAddress(NetworkAddress const& address) {
 		excludedAddresses[address]++;
 		TraceEvent("ExcludeAddress").detail("Address", address).detail("Value", excludedAddresses[address]);
 	}
 
-	virtual void includeAddress(NetworkAddress const& address) {
+	void includeAddress(NetworkAddress const& address) {
 		auto addressIt = excludedAddresses.find(address);
 		if (addressIt != excludedAddresses.end()) {
 			if (addressIt->second > 1) {
@@ -253,29 +253,27 @@ public:
 			TraceEvent(SevWarn,"IncludeAddress").detail("Address", address).detail("Result", "Missing");
 		}
 	}
-	virtual void includeAllAddresses() {
+	void includeAllAddresses() {
 		TraceEvent("IncludeAddressAll").detail("AddressTotal", excludedAddresses.size());
 		excludedAddresses.clear();
 	}
-	virtual bool isExcluded(NetworkAddress const& address) const {
+	bool isExcluded(NetworkAddress const& address) const {
 		return excludedAddresses.find(address) != excludedAddresses.end();
 	}
 
-	virtual void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
-		swapsDisabled.insert(zoneId);
-	}
-	virtual void enableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
+	void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId) { swapsDisabled.insert(zoneId); }
+	void enableSwapToMachine(Optional<Standalone<StringRef>> zoneId) {
 		swapsDisabled.erase(zoneId);
 		allSwapsDisabled = false;
 	}
-	virtual bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
+	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
 		return swapsDisabled.count( zoneId ) == 0 && !allSwapsDisabled && !extraDB;
 	}
-	virtual void enableSwapsToAll() {
+	void enableSwapsToAll() {
 		swapsDisabled.clear();
 		allSwapsDisabled = false;
 	}
-	virtual void disableSwapsToAll() {
+	void disableSwapsToAll() {
 		swapsDisabled.clear();
 		allSwapsDisabled = true;
 	}
