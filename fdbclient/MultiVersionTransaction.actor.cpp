@@ -447,7 +447,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char *clusterFilePath) {
 		}));
 	});
 
-	return Reference<DLDatabase>(new DLDatabase(api, dbFuture));
+	return makeReference<DLDatabase>(api, dbFuture);
 }
 
 Reference<IDatabase> DLApi::createDatabase(const char *clusterFilePath) {
@@ -916,7 +916,8 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 
 void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
 	clients.push_back(client);
-	connectionAttempts.push_back(Reference<Connector>(new Connector(Reference<DatabaseState>::addRef(this), client, clusterFilePath)));
+	connectionAttempts.push_back(
+	    makeReference<Connector>(Reference<DatabaseState>::addRef(this), client, clusterFilePath));
 }
 
 void MultiVersionDatabase::DatabaseState::startConnections() {
@@ -983,7 +984,7 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
 	if(!localClient) {
-		localClient = Reference<ClientInfo>(new ClientInfo(ThreadSafeApi::api));
+		localClient = makeReference<ClientInfo>(ThreadSafeApi::api);
 	}
 
 	if(this->apiVersion != 0 && this->apiVersion != apiVersion) {
@@ -1047,7 +1048,7 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 
 	if(externalClients.count(filename) == 0) {
 		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-		externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(path), path));
+		externalClients[filename] = makeReference<ClientInfo>(new DLApi(path), path);
 	}
 }
 
@@ -1064,7 +1065,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		std::string lib = abspath(joinPath(path, filename));
 		if(externalClients.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-			externalClients[filename] = Reference<ClientInfo>(new ClientInfo(new DLApi(lib), lib));
+			externalClients[filename] = makeReference<ClientInfo>(new DLApi(lib), lib);
 		}	
 	}
 }
@@ -1767,7 +1768,7 @@ struct DLTest {
 	static Reference<FdbCApi> getApi() {
 		static Reference<FdbCApi> api;
 		if(!api) {
-			api = Reference<FdbCApi>(new FdbCApi());
+			api = makeReference<FdbCApi>();
 
 			// Functions needed for DLSingleAssignmentVar
 			api->futureSetCallback = [](FdbCApi::FDBFuture *f, FdbCApi::FDBCallback callback, void *callbackParameter) {  

@@ -701,8 +701,10 @@ ACTOR Future<Void> shardTracker(
 			wait( delay(0, TaskPriority::DataDistribution) );
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled)
-			self->output.sendError(e);		// Propagate failure to dataDistributionTracker
+		// If e is broken_promise then self may have already been deleted
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_broken_promise) {
+			self->output.sendError(e); // Propagate failure to dataDistributionTracker
+		}
 		throw e;
 	}
 }
@@ -717,7 +719,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 			continue;
 		}
 
-		Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics(new AsyncVar<Optional<ShardMetrics>>());
+		auto shardMetrics = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 
 		// For the case where the new tracker will take over at the boundaries of current shard(s)
 		//  we can use the old size if it is available. This will be the case when merging shards.

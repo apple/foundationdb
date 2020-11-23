@@ -24,6 +24,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "fdbserver/MetricLogger.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricsRule {

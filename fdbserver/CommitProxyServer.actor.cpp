@@ -547,7 +547,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	}
 
 	// Pre-resolution the commits
-	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
+	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1); // Wait for local batch
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
 	self->releaseDelay = delay(
 		std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE,

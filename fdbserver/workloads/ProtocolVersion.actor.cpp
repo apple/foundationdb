@@ -18,26 +18,7 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <ostream>
-#include <string>
-#include <thread>
-#include <vector>
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/MultiVersionTransaction.h"
-#include "fdbrpc/FlowTransport.h"
-#include "fdbrpc/Locality.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbmonitor/SimpleIni.h"
-#include "flow/Arena.h"
-#include "flow/ProtocolVersion.h"
-#include "flow/flow.h"
-#include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/genericactors.actor.h"
-#include "flow/network.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 struct ProtocolVersionWorkload : TestWorkload {
     ProtocolVersionWorkload(WorkloadContext const& wcx)

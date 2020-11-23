@@ -340,10 +340,9 @@ ACTOR Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> lea
 ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	state ActorCollection actors(false);
 	state Future<Void> myWork = Never();
-	state Reference<AsyncVar<RestoreWorkerInterface>> leader =
-	    Reference<AsyncVar<RestoreWorkerInterface>>(new AsyncVar<RestoreWorkerInterface>());
+	state Reference<AsyncVar<RestoreWorkerInterface>> leader = makeReference<AsyncVar<RestoreWorkerInterface>>();
 	state RestoreWorkerInterface myWorkerInterf;
-	state Reference<RestoreWorkerData> self = Reference<RestoreWorkerData>(new RestoreWorkerData());
+	state Reference<RestoreWorkerData> self = makeReference<RestoreWorkerData>();
 
 	myWorkerInterf.initEndpoints();
 	self->workerID = myWorkerInterf.id();

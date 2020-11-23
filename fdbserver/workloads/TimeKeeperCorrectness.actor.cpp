@@ -68,7 +68,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<bool> _check(Database cx, TimeKeeperCorrectnessWorkload *self) {
 		state KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);
-		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		TraceEvent(SevInfo, "TKCorrectness_CheckStart")
 				.detail("TimeKeeperMaxEntries", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)

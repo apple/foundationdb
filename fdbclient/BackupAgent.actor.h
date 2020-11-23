@@ -269,6 +269,7 @@ public:
 
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
+	static Key getPauseKey();
 
 	// parallel restore
 	Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true);
@@ -427,7 +428,8 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false, bool dstOnly = false);
+	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false,
+	                         bool dstOnly = false, bool waitForDestUID = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 

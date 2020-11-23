@@ -18,7 +18,7 @@ if (RocksDB_FOUND)
                -DWITH_CORE_TOOLS=OFF
                -DWITH_BENCHMARK_TOOLS=OFF
                -DWITH_BZ2=OFF
-               -DWITH_LZ4=OFF
+               -DWITH_LZ4=ON
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
@@ -45,7 +45,7 @@ else()
                -DWITH_CORE_TOOLS=OFF
                -DWITH_BENCHMARK_TOOLS=OFF
                -DWITH_BZ2=OFF
-               -DWITH_LZ4=OFF
+               -DWITH_LZ4=ON
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF

@@ -135,10 +135,10 @@ namespace PTreeImpl {
 				// and should drop its reference count
 				Reference<PTree<T>> r;
 				if (which)
-					r = Reference<PTree<T>>( new PTree<T>( node->priority, node->data, node->child(0, at), ptr, at ) );
-				else
-					r = Reference<PTree<T>>( new PTree<T>( node->priority, node->data, ptr, node->child(1, at), at ) );
-				node->pointer[2].clear();
+				    r = makeReference<PTree<T>>(node->priority, node->data, node->child(0, at), ptr, at);
+			    else
+				    r = makeReference<PTree<T>>(node->priority, node->data, ptr, node->child(1, at), at);
+			    node->pointer[2].clear();
 				return r;
 			} else {
 				if (node->updated)
@@ -150,10 +150,10 @@ namespace PTreeImpl {
 		}
 		if ( node->updated ) {
 			if (which)
-				return Reference<PTree<T>>( new PTree<T>( node->priority, node->data, node->child(0, at), ptr, at ) );
-			else
-				return Reference<PTree<T>>( new PTree<T>( node->priority, node->data, ptr, node->child(1, at), at ) );
-		} else {
+			    return makeReference<PTree<T>>(node->priority, node->data, node->child(0, at), ptr, at);
+		    else
+			    return makeReference<PTree<T>>(node->priority, node->data, ptr, node->child(1, at), at);
+	    } else {
 			node->lastUpdateVersion = at;
 			node->replacedPointer = which;
 			node->pointer[2] = ptr;
@@ -269,8 +269,8 @@ namespace PTreeImpl {
 	template<class T>
 	void insert(Reference<PTree<T>>& p, Version at, const T& x) {
 		if (!p){
-			p = Reference<PTree<T>>(new PTree<T>(x, at));
-		} else {
+		    p = makeReference<PTree<T>>(x, at);
+	    } else {
 			bool direction = !(x < p->data);
 			Reference<PTree<T>> child = p->child(direction, at);
 			insert(child, at, x);
@@ -425,8 +425,8 @@ namespace PTreeImpl {
 		if (!left) return right;
 		if (!right) return left;
 
-		Reference<PTree<T>> r = Reference<PTree<T>>(new PTree<T>(lastNode(left, at)->data, at));
-		if (EXPENSIVE_VALIDATION) {
+	    Reference<PTree<T>> r = makeReference<PTree<T>>(lastNode(left, at)->data, at);
+	    if (EXPENSIVE_VALIDATION) {
 			ASSERT( r->data < firstNode(right, at)->data);
 		}
 		Reference<PTree<T>> a = left;

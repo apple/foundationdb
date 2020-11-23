@@ -1196,7 +1196,7 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 			lastAvailable = std::max(lastAvailable, r->value());
 
 		if (lastAvailable != invalidVersion && lastAvailable >= data->oldestVersion.get()) {
-			TEST(true);
+			TEST(true); // wait for oldest version
 			wait( data->oldestVersion.whenAtLeast(lastAvailable+1) );
 		}
 
@@ -1388,9 +1388,9 @@ ACTOR Future<Void> fetchKeys( StorageCacheData *data, AddingCacheRange* cacheRan
 		//++data->counters.fetchExecutingCount;
 		//data->counters.fetchExecutingMS += 1000*(now() - executeStart);
 
-		TraceEvent(SevDebug, interval.end(), data->thisServerID);
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error &e){
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
 
 		// TODO define the shuttingDown state of cache server
 		if (e.code() == error_code_actor_cancelled && /* !data->shuttingDown &&*/ cacheRange->phase >= AddingCacheRange::Fetching) {
@@ -1951,7 +1951,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 	state Transaction tr(self->cx);
 	state Value trueValue = storageCacheValue(std::vector<uint16_t>{ 0 });
 	state Value falseValue = storageCacheValue(std::vector<uint16_t>{});
-	state MutationRef privatized;
+	state Standalone<MutationRef> privatized;
 	privatized.type = MutationRef::SetValue;
 	state Version readVersion;
 	try {
@@ -1969,7 +1969,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 					ASSERT(currCached == (kv.value == falseValue));
 					if (kv.value == trueValue) {
 						begin = kv.key;
-						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param1 = begin.withPrefix(systemKeys.begin, privatized.arena());
 						privatized.param2 = serverKeysTrue;
 						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).
 						//	detail("BeginKey", begin.substr(storageCacheKeys.begin.size())).
@@ -1979,7 +1979,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 					} else {
 						currCached = false;
 						end = kv.key;
-						privatized.param1 = begin.withPrefix(systemKeys.begin);
+						privatized.param1 = begin.withPrefix(systemKeys.begin, privatized.arena());
 						privatized.param2 = serverKeysFalse;
 						//TraceEvent(SevDebug, "SCStartupFetch", self->thisServerID).detail("EndKey", end.substr(storageCacheKeys.begin.size())).
 						//	detail("ReadVersion", readVersion).detail("DataVersion", self->version.get());

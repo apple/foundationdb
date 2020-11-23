@@ -113,12 +113,13 @@ public:
 		bool cachePopulated;
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0), logGenerations(0), cachePopulated(false),
-			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ), dbInfoCount(0),
-			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo() ) ),
-			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint, true ) )  // SOMEDAY: Locality!
-		{
-		}
+		DBInfo()
+		  : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false), unfinishedRecoveries(0),
+		    logGenerations(0), cachePopulated(false), clientInfo(new AsyncVar<ClientDBInfo>()), dbInfoCount(0),
+		    serverInfo(new AsyncVar<ServerDBInfo>()),
+		    db(DatabaseContext::create(clientInfo, Future<Void>(), LocalityData(), true, TaskPriority::DefaultEndpoint,
+		                               true)) // SOMEDAY: Locality!
+		{}
 
 		void setDistributor(const DataDistributorInterface& interf) {
 			auto newInfo = serverInfo->get();
@@ -1212,7 +1213,9 @@ public:
 		for(auto& logSet : dbi.logSystemConfig.tLogs) {
 			if(region.satelliteTLogPolicy.isValid() && logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
-				ASSERT(!oldSatelliteFallback || logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info());
+				ASSERT(!oldSatelliteFallback ||
+				       (region.satelliteTLogPolicyFallback.isValid() &&
+				        logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info()));
 				break;
 			}
 		}
@@ -1934,7 +1937,7 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 
 ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData* self, RecruitRemoteFromConfigurationRequest req ) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); //ClusterController RecruitTLogsRequest
+	TEST(true); //ClusterController RecruitTLogsRequest Remote
 	loop {
 		try {
 			RecruitRemoteFromConfigurationReply rep = self->findRemoteWorkersForConfiguration( req );
@@ -2186,7 +2189,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
-	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2214,7 +2217,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	wait(timeKeeperSetVersion(self));
 
 	loop {
-		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 		loop {
 			try {
 				if(!g_network->isSimulated()) {
