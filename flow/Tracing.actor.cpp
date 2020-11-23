@@ -23,6 +23,7 @@
 #include "flow/network.h"
 
 #include <functional>
+#include <iomanip>
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -90,7 +91,7 @@ struct TraceRequest {
 
 		TraceEvent(SevInfo, "TracingSpanResizedBuffer").detail("OldSize", buffer_size).detail("NewSize", size);
 		uint8_t* new_buffer = new uint8_t[size];
-		memcpy(new_buffer, buffer, data_size);
+		std::copy(buffer, buffer + data_size, new_buffer);
 		free(buffer);
 		buffer = new_buffer;
 		buffer_size = size;
@@ -175,20 +176,27 @@ protected:
 		// fluentd filter to be able to correctly parse the updated format! See
 		// the msgpack specification for more info on the bit patterns used
 		// here.
-		uint8_t size = 6;
+		uint8_t size = 7;
 		if (span.parents.size() == 0) --size;
 		request.write_byte(size | 0b10010000); // write as array
 
-		serialize_string(g_network->getLocalAddress().toString(), request);
+		serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
 
-		serialize_string(span.context.toString(), request);
+		serialize_value(span.context.first(), request, 0xcf); // trace id
+		serialize_value(span.context.second(), request, 0xcf); // span id
 
 		serialize_value(span.begin, request, 0xcb);
-		serialize_value(span.end, request, 0xcb);
+		serialize_value(span.end - span.begin, request, 0xcb); // duration
 
 		serialize_string(span.location.name.toString(), request);
 
 		serialize_vector(span.parents, request);
+
+		// std::stringstream out;
+		// for (int i = 0; i < request.data_size; ++i) {
+		// 	out << std::hex << std::setfill('0') << std::setw(2) << (unsigned int) (unsigned char)request.buffer[i] << " ";
+		// }
+		// TraceEvent("SerializedSpan").detail("Context", span.context).detail("Begin", span.begin).detail("Duration", span.end - span.begin).detail("Name", span.location.name.toString()).detail("NumParents", span.parents.size()).detail("SpanAsHex", out.str());
 	}
 
 private:
@@ -245,7 +253,7 @@ private:
 		}
 
 		for (const auto& parentContext : vec) {
-			serialize_string(parentContext.toString(), request);
+			serialize_value(parentContext.second(), request, 0xcf);
 		}
 	}
 };

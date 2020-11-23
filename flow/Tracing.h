@@ -35,7 +35,11 @@ inline Location operator"" _loc(const char* str, size_t size) {
 
 struct Span {
 	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
-	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {}
+	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
+		if (parents.size() > 0) {
+			this->context = SpanID((*parents.begin()).first(), context.second());
+		}
+	}
 	Span(Location location, std::initializer_list<SpanID> const& parents = {})
 	  : Span(deterministicRandom()->randomUniqueID(), location, parents) {}
 	Span(Location location, SpanID context) : Span(location, { context }) {}
