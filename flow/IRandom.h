@@ -174,4 +174,7 @@ Reference<IRandom> deterministicRandom();
 // non-deterministic contexts.
 Reference<IRandom> nondeterministicRandom();
 
+// Populates a buffer with a random sequence of bytes
+void generateRandomData(uint8_t* buffer, int length);
+
 #endif
