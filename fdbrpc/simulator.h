@@ -120,7 +120,7 @@ public:
 			}
 		}
 
-		const Reference<IListener> getListener(const NetworkAddress& addr) {
+		Reference<IListener> getListener(const NetworkAddress& addr) const {
 			auto listener = listenerMap.find(addr);
 			ASSERT( listener != listenerMap.end());
 			return listener->second;
