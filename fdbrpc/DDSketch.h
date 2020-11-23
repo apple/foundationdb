@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include "flow/Error.h"
+#include "flow/UnitTest.h"
 
 #if (!(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
 #error Do not support non-little-endian systems
@@ -35,49 +36,53 @@
 // This significantly reduces the time for log
 
 #if FASTLOG
-struct fastLogger {
-	// Basically, the goal is to compute log(x)/log(r).
-	// For double, it is represented as 2^e(1+s) (0<=s<1), so our goal becomes e*log(2)/log(r)*log(1+s),
-	// and we approximate log(1+s) with a cubic function. See more details on DataDog's paper, or
-	// CubicallyInterpolatedMapping.java in https://github.com/DataDog/sketches-java/
-	constexpr const static double correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
-	constexpr static const double A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
-	static const int SIGNIFICAND_WIDTH = 53;
-	static const uint64_t SIGNIFICAND_MASK = 0x000fffffffffffffuLL;
-	static const uint64_t EXPONENT_MASK = 0x7FF0000000000000uLL;
-	constexpr static const int EXPONENT_SHIFT = SIGNIFICAND_WIDTH - 1;
-	static const int EXPONENT_BIAS = 1023;
-	static const uint64_t ONE = 0x3ff0000000000000uLL;
-	static inline uint64_t doubleToLongBits(double x) {
-		uint64_t u;
-		uint64_t* pu = reinterpret_cast<uint64_t*>(&x);
-		u = *pu;
-		return u;
-	}
-	static inline double longBitsToDouble(uint64_t x) {
-		double u;
-		double* pu = reinterpret_cast<double*>(&x);
-		u = *pu;
-		return u;
-	}
-	static int getExponent(uint64_t longBits) {
-		return (int)((longBits & EXPONENT_MASK) >> EXPONENT_SHIFT) - EXPONENT_BIAS;
-	}
+namespace fastLogger {
+// Basically, the goal is to compute log(x)/log(r).
+// For double, it is represented as 2^e*(1+s) (0<=s<1), so our goal becomes e*log(2)/log(r)*log(1+s),
+// and we approximate log(1+s) with a cubic function. See more details on Datadog's paper, or
+// CubicallyInterpolatedMapping.java in https://github.com/DataDog/sketches-java/
+static const double correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
+constexpr static const double A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
+static const int SIGNIFICAND_WIDTH = 53;
+static const uint64_t SIGNIFICAND_MASK = 0x000fffffffffffffuLL;
+static const uint64_t EXPONENT_MASK = 0x7FF0000000000000uLL;
+constexpr static const int EXPONENT_SHIFT = SIGNIFICAND_WIDTH - 1;
+static const int EXPONENT_BIAS = 1023;
+static const uint64_t ONE = 0x3ff0000000000000uLL;
 
-	static double getSignificandPlusOne(uint64_t longBits) {
-		return longBitsToDouble((longBits & SIGNIFICAND_MASK) | ONE);
-	}
-	static double fastlog(double value) {
-		uint64_t longBits = doubleToLongBits(value);
-		double s = getSignificandPlusOne(longBits) - 1;
-		double e = getExponent(longBits);
-		return ((A * s + B) * s + C) * s + e;
-	}
-};
+static inline uint64_t doubleToLongBits(double x) {
+	static_assert(sizeof(double) == sizeof(uint64_t));
+	uint64_t u;
+	uint64_t* pu = reinterpret_cast<uint64_t*>(&x);
+	u = *pu;
+	return u;
+}
+
+static inline double longBitsToDouble(uint64_t x) {
+	double u;
+	double* pu = reinterpret_cast<double*>(&x);
+	u = *pu;
+	return u;
+}
+
+static inline int getExponent(uint64_t longBits) {
+	return (int)((longBits & EXPONENT_MASK) >> EXPONENT_SHIFT) - EXPONENT_BIAS;
+}
+
+static inline double getSignificandPlusOne(uint64_t longBits) {
+	return longBitsToDouble((longBits & SIGNIFICAND_MASK) | ONE);
+}
+static inline double fastlog(double value) {
+	uint64_t longBits = doubleToLongBits(value);
+	double s = getSignificandPlusOne(longBits) - 1;
+	double e = getExponent(longBits);
+	return ((A * s + B) * s + C) * s + e;
+}
+}; // namespace fastLogger
 #endif
 
 // A DDSketch for non-negative numbers
-// (those < 10^-18 are treated as 0, and huge numbers (>>10^18) may degrade the performance)
+// (those < 10^-18 are treated as 0, and huge numbers (>>10^18) fail ASSERT)
 template <class T>
 class DDSketch {
 public:
@@ -86,17 +91,13 @@ public:
 	    multiplier(FASTLOG ? fastLogger::correctingFactor * log(2) / log(1 + 2 * errorGuarantee / (1 - errorGuarantee))
 	                       : 1),
 	    offset((FASTLOG ? fastLogger::fastlog(1 / EPS) * multiplier : log(1 / EPS)) + 5), populationSize(0),
-	    zeroPopulationSize(0), _min(T()), _max(T()), sum(T()) {
-
+	    zeroPopulationSize(0), minValue(T()), maxValue(T()), sum(T()) {
 		buckets.resize(2 * offset, 0);
-#if FASTLOG
-		ASSERT(sizeof(double) == sizeof(uint64_t));
-#endif
 	}
 
 	DDSketch<T>& addSample(T sample) {
 		// Call it addSample for now, while it is not a sample anymore
-		if (!populationSize) _min = _max = sample;
+		if (!populationSize) minValue = maxValue = sample;
 
 		if (sample <= EPS) {
 			zeroPopulationSize++;
@@ -106,17 +107,14 @@ public:
 #else
 			int index = ceil(log(sample) / logGamma);
 #endif
-			ASSERT(index + offset >= 0);
-			if (index + offset >= buckets.size()) {
-				buckets.resize(index + offset + 1);
-			}
+			ASSERT(index + offset >= 0 && index + offset < buckets.size());
 			buckets[index + offset]++;
 		}
 
 		populationSize++;
 		sum += sample;
-		_max = std::max(_max, sample);
-		_min = std::min(_min, sample);
+		maxValue = std::max(maxValue, sample);
+		minValue = std::min(minValue, sample);
 		return *this;
 	}
 
@@ -127,36 +125,58 @@ public:
 
 	T median() { return percentile(0.5); }
 
-	T percentile(double percentile) { // Find the targetPercentilePopulation-th element
-		if (percentile < 0.0 || percentile > 1.0 || populationSize == 0) return T();
-		uint64_t count = zeroPopulationSize;
+	T percentile(double percentile) { // Find the tPP-th (0-indexed) element
+		ASSERT(percentile >= 0 && percentile <= 1);
+
+		if (populationSize == 0) return T();
 		uint64_t targetPercentilePopulation = percentile * (populationSize - 1);
-		if (targetPercentilePopulation < zeroPopulationSize) {
-			// Zeros are enough
-			return (T)EPS;
-		}
-		for (size_t i = 0; i < buckets.size(); i++) {
-			if (targetPercentilePopulation < count + buckets[i]) {
-#if FASTLOG
-				return (T)(2.0 * pow(gamma, (i - offset) / fastLogger::correctingFactor) / (gamma + 1));
-#else
-				return (T)(2.0 * pow(gamma, (i - offset)) / (gamma + 1));
-#endif
+		if (targetPercentilePopulation < zeroPopulationSize) return T(0);
+
+		int index = -1;
+		bool found = false;
+		if (percentile <= 0.5) { // count up
+			uint64_t count = zeroPopulationSize;
+			for (size_t i = 0; i < buckets.size(); i++) {
+				if (targetPercentilePopulation < count + buckets[i]) {
+					// count + buckets[i] = # of numbers so far (from the rightmost to this
+					// bucket, inclusive), so if target is in this bucket, it should means tPP < cnt + bck[i]
+					found = true;
+					index = i;
+					break;
+				}
+				count += buckets[i];
 			}
-			count += buckets[i];
+		} else { // and count down
+			uint64_t count = 0;
+			for (size_t i = buckets.size(); i >= 0; i--) {
+				if (targetPercentilePopulation + count + buckets[i] >= populationSize) {
+					// cnt + bkt[i] is # of numbers to the right of this bucket (incl.),
+					// so if target is not in this bucket (i.e., to the left of this bucket),
+					// it would be as right as the left bucket's rightmost number, so
+					// we would have tPP + cnt + bkt[i] < total population (tPP is 0-indexed),
+					// that means target is in this bucket if this condition is not satisfied.
+					found = true;
+					index = i;
+					break;
+				}
+				count += buckets[i];
+			}
 		}
-		UNREACHABLE(); // Should not be here
-		return T();
+		ASSERT(found);
+#if FASTLOG
+		return (T)(2.0 * pow(gamma, (index - offset) / fastLogger::correctingFactor) / (gamma + 1));
+#else
+		return (T)(2.0 * pow(gamma, (index - offset)) / (gamma + 1));
+#endif
 	}
 
-	T min() const { return _min; }
-	T max() const { return _max; }
+	T min() const { return minValue; }
+	T max() const { return maxValue; }
 
 	void clear() {
 		std::fill(buckets.begin(), buckets.end(), 0);
-		buckets.resize(2 * offset);
 		populationSize = zeroPopulationSize = 0;
-		sum = _min = _max = 0; // Doesn't work for all T
+		sum = minValue = maxValue = 0; // Doesn't work for all T
 	}
 
 	uint64_t getPopulationSize() const { return populationSize; }
@@ -166,11 +186,16 @@ public:
 	DDSketch<T>& mergeWith(const DDSketch<T>& anotherSketch) {
 		// Does not work if one use FASTLOG and the other did not
 		// Must have the same guarantee
-		ASSERT(fabs(errorGuarantee - anotherSketch.gerrorGuarantee) < EPS);
-		buckets.resize(std::max(buckets.size(), anotherSketch.buckets.size()));
+		ASSERT(errorGuarantee - anotherSketch.gerrorGuarantee < EPS &&
+		       anotherSketch.gerrorGuarantee - errorGuarantee < EPS && anotherSketch.buckets.size() == buckets.size());
 		for (size_t i = 0; i < anotherSketch.buckets.size(); i++) {
 			buckets[i] += anotherSketch.buckets[i];
 		}
+		populationSize += anotherSketch.populationSize;
+		zeroPopulationSize += anotherSketch.zeroPopulationSize;
+		minValue = std::min(minValue, anotherSketch.minValue);
+		maxValue = std::max(maxValue, anotherSketch.maxValue);
+		sum += anotherSketch.sum;
 		return *this;
 	}
 
@@ -184,7 +209,42 @@ private:
 
 	uint64_t populationSize, zeroPopulationSize; // we need to separately count 0s
 	std::vector<uint64_t> buckets;
-	T _min, _max, sum;
+	T minValue, maxValue, sum;
 };
 
 #endif
+
+
+
+
+TEST_CASE("/fdbrpc/ddsketch/accuracy") {
+
+	int TRY = 100, SIZE = 1e6;
+	const int totalPercentiles = 7;
+	double targetPercentiles[totalPercentiles] = {.0001, .01, .1, .50, .90, .99, .9999};
+	double stat[totalPercentiles];
+	for (int t = 0; t < TRY; t++) {
+		DDSketch<double> dd;
+		std::vector<double> nums;
+		for (int i = 0; i < SIZE; i++) {
+			static double a = 1, b = 1; // a skewed distribution
+			auto y = deterministicRandom()->random01();
+			auto num = b / pow(1 - y, 1 / a);
+			nums.push_back(num);
+			dd.addSample(num);
+		}
+		std::sort(nums.begin(), nums.end());
+		for (int percentID = 0; percentID < totalPercentiles; percentID++) {
+			double percentile = targetPercentiles[percentID];
+			double ground = nums[percentile * (SIZE - 1)], ddvalue = dd.percentile(percentile);
+			double relativeError = fabs(ground - ddvalue) / ground;
+			stat[percentID] += relativeError;
+		}
+	}
+
+	for (int percentID = 0; percentID < totalPercentiles; percentID++) {
+		printf("%.4lf per, relative error %.4lf\n", targetPercentiles[percentID], stat[percentID] / TRY);
+	}
+
+	return Void();
+}
