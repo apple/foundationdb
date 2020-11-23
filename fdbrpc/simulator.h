@@ -35,12 +35,16 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(nullptr), allowLogSetKills(true), usableRegions(1) {}
+	ISimulator()
+	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
+	    isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
+	    allSwapsDisabled(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), extraDB(nullptr),
+	    allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
 
-	enum BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 
 	// Subclasses may subclass ProcessInfo as well
 	struct MachineInfo;
@@ -150,7 +154,7 @@ public:
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	machineId;
 
-		MachineInfo() : machineProcess(0) {}
+		MachineInfo() : machineProcess(nullptr) {}
 	};
 
 	ProcessInfo* getProcess( Endpoint const& endpoint ) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
@@ -325,15 +329,12 @@ public:
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 
-	virtual flowGlobalType global(int id) const { return getCurrentProcess()->global(id); };
-	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
+	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
+	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
 
-	virtual void disableFor(const std::string& desc, double time) {
-		disabledMap[desc] = time;
-	}
+	void disableFor(const std::string& desc, double time) { disabledMap[desc] = time; }
 
-	virtual double checkDisabled(const std::string& desc) const
-	{
+	double checkDisabled(const std::string& desc) const {
 		auto iter = disabledMap.find(desc);
 		if (iter != disabledMap.end()) {
 			return iter->second;

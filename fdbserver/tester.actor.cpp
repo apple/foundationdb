@@ -992,16 +992,16 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 		}},
 	{ "simBackupAgents", [](const std::string& value, TestSpec* spec) {
 			if (value == "BackupToFile" || value == "BackupToFileAndDB")
-				spec->simBackupAgents = ISimulator::BackupToFile;
-			else
-				spec->simBackupAgents = ISimulator::NoBackupAgents;
-			TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec->simBackupAgents);
+		        spec->simBackupAgents = ISimulator::BackupAgentType::BackupToFile;
+	        else
+		        spec->simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+	        TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec->simBackupAgents);
 
 			if (value == "BackupToDB" || value == "BackupToFileAndDB")
-				spec->simDrAgents = ISimulator::BackupToDB;
-			else
-				spec->simDrAgents = ISimulator::NoBackupAgents;
-			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec->simDrAgents);
+		        spec->simDrAgents = ISimulator::BackupAgentType::BackupToDB;
+	        else
+		        spec->simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
+	        TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec->simDrAgents);
 		}},
 	{ "checkOnly", [](const std::string& value, TestSpec* spec) {
 			if(value == "true")
@@ -1197,8 +1197,8 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state bool waitForQuiescenceEnd = false;
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
-	state ISimulator::BackupAgentType simBackupAgents = ISimulator::NoBackupAgents;
-	state ISimulator::BackupAgentType simDrAgents = ISimulator::NoBackupAgents;
+	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+	state ISimulator::BackupAgentType simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state bool enableDD = false;
 	if (tests.empty()) useDB = true;
 	for( auto iter = tests.begin(); iter != tests.end(); ++iter ) {
@@ -1207,9 +1207,10 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		if( iter->waitForQuiescenceEnd ) waitForQuiescenceEnd = true;
 		startDelay = std::max( startDelay, iter->startDelay );
 		databasePingDelay = std::min( databasePingDelay, iter->databasePingDelay );
-		if (iter->simBackupAgents != ISimulator::NoBackupAgents) simBackupAgents = iter->simBackupAgents;
+		if (iter->simBackupAgents != ISimulator::BackupAgentType::NoBackupAgents)
+			simBackupAgents = iter->simBackupAgents;
 
-		if (iter->simDrAgents != ISimulator::NoBackupAgents) {
+		if (iter->simDrAgents != ISimulator::BackupAgentType::NoBackupAgents) {
 			simDrAgents = iter->simDrAgents;
 		}
 		enableDD = enableDD || getOption(iter->options[0], LiteralStringRef("enableDD"), false);
