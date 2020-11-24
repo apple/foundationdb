@@ -375,6 +375,8 @@ IKeyValueStore* createKVStore(std::string const& storeType, std::string const& f
 #endif
 	} else {
 		ASSERT(false);
+		// unreachable - but compiler doesn't seem to figure that out
+		return nullptr;
 	}
 }
 
