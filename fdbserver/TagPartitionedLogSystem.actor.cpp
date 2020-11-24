@@ -166,25 +166,16 @@ OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
 	const UID dbgid;
 	LogSystemType logSystemType;
-<<<<<<< HEAD
-	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, remote or satellite
-=======
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
->>>>>>> anoyes/merge-6.2-to-6.3
 	int expectedLogSets;
 	int logRouterTags;
 	int txsTags;
 	UID recruitmentID;
 	int repopulateRegionAntiQuorum;
 	bool stopped;
-<<<<<<< HEAD
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
 	const LogEpoch epoch;
 	LogEpoch oldestBackupEpoch;
-=======
-	std::set<int8_t> pseudoLocalities;
-	std::map<int8_t, Version> pseudoLocalityPopVersion; // first:locality, second:popped version at the locality
->>>>>>> anoyes/merge-6.2-to-6.3
 
 	// new members
 	std::map<Tag, Version> pseudoLocalityPopVersion;
@@ -279,7 +270,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	bool hasPseudoLocality(int8_t locality) final { return pseudoLocalities.count(locality) > 0; }
 
-<<<<<<< HEAD
 	// Return the min version of all pseudoLocalities, i.e., logRouter and backupTag
 	Version popPseudoLocalityTag(Tag tag, Version upTo) final {
 		ASSERT(isPseudoLocality(tag.locality) && hasPseudoLocality(tag.locality));
@@ -287,21 +277,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		Version& localityVersion = pseudoLocalityPopVersion[tag];
 		localityVersion = std::max(localityVersion, upTo);
 		Version minVersion = localityVersion;
-		for (const int8_t locality : pseudoLocalities) {
-			minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
-=======
-	// Return the max version that can be popped for the locality;
-	Version popPseudoLocalityTag(int8_t locality, Version upTo) override {
-		ASSERT(isPseudoLocality(locality));
-		auto& localityVersion = pseudoLocalityPopVersion[locality];
-		localityVersion = std::max(localityVersion, upTo);
-		Version minVersion = localityVersion;
 		// Why do we need to use the minimum popped version among all tags? Reason: for example,
 		// 2 pseudo tags pop 100 or 150, respectively. It's only safe to pop min(100, 150),
 		// because [101,150) is needed by another pseudo tag.
-		for (const auto& it : pseudoLocalityPopVersion) {
-			minVersion = std::min(minVersion, it.second);
->>>>>>> anoyes/merge-6.2-to-6.3
+		for (const int8_t locality : pseudoLocalities) {
+			minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
 		}
 		// TraceEvent("TLogPopPseudoTag", dbgid).detail("Tag", tag.toString()).detail("Version", upTo).detail("PopVersion", minVersion);
 		return minVersion;
@@ -1139,12 +1119,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-<<<<<<< HEAD
-	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) final {
-=======
 	// pop 'tag.locality' type data up to the 'upTo' version
-	virtual void pop( Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality ) {
->>>>>>> anoyes/merge-6.2-to-6.3
+	void pop(Version upTo, Tag tag, Version durableKnownCommittedVersion, int8_t popLocality) final {
 		if (upTo <= 0) return;
 		if (tag.locality == tagLocalityRemoteLog) {
 			popLogRouter(upTo, tag, durableKnownCommittedVersion, popLocality);
@@ -1159,30 +1135,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if (prev < upTo) {
 						// update pop version for popFromLog actor
 						outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, durableKnownCommittedVersion);
-<<<<<<< HEAD
 					}
 					if (prev == 0) {
 						// pop tag from log upto version defined in outstandingPops[].first
 						popActors.add( popFromLog( this, log, tag, 1.0 ) ); //< FIXME: knob
-=======
-
-					if (prev == 0) {
-						popActors.add(popFromLog(this, log, tag, 1.0)); //< FIXME: knob // TODO: Knobify it
->>>>>>> anoyes/merge-6.2-to-6.3
 					}
 				}
 			}
 		}
 	}
 
-<<<<<<< HEAD
+	// pop tag from log up to the version defined in self->outstandingPops[].first
 	ACTOR static Future<Void> popFromLog(TagPartitionedLogSystem* self,
 	                                     Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag,
 	                                     double time) {
-=======
-	// pop tag from log up to the version defined in self->outstandingPops[].first
-	ACTOR static Future<Void> popFromLog( TagPartitionedLogSystem* self, Reference<AsyncVar<OptionalInterface<TLogInterface>>> log, Tag tag, double time ) {
->>>>>>> anoyes/merge-6.2-to-6.3
 		state Version last = 0;
 		loop {
 			wait( delay(time, TaskPriority::TLogPop) );

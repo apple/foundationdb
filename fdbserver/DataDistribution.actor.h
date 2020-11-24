@@ -229,41 +229,13 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-<<<<<<< HEAD
-Future<Void> dataDistributionTracker(
-	Reference<InitialDataDistribution> const& initData,
-	Database const& cx,
-	PromiseStream<RelocateShard> const& output,
-	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-	PromiseStream<GetMetricsRequest> const& getShardMetrics,
-	PromiseStream<GetMetricsListRequest> const& getShardMetricsList,
-	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
-	Promise<Void> const& readyToStart,
-	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
-	UID const& distributorId,
-	KeyRangeMap<ShardTrackedData>* const& shards);
-
-Future<Void> dataDistributionQueue(
-	Database const& cx,
-	PromiseStream<RelocateShard> const& output,
-	FutureStream<RelocateShard> const& input,
-	PromiseStream<GetMetricsRequest> const& getShardMetrics,
-	Reference<AsyncVar<bool>> const& processingUnhealthy,
-	vector<TeamCollectionInterface> const& teamCollection,
-	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-	MoveKeysLock const& lock,
-	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
-	UID const& distributorId,
-	int const& teamSize,
-	int const& singleRegionTeamSize,
-	double* const& lastLimited);
-=======
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
                                            bool const* trackerCancelled);
 
@@ -273,7 +245,6 @@ ACTOR Future<Void> dataDistributionQueue(
     vector<TeamCollectionInterface> teamCollection, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
     MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes, UID distributorId, int teamSize,
     int singleRegionTeamSize, double* lastLimited);
->>>>>>> anoyes/merge-6.2-to-6.3
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

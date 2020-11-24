@@ -104,7 +104,6 @@ struct ProxyStats {
 
 	Future<Void> logger;
 
-<<<<<<< HEAD
 	int recentRequests;
 	Deque<int> requestBuckets;
 	double lastBucketBegin;
@@ -145,36 +144,13 @@ struct ProxyStats {
 		return r;
 	}
 
-	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()),
-	    maxComputeNS(0), minComputeNS(1e12),
-	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE/FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
-	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
-	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
-		txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
-		txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
-		txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
-		txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
-		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc),
-		txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),
-		txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
-		txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
-		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
-		txnConflicts("TxnConflicts", cc), txnThrottled("TxnThrottled", cc), commitBatchIn("CommitBatchIn", cc),
-		commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
-		conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
-		keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
-		lastCommitVersionAssigned(0),
-		commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-		commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
-		grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY) {
-=======
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
-	  : cc("ProxyStats", id.toString()), txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc),
-	    txnRequestErrors("TxnRequestErrors", cc), txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc),
-	    txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
+	  : cc("ProxyStats", id.toString()), recentRequests(0), lastBucketBegin(now()), maxComputeNS(0), minComputeNS(1e12),
+	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
+	    txnRequestIn("TxnRequestIn", cc), txnRequestOut("TxnRequestOut", cc), txnRequestErrors("TxnRequestErrors", cc),
+	    txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc),
+	    txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc),
 	    txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc),
 	    txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc),
 	    txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
@@ -183,10 +159,11 @@ struct ProxyStats {
 	    txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc),
 	    txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
 	    txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnCommitErrors("TxnCommitErrors", cc),
-	    txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc),
-	    mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
-	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
-	    keyServerLocationErrors("KeyServerLocationErrors", cc), lastCommitVersionAssigned(0),
+	    txnConflicts("TxnConflicts", cc), txnThrottled("TxnThrottled", cc), commitBatchIn("CommitBatchIn", cc),
+	    commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
+	    conflictRanges("ConflictRanges", cc), keyServerLocationIn("KeyServerLocationIn", cc),
+	    keyServerLocationOut("KeyServerLocationOut", cc), keyServerLocationErrors("KeyServerLocationErrors", cc),
+	    lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -199,15 +176,12 @@ struct ProxyStats {
 	                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    transactionRateAllowed(0), batchTransactionRateAllowed(0), transactionLimit(0), batchTransactionLimit(0),
 	    percentageOfDefaultGRVQueueProcessed(0), percentageOfBatchGRVQueueProcessed(0) {
->>>>>>> anoyes/merge-6.2-to-6.3
 		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
 		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
-<<<<<<< HEAD
 		specialCounter(cc, "MaxCompute", [this](){ return this->getAndResetMaxCompute(); });
 		specialCounter(cc, "MinCompute", [this](){ return this->getAndResetMinCompute(); });
-=======
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemAndDefaultTxnRateAllowed", [this]() { return this->transactionRateAllowed; });
 		specialCounter(cc, "BatchTransactionRateAllowed", [this]() { return this->batchTransactionRateAllowed; });
@@ -217,7 +191,6 @@ struct ProxyStats {
 		               [this]() { return this->percentageOfDefaultGRVQueueProcessed; });
 		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed",
 		               [this]() { return this->percentageOfBatchGRVQueueProcessed; });
->>>>>>> anoyes/merge-6.2-to-6.3
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 		for(int i = 0; i < FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS; i++) {
 			requestBuckets.push_back(0);
@@ -298,17 +271,12 @@ struct TransactionRateInfo {
 	}
 };
 
-<<<<<<< HEAD
-
-ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount, int64_t* inBatchTransactionCount, TransactionRateInfo *transactionRateInfo,
-						   TransactionRateInfo *batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply, GetHealthMetricsReply* detailedHealthMetricsReply,
-						   TransactionTagMap<uint64_t>* transactionTagCounter, PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags) {
-=======
 ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64_t* inTransactionCount,
-                           int64_t* inBatchTransactionCount, double* outTransactionRate,
-                           double* outBatchTransactionRate, GetHealthMetricsReply* healthMetricsReply,
-                           GetHealthMetricsReply* detailedHealthMetricsReply, ProxyStats* stats) {
->>>>>>> anoyes/merge-6.2-to-6.3
+                           int64_t* inBatchTransactionCount, TransactionRateInfo* transactionRateInfo,
+                           TransactionRateInfo* batchTransactionRateInfo, GetHealthMetricsReply* healthMetricsReply,
+                           GetHealthMetricsReply* detailedHealthMetricsReply,
+                           TransactionTagMap<uint64_t>* transactionTagCounter,
+                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags, ProxyStats* stats) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -345,14 +313,11 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 		}
 		when ( GetRateInfoReply rep = wait(reply) ) {
 			reply = Never();
-<<<<<<< HEAD
 
 			transactionRateInfo->setRate(rep.transactionRate);
 			batchTransactionRateInfo->setRate(rep.batchTransactionRate);
 			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("BatchRate", rep.batchTransactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
-=======
-			*outTransactionRate = rep.transactionRate;
-			*outBatchTransactionRate = rep.batchTransactionRate;
+
 			stats->transactionRateAllowed = rep.transactionRate;
 			stats->batchTransactionRateAllowed = rep.batchTransactionRate;
 			// TraceEvent("MasterProxyTxRate", myID)
@@ -361,7 +326,6 @@ ACTOR Future<Void> getRate(UID myID, Reference<AsyncVar<ServerDBInfo>> db, int64
 			//     .detail("BatchRateAllowed", rep.batchTransactionRate)
 			//     .detail("Lease", rep.leaseDuration)
 			//     .detail("ReleasedTransactions", *inTransactionCount - lastTC);
->>>>>>> anoyes/merge-6.2-to-6.3
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
@@ -1650,17 +1614,12 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
 
 	state PromiseStream<double> replyTimes;
-<<<<<<< HEAD
-
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo, healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags));
+	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo, &batchRateInfo,
+	                      healthMetricsReply, detailedHealthMetricsReply, &transactionTagCounter, &throttledTags,
+	                      stats));
 	addActor.send(queueTransactionStartRequests(db, &systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(),
 	                                            GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats, &batchRateInfo,
 	                                            &transactionTagCounter));
-=======
-	addActor.send(getRate(proxy.id(), db, &transactionCount, &batchTransactionCount, &normalRateInfo.rate,
-	                      &batchRateInfo.rate, healthMetricsReply, detailedHealthMetricsReply, stats));
-	addActor.send(queueTransactionStartRequests(&systemQueue, &defaultQueue, &batchQueue, proxy.getConsistentReadVersion.getFuture(), GRVTimer, &lastGRVTime, &GRVBatchTime, replyTimes.getFuture(), &commitData->stats));
->>>>>>> anoyes/merge-6.2-to-6.3
 
 	// Get a list of the other proxies that go together with us
 	while (std::find(db->get().client.proxies.begin(), db->get().client.proxies.end(), proxy) == db->get().client.proxies.end())
@@ -1729,16 +1688,10 @@ ACTOR static Future<Void> transactionStarter(MasterProxyInterface proxy, Referen
 			}
 
 			transactionsStarted[req.flags&1] += tc;
-<<<<<<< HEAD
-			if (req.priority >= TransactionPriority::IMMEDIATE)
-				systemTransactionsStarted[req.flags & 1] += tc;
-			else if (req.priority >= TransactionPriority::DEFAULT)
-=======
 			double currentTime = g_network->timer();
-			if (req.priority() >= GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE) {
+			if (req.priority >= TransactionPriority::IMMEDIATE) {
 				systemTransactionsStarted[req.flags & 1] += tc;
-			} else if (req.priority() >= GetReadVersionRequest::PRIORITY_DEFAULT) {
->>>>>>> anoyes/merge-6.2-to-6.3
+			} else if (req.priority >= TransactionPriority::DEFAULT) {
 				defaultPriTransactionsStarted[req.flags & 1] += tc;
 				stats->defaultTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 			} else {

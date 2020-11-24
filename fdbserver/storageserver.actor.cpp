@@ -657,28 +657,10 @@ public:
 		}
 	} counters;
 
-<<<<<<< HEAD
-	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db, StorageServerInterface const& ssi)
-		:	instanceID(deterministicRandom()->randomUniqueID().first()),
-			storage(this, storage), db(db), actors(false),
-			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
-			durableInProgress(Void()),
-			versionLag(0), primaryLocality(tagLocalityInvalid),
-			updateEagerReads(0),
-			shardChangeCounter(0),
-			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
-			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
-			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
-			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), versionBehind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
-			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
-	{
-=======
 	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db,
 	              StorageServerInterface const& ssi)
 	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
-	    db(db), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+	    db(db), actors(false), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
 	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), shuttingDown(false),
@@ -687,7 +669,6 @@ public:
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
 	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
 	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
->>>>>>> anoyes/merge-6.2-to-6.3
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -3815,7 +3796,6 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 	}
 }
 
-<<<<<<< HEAD
 ACTOR Future<Void> serveGetValueRequests( StorageServer* self, FutureStream<GetValueRequest> getValue ) {
 	loop {
 		GetValueRequest req = waitNext(getValue);
@@ -3852,7 +3832,9 @@ ACTOR Future<Void> serveWatchValueRequests( StorageServer* self, FutureStream<Wa
 		// TODO: fast load balancing?
 		// SOMEDAY: combine watches for the same key/value into a single watch
 		self->actors.add(self->readGuard(req, watchValueQ));
-=======
+	}
+}
+
 ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
 		return Void();
@@ -3879,7 +3861,6 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 		    .detail("StartKey", longestRunningFetchKeys.second.begin.printable())
 		    .detail("EndKey", longestRunningFetchKeys.second.end.printable())
 		    .detail("NumRunning", numRunningFetchKeys);
->>>>>>> anoyes/merge-6.2-to-6.3
 	}
 }
 
@@ -3890,7 +3871,6 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
-<<<<<<< HEAD
 	state Future<Void> updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 
 	self->actors.add(updateStorage(self));
@@ -3904,21 +3884,10 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	self->actors.add(serveGetKeyRequests(self, ssi.getKey.getFuture()));
 	self->actors.add(serveWatchValueRequests(self, ssi.watchValue.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
+	self->actors.add(reportStorageServerState(self));
 
 	self->transactionTagCounter.startNewInterval(self->thisServerID);
 	self->actors.add(recurring([&](){ self->transactionTagCounter.startNewInterval(self->thisServerID); }, SERVER_KNOBS->READ_TAG_MEASUREMENT_INTERVAL));
-=======
-	state double updateProcessStatsDelay = SERVER_KNOBS->UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
-	state Future<Void> updateProcessStatsTimer = delay(updateProcessStatsDelay);
-
-	actors.add(updateStorage(self));
-	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
-	actors.add(self->otherError.getFuture());
-	actors.add(metricsCore(self, ssi));
-	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
-	actors.add(checkBehind(self));
-	actors.add(reportStorageServerState(self));
->>>>>>> anoyes/merge-6.2-to-6.3
 
 	self->coreStarted.send( Void() );
 

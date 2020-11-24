@@ -78,20 +78,13 @@ struct LogRouterData {
 	const UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	Optional<UID> primaryPeekLocation;
-<<<<<<< HEAD
-	NotifiedVersion version;
-	NotifiedVersion minPopped;
-	const Version startVersion;
-	Version minKnownCommittedVersion;
-=======
 	NotifiedVersion version; // The largest version at which the log router has peeked mutations
 	                         // from satellite tLog or primary tLogs.
 	NotifiedVersion minPopped; // The minimum version among all tags that has been popped by remote tLogs.
-	Version startVersion;
+	const Version startVersion;
 	Version minKnownCommittedVersion; // The minimum durable version among all LRs.
 	                                  // A LR's durable version is the maximum version of mutations that have been
 	                                  // popped by remote tLog.
->>>>>>> anoyes/merge-6.2-to-6.3
 	Version poppedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;

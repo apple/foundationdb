@@ -42,11 +42,7 @@ enum {
 	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-<<<<<<< HEAD
-	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
-=======
 	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
->>>>>>> anoyes/merge-6.2-to-6.3
 	tagLocalityTxs = -7,
 	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99

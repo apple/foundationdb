@@ -83,14 +83,8 @@ struct RelocateData {
 };
 
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
-<<<<<<< HEAD
-	vector<Reference<IDataDistributionTeam>> teams;
-	vector<UID> tempServerIDs;
-=======
-public:
 	std::vector<Reference<IDataDistributionTeam>> teams;
 	std::vector<UID> tempServerIDs;
->>>>>>> anoyes/merge-6.2-to-6.3
 
 	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
@@ -100,21 +94,12 @@ public:
 		return result;
 	}
 
-<<<<<<< HEAD
 	template <class T>
-	vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
-		vector<T> result;
-
-		for (const auto& team : teams) {
-			vector<T> newItems = func(*team);
-=======
-	template<class T>
-	std::vector<T> collect(std::function<std::vector<T>(Reference<IDataDistributionTeam>)> func) {
+	std::vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
 		std::vector<T> result;
 
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			std::vector<T> newItems = func(*it);
->>>>>>> anoyes/merge-6.2-to-6.3
+		for (const auto& team : teams) {
+			std::vector<T> newItems = func(*team);
 			result.insert(result.end(), newItems.begin(), newItems.end());
 		}
 		return result;
@@ -140,16 +125,9 @@ public:
 		return !any([func](IDataDistributionTeam const& team) { return !func(team); });
 	}
 
-<<<<<<< HEAD
-	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
+	std::vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
 		return collect<StorageServerInterface>(
 		    [](IDataDistributionTeam const& team) { return team.getLastKnownServerInterfaces(); });
-=======
-	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() {
-		return collect<StorageServerInterface>([](Reference<IDataDistributionTeam> team) {
-			return team->getLastKnownServerInterfaces();
-		});
->>>>>>> anoyes/merge-6.2-to-6.3
 	}
 
 	int size() const override {
@@ -160,18 +138,11 @@ public:
 		return totalSize;
 	}
 
-<<<<<<< HEAD
-	vector<UID> const& getServerIDs() const override {
+	std::vector<UID> const& getServerIDs() const override {
 		static vector<UID> tempServerIDs;
 		tempServerIDs.clear();
 		for (const auto& team : teams) {
-			vector<UID> const &childIDs = team->getServerIDs();
-=======
-	virtual std::vector<UID> const& getServerIDs() {
-		tempServerIDs.clear();
-		for (auto it = teams.begin(); it != teams.end(); it++) {
-			std::vector<UID> const& childIDs = (*it)->getServerIDs();
->>>>>>> anoyes/merge-6.2-to-6.3
+			std::vector<UID> const& childIDs = team->getServerIDs();
 			tempServerIDs.insert(tempServerIDs.end(), childIDs.begin(), childIDs.end());
 		}
 		return tempServerIDs;
@@ -581,13 +552,8 @@ struct DDQueueData {
 
 				if(keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for( int shard = 0; shard < keyServersEntries.size(); shard++ ) {
-<<<<<<< HEAD
-						vector<UID> src, dest;
-						decodeKeyServersValue( UIDtoTagMap, keyServersEntries[shard].value, src, dest );
-=======
 						std::vector<UID> src, dest;
-						decodeKeyServersValue( keyServersEntries[shard].value, src, dest );
->>>>>>> anoyes/merge-6.2-to-6.3
+						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
 						ASSERT( src.size() );
 						for( int i = 0; i < src.size(); i++ ) {
 							servers.insert( src[i] );

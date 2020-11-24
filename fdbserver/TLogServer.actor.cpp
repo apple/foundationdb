@@ -1027,7 +1027,6 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	return Void();
 }
 
-<<<<<<< HEAD
 ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
 	if (self->ignorePopRequest) {
 		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
@@ -1107,16 +1106,11 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 	return Void();
 }
 
-// This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all CPU resources.
-// For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce latencies for more important
-// work (e.g. commits).
-=======
 // This function (and updatePersistentData, which is called by this function) run at a low priority and can soak up all
 // CPU resources. For this reason, they employ aggressive use of yields to avoid causing slow tasks that could introduce
 // latencies for more important work (e.g. commits).
 // This actor is just a loop that calls updatePersistentData and popDiskQueue whenever
 // (a) there's data to be spilled or (b) we should update metadata after some commits have been fully popped.
->>>>>>> anoyes/merge-6.2-to-6.3
 ACTOR Future<Void> updateStorage( TLogData* self ) {
 	while(self->spillOrder.size() && !self->id_data.count(self->spillOrder.front())) {
 		self->spillOrder.pop_front();

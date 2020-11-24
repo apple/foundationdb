@@ -1858,7 +1858,6 @@ int main(int argc, char* argv[]) {
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
 		} else if (role == FDBD) {
-<<<<<<< HEAD
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
 			std::vector<std::string>* pFiles =
@@ -1868,19 +1867,6 @@ int main(int argc, char* argv[]) {
 					pFiles->push_back(f);
 				}
 			}
-=======
-			ASSERT( connectionFile );
-
-			setupSlowTaskProfiler();
-
-			if (!dataFolder.size())
-				dataFolder = format("fdb/%d/", publicAddresses.address.port);  // SOMEDAY: Better default
-
-			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
-			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
-			actors.push_back(histogramReport());
-			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
->>>>>>> anoyes/merge-6.2-to-6.3
 
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
@@ -1909,6 +1895,7 @@ int main(int argc, char* argv[]) {
 				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
 				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
 				                      opts.whitelistBinPaths));
+				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 				f = stopAfter(waitForAll(actors));

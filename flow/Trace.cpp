@@ -30,11 +30,7 @@
 #include <cctype>
 #include <time.h>
 #include <set>
-<<<<<<< HEAD
-
-=======
 #include <iomanip>
->>>>>>> anoyes/merge-6.2-to-6.3
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/FastRef.h"

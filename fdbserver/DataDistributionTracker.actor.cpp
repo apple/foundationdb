@@ -88,10 +88,9 @@ struct DataDistributionTracker {
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
-<<<<<<< HEAD
 	// Read hot detection
 	PromiseStream<KeyRange> readHotShard;
-=======
+
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
@@ -119,7 +118,6 @@ struct DataDistributionTracker {
 			return &tracker;
 		}
 	};
->>>>>>> anoyes/merge-6.2-to-6.3
 
 	DataDistributionTracker(Database cx, UID distributorId, Promise<Void> const& readyToStart,
 	                        PromiseStream<RelocateShard> const& output,
@@ -181,21 +179,13 @@ int64_t getMaxShardSize( double dbSizeEstimate ) {
 		(int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
 }
 
-<<<<<<< HEAD
-ACTOR Future<Void> trackShardMetrics(DataDistributionTracker* self, KeyRange keys,
+ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self, KeyRange keys,
                                      Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics) {
 	state BandwidthStatus bandwidthStatus = shardMetrics->get().present() ? getBandwidthStatus( shardMetrics->get().get().metrics ) : BandwidthStatusNormal;
 	state double lastLowBandwidthStartTime = shardMetrics->get().present() ? shardMetrics->get().get().lastLowBandwidthStartTime : now();
 	state int shardCount = shardMetrics->get().present() ? shardMetrics->get().get().shardCount : 1;
 	state ReadBandwidthStatus readBandwidthStatus = shardMetrics->get().present() ? getReadBandwidthStatus(shardMetrics->get().get().metrics) : ReadBandwidthStatusNormal;
 
-=======
-ACTOR Future<Void> trackShardBytes(DataDistributionTracker::SafeAccessor self, KeyRange keys,
-                                   Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
-	state BandwidthStatus bandwidthStatus = shardSize->get().present() ? getBandwidthStatus( shardSize->get().get().metrics ) : BandwidthStatusNormal;
-	state double lastLowBandwidthStartTime = shardSize->get().present() ? shardSize->get().get().lastLowBandwidthStartTime : now();
-	state int shardCount = shardSize->get().present() ? shardSize->get().get().shardCount : 1;
->>>>>>> anoyes/merge-6.2-to-6.3
 	wait( delay( 0, TaskPriority::DataDistribution ) );
 
 	/*TraceEvent("TrackShardMetricsStarting")
@@ -248,7 +238,7 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker::SafeAccessor self, K
 					// TraceEvent("RHDTriggerReadHotLoggingForShard")
 					//     .detail("ShardBegin", keys.begin.printable().c_str())
 					//     .detail("ShardEnd", keys.end.printable().c_str());
-					self->readHotShard.send(keys);
+					self()->readHotShard.send(keys);
 				} else {
 					ASSERT(false);
 				}
@@ -292,19 +282,12 @@ ACTOR Future<Void> trackShardBytes(DataDistributionTracker::SafeAccessor self, K
 						.detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
 						.detail("TrackerID", trackerID);*/
 
-<<<<<<< HEAD
 					if( shardMetrics->get().present() ) {
-						self->dbSizeEstimate->set( self->dbSizeEstimate->get() + metrics.first.get().bytes - shardMetrics->get().get().metrics.bytes );
-						if(keys.begin >= systemKeys.begin) {
-							self->systemSizeEstimate += metrics.first.get().bytes - shardMetrics->get().get().metrics.bytes;
-=======
-					if( shardSize->get().present() ) {
 						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
-						                            shardSize->get().get().metrics.bytes);
+						                            shardMetrics->get().get().metrics.bytes);
 						if(keys.begin >= systemKeys.begin) {
 							self()->systemSizeEstimate +=
-							    metrics.first.get().bytes - shardSize->get().get().metrics.bytes;
->>>>>>> anoyes/merge-6.2-to-6.3
+							    metrics.first.get().bytes - shardMetrics->get().get().metrics.bytes;
 						}
 					}
 
@@ -792,15 +775,9 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		}
 
 		ShardTrackedData data;
-<<<<<<< HEAD
 		data.stats = shardMetrics;
-		data.trackShard = shardTracker(self, ranges[i], shardMetrics);
-		data.trackBytes = trackShardMetrics(self, ranges[i], shardMetrics);
-=======
-		data.stats = shardSize;
-		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardSize);
-		data.trackBytes = trackShardBytes(DataDistributionTracker::SafeAccessor(self), ranges[i], shardSize);
->>>>>>> anoyes/merge-6.2-to-6.3
+		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
+		data.trackBytes = trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		self->shards.insert( ranges[i], data );
 	}
 }
