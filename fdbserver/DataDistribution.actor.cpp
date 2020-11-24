@@ -4979,12 +4979,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			return Void();
 		}
 		catch( Error &e ) {
+			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
-			trackerCancelled = true;
 			wait(shards.clearAsync());
 			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
