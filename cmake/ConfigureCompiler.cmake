@@ -354,7 +354,7 @@ else()
       -fno-builtin-free)
   endif()
 
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
     # Graviton or later
     # https://github.com/aws/aws-graviton-gettting-started
     add_compile_options(-march=armv8-a+crc+simd)
