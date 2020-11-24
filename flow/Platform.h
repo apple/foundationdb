@@ -415,6 +415,7 @@ inline static uint64_t timestampCounter() {
 }
 #elif defined(__linux__)
 #  include <x86intrin.h>
+#  define timestampCounter() __rdtsc()
 #elif defined(__APPLE__) // macOS on Intel
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
 #  if !(__has_builtin(__rdtsc))
@@ -423,7 +424,11 @@ inline static uint64_t timestampCounter() {
 	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
 	return( lo | (hi << 32) );
 }
+#  else
+#    define timestampCounter() __rdtsc()
 #  endif
+#else
+#  define timestampCounter() __rdtsc()
 #endif
 
 #if defined(__linux__)
