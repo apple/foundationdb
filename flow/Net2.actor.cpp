@@ -55,6 +55,8 @@
 #endif
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+#include <memory>
+
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;
 intptr_t g_stackYieldLimit = 0;
@@ -103,7 +105,7 @@ class Net2;
 class Peer;
 class Connection;
 
-Net2 *g_net2 = 0;
+std::unique_ptr<Net2> g_net2 = 0;
 
 class Task {
 public:
@@ -1900,7 +1902,7 @@ void ASIOReactor::wake() {
 
 INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {
-		N2::g_net2 = new N2::Net2(tlsConfig, useThreadPool, useMetrics);
+		N2::g_net2 = std::make_unique<N2::Net2>(tlsConfig, useThreadPool, useMetrics);
 	}
 	catch(boost::system::system_error e) {
 		TraceEvent("Net2InitError").detail("Message", e.what());
@@ -1911,7 +1913,7 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 		throw unknown_error();
 	}
 
-	return N2::g_net2;
+	return N2::g_net2.get();
 }
 
 struct TestGVR {
