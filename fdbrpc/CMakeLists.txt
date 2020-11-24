@@ -33,12 +33,13 @@ set(COROUTINE_SRCS
   libcoroutine/Common.c
   libcoroutine/Coro.c)
 
-set(FDBRPC_THIRD_PARTY_SRCS libeio/eio.c)
+set(FDBRPC_THIRD_PARTY_SRCS)
 
 if(APPLE)
   list(APPEND COROUTINE_SRCS libcoroutine/asm.S)
 endif()
 if(NOT WIN32)
+  list(APPEND FDBRPC_THIRD_PARTY_SRCS libeio/eio.c)
   if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     find_library(EIO eio)
     if(EIO)
