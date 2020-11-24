@@ -20,6 +20,8 @@
 
 #include "flow/Tracing.h"
 
+#include <memory>
+
 namespace {
 
 struct NoopTracer : ITracer {
@@ -47,7 +49,7 @@ struct LogfileTracer : ITracer {
 	}
 };
 
-ITracer* g_tracer = new NoopTracer();
+std::unique_ptr<ITracer> g_tracer = std::make_unique<NoopTracer>();
 
 } // namespace
 
@@ -55,13 +57,12 @@ void openTracer(TracerType type) {
 	if (g_tracer->type() == type) {
 		return;
 	}
-	delete g_tracer;
 	switch (type) {
 	case TracerType::DISABLED:
-		g_tracer = new NoopTracer{};
+		g_tracer = std::make_unique<NoopTracer>();
 		break;
 	case TracerType::LOG_FILE:
-		g_tracer = new LogfileTracer{};
+		g_tracer = std::make_unique<LogfileTracer>();
 		break;
 	case TracerType::END:
 		ASSERT(false);
