@@ -464,7 +464,7 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	std::vector< DiskStore > result;
 #if defined(SSD_SQLITE_ENABLED)
 	auto result0 = getDiskStores(folder, bTreeV1Suffix.suffix, bTreeV1Suffix.type, bTreeV1Suffix.check);
-	result.insert( esult.end(), result0.begin(), result0.end() );
+	result.insert( result.end(), result0.begin(), result0.end() );
 	auto result1 = getDiskStores(folder, bTreeV2Suffix.suffix, bTreeV2Suffix.type, bTreeV2Suffix.check);
 	result.insert( result.end(), result1.begin(), result1.end() );
 #endif
