@@ -97,18 +97,9 @@ const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 int openCount = 0;
 
 struct SimClogging {
-	double getSendDelay( NetworkAddress from, NetworkAddress to ) {
-		return halfLatency();
-		double tnow = now();
-		double t = tnow + halfLatency();
+	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
 
-		if (!g_simulator.speedUpSimulation && clogSendUntil.count( to.ip ))
-			t = std::max( t, clogSendUntil[ to.ip ] );
-
-		return t - tnow;
-	}
-
-	double getRecvDelay( NetworkAddress from, NetworkAddress to ) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to) {
 		auto pair = std::make_pair( from.ip, to.ip );
 
 		double tnow = now();

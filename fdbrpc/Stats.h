@@ -152,15 +152,16 @@ Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEv
 
 class LatencyBands {
 public:
-	LatencyBands(std::string name, UID id, double loggingInterval) : name(name), id(id), loggingInterval(loggingInterval), cc(nullptr), filteredCount(nullptr) {}
+	LatencyBands(std::string name, UID id, double loggingInterval)
+	  : name(name), id(id), loggingInterval(loggingInterval) {}
 
 	void addThreshold(double value) {
 		if(value > 0 && bands.count(value) == 0) {
 			if(bands.size() == 0) {
 				ASSERT(!cc && !filteredCount);
-				cc = new CounterCollection(name, id.toString());
-				logger = traceCounters(name, id, loggingInterval, cc, id.toString() + "/" + name);
-				filteredCount = new Counter("Filtered", *cc);
+				cc = std::make_unique<CounterCollection>(name, id.toString());
+				logger = traceCounters(name, id, loggingInterval, cc.get(), id.toString() + "/" + name);
+				filteredCount = std::make_unique<Counter>("Filtered", *cc);
 				insertBand(std::numeric_limits<double>::infinity());
 			}
 
@@ -181,18 +182,9 @@ public:
 
 	void clearBands() {
 		logger = Void();
-
-		for(auto itr : bands) {
-			delete itr.second;
-		}
-		
 		bands.clear();
-
-		delete filteredCount;
-		delete cc;
-
-		filteredCount = nullptr;
-		cc = nullptr;
+		filteredCount.reset();
+		cc.reset();
 	}
 
 	~LatencyBands() {
@@ -200,18 +192,18 @@ public:
 	}
 
 private:
-	std::map<double, Counter*> bands;
-	Counter *filteredCount;
+	std::map<double, std::unique_ptr<Counter>> bands;
+	std::unique_ptr<Counter> filteredCount;
 
 	std::string name;
 	UID id;
 	double loggingInterval;
 
-	CounterCollection *cc;
+	std::unique_ptr<CounterCollection> cc;
 	Future<Void> logger;
 
 	void insertBand(double value) {
-		bands.insert(std::make_pair(value, new Counter(format("Band%f", value), *cc)));
+		bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
 	}
 };
 
