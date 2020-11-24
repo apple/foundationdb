@@ -62,14 +62,15 @@ def write_unix_asm(asmfile, functions, prefix):
     if cpu != "aarch64":
         asmfile.write(".intel_syntax noprefix\n")
 
-    if os.startswith('linux') or os == "freebsd":
+    if cpu == 'aarch64':
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
 
-        asmfile.write("\n.text\n")
-        for f in functions:
-            asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
+        if os.startswith('linux') or os == "freebsd":
+            asmfile.write("\n.text\n")
+            for f in functions:
+                asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
 
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
