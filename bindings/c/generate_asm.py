@@ -23,7 +23,7 @@
 import re
 import sys
 
-(platform, source, asm, h) = sys.argv[1:]
+(os, cpu, source, asm, h) = sys.argv[1:]
 
 functions = {}
 
@@ -59,10 +59,10 @@ def write_windows_asm(asmfile, functions):
 
 
 def write_unix_asm(asmfile, functions, prefix):
-    if platform != "linux-aarch64":
+    if cpu != "aarch64":
         asmfile.write(".intel_syntax noprefix\n")
 
-    if platform.startswith('linux') or platform == "freebsd":
+    if os.startswith('linux') or os == "freebsd":
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
@@ -74,8 +74,11 @@ def write_unix_asm(asmfile, functions, prefix):
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
         asmfile.write("%s%s:\n" % (prefix, f))
-        if platform == "linux-aarch64":
-            asmfile.write("\tldr x16, =fdb_api_ptr_%s\n" % (f))
+        p = ''
+        if os == 'osx':
+            p = '_'
+        if cpu == "aarch64":
+            asmfile.write("\tldr x16, =%sfdb_api_ptr_%s\n" % (p, f))
             asmfile.write("\tldr x16, [x16]\n")
             asmfile.write("\tbr x16\n")
         else:
@@ -92,15 +95,15 @@ with open(asm, 'w') as asmfile:
         hfile.write(
             "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
 
-        if platform.startswith('linux'):
+        if os.startswith('linux'):
             write_unix_asm(asmfile, functions, '')
-        elif platform == "osx":
+        elif os == "osx":
             write_unix_asm(asmfile, functions, '_')
-        elif platform == "windows":
+        elif os == "windows":
             write_windows_asm(asmfile, functions)
 
         for f in functions:
-            if platform == "windows":
+            if os == "windows":
                 hfile.write("extern \"C\" ")
             hfile.write("void* fdb_api_ptr_%s = (void*)&fdb_api_ptr_unimpl;\n" % f)
             for v in functions[f]:

@@ -356,6 +356,28 @@ ACTOR Future<Void> testKVStoreMain( KVStoreTestWorkload* workload, KVTest* ptest
 	return Void();
 }
 
+IKeyValueStore* createKVStore(std::string const& storeType, std::string const& fn, UID id) {
+	if (storeType == "ssd-redwood-experimental") {
+		return keyValueStoreRedwoodV1(fn, id);
+	} else if (storeType == "ssd-rocksdb-experimental") {
+		return keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);
+	} else if (storeType == "memory") {
+		return keyValueStoreMemory(fn, id, 500e6);
+	} else if (storeType == "memory-radixtree-beta") {
+		return keyValueStoreMemory(fn, id, 500e6, "fdr", KeyValueStoreType::MEMORY_RADIXTREE);
+#ifdef SSD_SQLITE_ENABLED
+	} else if (storeType == "ssd") {
+		return keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V2);
+	} else if (storeType == "ssd-1") {
+		return keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V1);
+	} else if (storeType == "ssd-2") {
+		return keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
+#endif
+	} else {
+		ASSERT(false);
+	}
+}
+
 ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	state KVTest test(workload->nodeCount, !workload->filename.size(), workload->keyBytes);
 	state Error err;
@@ -365,22 +387,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 
 	UID id = deterministicRandom()->randomUniqueID();
 	std::string fn = workload->filename.size() ? workload->filename : id.toString();
-	if (workload->storeType == "ssd")
-		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V2);
-	else if (workload->storeType == "ssd-1")
-		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V1);
-	else if (workload->storeType == "ssd-2")
-		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
-	else if (workload->storeType == "ssd-redwood-experimental")
-		test.store = keyValueStoreRedwoodV1(fn, id);
-	else if (workload->storeType == "ssd-rocksdb-experimental")
-		test.store = keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);
-	else if (workload->storeType == "memory")
-		test.store = keyValueStoreMemory(fn, id, 500e6);
-	else if (workload->storeType == "memory-radixtree-beta")
-		test.store = keyValueStoreMemory(fn, id, 500e6, "fdr", KeyValueStoreType::MEMORY_RADIXTREE);
-	else
-		ASSERT(false);
+	test.store = createKVStore(workload->storeType, fn, id);
 
 	wait(test.store->init());
 

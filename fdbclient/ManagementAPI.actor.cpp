@@ -135,6 +135,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 
 	Optional<KeyValueStoreType> logType;
 	Optional<KeyValueStoreType> storeType;
+#ifdef SSD_SQLITE_ENABLED
 	if (mode == "ssd-1") {
 		logType = KeyValueStoreType::SSD_BTREE_V1;
 		storeType = KeyValueStoreType::SSD_BTREE_V1;
@@ -150,12 +151,19 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else if (mode == "memory" || mode == "memory-2") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType= KeyValueStoreType::MEMORY;
-	} else if (mode == "memory-1") {
-		logType = KeyValueStoreType::MEMORY;
-		storeType= KeyValueStoreType::MEMORY;
 	} else if (mode == "memory-radixtree-beta") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType= KeyValueStoreType::MEMORY_RADIXTREE;
+	}
+#else
+	if (mode == "ssd-redwood") {
+		logType = KeyValueStoreType::SSD_REDWOOD_V1;
+		storeType= KeyValueStoreType::SSD_REDWOOD_V1;
+	}
+#endif
+	else if (mode == "memory-1") {
+		logType = KeyValueStoreType::MEMORY;
+		storeType= KeyValueStoreType::MEMORY;
 	}
 	// Add any new store types to fdbserver/workloads/ConfigureDatabase, too
 

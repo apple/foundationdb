@@ -21,6 +21,7 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
@@ -265,8 +266,10 @@ struct KeyValueStoreSuffix {
 	FilesystemCheck check;
 };
 
+#if defined(SSD_SQLITE_ENABLED)
 KeyValueStoreSuffix bTreeV1Suffix = { KeyValueStoreType::SSD_BTREE_V1, ".fdb", FilesystemCheck::FILES_ONLY };
 KeyValueStoreSuffix bTreeV2Suffix = { KeyValueStoreType::SSD_BTREE_V2, ".sqlite", FilesystemCheck::FILES_ONLY };
+#endif
 KeyValueStoreSuffix memorySuffix = { KeyValueStoreType::MEMORY, "-0.fdq", FilesystemCheck::FILES_ONLY };
 KeyValueStoreSuffix memoryRTSuffix = { KeyValueStoreType::MEMORY_RADIXTREE, "-0.fdr", FilesystemCheck::FILES_ONLY };
 KeyValueStoreSuffix redwoodSuffix = { KeyValueStoreType::SSD_REDWOOD_V1, ".redwood", FilesystemCheck::FILES_ONLY };
@@ -276,11 +279,14 @@ KeyValueStoreSuffix rocksdbSuffix = { KeyValueStoreType::SSD_ROCKSDB_V1, ".rocks
 std::string validationFilename = "_validate";
 
 std::string filenameFromSample( KeyValueStoreType storeType, std::string folder, std::string sample_filename ) {
+#if defined(SSD_SQLITE_ENABLED)
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1 )
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
 		return joinPath(folder, sample_filename);
-	else if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
+	else
+#endif
+	if( storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
 		return joinPath(folder, sample_filename);
@@ -290,11 +296,14 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 }
 
 std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std::string prefix, UID id ) {
+#if defined(SSD_SQLITE_ENABLED)
 	if(storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
 		return joinPath(folder, prefix + id.toString() + ".sqlite");
-	else if(storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE)
+	else
+#endif
+	if(storeType == KeyValueStoreType::MEMORY || storeType == KeyValueStoreType::MEMORY_RADIXTREE)
 		return joinPath( folder, prefix + id.toString() + "-" );
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, prefix + id.toString() + ".redwood");
@@ -452,9 +461,13 @@ std::vector<DiskStore> getDiskStores(std::string folder, std::string suffix, Key
 }
 
 std::vector< DiskStore > getDiskStores( std::string folder ) {
-	auto result = getDiskStores(folder, bTreeV1Suffix.suffix, bTreeV1Suffix.type, bTreeV1Suffix.check);
+	std::vector< DiskStore > result;
+#if defined(SSD_SQLITE_ENABLED)
+	auto result0 = getDiskStores(folder, bTreeV1Suffix.suffix, bTreeV1Suffix.type, bTreeV1Suffix.check);
+	result.insert( esult.end(), result0.begin(), result0.end() );
 	auto result1 = getDiskStores(folder, bTreeV2Suffix.suffix, bTreeV2Suffix.type, bTreeV2Suffix.check);
 	result.insert( result.end(), result1.begin(), result1.end() );
+#endif
 	auto result2 = getDiskStores(folder, memorySuffix.suffix, memorySuffix.type, memorySuffix.check);
 	result.insert( result.end(), result2.begin(), result2.end() );
 	auto result3 = getDiskStores(folder, redwoodSuffix.suffix, redwoodSuffix.type, redwoodSuffix.check);
@@ -925,6 +938,26 @@ struct SharedLogsValue {
 		: actor(actor), uid(uid), requests(requests) {
 	}
 };
+
+bool isStorePartial(std::string const& fileName, KeyValueStoreType type) {
+#if defined(SSD_SQLITE_ENABLED)
+	if (type == KeyValueStoreType::SSD_BTREE_V1) {
+		return fileExists(fileName + ".fdb-wal");
+	} else if (type == KeyValueStoreType::SSD_BTREE_V2) {
+		return fileExists(fileName + ".sqlite-wal");
+	} else
+#endif
+	if (type == KeyValueStoreType::SSD_REDWOOD_V1) {
+		return fileExists(fileName + "0.pagerlog") && fileExists(fileName + "1.pagerlog");
+	} else if (type == KeyValueStoreType::SSD_ROCKSDB_V1) {
+		return fileExists(joinPath(fileName, "CURRENT")) && fileExists(joinPath(fileName, "IDENTITY"));
+	} else if (type == KeyValueStoreType::MEMORY) {
+		return fileExists(fileName + "1.fdq");
+	} else {
+		ASSERT(type == KeyValueStoreType::MEMORY_RADIXTREE);
+		return fileExists(fileName + "1.fdr");
+	}
+}
 
 ACTOR Future<Void> workerServer(
 		Reference<ClusterConnectionFile> connFile,
@@ -1481,49 +1514,30 @@ ACTOR Future<Void> workerServer(
 			when( DiskStoreRequest req = waitNext(interf.diskStoreRequest.getFuture()) ) {
 				Standalone<VectorRef<UID>> ids;
 				for(DiskStore d : getDiskStores(folder)) {
-					bool included = true;
-					if(!req.includePartialStores) {
-						if(d.storeType == KeyValueStoreType::SSD_BTREE_V1) {
-							included = fileExists(d.filename + ".fdb-wal");
+					bool included = req.includePartialStores || !isStorePartial(d.filename, d.storeType);
+					if (d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
+						included = false;
+						// The previous code assumed that d.filename is a filename.  But that is not true.
+						// d.filename is a path. Removing a prefix and adding a new one just makes a broken
+						// directory name.  So fileExists would always return false.
+						// Weirdly, this doesn't break anything, as tested by taking a clean check of FDB,
+						// setting included to false always, and then running correctness.  So I'm just
+						// improving the situation by actually marking it as broken.
+						// FIXME: this whole thing
+						/*
+						std::string logDataBasename;
+						StringRef filename = d.filename;
+						if (filename.startsWith(fileLogDataPrefix)) {
+						    logDataBasename = fileLogQueuePrefix.toString() +
+						d.filename.substr(fileLogDataPrefix.size()); } else { StringRef optionsString =
+						filename.removePrefix(fileVersionedLogDataPrefix).eat("-"); logDataBasename =
+						fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 						}
-						else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
-							included = fileExists(d.filename + ".sqlite-wal");
+						TraceEvent("DiskStoreRequest").detail("FilenameBasename", logDataBasename);
+						if (fileExists(logDataBasename + "0.fdq") && fileExists(logDataBasename + "1.fdq")) {
+						    included = true;
 						}
-						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
-							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
-						}
-						else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-							included = fileExists(joinPath(d.filename, "CURRENT")) && fileExists(joinPath(d.filename, "IDENTITY"));
-						} else if (d.storeType == KeyValueStoreType::MEMORY) {
-							included = fileExists(d.filename + "1.fdq");
-						} else {
-							ASSERT(d.storeType == KeyValueStoreType::MEMORY_RADIXTREE);
-							included = fileExists(d.filename + "1.fdr");
-						}
-						if(d.storedComponent == DiskStore::COMPONENT::TLogData && included) {
-							included = false;
-							// The previous code assumed that d.filename is a filename.  But that is not true.
-							// d.filename is a path. Removing a prefix and adding a new one just makes a broken
-							// directory name.  So fileExists would always return false.
-							// Weirdly, this doesn't break anything, as tested by taking a clean check of FDB,
-							// setting included to false always, and then running correctness.  So I'm just
-							// improving the situation by actually marking it as broken.
-							// FIXME: this whole thing
-							/*
-							std::string logDataBasename;
-							StringRef filename = d.filename;
-							if (filename.startsWith(fileLogDataPrefix)) {
-								logDataBasename = fileLogQueuePrefix.toString() + d.filename.substr(fileLogDataPrefix.size());
-							} else {
-								StringRef optionsString = filename.removePrefix(fileVersionedLogDataPrefix).eat("-");
-								logDataBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
-							}
-							TraceEvent("DiskStoreRequest").detail("FilenameBasename", logDataBasename);
-							if (fileExists(logDataBasename + "0.fdq") && fileExists(logDataBasename + "1.fdq")) {
-								included = true;
-							}
-							*/
-						}
+						*/
 					}
 					if(included) {
 						ids.push_back(ids.arena(), d.storeID);

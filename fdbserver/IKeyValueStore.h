@@ -85,7 +85,9 @@ protected:
 	virtual ~IKeyValueStore() {}
 };
 
+#if !(defined(__APPLE__) && defined(__aarch64__))
 extern IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false );
+#endif
 extern IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID);
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path, UID logID, KeyValueStoreType storeType, bool checkChecksums=false, bool checkIntegrity=false);
 extern IKeyValueStore* keyValueStoreMemory(std::string const& basename, UID logID, int64_t memoryLimit,
@@ -95,10 +97,12 @@ extern IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logI
 
 inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string const& filename, UID logID, int64_t memoryLimit, bool checkChecksums=false, bool checkIntegrity=false ) {
 	switch( storeType ) {
+#if !(defined(__APPLE__) && defined(__aarch64__))
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);
 	case KeyValueStoreType::SSD_BTREE_V2:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
+#endif
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory( filename, logID, memoryLimit );
 	case KeyValueStoreType::SSD_REDWOOD_V1:
@@ -114,6 +118,8 @@ inline IKeyValueStore* openKVStore( KeyValueStoreType storeType, std::string con
 }
 
 void GenerateIOLogChecksumFile(std::string filename);
+#if defined(SSD_SQLITE_ENABLED)
 Future<Void> KVFileCheck(std::string const & filename, bool const &integrity);
+#endif
 
 #endif

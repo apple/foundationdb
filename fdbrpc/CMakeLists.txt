@@ -29,32 +29,26 @@ set(FDBRPC_SRCS
   TimedRequest.h
   TraceFileIO.cpp)
 
-set(FDBRPC_THIRD_PARTY_SRCS
+set(COROUTINE_SRCS
   libcoroutine/Common.c
   libcoroutine/Coro.c)
 
+set(FDBRPC_THIRD_PARTY_SRCS libeio/eio.c)
+
 if(APPLE)
-  list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/asm.S)
+  list(APPEND COROUTINE_SRCS libcoroutine/asm.S)
 endif()
 if(NOT WIN32)
   if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     find_library(EIO eio)
     if(EIO)
-      list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c)
+      list(APPEND COROUTINE_SRCS libcoroutine/context.c)
     else()
-      list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c libeio/eio.c)
+      list(APPEND COROUTINE_SRCS libcoroutine/context.c libeio/eio.c)
     endif()
   else()
-    list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/context.c libeio/eio.c)
+    list(APPEND COROUTINE_SRCS libcoroutine/context.c)
   endif()
-endif()
-
-add_library(thirdparty STATIC ${FDBRPC_THIRD_PARTY_SRCS})
-if(NOT WIN32)
-  target_compile_options(thirdparty BEFORE PRIVATE -w) # disable warnings for third party
-endif()
-if(USE_VALGRIND)
-  target_link_libraries(thirdparty PUBLIC Valgrind)
 endif()
 
 set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
@@ -65,6 +59,19 @@ set(FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS
 add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
-target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+
+if(SSD_SQLITE_ENABLED)
+  list(APPEND FDBRPC_THIRD_PARTY_SRCS ${COROUTINE_SRCS})
+endif()
+
+add_library(thirdparty STATIC ${FDBRPC_THIRD_PARTY_SRCS})
+if(NOT WIN32)
+  target_compile_options(thirdparty BEFORE PRIVATE -w) # disable warnings for third party
+endif()
+if(USE_VALGRIND)
+  target_link_libraries(thirdparty PUBLIC Valgrind)
+endif()
+
 target_link_libraries(fdbrpc PRIVATE thirdparty)
+target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
 target_link_libraries(fdbrpc PUBLIC flow)

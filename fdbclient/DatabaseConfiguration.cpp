@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 
 DatabaseConfiguration::DatabaseConfiguration()
@@ -271,7 +272,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (tLogVersion > TLogVersion::DEFAULT || isOverridden("log_version")) {
 		result["log_version"] = (int)tLogVersion;
 	}
-
+#if defined(SSD_SQLITE_ENABLED)
 	if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V1 &&
 	    storageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
 		result["storage_engine"] = "ssd-1";
@@ -284,14 +285,21 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 		result["storage_engine"] = "ssd-rocksdb-experimental";
-	} else if (tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY) {
-		result["storage_engine"] = "memory-1";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		result["storage_engine"] = "memory-radixtree-beta";
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::MEMORY) {
 		result["storage_engine"] = "memory-2";
+	}
+#else
+	if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1 &&
+		storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
+		result["storage_engine"] = "ssd-redwood";
+	}
+#endif
+	else if (tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY) {
+		result["storage_engine"] = "memory-1";
 	} else {
 		result["storage_engine"] = "custom";
 	}
@@ -444,6 +452,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("log_engine")) {
 		parse((&type), value);
 		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
+#ifdef SSD_SQLITE_ENABLED
 		// TODO:  Remove this once Redwood works as a log engine
 		if(tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
@@ -452,6 +461,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		if(tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
 		}
+#endif
 	} else if (ck == LiteralStringRef("log_spill")) {
 		parse((&type), value);
 		tLogSpillType = (TLogSpillType::SpillType)type;

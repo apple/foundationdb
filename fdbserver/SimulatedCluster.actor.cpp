@@ -38,7 +38,12 @@
 #undef max
 #undef min
 
+#if defined(SSD_SQLITE_ENABLED)
 extern "C" int g_expect_full_pointermap;
+#else
+// we don't support sqlite - this hack mackes refactoring easier
+int g_expect_full_pointermap = 0;
+#endif
 extern const char* getSourceVersion();
 
 const int MACHINE_REBOOT_TIME = 10;

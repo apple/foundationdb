@@ -103,6 +103,16 @@ if(GEM_EXECUTABLE)
 endif()
 
 ################################################################################
+# SQLite
+################################################################################
+
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(SSD_SQLITE_ENABLED OFF CACHE BOOL "Build with SQLite support")
+else()
+  set(SSD_SQLITE_ENABLED ON CACHE BOOL "Build with SQLite support")
+endif()
+
+################################################################################
 # RocksDB
 ################################################################################
 

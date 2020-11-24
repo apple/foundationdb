@@ -2055,6 +2055,7 @@ Future<KeyValueStoreSQLite::SpringCleaningWorkPerformed> KeyValueStoreSQLite::do
 	return f;
 }
 
+#if defined(SSD_SQLITE_ENABLED)
 void createTemplateDatabase() {
 	ASSERT( !vfs_registered );
 	SQLiteDB db1("template.fdb", false, false);
@@ -2062,6 +2063,7 @@ void createTemplateDatabase() {
 	db1.createFromScratch();
 	db2.createFromScratch();
 }
+#endif
 
 void GenerateIOLogChecksumFile(std::string filename) {
 	if(!fileExists(filename)) {

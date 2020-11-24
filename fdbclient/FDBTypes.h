@@ -707,9 +707,13 @@ struct KeyValueStoreType {
 	// Only add new ones just before END.
 	// SS storeType is END before the storageServerInterface is initialized.
 	enum StoreType {
+#if !(defined(__APPLE__) && defined(__aarch64__))
 		SSD_BTREE_V1,
+#endif
 		MEMORY,
+#if !(defined(__APPLE__) && defined(__aarch64__))
 		SSD_BTREE_V2,
+#endif
 		SSD_REDWOOD_V1,
 		MEMORY_RADIXTREE,
 		SSD_ROCKSDB_V1,
@@ -729,8 +733,10 @@ struct KeyValueStoreType {
 
 	std::string toString() const {
 		switch( type ) {
+#if !(defined(__APPLE__) && defined(__aarch64__))
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
+#endif
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case SSD_ROCKSDB_V1: return "ssd-rocksdb-experimental";
 			case MEMORY: return "memory";

@@ -8058,6 +8058,14 @@ Future<Void> closeKVS(IKeyValueStore* kvs) {
 	return closed;
 }
 
+IKeyValueStore* openSqlite() {
+#if defined(SSD_SQLITE_ENABLED)
+	return openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
+#else
+	return nullptr;
+#endif
+}
+
 ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int recordCountTarget,
                                             bool usePrefixesInOrder, KVSource source) {
 
@@ -8071,10 +8079,12 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize, int valueSize, int r
 	deleteFile("test.sqlite");
 	deleteFile("test.sqlite-wal");
 	wait(delay(5));
-	state IKeyValueStore* sqlite = openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
-	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
-	wait(closeKVS(sqlite));
-	printf("\n");
+	state IKeyValueStore* sqlite = openSqlite();
+	if (sqlite != nullptr) {
+		wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder));
+		wait(closeKVS(sqlite));
+		printf("\n");
+	}
 
 	return Void();
 }

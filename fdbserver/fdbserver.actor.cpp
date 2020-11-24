@@ -184,7 +184,9 @@ extern void dsltest();
 extern void pingtest();
 extern void copyTest();
 extern void versionedMapTest();
+#if defined(SSD_SQLITE_ENABLED)
 extern void createTemplateDatabase();
+#endif
 // FIXME: this really belongs in a header somewhere since it is actually used.
 extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
 
@@ -881,11 +883,15 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 namespace {
 enum Role {
 	ConsistencyCheck,
+#if defined(SSD_SQLITE_ENABLED)
 	CreateTemplateDatabase,
+#endif
 	DSLTest,
 	FDBD,
+#if defined(SSD_SQLITE_ENABLED)
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
+#endif
 	MultiTester,
 	NetworkTestClient,
 	NetworkTestServer,
@@ -1057,18 +1063,22 @@ private:
 					role = DSLTest;
 				else if (!strcmp(sRole, "versionedmaptest"))
 					role = VersionedMapTest;
+#if defined(SSD_SQLITE_ENABLED)
 				else if (!strcmp(sRole, "createtemplatedb"))
 					role = CreateTemplateDatabase;
+#endif
 				else if (!strcmp(sRole, "networktestclient"))
 					role = NetworkTestClient;
 				else if (!strcmp(sRole, "networktestserver"))
 					role = NetworkTestServer;
 				else if (!strcmp(sRole, "restore"))
 					role = Restore;
+#if defined(SSD_SQLITE_ENABLED)
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
 					role = KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
 					role = KVFileGenerateIOLogChecksums;
+#endif
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ConsistencyCheck;
 				else {
@@ -1423,9 +1433,14 @@ private:
 		bool autoPublicAddress =
 		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
 		                [](const std::string& addr) { return StringRef(addr).startsWith(LiteralStringRef("auto:")); });
-		if ((role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck &&
-		     role != KVFileGenerateIOLogChecksums) ||
-		    autoPublicAddress) {
+		if ((role != Simulation &&
+#if defined(SSD_SQLITE_ENABLED)
+			 role != CreateTemplateDatabase && role != KVFileIntegrityCheck &&
+		     role != KVFileGenerateIOLogChecksums
+#else
+		    true
+#endif
+			) || autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
 				std::string connectionString = seedConnString.length() ? seedConnString : "";
@@ -1627,13 +1642,19 @@ int main(int argc, char* argv[]) {
 		}
 
 		// Initialize the thread pool
+#if defined(SSD_SQLITE_ENABLED)
 		CoroThreadPool::init();
+#endif
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread();
 
 		std::vector<Future<Void>> listenErrors;
 
-		if (role == Simulation || role == CreateTemplateDatabase) {
+		if (role == Simulation
+#if defined(SSD_SQLITE_ENABLED)
+			|| role == CreateTemplateDatabase
+#endif
+			) {
 			//startOldSimulator();
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
@@ -1920,8 +1941,10 @@ int main(int argc, char* argv[]) {
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,
 			                       StringRef(), opts.localities));
 			g_network->run();
+#if defined(SSD_SQLITE_ENABLED)
 		} else if (role == CreateTemplateDatabase) {
 			createTemplateDatabase();
+#endif
 		} else if (role == NetworkTestClient) {
 			f = stopAfter(networkTestClient(opts.testServersStr));
 			g_network->run();
@@ -1931,6 +1954,7 @@ int main(int argc, char* argv[]) {
 		} else if (role == Restore) {
 			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
+#if defined(SSD_SQLITE_ENABLED)
 		} else if (role == KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));
 			g_network->run();
@@ -1945,6 +1969,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+#endif
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

@@ -11,8 +11,6 @@ set(FDBSERVER_SRCS
   CoordinatedState.h
   Coordination.actor.cpp
   CoordinationInterface.h
-  CoroFlow.actor.cpp
-  CoroFlow.h
   DataDistribution.actor.cpp
   DataDistribution.actor.h
   DataDistributionQueue.actor.cpp
@@ -32,7 +30,6 @@ set(FDBSERVER_SRCS
   KeyValueStoreCompressTestData.actor.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
-  KeyValueStoreSQLite.actor.cpp
   Knobs.cpp
   Knobs.h
   LatencyBandConfig.cpp
@@ -105,7 +102,6 @@ set(FDBSERVER_SRCS
   TLogInterface.h
   TLogServer.actor.cpp
   VersionedBTree.actor.cpp
-  VFSAsync.cpp
   WaitFailure.actor.cpp
   WaitFailure.h
   worker.actor.cpp
@@ -229,15 +225,6 @@ set(FDBSERVER_SRCS
   workloads/WriteTagThrottling.actor.cpp
 )
 
-add_library(fdb_sqlite STATIC
-  sqlite/btree.h
-  sqlite/hash.h
-  sqlite/sqlite3.h
-  sqlite/sqlite3ext.h
-  sqlite/sqliteInt.h
-  sqlite/sqliteLimit.h
-  sqlite/sqlite3.amalgamation.c)
-
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
   # Set this to 0 if you want to compile RocksDB with `-march=native`.
@@ -248,12 +235,6 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
-endif()
-
-# Suppress warnings in sqlite since it's third party
-if(NOT WIN32)
-  target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
-  target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
@@ -268,9 +249,30 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+  target_link_libraries(fdbserver PRIVATE fdbclient ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
 else()
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+  target_link_libraries(fdbserver PRIVATE fdbclient)
+endif()
+
+if(SSD_SQLITE_ENABLED)
+  list(APPEND FDBSERVER_SRCS
+    KeyValueStoreSQLite.actor.cpp 
+    CoroFlow.actor.cpp
+    CoroFlow.h
+    VFSAsync.cpp)
+  add_library(fdb_sqlite STATIC
+    sqlite/btree.h
+    sqlite/hash.h
+    sqlite/sqlite3.h
+    sqlite/sqlite3ext.h
+    sqlite/sqliteInt.h
+    sqlite/sqliteLimit.h
+    sqlite/sqlite3.amalgamation.c)
+  # Suppress warnings in sqlite since it's third party
+  if(NOT WIN32)
+    target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
+    target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
+  endif()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target)
