@@ -76,7 +76,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		useExtraDB = g_simulator.extraDB != nullptr;
 		if(useExtraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 			useSystemKeys = false;
 		}

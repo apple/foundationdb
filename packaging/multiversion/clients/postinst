@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+CMAKE_CONFIG_DIR="/usr/@LIB_DIR@/cmake"
+PKG_CONFIG_DIR="/usr/@LIB_DIR@/pkgconfig"
+
+if [ ! -d "${CMAKE_CONFIG_DIR}" ]
+then
+    mkdir "${CMAKE_CONFIG_DIR}"
+fi
+if [ ! -d "${PKG_CONFIG_DIR}" ]
+then
+    mkdir ${PKG_CONFIG_DIR}
+fi
+
+
+alternatives --install /usr/bin/fdbcli fdbclients /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbcli @ALTERNATIVES_PRIORITY@ \
+    --slave /usr/bin/fdbbackup fdbbackup /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
+    --slave /usr/bin/fdbrestore fdbrestore /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
+    --slave /usr/bin/dr_agent dr_agent /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
+    --slave /usr/bin/fdbdr fdbdr /usr/lib/foundationdb-@PROJECT_VERSION@/bin/fdbbackup \
+    --slave /usr/@LIB_DIR@/libfdb_c.so libfdb_c /usr/lib/foundationdb-@PROJECT_VERSION@/lib/libfdb_c.so \
+    --slave /usr/@LIB_DIR@/pkgconfig/foundationdb-client.pc foundationdb-client.pc /usr/lib/foundationdb-@PROJECT_VERSION@/lib/pkgconfig/foundationdb-client.pc \
+    --slave /usr/@LIB_DIR@/cmake/FoundationDB-Client FoundationDB-ClientConfig /usr/lib/foundationdb-@PROJECT_VERSION@/lib/cmake/FoundationDB-Client \
+    --slave /usr/include/foundationdb fdb-client-headers /usr/lib/foundationdb-@PROJECT_VERSION@/include/foundationdb

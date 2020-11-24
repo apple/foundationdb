@@ -48,7 +48,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, Lo
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
-	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageAndTags, hasMsg, poppedVersion, tag ) );
+	return makeReference<ILogSystem::ServerPeekCursor>(results, messageVersion, end, messageAndTags, hasMsg,
+	                                                   poppedVersion, tag);
 }
 
 void ILogSystem::ServerPeekCursor::setProtocolVersion( ProtocolVersion version ) {
@@ -141,8 +142,20 @@ ACTOR Future<Void> resetChecker( ILogSystem::ServerPeekCursor* self, NetworkAddr
 	self->unknownReplies = 0;
 	self->fastReplies = 0;
 	wait(delay(SERVER_KNOBS->PEEK_STATS_INTERVAL));
-	TraceEvent("SlowPeekStats").detail("PeerAddress", addr).detail("SlowReplies", self->slowReplies).detail("FastReplies", self->fastReplies).detail("UnknownReplies", self->unknownReplies);
-	if(self->slowReplies >= SERVER_KNOBS->PEEK_STATS_SLOW_AMOUNT && self->slowReplies/double(self->slowReplies+self->fastReplies) >= SERVER_KNOBS->PEEK_STATS_SLOW_RATIO) {
+	TraceEvent("SlowPeekStats", self->randomID)
+	    .detail("PeerAddress", addr)
+	    .detail("SlowReplies", self->slowReplies)
+	    .detail("FastReplies", self->fastReplies)
+	    .detail("UnknownReplies", self->unknownReplies);
+
+	if (self->slowReplies >= SERVER_KNOBS->PEEK_STATS_SLOW_AMOUNT &&
+	    self->slowReplies / double(self->slowReplies + self->fastReplies) >= SERVER_KNOBS->PEEK_STATS_SLOW_RATIO) {
+
+		TraceEvent("ConnectionResetSlowPeek", self->randomID)
+		    .detail("PeerAddress", addr)
+		    .detail("SlowReplies", self->slowReplies)
+		    .detail("FastReplies", self->fastReplies)
+		    .detail("UnknownReplies", self->unknownReplies);
 		FlowTransport::transport().resetConnection(addr);
 		self->lastReset = now();
 	}
@@ -351,7 +364,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<O
 	bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, Reference<IReplicationPolicy> const tLogPolicy, int tLogReplicationFactor )
 	: bestServer(bestServer), readQuorum(readQuorum), tag(tag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(deterministicRandom()->randomUniqueID()), tLogReplicationFactor(tLogReplicationFactor) {
 	if(tLogPolicy) {
-		logSet = Reference<LogSet>( new LogSet() );
+		logSet = makeReference<LogSet>();
 		logSet->tLogPolicy = tLogPolicy;
 		logSet->tLogLocalities = tLogLocalities;
 		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
@@ -359,7 +372,8 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<O
 	}
 
 	for( int i = 0; i < logServers.size(); i++ ) {
-		Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logServers[i], tag, begin, end, bestServer >= 0, parallelGetMore ) );
+		auto cursor = makeReference<ILogSystem::ServerPeekCursor>(logServers[i], tag, begin, end, bestServer >= 0,
+		                                                          parallelGetMore);
 		//TraceEvent("MPC_Starting", randomID).detail("Cursor", cursor->randomID).detail("End", end);
 		serverCursors.push_back( cursor );
 	}
@@ -378,7 +392,8 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::MergedPeekCursor::cloneNoMore() {
 	for( auto it : serverCursors ) {
 		cursors.push_back(it->cloneNoMore());
 	}
-	return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( cursors, messageVersion, bestServer, readQuorum, nextVersion, logSet, tLogReplicationFactor ) );
+	return makeReference<ILogSystem::MergedPeekCursor>(cursors, messageVersion, bestServer, readQuorum, nextVersion,
+	                                                   logSet, tLogReplicationFactor);
 }
 
 void ILogSystem::MergedPeekCursor::setProtocolVersion( ProtocolVersion version ) {
@@ -589,7 +604,8 @@ ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& 
 	int maxServers = 0;
 	for( int i = 0; i < logSets.size(); i++ ) {
 		for( int j = 0; j < logSets[i]->logServers.size(); j++) {
-			Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logSets[i]->logServers[j], tag, begin, end, true, parallelGetMore ) );
+			auto cursor = makeReference<ILogSystem::ServerPeekCursor>(logSets[i]->logServers[j], tag, begin, end, true,
+			                                                          parallelGetMore);
 			serverCursors[i].push_back( cursor );
 		}
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
@@ -616,7 +632,8 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::SetPeekCursor::cloneNoMore() {
 			cursors[i].push_back( serverCursors[i][j]->cloneNoMore() );
 		}
 	}
-	return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( logSets, cursors, messageVersion, bestSet, bestServer, nextVersion, useBestSet ) );
+	return makeReference<ILogSystem::SetPeekCursor>(logSets, cursors, messageVersion, bestSet, bestServer, nextVersion,
+	                                                useBestSet);
 }
 
 void ILogSystem::SetPeekCursor::setProtocolVersion( ProtocolVersion version ) {
@@ -723,7 +740,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				c->advanceTo(messageVersion);
 				if( start <= messageVersion && messageVersion < c->version() ) {
 					advancedPast = true;
-					TEST(true); //Merge peek cursor advanced past desired sequence
+					TEST(true); //Merge peek cursor with logIdx advanced past desired sequence
 				}
 			}
 		}
@@ -999,7 +1016,8 @@ ILogSystem::BufferedCursor::BufferedCursor( std::vector<Reference<AsyncVar<Optio
 	messages.reserve(SERVER_KNOBS->DESIRED_OUTSTANDING_MESSAGES);
 	cursorMessages.resize(logServers.size());
 	for( int i = 0; i < logServers.size(); i++ ) {
-		Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logServers[i], tag, begin, end, false, parallelGetMore ) );
+		auto cursor =
+		    makeReference<ILogSystem::ServerPeekCursor>(logServers[i], tag, begin, end, false, parallelGetMore);
 		cursors.push_back( cursor );
 	}
 }

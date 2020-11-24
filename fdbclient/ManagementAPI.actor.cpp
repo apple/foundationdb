@@ -1758,6 +1758,7 @@ ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx, vec
 
 			wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
+			TraceEvent("CheckForExcludingServersError").error(e);
 			wait( tr.onError(e) );
 		}
 	}

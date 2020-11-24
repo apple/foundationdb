@@ -18,26 +18,7 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <ostream>
-#include <string>
-#include <thread>
-#include <vector>
-#include "fdbclient/CoordinationInterface.h"
-#include "fdbclient/MultiVersionTransaction.h"
-#include "fdbrpc/FlowTransport.h"
-#include "fdbrpc/Locality.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbmonitor/SimpleIni.h"
-#include "flow/Arena.h"
-#include "flow/ProtocolVersion.h"
-#include "flow/flow.h"
-#include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/genericactors.actor.h"
-#include "flow/network.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 struct ProtocolVersionWorkload : TestWorkload {
     ProtocolVersionWorkload(WorkloadContext const& wcx)
@@ -54,6 +35,7 @@ struct ProtocolVersionWorkload : TestWorkload {
 	}
 
     ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
+        state ISimulator::ProcessInfo* currProcess = g_pSimulator->getCurrentProcess();
         state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
         state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess = find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p){
             return p->protocolVersion != currentProtocolVersion;
@@ -61,11 +43,14 @@ struct ProtocolVersionWorkload : TestWorkload {
         
         ASSERT(diffVersionProcess != allProcesses.end());
 
-        RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { (*diffVersionProcess)->addresses }, WLTOKEN_PROTOCOL_INFO } };
-        ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-        
-        ASSERT(reply.version != g_network->protocolVersion());
-		return Void();
+        wait(g_pSimulator->onProcess(*diffVersionProcess));
+        uint64_t version = wait(getCoordinatorProtocols(cx->getConnectionFile()));
+        ASSERT(version != g_network->protocolVersion().version());
+
+        // switch back to protocol-compatible process for consistency check
+        wait(g_pSimulator->onProcess(currProcess));
+
+        return Void();
 	}
 
     Future<bool> check(Database const& cx) override {

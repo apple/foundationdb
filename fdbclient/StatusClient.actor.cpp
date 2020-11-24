@@ -479,7 +479,7 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	state int coordinatorsFaultTolerance = 0;
 
 	try {
-		state int64_t clientTime = time(0);
+		state int64_t clientTime = g_network->timer();
 
 		StatusObject _statusObjClient = wait(clientStatusFetcher(f, &clientMessages, &quorum_reachable, &coordinatorsFaultTolerance));
 		statusObjClient = _statusObjClient;
@@ -574,7 +574,7 @@ ACTOR Future<Void> timeoutMonitorLeader(Database db) {
 Future<StatusObject> StatusClient::statusFetcher( Database db ) {
 	db->lastStatusFetch = now();
 	if(!db->statusClusterInterface) {
-		db->statusClusterInterface = Reference<AsyncVar<Optional<ClusterInterface>>>(new AsyncVar<Optional<ClusterInterface>>);
+		db->statusClusterInterface = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 		db->statusLeaderMon = timeoutMonitorLeader(db);
 	}
 

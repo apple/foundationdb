@@ -1510,7 +1510,7 @@ private:
 		Reference<ReadCursor> getCursor() {
 			Reference<ReadCursor> cursor = *ppReadCursor;
 			if (!cursor) {
-				*ppReadCursor = cursor = Reference<ReadCursor>(new ReadCursor);
+				*ppReadCursor = cursor = makeReference<ReadCursor>();
 				cursor->init(conn);
 			}
 			return cursor;

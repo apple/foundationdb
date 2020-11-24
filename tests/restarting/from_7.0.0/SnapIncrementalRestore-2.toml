@@ -8,7 +8,7 @@ clearAfterTest = false
     tag = 'default'
     restoreOnly = true
     checkBeginVersion = true
-    manualBackupAgentStart = true
+    clearBackupAgentKeys = true
 
 [[test]]
 testTitle = 'VerifyCycleAndAtomics'

@@ -120,7 +120,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		{
 			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
 			if(self->fileHandle.getPtr() == nullptr)
-				self->fileHandle = Reference<AsyncFileHandle>(new AsyncFileHandle(file, self->path, false));
+				self->fileHandle = makeReference<AsyncFileHandle>(file, self->path, false);
 			else
 				self->fileHandle->file = file;
 		}
@@ -148,7 +148,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 	}
 
 	ACTOR static Future<Void> worker(DiskDurabilityWorkload *self) {
-		state Reference<AsyncFileBuffer> buffer = Reference<AsyncFileBuffer>(new AsyncFileBuffer(_PAGE_SIZE, true));
+		state Reference<AsyncFileBuffer> buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
 		state int logfp = (int)ceil(log2(self->filePages));
 		loop {
 			int block = intHash(std::min<int>(deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(0, logfp)), self->filePages - 1)) % self->filePages;

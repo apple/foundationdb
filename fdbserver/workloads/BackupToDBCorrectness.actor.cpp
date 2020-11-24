@@ -103,7 +103,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
@@ -254,7 +254,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time
+			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time - stopDifferential not ready
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID).detail("Tag", printable(tag)).detail("DifferentialAfter", stopDifferentialDelay);
 
@@ -332,6 +332,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status
@@ -353,7 +354,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("%.6f %-10s Wait #%4d for %lld tasks to end\n", now(), randomID.toString().c_str(), waitCycles, (long long) taskCount);
 
 					wait(delay(5.0));
-					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+					tr = makeReference<ReadYourWritesTransaction>(cx);
 					int64_t _taskCount = wait( backupAgent->getTaskCount(tr) );
 					taskCount = _taskCount;
 
@@ -537,9 +538,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(self->backupTag));
 				try {
-					wait(backupAgent.abortBackup(self->extraDB, self->backupTag));
-				}
-				catch (Error& e) {
+					// This abort can race with submitBackup such that destUID may
+					// not be set yet. Adding "waitForDestUID" flag to avoid the race.
+					wait(backupAgent.abortBackup(self->extraDB, self->backupTag, /*partial=*/false,
+					                             /*abortOldBackup=*/false, /*dstOnly=*/false, /*waitForDestUID*/ true));
+				} catch (Error& e) {
 					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
 					if (e.code() != error_code_backup_unneeded)
 						throw;

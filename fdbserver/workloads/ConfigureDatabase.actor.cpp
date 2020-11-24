@@ -131,7 +131,7 @@ std::string generateRegions() {
 				break;
 			}
 			case 1: {
-				TEST( true );  // Simulated cluster using no satellite redundancy mode
+				TEST( true );  // Simulated cluster using no satellite redundancy mode (<5 datacenters)
 				break;
 			}
 			case 2: {

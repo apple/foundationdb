@@ -267,18 +267,36 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 			if(!peer) {
 				TraceEvent(SevWarnAlways, "MissingNetworkAddress").suppressFor(10.0).detail("PeerAddr", lastAddress);
 			}
+			if (peer->lastLoggedTime <= 0.0) {
+				peer->lastLoggedTime = peer->lastConnectTime;
+			}
+
 			if(peer && peer->pingLatencies.getPopulationSize() >= 10) {
 				TraceEvent("PingLatency")
-				  .detail("PeerAddr", lastAddress)
-				  .detail("MinLatency", peer->pingLatencies.min())
-				  .detail("MaxLatency", peer->pingLatencies.max())
-				  .detail("MeanLatency", peer->pingLatencies.mean())
-				  .detail("MedianLatency", peer->pingLatencies.median())
-				  .detail("P90Latency", peer->pingLatencies.percentile(0.90))
-				  .detail("Count", peer->pingLatencies.getPopulationSize())
-				  .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived)
-				  .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent);
+				    .detail("Elapsed", now() - peer->lastLoggedTime)
+				    .detail("PeerAddr", lastAddress)
+				    .detail("MinLatency", peer->pingLatencies.min())
+				    .detail("MaxLatency", peer->pingLatencies.max())
+				    .detail("MeanLatency", peer->pingLatencies.mean())
+				    .detail("MedianLatency", peer->pingLatencies.median())
+				    .detail("P90Latency", peer->pingLatencies.percentile(0.90))
+				    .detail("Count", peer->pingLatencies.getPopulationSize())
+				    .detail("BytesReceived", peer->bytesReceived - peer->lastLoggedBytesReceived)
+				    .detail("BytesSent", peer->bytesSent - peer->lastLoggedBytesSent)
+				    .detail("ConnectOutgoingCount", peer->connectOutgoingCount)
+				    .detail("ConnectIncomingCount", peer->connectIncomingCount)
+				    .detail("ConnectFailedCount", peer->connectFailedCount)
+				    .detail("ConnectMinLatency", peer->connectLatencies.min())
+				    .detail("ConnectMaxLatency", peer->connectLatencies.max())
+				    .detail("ConnectMeanLatency", peer->connectLatencies.mean())
+				    .detail("ConnectMedianLatency", peer->connectLatencies.median())
+				    .detail("ConnectP90Latency", peer->connectLatencies.percentile(0.90));
+				peer->lastLoggedTime = now();
+				peer->connectOutgoingCount = 0;
+				peer->connectIncomingCount = 0;
+				peer->connectFailedCount = 0;
 				peer->pingLatencies.clear();
+				peer->connectLatencies.clear();
 				peer->lastLoggedBytesReceived = peer->bytesReceived;
 				peer->lastLoggedBytesSent = peer->bytesSent;
 				wait(delay(FLOW_KNOBS->PING_LOGGING_INTERVAL));
@@ -300,7 +318,7 @@ TransportData::TransportData(uint64_t transportId)
 		transportId(transportId),
 		numIncompatibleConnections(0)
 {
-	degraded = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
+	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
 }
 
@@ -575,6 +593,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				    .detail("FailureStatus", IFailureMonitor::failureMonitor().getState(self->destination).isAvailable()
 				                                 ? "OK"
 				                                 : "FAILED");
+				++self->connectOutgoingCount;
 
 				try {
 					choose {
@@ -582,6 +601,10 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 						         wait(INetworkConnections::net()->connect(self->destination))) {
 							conn = _conn;
 							wait(conn->connectHandshake());
+							self->connectLatencies.addSample(now() - self->lastConnectTime);
+							if (FlowTransport::isClient()) {
+								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
+							}
 							if (self->unsent.empty()) {
 								delayedHealthUpdateF = delayedHealthUpdate(self->destination);
 								choose {
@@ -605,8 +628,9 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 							throw connection_failed();
 						}
 					}
-				} catch (Error& e) {
-					if (e.code() != error_code_connection_failed) {
+				} catch(Error &e) {
+					++self->connectFailedCount;
+					if(e.code() != error_code_connection_failed) {
 						throw;
 					}
 					TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID())
@@ -737,7 +761,9 @@ Peer::Peer(TransportData* transport, NetworkAddress const& destination)
     reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
     incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
     pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
-    bytesSent(0), lastLoggedBytesSent(0), protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())) {
+    bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
+	connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1),
+	protocolVersion(Reference<AsyncVar<Optional<ProtocolVersion>>>(new AsyncVar<Optional<ProtocolVersion>>())) {
 	IFailureMonitor::failureMonitor().setStatus(destination, FailureStatus(false));
 }
 
@@ -788,6 +814,7 @@ void Peer::discardUnreliablePackets() {
 void Peer::onIncomingConnection( Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader ) {
 	// In case two processes are trying to connect to each other simultaneously, the process with the larger canonical NetworkAddress
 	// gets to keep its outgoing connection.
+	++self->connectIncomingCount;
 	if ( !destination.isPublic() && !outgoingConnectionIdle ) throw address_in_use();
 	NetworkAddress compatibleAddr = transport->localAddresses.address;
 	if(transport->localAddresses.secondaryAddress.present() && transport->localAddresses.secondaryAddress.get().isTLS() == destination.isTLS()) {
@@ -1224,7 +1251,7 @@ Reference<Peer> TransportData::getPeer( NetworkAddress const& address ) {
 Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, bool startConnectionKeeper ) {
 	auto peer = getPeer(address);
 	if(!peer) {
-		peer = Reference<Peer>( new Peer(this, address) );
+		peer = makeReference<Peer>(this, address);
 		if(startConnectionKeeper && !isLocalAddress(address)) {
 			peer->connect = connectionKeeper(peer);
 		}

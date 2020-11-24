@@ -100,7 +100,7 @@ template <class LeaderInterface>
 Future<Void> monitorLeader(Reference<ClusterConnectionFile> const& connFile,
 						   Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 	LeaderDeserializer<LeaderInterface> deserializer;
-	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
+	auto serializedInfo = makeReference<AsyncVar<Value>>();
 	Future<Void> m = monitorLeaderInternal( connFile, serializedInfo );
 	return m || deserializer( serializedInfo, outKnownLeader );
 }
