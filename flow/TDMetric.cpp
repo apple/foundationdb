@@ -143,11 +143,6 @@ DynamicEventMetric::DynamicEventMetric(MetricNameRef const& name, Void)
   : BaseEventMetric(name), newFields(false), latestRecorded(false) {
 }
 
-DynamicEventMetric::~DynamicEventMetric() {
-	for(auto &i : fields)
-		delete i.second;
-}
-
 uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 	if(!enabled)
 		return 0;
@@ -169,8 +164,7 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 	if(newFields) {
 		// New fields were added so go to new key for all fields (at all levels) so the field parallel data series line up correctly.
 		time.nextKeyAllLevels(t);
-		for(auto f : fields)
-			f.second->nextKeyAllLevels(t);
+		for (auto& [name, field] : fields) field->nextKeyAllLevels(t);
 		newFields = false;
 	}
 
@@ -178,14 +172,12 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 	int64_t bytes = 0;
 	
 	time.log(t, t, l, overflow, bytes);
-	
-	for(auto f : fields)
-		f.second->log(t, l, overflow, bytes);
-	
+
+	for (auto& [name, field] : fields) field->log(t, l, overflow, bytes);
+
 	if(overflow) {
 			time.nextKey(t, l);
-			for(auto f : fields)
-				f.second->nextKey(t, l);
+		    for (auto& [name, field] : fields) field->nextKey(t, l);
 	}
 
 	latestRecorded = false;
@@ -196,8 +188,7 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 
 void DynamicEventMetric::flushData(MetricKeyRef const &mk, uint64_t rollTime, MetricUpdateBatch &batch) {
 	time.flushField( mk, rollTime, batch );
-	for(auto f : fields)
-		f.second->flushField(mk, rollTime, batch);
+	for (auto& [name, field] : fields) field->flushField(mk, rollTime, batch);
 	if(!latestRecorded) {
 		batch.updates.push_back(std::make_pair(mk.packLatestKey(), StringRef()));
 		latestRecorded = true;
@@ -206,8 +197,7 @@ void DynamicEventMetric::flushData(MetricKeyRef const &mk, uint64_t rollTime, Me
 
 void DynamicEventMetric::rollMetric( uint64_t t ) {
 	time.rollMetric(t);
-	for(auto f : fields)
-		f.second->rollMetric(t);
+	for (auto& f : fields) f.second->rollMetric(t);
 }
 
 void DynamicEventMetric::registerFields(MetricKeyRef const &mk, std::vector<Standalone<StringRef>>& fieldKeys) {
@@ -215,9 +205,8 @@ void DynamicEventMetric::registerFields(MetricKeyRef const &mk, std::vector<Stan
 	time.registerField(mk, fieldKeys);
 
 	// Register the new fields
-	for(auto f : fieldsToRegister)
-		fields[f]->registerField(mk, fieldKeys);
-	
+	for (auto& f : fieldsToRegister) fields[f]->registerField(mk, fieldKeys);
+
 	// Clear the to-register set.
 	fieldsToRegister.clear();
 }

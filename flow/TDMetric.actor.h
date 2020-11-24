@@ -949,7 +949,7 @@ struct DynamicFieldBase {
 	virtual void setValueFrom(DynamicFieldBase *src, StringRef eventType) = 0;
 
 	// Create a new field of the same type and with the same current value as this one and with the given name
-	virtual DynamicFieldBase * createNewWithValue(const char *name) = 0;
+	virtual std::unique_ptr<DynamicFieldBase> createNewWithValue(const char* name) = 0;
 
 	// This does a fairly cheap and "safe" downcast without using dynamic_cast / RTTI by checking that the pointer value
 	// of the const char * type string is the same as getDerivedTypeName for this object.
@@ -1004,8 +1004,8 @@ struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescri
 			clear();  // Not really necessary with proper use but just in case it is better to clear than use an old value.
 	}
 
-	DynamicFieldBase* createNewWithValue(const char* name) override {
-		DynamicField<T> *n = new DynamicField<T>(name);
+	std::unique_ptr<DynamicFieldBase> createNewWithValue(const char* name) override {
+		auto n = std::make_unique<DynamicField<T>>(name);
 		n->set(value);
 		return n;
 	}
@@ -1027,7 +1027,7 @@ private:
 
 	// TODO:  A Standalone key type isn't ideal because on lookups a ref will be made Standalone just for the search
 	// All fields that are set with setField will be in fields.
-	std::map<Standalone<StringRef>, DynamicFieldBase *> fields;
+	std::map<Standalone<StringRef>, std::unique_ptr<DynamicFieldBase>> fields;
 
 	// Set of fields not yet registered
 	std::set<Standalone<StringRef> > fieldsToRegister;
@@ -1048,7 +1048,7 @@ private:
 
 public:
 	DynamicEventMetric(MetricNameRef const &name, Void = Void());
-    ~DynamicEventMetric();
+	~DynamicEventMetric() = default;
 
 	void addref() override { ReferenceCounted<DynamicEventMetric>::addref(); }
 	void delref() override { ReferenceCounted<DynamicEventMetric>::delref(); }
@@ -1057,16 +1057,16 @@ public:
 		// Must initialize fields, previously knobs may not have been set.
 		// Note that future fields will be okay because the field constructor will init and the knobs will be set.
 		time.init();
-		for(auto f : fields)
-			f.second->init();
+		for (auto& [name, field] : fields) field->init();
 	}
 
 	// Set (or create) a new field in the event
 	template<typename ValueType>
 	void setField(const char *fieldName, const ValueType &value) {
 		StringRef fname((uint8_t *)fieldName, strlen(fieldName));
-		DynamicFieldBase *&p = fields[fname];
-		if (p != nullptr) {
+		auto& p = fields[fname];
+		// DynamicFieldBase *&p = fields[fname];
+		if (p.get() != nullptr) {
 			// FIXME:  This will break for DynamicEventMetric instances that are reused, such as use cases outside
 			// of TraceEvents.  Currently there are none in the code, and there may never any be but if you're here
 			// because you reused a DynamicEventMetric and got the error below then this issue must be fixed.  One
@@ -1075,7 +1075,7 @@ public:
 			TraceEvent(SevError, "DuplicateTraceProperty").detail("Property", fieldName).backtrace();
 			if (g_network->isSimulated()) ASSERT(false);
 		}
-		p = new DynamicField<ValueType>(fieldName);
+		p = std::make_unique<DynamicField<ValueType>>(fieldName);
 		if(pCollection != nullptr)
 			p->init();
 		newFieldAdded(fname);
@@ -1094,17 +1094,15 @@ public:
 	// This provides a way to first set fields in a temporary DynamicEventMetric and then push all of those field values
 	// into another DynamicEventMetric (which is actually logging somewhere) and log the event.
 	uint64_t setFieldsAndLogFrom(DynamicEventMetric *source, uint64_t explicitTime = 0) {
-		for(auto f : source->fields)
-		{
-			DynamicFieldBase *&p = fields[f.first];
-			if(p == nullptr) {
+		for (auto& f : source->fields) {
+			std::unique_ptr<DynamicFieldBase>& p = fields[f.first];
+			if (p.get() == nullptr) {
 				p = f.second->createNewWithValue(f.first.toString().c_str());
 				if(pCollection != nullptr)
 					p->init();
 				newFieldAdded(f.first);
-			}
-			else
-				p->setValueFrom(f.second, getTypeName());
+			} else
+				p->setValueFrom(f.second.get(), getTypeName());
 		}
 		return log(explicitTime);
 	}
@@ -1113,8 +1111,7 @@ public:
 
 	// Set all of the fields to their default values.
 	void clearFields() {
-		for(auto f : fields)
-			f.second->clear();
+		for (auto& [name, field] : fields) field->clear();
 	}
 
 	uint64_t log(uint64_t explicitTime = 0);
