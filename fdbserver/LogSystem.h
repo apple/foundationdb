@@ -329,11 +329,11 @@ struct ILogSystem {
 
 		//if hasMessage() returns true, getMessage(), getMessageWithTags(), or reader() can be called.
 		//does not modify the cursor
-		virtual bool hasMessage() = 0;
+		virtual bool hasMessage() const = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//return the tags associated with the message for the current sequence
-		virtual VectorRef<Tag> getTags() = 0;
+		virtual VectorRef<Tag> getTags() const = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//returns the arena containing the contents of getMessage(), getMessageWithTags(), and reader()
@@ -374,25 +374,25 @@ struct ILogSystem {
 		// (1) the failure monitor detects that the servers associated with the cursor is failed
 		// (2) the interface is not present
 		// (3) the cursor cannot return any more results
-		virtual bool isActive() = 0;
+		virtual bool isActive() const = 0;
 
 		//returns true if the cursor cannot return any more results
-		virtual bool isExhausted() = 0;
+		virtual bool isExhausted() const = 0;
 
 		// Returns the smallest possible message version which the current message (if any) or a subsequent message might have
 		// (If hasMessage(), this is therefore the message version of the current message)
-		virtual const LogMessageVersion& version() = 0;
+		virtual const LogMessageVersion& version() const = 0;
 
 		//So far, the cursor has returned all messages which both satisfy the criteria passed to peek() to create the cursor AND have (popped(),0) <= message version number <= version()
 		//Other messages might have been skipped
-		virtual Version popped() = 0;
+		virtual Version popped() const = 0;
 
 		// Returns the maximum version known to have been pushed (not necessarily durably) into the log system (0 is always a possible result!)
-		virtual Version getMaxKnownVersion() { return 0; }
+		virtual Version getMaxKnownVersion() const { return 0; }
 
-		virtual Version getMinKnownCommittedVersion() = 0;
+		virtual Version getMinKnownCommittedVersion() const = 0;
 
-		virtual Optional<UID> getPrimaryPeekLocation() = 0;
+		virtual Optional<UID> getPrimaryPeekLocation() const = 0;
 
 		virtual void addref() = 0;
 
@@ -432,26 +432,26 @@ struct ILogSystem {
 		void setProtocolVersion(ProtocolVersion version) override;
 		Arena& arena() override;
 		ArenaReader* reader() override;
-		bool hasMessage() override;
+		bool hasMessage() const override;
 		void nextMessage() override;
 		StringRef getMessage() override;
 		StringRef getMessageWithTags() override;
-		VectorRef<Tag> getTags() override;
+		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
 		Future<Void> onFailed() override;
-		bool isActive() override;
-		bool isExhausted() override;
-		const LogMessageVersion& version() override;
-		Version popped() override;
-		Version getMinKnownCommittedVersion() override;
-		Optional<UID> getPrimaryPeekLocation() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<ServerPeekCursor>::addref(); }
 
 		void delref() override { ReferenceCounted<ServerPeekCursor>::delref(); }
 
-		Version getMaxKnownVersion() override { return results.maxKnownVersion; }
+		Version getMaxKnownVersion() const override { return results.maxKnownVersion; }
 	};
 
 	struct MergedPeekCursor final : IPeekCursor, ReferenceCounted<MergedPeekCursor> {
@@ -478,20 +478,20 @@ struct ILogSystem {
 		ArenaReader* reader() override;
 		void calcHasMessage();
 		void updateMessage(bool usePolicy);
-		bool hasMessage() override;
+		bool hasMessage() const override;
 		void nextMessage() override;
 		StringRef getMessage() override;
 		StringRef getMessageWithTags() override;
-		VectorRef<Tag> getTags() override;
+		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
 		Future<Void> onFailed() override;
-		bool isActive() override;
-		bool isExhausted() override;
-		const LogMessageVersion& version() override;
-		Version popped() override;
-		Version getMinKnownCommittedVersion() override;
-		Optional<UID> getPrimaryPeekLocation() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<MergedPeekCursor>::addref(); }
 
@@ -521,20 +521,20 @@ struct ILogSystem {
 		ArenaReader* reader() override;
 		void calcHasMessage();
 		void updateMessage(int logIdx, bool usePolicy);
-		bool hasMessage() override;
+		bool hasMessage() const override;
 		void nextMessage() override;
 		StringRef getMessage() override;
 		StringRef getMessageWithTags() override;
-		VectorRef<Tag> getTags() override;
+		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
 		Future<Void> onFailed() override;
-		bool isActive() override;
-		bool isExhausted() override;
-		const LogMessageVersion& version() override;
-		Version popped() override;
-		Version getMinKnownCommittedVersion() override;
-		Optional<UID> getPrimaryPeekLocation() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<SetPeekCursor>::addref(); }
 
@@ -552,20 +552,20 @@ struct ILogSystem {
 		void setProtocolVersion(ProtocolVersion version) override;
 		Arena& arena() override;
 		ArenaReader* reader() override;
-		bool hasMessage() override;
+		bool hasMessage() const override;
 		void nextMessage() override;
 		StringRef getMessage() override;
 		StringRef getMessageWithTags() override;
-		VectorRef<Tag> getTags() override;
+		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
 		Future<Void> onFailed() override;
-		bool isActive() override;
-		bool isExhausted() override;
-		const LogMessageVersion& version() override;
-		Version popped() override;
-		Version getMinKnownCommittedVersion() override;
-		Optional<UID> getPrimaryPeekLocation() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<MultiCursor>::addref(); }
 
@@ -620,20 +620,20 @@ struct ILogSystem {
 		void setProtocolVersion(ProtocolVersion version) override;
 		Arena& arena() override;
 		ArenaReader* reader() override;
-		bool hasMessage() override;
+		bool hasMessage() const override;
 		void nextMessage() override;
 		StringRef getMessage() override;
 		StringRef getMessageWithTags() override;
-		VectorRef<Tag> getTags() override;
+		VectorRef<Tag> getTags() const override;
 		void advanceTo(LogMessageVersion n) override;
 		Future<Void> getMore(TaskPriority taskID = TaskPriority::TLogPeekReply) override;
 		Future<Void> onFailed() override;
-		bool isActive() override;
-		bool isExhausted() override;
-		const LogMessageVersion& version() override;
-		Version popped() override;
-		Version getMinKnownCommittedVersion() override;
-		Optional<UID> getPrimaryPeekLocation() override;
+		bool isActive() const override;
+		bool isExhausted() const override;
+		const LogMessageVersion& version() const override;
+		Version popped() const override;
+		Version getMinKnownCommittedVersion() const override;
+		Optional<UID> getPrimaryPeekLocation() const override;
 
 		void addref() override { ReferenceCounted<BufferedCursor>::addref(); }
 
