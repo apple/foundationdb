@@ -25,6 +25,7 @@
 #ifdef __linux__
 
 #include <execinfo.h>
+#include <memory>
 #include <signal.h>
 #include <sys/time.h>
 #include <stdlib.h>
@@ -129,7 +130,7 @@ struct Profiler {
 	OutputBuffer* output_buffer;
 	Future<Void> actor;
 	sigset_t profilingSignals;
-	static Profiler* active_profiler;
+	static std::unique_ptr<Profiler> active_profiler;
 	BinaryWriter environmentInfoWriter;
 	INetwork* network;
 	timer_t periodicTimer;
@@ -261,7 +262,7 @@ struct Profiler {
 	}
 };
 
-Profiler* Profiler::active_profiler = 0;
+std::unique_ptr<Profiler> Profiler::active_profiler;
 
 std::string findAndReplace( std::string const& fn, std::string const& symbol, std::string const& value ) {
 	auto i = fn.find(symbol);
@@ -287,14 +288,12 @@ void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/, Optio
 	outputFile = findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)sys_gettid()));
 
 	if (!Profiler::active_profiler)
-		Profiler::active_profiler = new Profiler( period, outputFile, network );
+		Profiler::active_profiler = std::make_unique<Profiler>( period, outputFile, network );
 }
 
 void stopProfiling() {
 	if (Profiler::active_profiler) {
-		Profiler *p = Profiler::active_profiler;
-		Profiler::active_profiler = nullptr;
-		delete p;
+		Profiler::active_profiler.reset();
 	}
 }
 
