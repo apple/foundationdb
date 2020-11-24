@@ -733,14 +733,14 @@ struct KeyValueStoreType {
 
 	std::string toString() const {
 		switch( type ) {
-#if !(defined(__APPLE__) && defined(__aarch64__))
+#if defined(SSD_SQLITE_ENABLED)
 			case SSD_BTREE_V1: return "ssd-1";
 			case SSD_BTREE_V2: return "ssd-2";
+			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 #endif
 			case SSD_REDWOOD_V1: return "ssd-redwood-experimental";
 			case SSD_ROCKSDB_V1: return "ssd-rocksdb-experimental";
 			case MEMORY: return "memory";
-			case MEMORY_RADIXTREE: return "memory-radixtree-beta";
 			default: return "unknown";
 		}
 	}

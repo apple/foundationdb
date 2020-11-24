@@ -27,7 +27,11 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
+#if defined(SSD_SQLITE_ENABLED)
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory", "memory-1", "memory-2", "memory-radixtree-beta" };
+#else
+static const char* storeTypes[] = { "ssd-redwood", "memory", "memory-1", "memory-2" };
+#endif
 static const char* logTypes[] = {
 	"log_engine:=1", "log_engine:=2",
 	"log_spill:=1", "log_spill:=2",

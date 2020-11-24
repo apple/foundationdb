@@ -2589,13 +2589,17 @@ void configureGenerator(const char* text, const char *line, std::vector<std::str
 		                   "triple",
 		                   "three_data_hall",
 		                   "three_datacenter",
+#if defined(SSD_SQLITE_ENABLED)
 		                   "ssd",
 		                   "ssd-1",
 		                   "ssd-2",
+#endif
 		                   "memory",
 		                   "memory-1",
 		                   "memory-2",
+#if defined(SSD_SQLITE_ENABLED)
 		                   "memory-radixtree-beta",
+#endif
 		                   "commit_proxies=",
 		                   "grv_proxies=",
 		                   "logs=",

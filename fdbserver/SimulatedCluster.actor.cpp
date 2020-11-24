@@ -743,6 +743,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	if (deterministicRandom()->random01() < 0.25) db.commitProxyCount = deterministicRandom()->randomInt(1, 7);
 	if (deterministicRandom()->random01() < 0.25) db.grvProxyCount = deterministicRandom()->randomInt(1, 4);
 	if (deterministicRandom()->random01() < 0.25) db.resolverCount = deterministicRandom()->randomInt(1,7);
+#if defined(SSD_SQLITE_ENABLED)
 	int storage_engine_type = deterministicRandom()->randomInt(0, 4);
 	switch (storage_engine_type) {
 	case 0: {
@@ -768,6 +769,23 @@ void SimulationConfig::generateNormalConfig(int minimumReplication, int minimumR
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
+#else
+	int storage_engine_type = deterministicRandom()->randomInt(0, 2);
+	switch (storage_engine_type) {
+	case 0: {
+		TEST(true); // Simulated cluster using ssd storage engine (no sqlite)
+		set_config("ssd-redwood");
+		break;
+	}
+	case 1: {
+		TEST(true); // Simulated cluster using default memory storage engine (no sqlite)
+		set_config("memory");
+		break;
+	}
+	default:
+		ASSERT(false); // Programmer forgot to adjust cases.
+	}
+#endif
 	//	if (deterministicRandom()->random01() < 0.5) {
 	//		set_config("ssd");
 	//	} else {
