@@ -239,21 +239,6 @@ endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
-add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
-
-target_include_directories(fdbserver PRIVATE
-  ${CMAKE_SOURCE_DIR}/bindings/c
-  ${CMAKE_BINARY_DIR}/bindings/c
-  ${CMAKE_CURRENT_BINARY_DIR}/workloads
-  ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
-if (WITH_ROCKSDB_EXPERIMENTAL)
-  add_dependencies(fdbserver rocksdb)
-  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
-else()
-  target_link_libraries(fdbserver PRIVATE fdbclient)
-endif()
-
 if(SSD_SQLITE_ENABLED)
   list(APPEND FDBSERVER_SRCS
     KeyValueStoreSQLite.actor.cpp 
@@ -273,6 +258,25 @@ if(SSD_SQLITE_ENABLED)
     target_compile_definitions(fdb_sqlite PRIVATE $<$<CONFIG:Debug>:NDEBUG>)
     target_compile_options(fdb_sqlite BEFORE PRIVATE -w) # disable warnings for third party
   endif()
+endif()
+
+add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
+
+if(SSD_SQLITE_ENABLED)
+target_link_libraries(fdbserver PRIVATE fdb_sqlite)
+endif()
+
+target_include_directories(fdbserver PRIVATE
+  ${CMAKE_SOURCE_DIR}/bindings/c
+  ${CMAKE_BINARY_DIR}/bindings/c
+  ${CMAKE_CURRENT_BINARY_DIR}/workloads
+  ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
+if (WITH_ROCKSDB_EXPERIMENTAL)
+  add_dependencies(fdbserver rocksdb)
+  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
+  target_link_libraries(fdbserver PRIVATE fdbclient ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+else()
+  target_link_libraries(fdbserver PRIVATE fdbclient)
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target)
