@@ -18,7 +18,11 @@
 # limitations under the License.
 cmake_minimum_required(VERSION 3.13)
 project(foundationdb
+<<<<<<< HEAD
   VERSION 6.3.10
+=======
+  VERSION 6.2.29
+>>>>>>> anoyes/merge-6.2-to-6.3
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
   LANGUAGES C CXX ASM)

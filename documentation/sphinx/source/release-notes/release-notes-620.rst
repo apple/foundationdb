@@ -2,11 +2,15 @@
 Release Notes
 #############
 
+6.2.29
+======
+* Fix invalid memory access on data distributor when snapshotting large clusters. `(PR #4076) <https://github.com/apple/foundationdb/pull/4076>`_
+* Add human-readable DateTime to trace events `(PR #4087) <https://github.com/apple/foundationdb/pull/4087>`_
+
 6.2.28
 ======
 * Log detailed team collection information when median available space ratio of all teams is too low. `(PR #3912) <https://github.com/apple/foundationdb/pull/3912>`_
 * Bug fix, blob client did not support authentication key sizes over 64 bytes.  `(PR #3964) <https://github.com/apple/foundationdb/pull/3964>`_
-
 
 6.2.27
 ======

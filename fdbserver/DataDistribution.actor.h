@@ -212,7 +212,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 struct ShardMetrics {
 	StorageMetrics metrics;
 	double lastLowBandwidthStartTime;
-	int shardCount;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
 
 	bool operator==(ShardMetrics const& rhs) const {
 		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
@@ -229,6 +229,7 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
+<<<<<<< HEAD
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
@@ -256,6 +257,23 @@ Future<Void> dataDistributionQueue(
 	int const& teamSize,
 	int const& singleRegionTeamSize,
 	double* const& lastLimited);
+=======
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+                                           PromiseStream<RelocateShard> output,
+                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           bool const* trackerCancelled);
+
+ACTOR Future<Void> dataDistributionQueue(
+    Database cx, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input,
+    PromiseStream<GetMetricsRequest> getShardMetrics, Reference<AsyncVar<bool>> processingUnhealthy,
+    vector<TeamCollectionInterface> teamCollection, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+    MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes, UID distributorId, int teamSize,
+    int singleRegionTeamSize, double* lastLimited);
+>>>>>>> anoyes/merge-6.2-to-6.3
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

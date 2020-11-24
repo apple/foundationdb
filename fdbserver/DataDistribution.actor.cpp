@@ -4777,9 +4777,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 	state DatabaseConfiguration configuration;
 	state Reference<InitialDataDistribution> initData;
 	state MoveKeysLock lock;
+<<<<<<< HEAD
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
+=======
+	state bool trackerCancelled;
+>>>>>>> anoyes/merge-6.2-to-6.3
 	loop {
+		trackerCancelled = false;
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4942,6 +4947,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back(reportErrorsExcept(
 			    dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics,
+<<<<<<< HEAD
 			                            getShardMetricsList, getAverageShardBytes.getFuture(), readyToStart,
 			                            anyZeroHealthyTeams, self->ddId, &shards),
 			    "DDTracker", self->ddId, &normalDDQueueErrors()));
@@ -4950,6 +4956,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			                          shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId,
 			                          storageTeamSize, configuration.storageTeamSize, &lastLimited),
 			    "DDQueue", self->ddId, &normalDDQueueErrors()));
+=======
+			                            getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, self->ddId,
+			                            &shards, &trackerCancelled),
+			    "DDTracker", self->ddId, &normalDDQueueErrors()));
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, self->ddId, storageTeamSize, configuration.storageTeamSize, &lastLimited ), "DDQueue", self->ddId, &normalDDQueueErrors() ) );
+>>>>>>> anoyes/merge-6.2-to-6.3
 
 			vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = Reference<DDTeamCollection>(new DDTeamCollection(
@@ -4978,10 +4990,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 		}
 		catch( Error &e ) {
 			state Error err = e;
+<<<<<<< HEAD
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			self->teamCollection = nullptr;
 			primaryTeamCollection = Reference<DDTeamCollection>();
 			remoteTeamCollection = Reference<DDTeamCollection>();
+=======
+			trackerCancelled = true;
+>>>>>>> anoyes/merge-6.2-to-6.3
 			wait(shards.clearAsync());
 			if (err.code() != error_code_movekeys_conflict) throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
