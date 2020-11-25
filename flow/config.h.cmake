@@ -12,11 +12,10 @@
 # define NTDDI_VERSION 0x05020000
 # define BOOST_ALL_NO_LIB
 #else
-# cmakedefine USE_UCONTEXT
 # cmakedefine USE_ASAN
 # cmakedefine USE_MSAN
 # cmakedefine USE_UBSAN
-# cmakedefine USE_UCONTEXT
+# define USE_UCONTEXT
 # if defined(USE_ASAN) || \
      defined(USE_MSAN) || \
      defined(USE_UBSAN) || \
@@ -40,10 +39,6 @@
 # cmakedefine USE_VALGRIND
 # ifdef USE_VALGRIND
 #  define VALGRIND 1
-# endif
-# cmakedefine WITH_LIBCXX
-# if !defined(WITH_LIBCXX) && defined(__APPLE__)
-#  define WITH_LIBCXX
 # endif
 # cmakedefine DTRACE_PROBES
 # cmakedefine HAS_ALIGNED_ALLOC
