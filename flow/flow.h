@@ -36,6 +36,7 @@
 #include <string>
 #include <utility>
 #include <algorithm>
+#include <memory>
 
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
@@ -407,6 +408,30 @@ struct SingleCallback {
 	}
 };
 
+// in the future we might want to read these from a different thread. std::shared_ptr
+// seems to be better suited for this...
+struct ActorLineagePropertyMap : std::enable_shared_from_this<ActorLineagePropertyMap> {
+	std::shared_ptr<ActorLineagePropertyMap> parent = nullptr;
+};
+
+extern thread_local ActorLineagePropertyMap* currentLineage;
+
+struct ActorLineage {
+	std::shared_ptr<ActorLineagePropertyMap> properties = std::make_shared<ActorLineagePropertyMap>();
+	ActorLineage() {
+		if (currentLineage) {
+			properties->parent = currentLineage->shared_from_this();
+		}
+	}
+};
+
+struct save_lineage {
+	ActorLineagePropertyMap* current = currentLineage;
+	~save_lineage() {
+		currentLineage = current;
+	}
+};
+
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
@@ -445,6 +470,7 @@ public:
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
+		save_lineage _{};
 		while (Callback<T>::next != this)
 			Callback<T>::next->fire(this->value());
 	}
@@ -457,6 +483,7 @@ public:
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		this->error_state = err;
+		save_lineage _{};
 		while (Callback<T>::next != this)
 			Callback<T>::next->error(err);
 	}
@@ -477,6 +504,7 @@ public:
 	void finishSendAndDelPromiseRef() {
 		// Call only after value_storage has already been initialized!
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
+		save_lineage _{};
 		while (Callback<T>::next != this)
 			Callback<T>::next->fire(this->value());
 
@@ -500,6 +528,7 @@ public:
 		}
 
 		this->error_state = err;
+		save_lineage _{};
 		while (Callback<T>::next != this)
 			Callback<T>::next->error(err);
 
@@ -987,7 +1016,7 @@ static inline void destruct(T& t) {
 }
 
 template <class ReturnValue>
-struct Actor : SAV<ReturnValue> {
+struct Actor : SAV<ReturnValue>, ActorLineage {
 	int8_t actor_wait_state;  // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback group #
 
 	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
@@ -995,7 +1024,7 @@ struct Actor : SAV<ReturnValue> {
 };
 
 template <>
-struct Actor<void> {
+struct Actor<void> : ActorLineage {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
 	int8_t actor_wait_state;  // 0 means actor is not waiting; 1-N mean waiting in callback group #
