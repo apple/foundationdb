@@ -4779,7 +4779,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 	state MoveKeysLock lock;
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
+	state bool trackerCancelled;
 	loop {
+		trackerCancelled = false;
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4943,7 +4945,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			actors.push_back(reportErrorsExcept(
 			    dataDistributionTracker(initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics,
 			                            getShardMetricsList, getAverageShardBytes.getFuture(), readyToStart,
-			                            anyZeroHealthyTeams, self->ddId, &shards),
+			                            anyZeroHealthyTeams, self->ddId, &shards, &trackerCancelled),
 			    "DDTracker", self->ddId, &normalDDQueueErrors()));
 			actors.push_back(reportErrorsExcept(
 			    dataDistributionQueue(cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis,
@@ -4977,6 +4979,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self, Promise
 			return Void();
 		}
 		catch( Error &e ) {
+			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			self->teamCollection = nullptr;

@@ -579,6 +579,9 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( READ_TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) READ_TAG_MEASUREMENT_INTERVAL = 1.0;
 	init( OPERATION_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) OPERATION_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
+	init( REPORT_DD_METRICS,                                    true );
+	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );
+	init( FETCH_KEYS_TOO_LONG_TIME_CRITERIA,                   300.0 );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -611,6 +614,7 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( MAX_STATUS_REQUESTS_PER_SECOND,                      256.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 	init( DISABLE_DUPLICATE_LOG_WARNING,                       false );
+	init( HISTOGRAM_REPORT_INTERVAL,                           300.0 );
 
 	// IPager
 	init( PAGER_RESERVED_PAGES,                                    1 );
