@@ -612,6 +612,7 @@ ACTOR Future<Void> commitBatch(
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
+	state double timeStart = g_network->timer();
 
 	if(localBatchNumber-self->latestLocalCommitBatchResolving.get()>SERVER_KNOBS->RESET_MASTER_BATCHES && now()-self->lastMasterReset>SERVER_KNOBS->RESET_MASTER_DELAY) {
 		TraceEvent(SevWarnAlways, "ConnectionResetMaster", self->dbgid)
@@ -625,6 +626,23 @@ ACTOR Future<Void> commitBatch(
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
+	double queuingDelay = g_network->timer() - timeStart;
+	state bool rejectBatch = false;
+	if (queuingDelay > SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
+	    (BUGGIFY && g_network->isSimulated() && deterministicRandom()->random01() < 0.01)) {
+		TEST(true); // Reject transactions in the batch
+		rejectBatch = true;
+
+		for (const auto& tr : trs) {
+			tr.reply.sendError(not_committed());
+		}
+		self->latestLocalCommitBatchResolving.set(localBatchNumber);
+		self->latestLocalCommitBatchLogging.set(localBatchNumber);
+		++self->stats.commitBatchOut;
+		self->stats.txnCommitOut += trs.size();
+		return Void();
+	}
+
 	state Future<Void> releaseDelay = delay(std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE, batchOperations*self->commitComputePerOperation[latencyBucket]), TaskPriority::ProxyMasterVersionReply);
 
 	if (debugID.present())
@@ -654,7 +672,7 @@ ACTOR Future<Void> commitBatch(
 	ResolutionRequestBuilder requests( self, commitVersion, prevVersion, self->version );
 	int conflictRangeCount = 0;
 	state int64_t maxTransactionBytes = 0;
-	for (int t = 0; t<trs.size(); t++) {
+	for (int t = 0; t<trs.size() && !rejectBatch; t++) {
 		requests.addTransaction(trs[t], t);
 		conflictRangeCount += trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
 		//TraceEvent("MPTransactionDump", self->dbgid).detail("Snapshot", trs[t].transaction.read_snapshot);
@@ -767,9 +785,9 @@ ACTOR Future<Void> commitBatch(
 
 	// Determine which transactions actually committed (conservatively) by combining results from the resolvers
 	state vector<uint8_t> committed(trs.size());
-	ASSERT(transactionResolverMap.size() == committed.size());
+	ASSERT(rejectBatch || transactionResolverMap.size() == committed.size());
 	vector<int> nextTr(resolution.size());
-	for (int t = 0; t<trs.size(); t++) {
+	for (int t = 0; t<trs.size() && !rejectBatch; t++) {
 		uint8_t commit = ConflictBatch::TransactionCommitted;
 		for (int r : transactionResolverMap[t])
 		{
@@ -786,7 +804,7 @@ ACTOR Future<Void> commitBatch(
 	state bool locked = lockedKey.present() && lockedKey.get().size();
 
 	state Optional<Key> mustContainSystemKey = self->txnStateStore->readValue(mustContainSystemMutationsKey).get();
-	if(mustContainSystemKey.present() && mustContainSystemKey.get().size()) {
+	if(mustContainSystemKey.present() && mustContainSystemKey.get().size() && !rejectBatch) {
 		for (int t = 0; t<trs.size(); t++) {
 			if( committed[t] == ConflictBatch::TransactionCommitted ) {
 				bool foundSystem = false;
@@ -810,7 +828,7 @@ ACTOR Future<Void> commitBatch(
 	// This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes to storage servers' responsibilities)
 	int t;
 	state int commitCount = 0;
-	for (t = 0; t < trs.size() && !forceRecovery; t++)
+	for (t = 0; t < trs.size() && !forceRecovery && !rejectBatch; t++)
 	{
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			commitCount++;
@@ -819,13 +837,14 @@ ACTOR Future<Void> commitBatch(
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
 			firstStateMutations = false;
-			forceRecovery = false;
+			// forceRecovery = false;
 		}
 	}
-	if (forceRecovery) {
+	if (forceRecovery || rejectBatch) {
 		for (; t<trs.size(); t++)
 			committed[t] = ConflictBatch::TransactionConflict;
-		TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "AwaitCommit");
+		if (forceRecovery)
+			TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "AwaitCommit");
 	}
 
 	lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
