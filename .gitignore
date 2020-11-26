@@ -85,6 +85,7 @@ flow/coveragetool/obj
 /compile_commands.json
 /.ccls-cache
 /.clangd
+/.cache
 
 # Temporary and user configuration files
 *~
