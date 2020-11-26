@@ -67,15 +67,15 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
+set(IS_ARM_MAC NO)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
    set(IS_ARM_MAC YES)
- endif()
+endif()
 
- set(IS_ARM_MAC NO)
- # The tests don't build on windows and ARM macs
- # doctest doesn't seem to compile on ARM macs, we should
- # check later whether this works
- if(NOT WIN32 AND NOT IS_ARM_MAC)
+# The tests don't build on windows and ARM macs
+# doctest doesn't seem to compile on ARM macs, we should
+# check later whether this works
+if(NOT WIN32 AND NOT IS_ARM_MAC)
   set(MAKO_SRCS
     test/mako/mako.c
     test/mako/mako.h
