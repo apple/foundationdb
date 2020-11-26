@@ -17,7 +17,7 @@ elseif(WIN32)
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-  set(os "aarch64")
+  set(cpu "aarch64")
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
