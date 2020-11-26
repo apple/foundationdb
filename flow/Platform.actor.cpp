@@ -2421,7 +2421,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
                                              bool directoryOnly, bool async) {
 	INJECT_FAULT( platform_error, "findFiles" ); // findFiles failed
 	state vector<std::string> result;
-	state int64_t tsc_begin = __rdtsc();
+	state int64_t tsc_begin = timestampCounter();
 
 	state DIR *dip = nullptr;
 
@@ -2451,9 +2451,9 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 			    (!directoryOnly && acceptFile(buf.st_mode, name, extension))) {
 				result.push_back( name );
 			}
-			if (async && __rdtsc() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
+			if (async && timestampCounter() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
 				wait( yield() );
-				tsc_begin = __rdtsc();
+				tsc_begin = timestampCounter();
 			}
 		}
 
