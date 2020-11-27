@@ -60,21 +60,16 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 		f = fopen(filename.c_str(), "wb");
 	}
 
-	virtual bool isOpen() {
-		return f != nullptr;
-	}
+	bool isOpen() const { return f != nullptr; }
 
-	virtual void addref() { ReferenceCounted<SyncFileForSim>::addref(); }
-	virtual void delref() { ReferenceCounted<SyncFileForSim>::delref(); }
+	int64_t debugFD() const { return (int64_t)f; }
 
-	virtual int64_t debugFD() { return (int64_t)f; }
-
-	virtual Future<int> read( void* data, int length, int64_t offset ) {
+	Future<int> read(void* data, int length, int64_t offset) {
 		ASSERT(false);
 		throw internal_error();
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+	Future<Void> write(void const* data, int length, int64_t offset) {
 		ASSERT(isOpen());
 		fseek(f, offset, SEEK_SET);
 		if (fwrite(data, 1, length, f) != length)
@@ -82,23 +77,23 @@ struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 		return Void();
 	}
 
-	virtual Future<Void> truncate( int64_t size ) {
+	Future<Void> truncate(int64_t size) {
 		ASSERT( size == 0 );
 		return Void();
 	}
 
-	virtual Future<Void> flush() {
+	Future<Void> flush() {
 		ASSERT(isOpen());
 		fflush(f);
 		return Void();
 	}
 
-	virtual Future<Void> sync() {
+	Future<Void> sync() {
 		ASSERT(false);
 		throw internal_error();
 	}
 
-	virtual Future<int64_t> size() {
+	Future<int64_t> size() const {
 		ASSERT(false);
 		throw internal_error();
 	}

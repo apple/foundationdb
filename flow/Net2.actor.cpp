@@ -357,8 +357,8 @@ struct SendBufferIterator {
 
 class Connection final : public IConnection, ReferenceCounted<Connection> {
 public:
-	virtual void addref() { ReferenceCounted<Connection>::addref(); }
-	virtual void delref() { ReferenceCounted<Connection>::delref(); }
+	void addref() override { ReferenceCounted<Connection>::addref(); }
+	void delref() override { ReferenceCounted<Connection>::delref(); }
 
 	void close() override {
 		closeSocket();
@@ -700,8 +700,8 @@ public:
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
-	virtual void addref() { ReferenceCounted<Listener>::addref(); }
-	virtual void delref() { ReferenceCounted<Listener>::delref(); }
+	void addref() override { ReferenceCounted<Listener>::addref(); }
+	void delref() override { ReferenceCounted<Listener>::delref(); }
 
 	// Returns one incoming connection when it is available
 	Future<Reference<IConnection>> accept() override {
@@ -777,8 +777,8 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 class SSLConnection final : public IConnection, ReferenceCounted<SSLConnection> {
 public:
-	virtual void addref() { ReferenceCounted<SSLConnection>::addref(); }
-	virtual void delref() { ReferenceCounted<SSLConnection>::delref(); }
+	void addref() override { ReferenceCounted<SSLConnection>::addref(); }
+	void delref() override { ReferenceCounted<SSLConnection>::delref(); }
 
 	void close() override {
 		closeSocket();
@@ -1096,8 +1096,8 @@ public:
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
-	virtual void addref() { ReferenceCounted<SSLListener>::addref(); }
-	virtual void delref() { ReferenceCounted<SSLListener>::delref(); }
+	void addref() override { ReferenceCounted<SSLListener>::addref(); }
+	void delref() override { ReferenceCounted<SSLListener>::delref(); }
 
 	// Returns one incoming connection when it is available
 	Future<Reference<IConnection>> accept() override {
