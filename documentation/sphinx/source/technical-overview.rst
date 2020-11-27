@@ -47,3 +47,4 @@ These documents explain the engineering design of FoundationDB, with detailed in
    flow
    testing
    kv-architecture
+   read-write-path
