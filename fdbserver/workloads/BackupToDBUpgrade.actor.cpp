@@ -346,6 +346,9 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		state UID logUid;
 		state Version commitVersion;
 
+		// Disable proxy rejection to avoid ApplyMutationsError
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
+
 		state Future<Void> stopDifferential = delay(self->stopDifferentialAfter);
 		state Future<Void> waitUpgrade = backupAgent.waitUpgradeToLatestDrVersion(self->extraDB, self->backupTag);
 		wait(success(stopDifferential) && success(waitUpgrade));
@@ -461,6 +464,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);
 			throw;
 		}
+
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 
 		return Void();
 	}

@@ -627,19 +627,27 @@ ACTOR Future<Void> commitBatch(
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber-1); // Queuing pre-resolution commit processing 
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
 	double queuingDelay = g_network->timer() - timeStart;
-	if (queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
-	    (BUGGIFY && g_network->isSimulated() && deterministicRandom()->random01() < 0.01 && trs.size() > 0 &&
-	     !trs[0].transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")))) {
+	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
+	     (BUGGIFY && g_network->isSimulated() && deterministicRandom()->random01() < 0.01)) &&
+	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG &&
+	    trs.size() > 0 && !trs[0].transaction.mutations.empty() && !trs[0].transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
-		TraceEvent("ProxyReject", self->dbgid).detail("Delay", queuingDelay).detail("N", trs.size());
-		for (const auto m : trs[0].transaction.mutations) {
-			TraceEvent("ProxyReject", self->dbgid).detail("Mutation", m.toString());
+		TraceEvent("ProxyReject", self->dbgid).detail("Delay", queuingDelay).detail("N", trs.size()).detail("BatchNumber", localBatchNumber);
+		int i = 0;
+		for (const auto tr : trs) {
+			int j = 0;
+			for (const auto& m : tr.transaction.mutations) {
+				TraceEvent("ProxyReject", self->dbgid).detail("T", i).detail("M", j).detail("Mutation", m.toString());
+				j++;
+			}
+			i++;
 		}
 		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
 		self->latestLocalCommitBatchResolving.set(localBatchNumber);
 
 		wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber-1));
+		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
 		self->latestLocalCommitBatchLogging.set(localBatchNumber);
 		for (const auto& tr : trs) {
 			tr.reply.sendError(not_committed());

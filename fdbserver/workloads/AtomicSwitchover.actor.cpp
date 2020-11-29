@@ -152,6 +152,9 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
 
+		// Disable proxy rejection to avoid ApplyMutationsError
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
+
 		TraceEvent("AS_Wait1");
 		wait(success( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) ));
 		TraceEvent("AS_Ready1");
@@ -176,6 +179,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		if (g_simulator.drAgents == ISimulator::BackupToDB) {
 			g_simulator.drAgents = ISimulator::NoBackupAgents;
 		}
+
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 
 		return Void();
 	}
