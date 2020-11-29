@@ -56,8 +56,6 @@ struct BackupToDBAbort : TestWorkload {
 	ACTOR static Future<Void> _setup(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
 		try {
-			// Disable proxy rejection to avoid ApplyMutationsError
-			const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
 			TraceEvent("BDBA_Submit1");
 			wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
 			TraceEvent("BDBA_Submit2");
@@ -65,7 +63,6 @@ struct BackupToDBAbort : TestWorkload {
 			if( e.code() != error_code_backup_duplicate )
 				throw;
 		}
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 		return Void();
 	}
 
@@ -76,6 +73,9 @@ struct BackupToDBAbort : TestWorkload {
 
 	ACTOR static Future<Void> _start(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
+
+		// Disable proxy rejection to avoid ApplyMutationsError
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
 
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
@@ -94,6 +94,7 @@ struct BackupToDBAbort : TestWorkload {
 			g_simulator.drAgents = ISimulator::NoBackupAgents;
 		}
 
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 		return Void();
 	}
 
