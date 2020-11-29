@@ -633,7 +633,10 @@ ACTOR Future<Void> commitBatch(
 	    trs.size() > 0 && !trs[0].transaction.mutations.empty() && !trs[0].transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
-		TraceEvent("ProxyReject", self->dbgid).detail("Delay", queuingDelay).detail("N", trs.size()).detail("BatchNumber", localBatchNumber);
+		TraceEvent(SevWarnAlways, "ProxyReject", self->dbgid)
+		    .detail("QDelay", queuingDelay)
+		    .detail("Transactions", trs.size())
+		    .detail("BatchNumber", localBatchNumber);
 		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
 		self->latestLocalCommitBatchResolving.set(localBatchNumber);
 
@@ -644,6 +647,7 @@ ACTOR Future<Void> commitBatch(
 			tr.reply.sendError(not_committed());
 		}
 		++self->stats.commitBatchOut;
+		self->stats.txnConflicts += trs.size();
 		return Void();
 	}
 
