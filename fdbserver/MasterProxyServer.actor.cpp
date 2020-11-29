@@ -634,15 +634,6 @@ ACTOR Future<Void> commitBatch(
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
 		TraceEvent("ProxyReject", self->dbgid).detail("Delay", queuingDelay).detail("N", trs.size()).detail("BatchNumber", localBatchNumber);
-		int i = 0;
-		for (const auto tr : trs) {
-			int j = 0;
-			for (const auto& m : tr.transaction.mutations) {
-				TraceEvent("ProxyReject", self->dbgid).detail("T", i).detail("M", j).detail("Mutation", m.toString());
-				j++;
-			}
-			i++;
-		}
 		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
 		self->latestLocalCommitBatchResolving.set(localBatchNumber);
 
@@ -850,7 +841,6 @@ ACTOR Future<Void> commitBatch(
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
 			firstStateMutations = false;
-			// forceRecovery = false;
 		}
 	}
 	if (forceRecovery) {

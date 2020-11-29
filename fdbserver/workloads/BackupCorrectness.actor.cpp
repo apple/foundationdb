@@ -364,6 +364,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
 		TraceEvent("BARW_Arguments").detail("BackupTag", printable(self->backupTag)).detail("PerformRestore", self->performRestore)
 			.detail("BackupAfter", self->backupAfter).detail("RestoreAfter", self->restoreAfter)
 			.detail("AbortAndRestartAfter", self->abortAndRestartAfter).detail("DifferentialAfter", self->stopDifferentialAfter);
@@ -661,6 +662,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e).GetLastError();
 			throw;
 		}
+		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 		return Void();
 	}
 };
