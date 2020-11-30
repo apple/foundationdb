@@ -612,7 +612,7 @@ ACTOR Future<Void> commitBatch(
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
-	state double timeStart = g_network->timer();
+	state double timeStart = now();
 
 	if(localBatchNumber-self->latestLocalCommitBatchResolving.get()>SERVER_KNOBS->RESET_MASTER_BATCHES && now()-self->lastMasterReset>SERVER_KNOBS->RESET_MASTER_DELAY) {
 		TraceEvent(SevWarnAlways, "ConnectionResetMaster", self->dbgid)
@@ -628,12 +628,13 @@ ACTOR Future<Void> commitBatch(
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
 	double queuingDelay = g_network->timer() - timeStart;
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
-	     (BUGGIFY && g_network->isSimulated() && deterministicRandom()->random01() < 0.01)) &&
-	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG &&
-	    trs.size() > 0 && !trs[0].transaction.mutations.empty() && !trs[0].transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
+	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01))) &&
+	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && trs.size() > 0 && !trs[0].transaction.mutations.empty() &&
+	    !trs[0].transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
 		TraceEvent(SevWarnAlways, "ProxyReject", self->dbgid)
+		    .suppressFor(0.1)
 		    .detail("QDelay", queuingDelay)
 		    .detail("Transactions", trs.size())
 		    .detail("BatchNumber", localBatchNumber);
@@ -644,7 +645,7 @@ ACTOR Future<Void> commitBatch(
 		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
 		self->latestLocalCommitBatchLogging.set(localBatchNumber);
 		for (const auto& tr : trs) {
-			tr.reply.sendError(not_committed());
+			tr.reply.sendError(transaction_too_old());
 		}
 		++self->stats.commitBatchOut;
 		self->stats.txnConflicts += trs.size();
