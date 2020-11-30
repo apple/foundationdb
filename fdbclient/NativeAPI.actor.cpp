@@ -946,6 +946,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    std::make_unique<ConsistencyCheckImpl>(
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TracingOptionsImpl>(
+		        KeyRangeRef(LiteralStringRef("a"), LiteralStringRef("a0")) // TODO: Remove prefix
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,

@@ -145,6 +145,7 @@ public:
 		MANAGEMENT, // Management-API
 		METRICS, // data-distribution metrics
 		TESTONLY, // only used by correctness tests
+		TRACING, // Distributed tracing options
 		TRANSACTION, // transaction related info, conflicting keys, read/write conflict range
 		STATUSJSON,
 		UNKNOWN, // default value for all unregistered range
@@ -317,6 +318,16 @@ public:
 	explicit ConsistencyCheckImpl(KeyRangeRef kr);
 	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
+public:
+	explicit TracingOptionsImpl(KeyRangeRef kr);
+	Future<Standalone<RangeResultRef>> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
+	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 };
 
 #include "flow/unactorcompiler.h"

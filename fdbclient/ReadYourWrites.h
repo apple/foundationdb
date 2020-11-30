@@ -39,6 +39,8 @@ struct ReadYourWritesTransactionOptions {
 	bool disableUsedDuringCommitProtection : 1;
 	bool specialKeySpaceRelaxed : 1;
 	bool specialKeySpaceChangeConfiguration : 1;
+	Optional<std::string> transactionId;
+	bool disableTracing : 1;
 	double timeoutInSeconds;
 	int maxRetries;
 	int snapshotRywEnabled;
@@ -151,6 +153,9 @@ public:
 
 	bool specialKeySpaceRelaxed() const { return options.specialKeySpaceRelaxed; }
 	bool specialKeySpaceChangeConfiguration() const { return options.specialKeySpaceChangeConfiguration; }
+
+	Optional<std::string> transactionId() const { return options.transactionId; }
+	bool disableTracing() const { return options.disableTracing; }
 
 	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }

@@ -2069,6 +2069,12 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 		    validateOptionValue(value, false);
 			options.specialKeySpaceChangeConfiguration = true;
 			break;
+		case FDBTransactionOptions::CUSTOM_TRANSACTION_ID:
+			options.transactionId = value.present() ? value.get().toString() : Optional<std::string>();
+			break;
+		case FDBTransactionOptions::DISABLE_TRACING:
+			options.disableTracing = value.present();
+			break;
 		default:
 			break;
 	}
