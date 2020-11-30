@@ -55,7 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	//Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
-	FDBFuture* (*getServerProtocol)(const char* clusterFilePath);
+	FDBFuture* (*getServerProtocol)(const char* clusterFilePath, uint64_t* expectedProtocol);
 	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const *value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
@@ -206,7 +206,7 @@ public:
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath, uint64_t* expectedProtocol) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -325,7 +325,9 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
-private:
+// TODO: had to expose this to allow DatabaseState to be accessed within an ACTOR.
+// also could introduce some public functions to expose the underlying logic (ie currentClientIndex and Connector).
+// private:
 	struct DatabaseState;
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
@@ -357,7 +359,6 @@ private:
 
 		void stateChanged();
 		void addConnection(Reference<ClientInfo> client, std::string clusterFilePath);
-		void startConnections();
 		void cancelConnections();
 
 		Reference<IDatabase> db;
@@ -370,6 +371,7 @@ private:
 		int currentClientIndex;
 		std::vector<Reference<ClientInfo>> clients;
 		std::vector<Reference<Connector>> connectionAttempts;
+		Future<Void> protocolFuture;
 
 		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
 		UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaultOptions;
@@ -384,7 +386,7 @@ class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath, uint64_t* expectedProtocol) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -405,6 +407,8 @@ public:
 
 	static bool apiVersionAtLeast(int minVersion);
 
+	FutureStream<Void> getExternalClientStream();
+
 private:
 	MultiVersionApi();
 
@@ -415,6 +419,8 @@ private:
 	void addExternalLibrary(std::string path);
 	void addExternalLibraryDirectory(std::string path);
 	void disableLocalClient();
+	void loadExternalClientVersion(Reference<ClientInfo> client);
+	void setupExternalClientNetwork(Reference<ClientInfo> client);
 	void setSupportedClientVersions(Standalone<StringRef> versions);
 
 	void setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value);
@@ -422,10 +428,15 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, Reference<ClientInfo>> externalClients;
 
+	std::unordered_map<std::string, Reference<MultiVersionDatabase>> multiVersionDatabases;
+	PromiseStream<Void> externalClientStream;
+
+	std::vector<THREAD_HANDLE> threadHandles;
 	bool networkStartSetup;
 	volatile bool networkSetup;
-	volatile bool bypassMultiClientApi;
+	volatile bool multiClientDisabled;
 	volatile bool externalClient;
+	uint64_t externalTransportId;
 	int apiVersion;
 
 	Mutex lock;

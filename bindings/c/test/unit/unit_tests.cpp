@@ -1539,7 +1539,7 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 }
 
 TEST_CASE("fdb_get_server_protocol") {
-  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
+  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str(), nullptr);
   uint64_t out;
 
   fdb_check(fdb_future_block_until_ready(protocolFuture));
