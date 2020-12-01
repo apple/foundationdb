@@ -23,6 +23,11 @@
 #include "fdbrpc/libcoroutine/Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include <boost/coroutine2/all.hpp>
+#include <boost/coroutine2/coroutine.hpp>
+#include <functional>
+#include "flow/flow.h"
+#include "flow/network.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 
@@ -46,20 +51,12 @@ protected:
 
 
 struct Coroutine /*: IThreadlike*/ {
-	Coroutine() {
-		coro = Coro_new();
-		if (coro == nullptr)
-			platform::outOfMemory();
-	}
-
-	~Coroutine() {
-		Coro_free(coro);
-	}
+	Coroutine() = default;
+	~Coroutine() { *alive = false; }
 
 	void start() {
-		int result = Coro_startCoro_( swapCoro(coro), coro, this, &entry );
-		if (result == ENOMEM) 
-			platform::outOfMemory();
+		coro.reset(new coro_t::pull_type([this](coro_t::push_type& sink) { entry(sink); }));
+		switcher(this);
 	}
 
 	void unblock() {
@@ -68,6 +65,28 @@ struct Coroutine /*: IThreadlike*/ {
 	}
 
 protected:
+	ACTOR static void switcher(Coroutine* self) {
+		state std::shared_ptr<bool> alive = self->alive;
+		while (*alive && *self->coro) {
+			try {
+				wait(self->coro->get());
+			} catch (Error& e) {
+				// We just want to transfer control back to the coroutine. The coroutine will handle the error.
+			}
+			current_coro = self;
+			(*self->coro)(); // Transfer control to the coroutine, and wait until the coroutine has a future it needs to
+			                 // wait for
+			current_coro = nullptr;
+			wait(delay(0, g_network->getCurrentTask()));
+		}
+	}
+
+	void entry(coro_t::push_type& sink) {
+		current_coro = this;
+		this->sink = &sink;
+		run();
+	}
+
 	void block() {
 		//Coro_switchTo_( swapCoro(main_coro), main_coro );
 		blocked = Promise<Void>();
@@ -91,6 +110,7 @@ private:
 
 	Coro* coro;
 	Promise<Void> blocked;
+	std::shared_ptr<bool> alive{ std::make_shared<bool>(true) };
 };
 
 template <class Threadlike, class Mutex, bool IS_CORO>

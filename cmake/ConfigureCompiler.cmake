@@ -142,7 +142,13 @@ else()
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
   if(USE_ASAN)
-    add_compile_options(-fsanitize=address)
+    add_compile_options(
+      -fsanitize=address
+      -DUSE_SANITIZER
+      -DADDRESS_SANITIZER
+      -DBOOST_USE_ASAN
+      -DBOOST_USE_UCONTEXT
+      )
     add_link_options(-fsanitize=address)
   endif()
 
