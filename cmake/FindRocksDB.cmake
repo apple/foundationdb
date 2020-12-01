@@ -2,6 +2,7 @@
 
 find_path(ROCKSDB_INCLUDE_DIR
   NAMES rocksdb/db.h
+  PATHS /opt/rocksdb-6.10.1
   PATH_SUFFIXES include)
 
 find_package_handle_standard_args(RocksDB
