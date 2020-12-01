@@ -25,9 +25,9 @@
 #include <boost/coroutine2/all.hpp>
 #include <boost/coroutine2/coroutine.hpp>
 #include <functional>
-#include "flow/actorcompiler.h" // has to be last include
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 using coro_t = boost::coroutines2::coroutine<Future<Void>>;
 
@@ -53,15 +53,12 @@ struct Coroutine;
 Coroutine* current_coro;
 
 struct Coroutine /*: IThreadlike*/ {
-	Coroutine() {
-		coro.reset(new coro_t::pull_type([this](coro_t::push_type& sink) { entry(sink); }));
-	}
+	Coroutine() = default;
+	~Coroutine() { *alive = false; }
 
 	void start() {
-		while (true) {
-			auto& f = (*coro)();
-			switcher(this, f.get(), g_network->getCurrentTask());
-		}
+		coro.reset(new coro_t::pull_type([this](coro_t::push_type& sink) { entry(sink); }));
+		switcher(this);
 	}
 
 	void unblock() {
@@ -75,12 +72,20 @@ struct Coroutine /*: IThreadlike*/ {
 	}
 
 protected:
-	ACTOR static void switcher(Coroutine* self, Future<Void> what, TaskPriority taskID) {
-		try {
-			wait(what);
-		} catch (Error& e) {}
-		wait(delay(0, taskID));
-		(*self->coro)();
+	ACTOR static void switcher(Coroutine* self) {
+		state std::shared_ptr<bool> alive = self->alive;
+		while (*alive && *self->coro) {
+			try {
+				wait(self->coro->get());
+			} catch (Error& e) {
+				// We just want to transfer control back to the coroutine. The coroutine will handle the error.
+			}
+			current_coro = self;
+			(*self->coro)(); // Transfer control to the coroutine, and wait until the coroutine has a future it needs to
+			                 // wait for
+			current_coro = nullptr;
+			wait(delay(0, g_network->getCurrentTask()));
+		}
 	}
 
 	void entry(coro_t::push_type& sink) {
@@ -103,6 +108,7 @@ private:
 	std::unique_ptr<coro_t::pull_type> coro;
 	coro_t::push_type* sink;
 	Promise<Void> blocked;
+	std::shared_ptr<bool> alive{ std::make_shared<bool>(true) };
 };
 
 template <class Threadlike, class Mutex, bool IS_CORO>

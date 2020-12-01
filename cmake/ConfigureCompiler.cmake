@@ -170,6 +170,8 @@ else()
       -fsanitize=address
       -DUSE_SANITIZER
       -DADDRESS_SANITIZER
+      -DBOOST_USE_ASAN
+      -DBOOST_USE_UCONTEXT
       )
     add_link_options(-fsanitize=address)
   endif()
