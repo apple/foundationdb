@@ -567,6 +567,19 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
+// Try to identify recovery transaction and backup's apply mutations.
+// Both cannot be rejected and are approximated by looking at first mutation
+// starting with 0xff.
+bool canReject(const std::vector<CommitTransactionRequest>& trs) {
+	for (const auto& tr : trs) {
+		if (tr.transaction.mutations.empty()) continue;
+		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
+			return false;
+		}
+	}
+	return true;
+}
+
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
 	vector<CommitTransactionRequest> trs,
@@ -629,8 +642,7 @@ ACTOR Future<Void> commitBatch(
 	double queuingDelay = g_network->timer() - timeStart;
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
 	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01))) &&
-	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && trs.size() > 0 && !trs[0].transaction.mutations.empty() &&
-	    !trs[0].transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
+	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
 		TraceEvent(SevWarnAlways, "ProxyReject", self->dbgid)
