@@ -25,6 +25,8 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include "flow/Error.h"
+#include "flow/UnitTest.h"
 
 #if (!(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
 #error Do not support non-little-endian systems
