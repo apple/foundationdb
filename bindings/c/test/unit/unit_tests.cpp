@@ -1547,6 +1547,24 @@ TEST_CASE("fdb_get_server_protocol") {
   fdb_future_destroy(protocolFuture);
 }
 
+TEST_CASE("fdb_get_server_protocol expected_protocol_doesnt_finish") {  
+  FDBFuture* currentProtocolFuture = fdb_get_server_protocol(clusterFilePath.c_str(), nullptr);
+  uint64_t currentProtocolVersion;
+  fdb_check(fdb_future_block_until_ready(currentProtocolFuture));
+  fdb_check(fdb_future_get_uint64(currentProtocolFuture, &currentProtocolVersion));
+  fdb_future_destroy(currentProtocolFuture);
+
+  FDBFuture* protocolExpectedFuture = fdb_get_server_protocol(clusterFilePath.c_str(), &currentProtocolVersion);
+  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str(), nullptr);
+
+  uint64_t out;
+  fdb_check(fdb_future_block_until_ready(protocolFuture));
+  fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+  CHECK(!fdb_future_is_ready(protocolExpectedFuture));
+  fdb_future_destroy(protocolExpectedFuture);
+  fdb_future_destroy(protocolFuture);
+}
+
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
   // Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
   // should return a watches_disabled error.

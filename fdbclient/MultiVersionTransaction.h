@@ -433,16 +433,15 @@ private:
 
 	std::vector<THREAD_HANDLE> threadHandles;
 	bool networkStartSetup;
-	volatile bool networkSetup;
-	volatile bool multiClientDisabled;
-	volatile bool externalClient;
-	uint64_t externalTransportId;
+	std::atomic<bool> networkSetup;
+	std::atomic<bool> multiClientDisabled;
+	std::atomic<bool> externalClient;
 	int apiVersion;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
-	volatile bool envOptionsLoaded;
+	std::atomic<bool> envOptionsLoaded;
 };
 
 #endif

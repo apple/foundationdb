@@ -749,6 +749,7 @@ ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *
 				c->connect();
 
 				// is this safe? Do we have to use onMainThreadVoid
+				// It can only be safely used from the main thread, on futures which are being set on the main thread
 				uint64_t nextProtocolVersionInt = wait(unsafeThreadFutureToFuture(c->client->api->getServerProtocol(clusterFilePath.c_str(), &currentProtocolVersionInt)));
 				currentProtocolVersionInt = nextProtocolVersionInt;
 				foundCompatible = true;
@@ -1095,8 +1096,6 @@ void MultiVersionApi::setupExternalClientNetwork(Reference<ClientInfo> client) {
 	for(auto option : options) {
 		client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 	}
-	client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(externalTransportId));
-
 	client->api->setupNetwork();
 }
 
@@ -1193,18 +1192,6 @@ void MultiVersionApi::setupNetwork() {
 		}
 
 		networkStartSetup = true;
-
-		// TODO:
-		// From FlowTransport:336: Multi-version clients will use the same Id for both connections, other connections will set this to zero
-		// if we can add new connections, should we assign a non-zero ID ahead of time?
-		// also should we be savings externalTransportId as a member? Or can we find in options vector?
-		if(!multiClientDisabled) {
-			externalTransportId = (uint64_t(uint32_t(platform::getRandomSeed())) << 32) ^ uint32_t(platform::getRandomSeed());
-			if(externalTransportId <= 1) externalTransportId += 2;
-			// can we push externalTransportId on to our local options vector as well? So we don't have to set it separately for external clients?
-			// then we also wouldn't have to store the externalTransportId as a member
-			localClient->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(externalTransportId));
-		}
 		localClient->api->setupNetwork();
 	}
 
@@ -1362,13 +1349,10 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 
 	MutexHolder holder(lock);
 
-	// why are we looking for filename - shouldn't we be using path?
-	// if(externalClients.count(filename) == 0) {
-	if(externalClients.count(path) == 0) {
+	if(externalClients.count(filename) == 0) {
 		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 		Reference<ClientInfo> newExternalClient = makeReference<ClientInfo>(new DLApi(path), path);
-		// externalClients[filename] = newExternalClient;
-		externalClients[path] = newExternalClient;
+		externalClients[filename] = newExternalClient;
 		if(networkStartSetup) {
 			try {
 				loadExternalClientVersion(newExternalClient);
@@ -1397,13 +1381,10 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 	// TODO: monitor current directories for new files
 	for(auto filename : files) {
 		std::string lib = abspath(joinPath(path, filename));
-		// why are we looking for filename - shouldn't we be using lib?
-		// if(externalClients.count(filename) == 0) {
-		if(externalClients.count(lib) == 0) {
+		if(externalClients.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
 			Reference<ClientInfo> newExternalClient = makeReference<ClientInfo>(new DLApi(lib), lib);
-			// externalClients[filename] = newExternalClient;
-			externalClients[lib] = newExternalClient;
+			externalClients[filename] = newExternalClient;
 			if(networkStartSetup) {
 				try {
 					loadExternalClientVersion(newExternalClient);
@@ -1502,7 +1483,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 	envOptionsLoaded = true;
 }
 
-MultiVersionApi::MultiVersionApi() : multiClientDisabled(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), externalTransportId(0), apiVersion(0), envOptionsLoaded(false) {}
+MultiVersionApi::MultiVersionApi() : multiClientDisabled(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
