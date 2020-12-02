@@ -90,7 +90,9 @@ set(FLOW_SRCS
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
-  version.cpp)
+  version.cpp
+  xxhash.c
+  xxhash.h)
 
 if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)

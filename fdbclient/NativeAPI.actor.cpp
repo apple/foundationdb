@@ -4395,11 +4395,22 @@ namespace {
 	}
 }
 
-ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
+ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f,  Optional<ProtocolVersion> expectedProtocol) {
 	loop {
+		state ProtocolVersion coordProtocol;
 		choose {
-			when(ProtocolVersion coordProtocol = wait(getCoordProtocolRequestVersions(f))) { return coordProtocol.version(); }
-			when(ProtocolVersion coordProtocol = wait(getConnectPktVersions(f))) { return coordProtocol.version(); }
+			when(ProtocolVersion p = wait(getCoordProtocolRequestVersions(f))) { coordProtocol = p; }
+			when(ProtocolVersion p = wait(getConnectPktVersions(f))) { coordProtocol = p; }
+		}
+
+		if(expectedProtocol.present()) {
+			if(expectedProtocol.get() != coordProtocol) {
+				return coordProtocol.version();
+			}
+			wait(delay(2.0));
+		}
+		else {
+			return coordProtocol.version();
 		}
 	}
 }

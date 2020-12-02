@@ -605,8 +605,8 @@ FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
 }
 
 extern "C" DLLEXPORT
-FDBFuture* fdb_get_server_protocol(const char* clusterFilePath){
-	return (FDBFuture*)( API->getServerProtocol(clusterFilePath ? clusterFilePath : "").extractPtr() );
+FDBFuture* fdb_get_server_protocol(const char* clusterFilePath, uint64_t* expectedProtocol){
+	return (FDBFuture*)( API->getServerProtocol(clusterFilePath ? clusterFilePath : "", expectedProtocol).extractPtr() );
 }
 
 extern "C" DLLEXPORT

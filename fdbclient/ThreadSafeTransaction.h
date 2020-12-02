@@ -117,7 +117,7 @@ class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeAp
 public:
 	void selectApiVersion(int apiVersion);
 	const char* getClientVersion();
-	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath, uint64_t* expectedProtocol) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 	void setupNetwork();

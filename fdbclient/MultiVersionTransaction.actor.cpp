@@ -310,6 +310,7 @@ void DLApi::init() {
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl");
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
+	loadClientFunction(&api->getServerProtocol, lib, fdbCPath, "fdb_get_server_protocol");
 	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option");
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network");
 	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network");
@@ -382,9 +383,14 @@ const char* DLApi::getClientVersion() {
 	return api->getClientVersion();
 }
 
-ThreadFuture<uint64_t> DLApi::getServerProtocol(const char *clusterFilePath) {
-	ASSERT(false);
-	return ThreadFuture<uint64_t>();
+ThreadFuture<uint64_t> DLApi::getServerProtocol(const char *clusterFilePath, uint64_t* expectedProtocol) {
+	FdbCApi::FDBFuture *f = api->getServerProtocol(clusterFilePath, expectedProtocol);
+	return toThreadFuture<uint64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		uint64_t version;
+		FdbCApi::fdb_error_t error = api->futureGetUInt64(f, &version);
+		ASSERT(!error);
+		return version;
+	});
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
@@ -722,27 +728,63 @@ void MultiVersionTransaction::reset() {
 }
 
 // MultiVersionDatabase
+
+ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *api, std::string clusterFilePath) {
+	state Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(clusterFilePath);
+	state uint64_t currentProtocolVersionInt = wait(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
+	loop {
+		// TODO: This doesn't handle multiple compatible clients well
+		state int currentClientIndex = db->dbState->currentClientIndex;
+		state int i = 0;
+		state bool foundCompatible = false;
+		for(; i<db->dbState->connectionAttempts.size(); i++) {
+			auto c = db->dbState->connectionAttempts[i];
+			// why would we use isCompatible? it seems like even if protocol versions are compatible, a server and client can't communicate unless they're on the same version
+			// from FlowTransport::checkCompatible case ReqirePeer::Exactly
+			// if(i != currentClientIndex && ProtocolVersion(currentProtocolVersionInt).isCompatible(c->client->protocolVersion)) {
+			if(i != currentClientIndex && ProtocolVersion(currentProtocolVersionInt) == c->client->protocolVersion) {
+				if(currentClientIndex >= 0) {
+					db->dbState->connectionAttempts[currentClientIndex]->cancel();
+				}
+				c->connect();
+
+				// is this safe? Do we have to use onMainThreadVoid
+				// It can only be safely used from the main thread, on futures which are being set on the main thread
+				uint64_t nextProtocolVersionInt = wait(unsafeThreadFutureToFuture(c->client->api->getServerProtocol(clusterFilePath.c_str(), &currentProtocolVersionInt)));
+				currentProtocolVersionInt = nextProtocolVersionInt;
+				foundCompatible = true;
+				break;
+			}
+		}
+
+		if(!foundCompatible) {
+			waitNext(api->getExternalClientStream());
+		}
+	}
+}
+
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors) : dbState(new DatabaseState()) {
-	dbState->db = db;
-	dbState->dbVar->set(db);
+	// why are these being set here when they could be set in stateChanged?
+	// is this a performance boost - seems to be trying to set the local db ahead of time?
+	// dbState->db = db;
+	// dbState->dbVar->set(db);
 
 	if(!openConnectors) {
+		dbState->db = db;
+		dbState->dbVar->set(db);
 		dbState->currentClientIndex = 0;
 	}
 	else {
+		dbState->currentClientIndex = -1;
 		if(!api->localClientDisabled) {
-			dbState->currentClientIndex = 0;
 			dbState->addConnection(api->getLocalClient(), clusterFilePath);
-		}
-		else {
-			dbState->currentClientIndex = -1;
 		}
 
 		api->runOnExternalClients([this, clusterFilePath](Reference<ClientInfo> client) {
 			dbState->addConnection(client, clusterFilePath);
 		});
 
-		dbState->startConnections();
+		dbState->protocolFuture = connectAndMonitor(this, api, clusterFilePath);
 	}
 }
 
@@ -864,7 +906,10 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 	int newIndex = -1;
 	for(int i = 0; i < clients.size(); ++i) {
 		if(i != currentClientIndex && connectionAttempts[i]->connected) {
-			if(currentClientIndex >= 0 && !clients[i]->canReplace(clients[currentClientIndex])) {
+			// why is this using canReplace (which relies on ProtocolVersion.isCompatible).
+			// seems like this could disable a client that we might need in the future
+			// if(currentClientIndex >= 0 && !clients[i]->canReplace(clients[currentClientIndex])) {
+			if(currentClientIndex >= 0 && clients[i]->protocolVersion == clients[currentClientIndex]->protocolVersion) {
 				TraceEvent(SevWarn, "DuplicateClientVersion").detail("Keeping", clients[currentClientIndex]->libPath).detail("KeptClientProtocolVersion", clients[currentClientIndex]->protocolVersion.version()).detail("Disabling", clients[i]->libPath).detail("DisabledClientProtocolVersion", clients[i]->protocolVersion.version());
 				connectionAttempts[i]->connected = false; // Permanently disable this client in favor of the current one
 				clients[i]->failed = true;
@@ -920,12 +965,6 @@ void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> cl
 	    makeReference<Connector>(Reference<DatabaseState>::addRef(this), client, clusterFilePath));
 }
 
-void MultiVersionDatabase::DatabaseState::startConnections() {
-	for(auto c : connectionAttempts) {
-		c->connect();
-	}
-}
-
 void MultiVersionDatabase::DatabaseState::cancelConnections() {
 	addref();
 	onMainThreadVoid([this](){
@@ -944,6 +983,10 @@ void MultiVersionDatabase::DatabaseState::cancelConnections() {
 bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
 	ASSERT(MultiVersionApi::api->apiVersion != 0);
 	return MultiVersionApi::api->apiVersion >= minVersion || MultiVersionApi::api->apiVersion < 0;
+}
+
+FutureStream<Void> MultiVersionApi::getExternalClientStream() {
+	return externalClientStream.getFuture();
 }
 
 // runOnFailedClients should be used cautiously. Some failed clients may not have successfully loaded all symbols.
@@ -1000,8 +1043,8 @@ const char* MultiVersionApi::getClientVersion() {
 }
 
 
-ThreadFuture<uint64_t> MultiVersionApi::getServerProtocol(const char *clusterFilePath) {
-	return api->localClient->api->getServerProtocol(clusterFilePath);
+ThreadFuture<uint64_t> MultiVersionApi::getServerProtocol(const char *clusterFilePath, uint64_t* expectedProtocol) {
+	return api->localClient->api->getServerProtocol(clusterFilePath, expectedProtocol);
 }
 
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty=true) {
@@ -1021,7 +1064,7 @@ void MultiVersionApi::disableMultiVersionClientApi() {
 		throw invalid_option();
 	}
 
-	bypassMultiClientApi = true;
+	multiClientDisabled = true;
 }
 
 void MultiVersionApi::setCallbacksOnExternalThreads() {
@@ -1033,50 +1076,27 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 	callbackOnMainThread = false;
 }
 
-void MultiVersionApi::addExternalLibrary(std::string path) {
-	std::string filename = basename(path);
-
-	if(filename.empty() || !fileExists(path)) {
-		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
-		throw file_not_found();
-	}
-
-	MutexHolder holder(lock);
-	if(networkStartSetup) {
-		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup
-	}
-
-	if(externalClients.count(filename) == 0) {
-		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-		externalClients[filename] = makeReference<ClientInfo>(new DLApi(path), path);
-	}
-}
-
-void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
-	TraceEvent("AddingExternalClientDirectory").detail("Directory", path);
-	std::vector<std::string> files = platform::listFiles(path, DYNAMIC_LIB_EXT);
-
-	MutexHolder holder(lock);
-	if(networkStartSetup) {
-		throw invalid_option(); // SOMEDAY: it might be good to allow clients to be added after the network is setup. For directories, we can monitor them for the addition of new files.
-	}
-
-	for(auto filename : files) {
-		std::string lib = abspath(joinPath(path, filename));
-		if(externalClients.count(filename) == 0) {
-			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-			externalClients[filename] = makeReference<ClientInfo>(new DLApi(lib), lib);
-		}	
-	}
-}
-
+// TODO: if we now only run the compatible client, is there still a purpose in disabling the local client?
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);
-	if(networkStartSetup || bypassMultiClientApi) {
+	if(networkStartSetup || multiClientDisabled) {
 		throw invalid_option();
 	}
 
 	localClientDisabled = true;
+}
+
+void MultiVersionApi::loadExternalClientVersion(Reference<ClientInfo> client) {
+	TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
+	client->api->selectApiVersion(apiVersion);
+	client->loadProtocolVersion();
+}
+
+void MultiVersionApi::setupExternalClientNetwork(Reference<ClientInfo> client) {
+	for(auto option : options) {
+		client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
+	}
+	client->api->setupNetwork();
 }
 
 void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions) {
@@ -1088,7 +1108,7 @@ void MultiVersionApi::setSupportedClientVersions(Standalone<StringRef> versions)
 		localClient->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
 	}, nullptr);
 
-	if(!bypassMultiClientApi) {
+	if(!externalClients.empty() && !multiClientDisabled) {
 		runOnExternalClients([versions](Reference<ClientInfo> client) {
 			client->api->setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, versions);
 		});
@@ -1139,22 +1159,23 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	}
 	else if(option == FDBNetworkOptions::EXTERNAL_CLIENT) {
 		MutexHolder holder(lock);
-		ASSERT(!value.present() && !networkStartSetup);
+		ASSERT(!value.present());
 		externalClient = true;
-		bypassMultiClientApi = true;
+		multiClientDisabled = true;
 	}
 	else {
 		MutexHolder holder(lock);
 		localClient->api->setNetworkOption(option, value);
 
-		if(!bypassMultiClientApi) {
+		if(!multiClientDisabled) {
 			if(networkSetup) {
+				// TODO: should we also push back on to options?
+				// So if a new client is added, it'll also have this option as well as the older ones
+				// Do we want these network options to be set on all clients?
 				runOnExternalClients(
 				    [option, value](Reference<ClientInfo> client) { client->api->setNetworkOption(option, value); });
 			}
-			else {
-				options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
-			}
+			options.push_back(std::make_pair(option, value.castTo<Standalone<StringRef>>()));
 		}
 	}
 }
@@ -1164,7 +1185,6 @@ void MultiVersionApi::setupNetwork() {
 		loadEnvironmentVariableNetworkOptions();
 	}
 
-	uint64_t transportId = 0;
 	{ // lock scope
 		MutexHolder holder(lock);
 		if(networkStartSetup) {
@@ -1172,36 +1192,19 @@ void MultiVersionApi::setupNetwork() {
 		}
 
 		networkStartSetup = true;
-
-		if(externalClients.empty()) {
-			bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to add clients after setupNetwork is called
-		}
-
-		if(!bypassMultiClientApi) {
-			transportId = (uint64_t(uint32_t(platform::getRandomSeed())) << 32) ^ uint32_t(platform::getRandomSeed());
-			if(transportId <= 1) transportId += 2;
-			localClient->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
-		}
 		localClient->api->setupNetwork();
 	}
 
 	localClient->loadProtocolVersion();
 
-	if(!bypassMultiClientApi) {
+	if(!externalClients.empty() && !multiClientDisabled) {
 		runOnExternalClients([this](Reference<ClientInfo> client) {
-			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-			client->api->selectApiVersion(apiVersion);
-			client->loadProtocolVersion();
+			loadExternalClientVersion(client);
 		});
 
 		MutexHolder holder(lock);
-		runOnExternalClients([this, transportId](Reference<ClientInfo> client) {
-			for(auto option : options) {
-				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
-			}
-			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
-
-			client->api->setupNetwork();
+		runOnExternalClients([this](Reference<ClientInfo> client) {
+			setupExternalClientNetwork(client);
 		});
 
 		networkSetup = true; // Needs to be guarded by mutex
@@ -1210,7 +1213,9 @@ void MultiVersionApi::setupNetwork() {
 		networkSetup = true;
 	}
 
-	options.clear();
+	// TODO: How to handle options? Should they be cleared?
+	// MultiVersionApi::options gets copied over when initializing external client
+	// options.clear();
 	updateSupportedVersions();
 }
 
@@ -1234,18 +1239,17 @@ void MultiVersionApi::runNetwork() {
 
 	lock.leave();
 
-	std::vector<THREAD_HANDLE> handles;
-	if(!bypassMultiClientApi) {
-		runOnExternalClients([&handles](Reference<ClientInfo> client) {
+	if(!externalClients.empty() && !multiClientDisabled) {
+		runOnExternalClients([this](Reference<ClientInfo> client) {
 			if(client->external) {
-				handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
+				threadHandles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
 			}
 		});
 	}
 
 	localClient->api->runNetwork();
 
-	for(auto h : handles) {
+	for(auto h : threadHandles) {
 		waitThread(h);
 	}
 }
@@ -1260,7 +1264,7 @@ void MultiVersionApi::stopNetwork() {
 
 	localClient->api->stopNetwork();
 
-	if(!bypassMultiClientApi) {
+	if(!externalClients.empty() && !multiClientDisabled) {
 		runOnExternalClients([](Reference<ClientInfo> client) {
 			client->api->stopNetwork();
 		}, true);
@@ -1277,7 +1281,7 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 
 	localClient->api->addNetworkThreadCompletionHook(hook, hookParameter);
 
-	if(!bypassMultiClientApi) {
+	if(!externalClients.empty() && !multiClientDisabled) {
 		runOnExternalClients([hook, hookParameter](Reference<ClientInfo> client) {
 			client->api->addNetworkThreadCompletionHook(hook, hookParameter);
 		});
@@ -1294,18 +1298,22 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char *clusterFilePath
 
 	std::string clusterFile(clusterFilePath);
 	if(localClientDisabled) {
-		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, Reference<IDatabase>()));
+		Reference<MultiVersionDatabase> newDb = Reference<MultiVersionDatabase>(new MultiVersionDatabase(this, clusterFile, Reference<IDatabase>()));
+		multiVersionDatabases[std::string(clusterFilePath)] = newDb;
+		return newDb;
 	}
 
 	auto db = localClient->api->createDatabase(clusterFilePath);
-	if(bypassMultiClientApi) {
+	if(multiClientDisabled) {
 		return db;
 	}
 	else {
 		for(auto it : externalClients) {
 			TraceEvent("CreatingDatabaseOnExternalClient").detail("LibraryPath", it.second->libPath).detail("Failed", it.second->failed);
 		}
-		return Reference<IDatabase>(new MultiVersionDatabase(this, clusterFile, db));
+		Reference<MultiVersionDatabase> newDb = Reference<MultiVersionDatabase>(new MultiVersionDatabase(this, clusterFile, db));
+		multiVersionDatabases[std::string(clusterFilePath)] = newDb;
+		return newDb;
 	}
 }
 
@@ -1328,6 +1336,73 @@ void MultiVersionApi::updateSupportedVersions() {
 		}
 
 		setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS, StringRef(versionStr.begin(), versionStr.size()));
+	}
+}
+
+void MultiVersionApi::addExternalLibrary(std::string path) {
+	std::string filename = basename(path);
+
+	if(filename.empty() || !fileExists(path)) {
+		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
+		throw file_not_found();
+	}
+
+	MutexHolder holder(lock);
+
+	if(externalClients.count(filename) == 0) {
+		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
+		Reference<ClientInfo> newExternalClient = makeReference<ClientInfo>(new DLApi(path), path);
+		externalClients[filename] = newExternalClient;
+		if(networkStartSetup) {
+			try {
+				loadExternalClientVersion(newExternalClient);
+				setupExternalClientNetwork(newExternalClient);
+				threadHandles.push_back(g_network->startThread(&runNetworkThread, newExternalClient.getPtr()));
+			}
+			catch(Error& e){
+				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e);
+				newExternalClient->failed = true;
+				return;
+			}
+			for(const auto& [clusterFilePath, db] : multiVersionDatabases) {
+				db->dbState->addConnection(newExternalClient, clusterFilePath);
+			}
+			updateSupportedVersions();
+			externalClientStream.send(Void());
+		}
+	}
+}
+
+void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
+	TraceEvent("AddingExternalClientDirectory").detail("Directory", path);
+	std::vector<std::string> files = platform::listFiles(path, DYNAMIC_LIB_EXT);
+	MutexHolder holder(lock);
+
+	// TODO: monitor current directories for new files
+	for(auto filename : files) {
+		std::string lib = abspath(joinPath(path, filename));
+		if(externalClients.count(filename) == 0) {
+			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
+			Reference<ClientInfo> newExternalClient = makeReference<ClientInfo>(new DLApi(lib), lib);
+			externalClients[filename] = newExternalClient;
+			if(networkStartSetup) {
+				try {
+					loadExternalClientVersion(newExternalClient);
+					setupExternalClientNetwork(newExternalClient);
+					threadHandles.push_back(g_network->startThread(&runNetworkThread, newExternalClient.getPtr()));
+				}
+				catch(Error& e){
+					TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e);
+					newExternalClient->failed = true;
+					continue;
+				}
+				for(const auto& [clusterFilePath, db] : multiVersionDatabases) {
+					db->dbState->addConnection(newExternalClient, clusterFilePath);
+				}
+				updateSupportedVersions();
+				externalClientStream.send(Void());
+			}
+		}
 	}
 }
 
@@ -1408,7 +1483,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 	envOptionsLoaded = true;
 }
 
-MultiVersionApi::MultiVersionApi() : bypassMultiClientApi(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false) {}
+MultiVersionApi::MultiVersionApi() : multiClientDisabled(false), networkStartSetup(false), networkSetup(false), callbackOnMainThread(true), externalClient(false), localClientDisabled(false), apiVersion(0), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 

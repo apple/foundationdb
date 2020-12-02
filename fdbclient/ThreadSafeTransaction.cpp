@@ -365,12 +365,13 @@ const char* ThreadSafeApi::getClientVersion() {
 	return clientVersion.c_str();
 }
 
-ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath) {
+ThreadFuture<uint64_t> ThreadSafeApi::getServerProtocol(const char* clusterFilePath, uint64_t* expectedProtocolPtr) {
 	auto [clusterFile, isDefault] = ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath));
 
 	Reference<ClusterConnectionFile> f = Reference<ClusterConnectionFile>(new ClusterConnectionFile(clusterFile));
-	return onMainThread( [f]() -> Future< uint64_t > {
-			return getCoordinatorProtocols(f);
+	Optional<ProtocolVersion> expectedProtocol = expectedProtocolPtr ? Optional<ProtocolVersion>(ProtocolVersion(*expectedProtocolPtr)) : Optional<ProtocolVersion>();
+	return onMainThread( [f, expectedProtocol]() -> Future< uint64_t > {
+			return getCoordinatorProtocols(f, expectedProtocol);
 		} );
 }
 

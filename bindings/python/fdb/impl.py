@@ -1531,7 +1531,7 @@ def init_c_api():
     _capi.fdb_transaction_get_approximate_size.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_get_approximate_size.restype = ctypes.c_void_p
 
-    _capi.fdb_get_server_protocol.argtypes = [ctypes.c_char_p]
+    _capi.fdb_get_server_protocol.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint64)]
     _capi.fdb_get_server_protocol.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_get_versionstamp.argtypes = [ctypes.c_void_p]
@@ -1733,12 +1733,13 @@ open_databases = {}
 
 cacheLock = threading.Lock()
 
-def get_server_protocol(clusterFilePath=None):
+def get_server_protocol(clusterFilePath=None, expectedVersion=None):
     with _network_thread_reentrant_lock:
         if not _network_thread:
             init()
 
-    return FutureUInt64(_capi.fdb_get_server_protocol(optionalParamToBytes(clusterFilePath)[0]))
+    expected = ctypes.byref(ctypes.c_uint64(expectedVersion)) if expectedVersion is not None else None
+    return FutureUInt64(_capi.fdb_get_server_protocol(optionalParamToBytes(clusterFilePath)[0], expected))
 
 def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated

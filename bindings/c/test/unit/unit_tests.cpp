@@ -1539,11 +1539,29 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 }
 
 TEST_CASE("fdb_get_server_protocol") {
-  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
+  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str(), nullptr);
   uint64_t out;
 
   fdb_check(fdb_future_block_until_ready(protocolFuture));
   fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+  fdb_future_destroy(protocolFuture);
+}
+
+TEST_CASE("fdb_get_server_protocol expected_protocol_doesnt_finish") {  
+  FDBFuture* currentProtocolFuture = fdb_get_server_protocol(clusterFilePath.c_str(), nullptr);
+  uint64_t currentProtocolVersion;
+  fdb_check(fdb_future_block_until_ready(currentProtocolFuture));
+  fdb_check(fdb_future_get_uint64(currentProtocolFuture, &currentProtocolVersion));
+  fdb_future_destroy(currentProtocolFuture);
+
+  FDBFuture* protocolExpectedFuture = fdb_get_server_protocol(clusterFilePath.c_str(), &currentProtocolVersion);
+  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str(), nullptr);
+
+  uint64_t out;
+  fdb_check(fdb_future_block_until_ready(protocolFuture));
+  fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+  CHECK(!fdb_future_is_ready(protocolExpectedFuture));
+  fdb_future_destroy(protocolExpectedFuture);
   fdb_future_destroy(protocolFuture);
 }
 
