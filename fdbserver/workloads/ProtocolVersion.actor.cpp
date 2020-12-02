@@ -44,7 +44,7 @@ struct ProtocolVersionWorkload : TestWorkload {
         ASSERT(diffVersionProcess != allProcesses.end());
 
         wait(g_pSimulator->onProcess(*diffVersionProcess));
-        uint64_t version = wait(getCoordinatorProtocols(cx->getConnectionFile()));
+        uint64_t version = wait(getCoordinatorProtocols(cx->getConnectionFile(), Optional<ProtocolVersion>()));
         ASSERT(version != g_network->protocolVersion().version());
 
         // switch back to protocol-compatible process for consistency check

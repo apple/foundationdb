@@ -252,7 +252,7 @@ extern "C" {
     fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
-    fdb_get_server_protocol(const char* clusterFilePath);
+    fdb_get_server_protocol(const char* clusterFilePath, uint64_t* expectedProtocol);
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 
