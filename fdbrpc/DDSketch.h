@@ -25,8 +25,6 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
-#include "flow/Error.h"
-#include "flow/UnitTest.h"
 
 #if (!(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
 #error Do not support non-little-endian systems
@@ -41,42 +39,24 @@ namespace fastLogger {
 // For double, it is represented as 2^e*(1+s) (0<=s<1), so our goal becomes e*log(2)/log(r)*log(1+s),
 // and we approximate log(1+s) with a cubic function. See more details on Datadog's paper, or
 // CubicallyInterpolatedMapping.java in https://github.com/DataDog/sketches-java/
-static const double correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
-constexpr static const double A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
-static const int SIGNIFICAND_WIDTH = 53;
-static const uint64_t SIGNIFICAND_MASK = 0x000fffffffffffffuLL;
-static const uint64_t EXPONENT_MASK = 0x7FF0000000000000uLL;
-constexpr static const int EXPONENT_SHIFT = SIGNIFICAND_WIDTH - 1;
-static const int EXPONENT_BIAS = 1023;
-static const uint64_t ONE = 0x3ff0000000000000uLL;
+inline const double correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
+constexpr inline const double A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
 
-static inline uint64_t doubleToLongBits(double x) {
-	static_assert(sizeof(double) == sizeof(uint64_t));
-	uint64_t u;
-	uint64_t* pu = reinterpret_cast<uint64_t*>(&x);
-	u = *pu;
-	return u;
+inline double fastlog(double value) {
+	int e;
+	double s = frexp(value, &e);
+	s = s * 2 - 1;
+	return ((A * s + B) * s + C) * s + e - 1;
 }
 
-static inline double longBitsToDouble(uint64_t x) {
-	double u;
-	double* pu = reinterpret_cast<double*>(&x);
-	u = *pu;
-	return u;
-}
-
-static inline int getExponent(uint64_t longBits) {
-	return (int)((longBits & EXPONENT_MASK) >> EXPONENT_SHIFT) - EXPONENT_BIAS;
-}
-
-static inline double getSignificandPlusOne(uint64_t longBits) {
-	return longBitsToDouble((longBits & SIGNIFICAND_MASK) | ONE);
-}
-static inline double fastlog(double value) {
-	uint64_t longBits = doubleToLongBits(value);
-	double s = getSignificandPlusOne(longBits) - 1;
-	double e = getExponent(longBits);
-	return ((A * s + B) * s + C) * s + e;
+inline double reverseLog(double index) {
+	long exponent = floor(index);
+	// Derived from Cardano's formula
+	double d0 = B * B - 3 * A * C;
+	double d1 = 2 * B * B * B - 9 * A * B * C - 27 * A * A * (index - exponent);
+	double p = cbrt((d1 - sqrt(d1 * d1 - 4 * d0 * d0 * d0)) / 2);
+	double significandPlusOne = -(B + p + d0 / p) / (3 * A) + 1;
+	return ldexp(significandPlusOne / 2, exponent + 1);
 }
 }; // namespace fastLogger
 #endif
@@ -164,7 +144,7 @@ public:
 		}
 		ASSERT(found);
 #if FASTLOG
-		return (T)(2.0 * pow(gamma, (index - offset) / fastLogger::correctingFactor) / (gamma + 1));
+		return fastLogger::reverseLog((index - offset) / multiplier) * 2.0 / (1 + gamma);
 #else
 		return (T)(2.0 * pow(gamma, (index - offset)) / (gamma + 1));
 #endif
@@ -214,14 +194,11 @@ private:
 
 #endif
 
-
-
-
 TEST_CASE("/fdbrpc/ddsketch/accuracy") {
 
 	int TRY = 100, SIZE = 1e6;
 	const int totalPercentiles = 7;
-	double targetPercentiles[totalPercentiles] = {.0001, .01, .1, .50, .90, .99, .9999};
+	double targetPercentiles[totalPercentiles] = { .0001, .01, .1, .50, .90, .99, .9999 };
 	double stat[totalPercentiles];
 	for (int t = 0; t < TRY; t++) {
 		DDSketch<double> dd;
