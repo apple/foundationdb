@@ -57,7 +57,7 @@ struct Factory<RefType::SharedPointer> {
 
 template <>
 struct Factory<RefType::FlowReference> {
-	static Reference<Empty> create() { return Reference<Empty>(new Empty{}); }
+	static Reference<Empty> create() { return makeReference<Empty>(); }
 	static void cleanup(const Reference<Empty>&) {}
 };
 

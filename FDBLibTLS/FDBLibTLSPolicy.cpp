@@ -293,12 +293,12 @@ bool FDBLibTLSPolicy::set_verify_peers(int count, const uint8_t* verify_peers[],
 					break;
 				}
 				if(split == start || verifyString[split-1] != '\\') {
-					Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start,split-start)));
+					auto verify = makeReference<FDBLibTLSVerify>(verifyString.substr(start, split - start));
 					verify_rules.push_back(verify);
 					start = split+1;
 				}
 			}
-			Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start)));
+			auto verify = makeReference<FDBLibTLSVerify>(verifyString.substr(start));
 			verify_rules.push_back(verify);
 		} catch ( const std::runtime_error& ) {
 			verify_rules.clear();

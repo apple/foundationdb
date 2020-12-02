@@ -488,7 +488,7 @@ To create a reference counted instance of a class `T`, you instantiate a `Refere
 stack with a pointer to your `T` object:
 
 ```c++
-Reference<T> refCountedInstance(new T());
+auto refCountedInstance = makeReference<T>();
 ```
 The `Reference<T>` class automatically calls addref on your `T` instance every time it is copied
 (such as by argument passing or assignment), but not when the object is initially created

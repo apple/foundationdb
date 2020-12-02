@@ -66,7 +66,7 @@ static void logf(const char* event, void* uid, bool is_error, ...) {
 int FDBLibTLSVerifyTest::run() {
 	Reference<FDBLibTLSVerify> verify;
 	try {
-		verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(input));
+		verify = makeReference<FDBLibTLSVerify>(input);
 	} catch ( const std::runtime_error& e ) {
 		if (valid) {
 			std::cerr << "FAIL: Verify test failed, but should have succeeded - '" << input << "'\n";
@@ -102,8 +102,8 @@ int FDBLibTLSVerifyTest::run() {
 }
 
 static int policy_verify_test() {
-	Reference<FDBLibTLSPlugin> plugin = Reference<FDBLibTLSPlugin>(new FDBLibTLSPlugin());
-	Reference<FDBLibTLSPolicy> policy = Reference<FDBLibTLSPolicy>(new FDBLibTLSPolicy(plugin, (ITLSLogFunc)logf));
+	auto plugin = makeReference<FDBLibTLSPlugin>();
+	auto policy = makeReference<FDBLibTLSPolicy>(plugin, (ITLSLogFunc)logf);
 
 	const char *verify_peers[] = {
 		"S.CN=abc",
@@ -116,9 +116,9 @@ static int policy_verify_test() {
 		(int)strlen(verify_peers[2]),
 	};
 	Reference<FDBLibTLSVerify> verify_rules[] = {
-		Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(std::string(verify_peers[0], verify_peers_len[0]))),
-		Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(std::string(verify_peers[1], verify_peers_len[1]))),
-		Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(std::string(verify_peers[2], verify_peers_len[2]))),
+		makeReference<FDBLibTLSVerify>(std::string(verify_peers[0], verify_peers_len[0])),
+		makeReference<FDBLibTLSVerify>(std::string(verify_peers[1], verify_peers_len[1])),
+		makeReference<FDBLibTLSVerify>(std::string(verify_peers[2], verify_peers_len[2])),
 	};
 
 	if (!policy->set_verify_peers(3, (const uint8_t **)verify_peers, verify_peers_len)) {

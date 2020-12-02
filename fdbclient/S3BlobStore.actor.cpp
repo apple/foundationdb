@@ -235,8 +235,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 		StringRef key = c.eat(":");
 		StringRef secret = c.eat();
 
-		return Reference<S3BlobStoreEndpoint>(new S3BlobStoreEndpoint(
-		    host.toString(), service.toString(), key.toString(), secret.toString(), knobs, extraHeaders));
+		return makeReference<S3BlobStoreEndpoint>(host.toString(), service.toString(), key.toString(),
+		                                          secret.toString(), knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr) *error = err;
@@ -991,7 +991,12 @@ Future<std::vector<std::string>> S3BlobStoreEndpoint::listBuckets() {
 std::string S3BlobStoreEndpoint::hmac_sha1(std::string const& msg) {
 	std::string key = secret;
 
-	// First pad the key to 64 bytes.
+    // Hash key to shorten it if it is longer than SHA1 block size
+	if(key.size() > 64) {
+		key = SHA1::from_string(key);
+	}
+
+    // Pad key up to SHA1 block size if needed
 	key.append(64 - key.size(), '\0');
 
 	std::string kipad = key;
