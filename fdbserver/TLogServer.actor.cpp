@@ -1006,18 +1006,6 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 }
 
 ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Reference<LogData> logData ) {
-	if (self->ignorePopRequest) {
-		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
-
-		auto& v = self->toBePopped[inputTag];
-		v = std::max(v, to);
-
-		TraceEvent(SevDebug, "IgnoringPopRequest")
-			.detail("IgnorePopDeadline", self->ignorePopDeadline)
-			.detail("Tag", inputTag.toString())
-			.detail("Version", to);
-		return Void();
-	}
 	state Version upTo = to;
 	int8_t tagLocality = inputTag.locality;
 	if (isPseudoLocality(tagLocality)) {
@@ -1085,7 +1073,19 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 		    .detail("IgnorePopRequest", self->ignorePopRequest)
 		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
 	}
-	wait(tLogPopCore(self, req.tag, req.to, logData));
+	if (self->ignorePopRequest) {
+		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
+
+		auto& v = self->toBePopped[req.tag];
+		v = std::max(v, req.to);
+
+		TraceEvent(SevDebug, "IgnoringPopRequest")
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline)
+		    .detail("Tag", req.tag.toString())
+		    .detail("Version", req.to);
+	} else {
+		wait(tLogPopCore(self, req.tag, req.to, logData));
+	}
 	req.reply.send(Void());
 	return Void();
 }
