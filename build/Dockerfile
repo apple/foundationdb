@@ -1,17 +1,27 @@
 FROM centos:6
 
+# Clean yum cache, disable default Base repo and enable Vault
+RUN yum clean all &&\
+  sed -i -e 's/gpgcheck=1/enabled=0/g' /etc/yum.repos.d/CentOS-Base.repo &&\
+  sed -i -e 's/enabled=0/enabled=1/g' /etc/yum.repos.d/CentOS-Vault.repo &&\
+  sed -i -n '/6.1/q;p' /etc/yum.repos.d/CentOS-Vault.repo &&\
+  sed -i -e "s/6\.0/$(cut -d\  -f3 /etc/redhat-release)/g" /etc/yum.repos.d/CentOS-Vault.repo &&\
+  yum install -y yum-utils &&\
+  yum-config-manager --enable rhel-server-rhscl-7-rpms &&\
+  yum -y install centos-release-scl-rh epel-release  \
+    http://opensource.wandisco.com/centos/6/git/x86_64/wandisco-git-release-6-1.noarch.rpm &&\
+  sed -i -e 's/#baseurl=/baseurl=/g' -e 's/mirror.centos.org/vault.centos.org/g' \
+     -e 's/mirrorlist=/#mirrorlist=/g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo &&\
+  yum clean all
+
 # Install dependencies for developer tools, bindings,\
 # documentation, actorcompiler, and packaging tools\
-RUN yum install -y yum-utils &&\
-  yum-config-manager --enable rhel-server-rhscl-7-rpms &&\
-  yum -y install centos-release-scl epel-release \
-    http://opensource.wandisco.com/centos/6/git/x86_64/wandisco-git-release-6-1.noarch.rpm &&\
-  yum -y install devtoolset-8-8.1-1.el6 java-1.8.0-openjdk-devel \
-    devtoolset-8-gcc-8.3.1 devtoolset-8-gcc-c++-8.3.1 \
-    devtoolset-8-libubsan-devel devtoolset-8-libasan-devel devtoolset-8-valgrind-devel \
-    rh-python36-python-devel rh-ruby24 golang python27 rpm-build \
-    mono-core debbuild python-pip dos2unix valgrind-devel ccache \
-    distcc wget git lz4 lz4-devel lz4-static &&\
+RUN yum -y install devtoolset-8-8.1-1.el6 java-1.8.0-openjdk-devel \
+      devtoolset-8-gcc-8.3.1 devtoolset-8-gcc-c++-8.3.1 \
+      devtoolset-8-libubsan-devel devtoolset-8-libasan-devel devtoolset-8-valgrind-devel \
+      rh-python36-python-devel rh-ruby24 golang python27 rpm-build \
+      mono-core debbuild python-pip dos2unix valgrind-devel ccache \
+      distcc wget git lz4 lz4-devel lz4-static &&\
   pip install boto3==1.1.1
 
 USER root
@@ -61,8 +71,8 @@ RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.
 ARG TIMEZONEINFO=America/Los_Angeles
 RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
 
-LABEL version=0.1.19
-ENV DOCKER_IMAGEVER=0.1.19
+LABEL version=0.1.20
+ENV DOCKER_IMAGEVER=0.1.20
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
