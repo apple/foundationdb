@@ -283,6 +283,10 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 }
 
 ThreadFuture<bool> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	if(!api->databaseRebootWorker) {
+		return unsupported_operation();
+	}
+
 	FdbCApi::FDBFuture *f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		bool res;
