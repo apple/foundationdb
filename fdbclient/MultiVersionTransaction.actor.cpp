@@ -282,11 +282,11 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 
-ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<bool> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	FdbCApi::FDBFuture *f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
-	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-		int64_t res;
-		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		bool res;
+		FdbCApi::fdb_error_t error = api->futureGetBool(f, &res);
 		ASSERT(!error);
 		return res;
 	});
@@ -353,6 +353,7 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetRangeSplitPoints, lib, fdbCPath, "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
+	loadClientFunction(&api->futureGetBool, lib, fdbCPath, "fdb_future_get_bool", headerVersion >= 700);
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key");
@@ -783,7 +784,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	}
 }
 
-ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<bool> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	if (dbState->db) {
 		return dbState->db->rebootWorker(address, check, duration);
 	}

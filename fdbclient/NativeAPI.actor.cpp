@@ -4732,7 +4732,7 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 	return Void();
 }
 
-ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// fetch the addresses of all workers
 	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
 	// TODO : find out when this is invalid
@@ -4753,6 +4753,6 @@ ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool
 	return 1;
 }
 
-Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
+Future<bool> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	return rebootWorkerActor(this, addr, check, duration);
 }

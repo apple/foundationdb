@@ -108,6 +108,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	//Future
 	fdb_error_t (*futureGetDatabase)(FDBFuture *f, FDBDatabase **outDb);
 	fdb_error_t (*futureGetInt64)(FDBFuture *f, int64_t *outValue);
+	fdb_error_t (*futureGetBool) (FDBFuture *f, bool *outValue);
 	fdb_error_t (*futureGetError)(FDBFuture *f);
 	fdb_error_t (*futureGetKey)(FDBFuture *f, uint8_t const **outKey, int *outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture *f, fdb_bool_t *outPresent, uint8_t const **outValue, int *outValueLength);
@@ -193,7 +194,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<bool> rebootWorker(const StringRef& address, bool check, int duration) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -325,7 +326,7 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration);
+	ThreadFuture<bool> rebootWorker(const StringRef& address, bool check, int duration);
 
 private:
 	struct DatabaseState;

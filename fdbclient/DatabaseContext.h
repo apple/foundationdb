@@ -207,8 +207,8 @@ public:
 	bool switchable = false;
 
 	// Management API
-	// Attempt to kill or suspend a process 
-	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
+	// Attempt to kill or suspend a process, return true if successful
+	Future<bool> rebootWorker(StringRef address, bool check = false, int duration = 0);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
