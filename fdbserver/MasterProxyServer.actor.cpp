@@ -567,13 +567,14 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
-// Try to identify recovery transaction and backup's apply mutations.
+// Try to identify recovery transaction and backup's apply mutations (blind writes).
 // Both cannot be rejected and are approximated by looking at first mutation
 // starting with 0xff.
 bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	for (const auto& tr : trs) {
 		if (tr.transaction.mutations.empty()) continue;
-		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff"))) {
+		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
+		    tr.transaction.read_conflict_ranges.empty()) {
 			return false;
 		}
 	}
