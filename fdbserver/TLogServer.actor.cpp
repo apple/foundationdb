@@ -1018,7 +1018,7 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 	if (self->ignorePopRequest) {
 		TraceEvent(SevDebug, "IgnoringPopRequest").detail("IgnorePopDeadline", self->ignorePopDeadline);
 
-		wait(queuePopRequest(self, tag, to));
+		wait(queuePopRequest(self, inputTag, to));
 
 		TraceEvent(SevDebug, "IgnoringPopRequest")
 			.detail("IgnorePopDeadline", self->ignorePopDeadline)
