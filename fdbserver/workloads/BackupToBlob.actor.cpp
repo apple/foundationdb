@@ -35,7 +35,23 @@ struct BackupToBlobWorkload : TestWorkload {
 	BackupToBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
 		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		backupURL = getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000"));
+		auto backupURLString =
+		    getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000")).toString();
+		auto accessKeyVar =
+		    getOption(options, LiteralStringRef("accessKeyVar"), LiteralStringRef("BLOB_ACCESS_KEY")).toString();
+		auto secretKeyVar =
+		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
+		std::string accessKey = std::getenv(accessKeyVar.c_str());
+		std::string secretKey = std::getenv(secretKeyVar.c_str());
+		{
+			auto pos = backupURLString.find("<access_key>");
+			backupURLString.replace(pos, 12, accessKey);
+		}
+		{
+			auto pos = backupURLString.find("<secret_key>");
+			backupURLString.replace(pos, 12, secretKey);
+		}
+		backupURL = backupURLString;
 	}
 
 	std::string description() const override { return DESCRIPTION; }
