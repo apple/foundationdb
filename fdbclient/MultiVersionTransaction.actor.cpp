@@ -730,7 +730,8 @@ void MultiVersionTransaction::reset() {
 // MultiVersionDatabase
 
 ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *api, std::string clusterFilePath) {
-	state Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(clusterFilePath);
+	state std::string clusterFile = ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath)).first;
+	state Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(clusterFile);
 	state uint64_t currentProtocolVersionInt = wait(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
 	loop {
 		// TODO: This doesn't handle multiple compatible clients well
@@ -750,7 +751,7 @@ ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *
 
 				// is this safe? Do we have to use onMainThreadVoid
 				// It can only be safely used from the main thread, on futures which are being set on the main thread
-				uint64_t nextProtocolVersionInt = wait(unsafeThreadFutureToFuture(c->client->api->getServerProtocol(clusterFilePath.c_str(), &currentProtocolVersionInt)));
+				uint64_t nextProtocolVersionInt = wait(unsafeThreadFutureToFuture(c->client->api->getServerProtocol(clusterFile.c_str(), &currentProtocolVersionInt)));
 				currentProtocolVersionInt = nextProtocolVersionInt;
 				foundCompatible = true;
 				break;
