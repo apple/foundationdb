@@ -581,8 +581,8 @@ void initHelp() {
 	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
 	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
 	                "user will be asked to enter a passphrase to confirm their intent.");
-	helpMap["triggerDDTeamInfoLog"] =
-	    CommandHelp("triggerDDTeamInfoLog", "trigger the data distributor teams logging",
+	helpMap["triggerddteaminfolog"] =
+	    CommandHelp("triggerddteaminfolog", "trigger the data distributor teams logging",
 	                "Trigger the data distributor to log detailed information about its teams.");
 
 	hiddenCommands.insert("expensive_data_check");
@@ -2988,7 +2988,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "triggerDDTeamInfoLog")) {
+				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
 					wait(triggerDDTeamInfoLog(db));
 					continue;
 				}
