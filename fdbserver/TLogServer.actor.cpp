@@ -1054,7 +1054,6 @@ ACTOR Future<Void> tLogPopCore( TLogData* self, Tag inputTag, Version to, Refere
 }
 
 ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData) {
-	state const size_t batchSize = 1000;
 	state std::vector<Future<Void>> ignoredPops;
 	state std::map<Tag, Version>::const_iterator it;
 	state int ignoredPopsPlayed = 0;
@@ -1068,7 +1067,7 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 		const auto& [tag, version] = *it;
 		TraceEvent("PlayIgnoredPop").detail("Tag", tag.toString()).detail("Version", version);
 		ignoredPops.push_back(tLogPopCore(self, tag, version, logData));
-		if (++ignoredPopsPlayed % batchSize == 0) {
+		if (++ignoredPopsPlayed % SERVER_KNOBS->TLOG_POP_BATCH_SIZE == 0) {
 			wait(yield());
 		}
 	}
