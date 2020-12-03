@@ -182,6 +182,8 @@ description is not currently required but encouraged.
     <Option name="transaction_include_port_in_address" code="505"
             description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
+    <Option name="disable_tracing" code="600"
+            description="Disable tracing for all transactions." />
   </Scope>
   
   <Scope name="TransactionOption">
@@ -266,10 +268,6 @@ description is not currently required but encouraged.
             description="By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space). Use this option to allow reading from zero or more modules. Users who set this option should be prepared for new modules, which may have different behaviors than the modules they're currently reading. For example, a new module might block or return an error." />
     <Option name="special_key_space_enable_writes" code="714"
             description="By default, users are not allowed to write to special keys. Enable this option will implicitly enable all options required to achieve the configuration change." />        
-    <Option name="custom_transaction_id" code="715" paramType="String" paramDescription="String identifier used to identify the transaction."
-            description="Use a custom identifier for the transaction. If this option is not set, a random identifier will be generated for the transaction. The identifier is used to trace a transaction throughout the system." />
-    <Option name="disable_tracing" code="716"
-            description="Set this option to disable tracing for this transaction." />
     <Option name="tag" code="800" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."
             description="Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction." />
     <Option name="auto_throttle_tag" code="801" paramType="String" paramDescription="String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters."

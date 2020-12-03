@@ -1593,6 +1593,14 @@ void ReadYourWritesTransaction::getWriteConflicts( KeyRangeMap<bool> *result ) {
 	}
 }
 
+void ReadYourWritesTransaction::setTransactionID(uint64_t id) {
+	tr.setTransactionID(id);
+}
+
+void ReadYourWritesTransaction::setToken(uint64_t token) {
+	tr.setToken(token);
+}
+
 Standalone<RangeResultRef> ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
 	TEST(true); // Special keys read conflict range
 	ASSERT(readConflictRangeKeysRange.contains(kr));
@@ -2068,12 +2076,6 @@ void ReadYourWritesTransaction::setOptionImpl( FDBTransactionOptions::Option opt
 	    case FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES:
 		    validateOptionValue(value, false);
 			options.specialKeySpaceChangeConfiguration = true;
-			break;
-		case FDBTransactionOptions::CUSTOM_TRANSACTION_ID:
-			options.transactionId = value.present() ? value.get().toString() : Optional<std::string>();
-			break;
-		case FDBTransactionOptions::DISABLE_TRACING:
-			options.disableTracing = value.present();
 			break;
 		default:
 			break;

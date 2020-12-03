@@ -24,6 +24,11 @@
 #include "fdbclient/StatusClient.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+const std::string kTracingTransactionIdKey = "transaction_id";
+const std::string kTracingTokenKey = "token";
+}
+
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -1266,37 +1271,39 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	return Optional<std::string>();
 }
 
-TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
+	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
+}
 
 Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                 KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
-
-	if (kr.contains(std::string("\xff\xff/tracing/a/transaction_id"))) {
-		if (ryw->transactionId().present()) {
-			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, ryw->transactionId().get()));
-		} else {
-			result.push_back_deep(result.arena(), KeyValueRef(kr.begin, KeyRef(deterministicRandom()->randomUniqueID().toString())));
-		}
+	if (kr.contains(getKeyRange().begin.withSuffix(kTracingTransactionIdKey))) {
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::to_string(ryw->getTransactionInfo().spanID.first())));
 	}
-
-	if (kr.contains(std::string("\xff\xff/tracing/a/token"))) {
-		StringRef token;
-		if (ryw->disableTracing()) {
-			token = StringRef("0");
-		} else {
-			token = StringRef(deterministicRandom()->randomUniqueID().toString());
-		}
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, token));
+	if (kr.contains(getKeyRange().begin.withSuffix(kTracingTokenKey))) {
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::to_string(ryw->getTransactionInfo().spanID.second())));
 	}
 	return result;
 }
 
 void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
-	if (key == std::string("\xff\xff/tracing/a/transaction_id")) {
-		ryw->setOption(FDBTransactionOptions::CUSTOM_TRANSACTION_ID, value);
-	} else if (key == std::string("\xff\xff/tracing/a/token")) {
-		ryw->setOption(FDBTransactionOptions::DISABLE_TRACING, value);
+	if (ryw->getApproximateSize() > 0) {
+		ryw->setSpecialKeySpaceErrorMsg("tracing options must be set first");
+		throw special_keys_api_failure();
+	}
+
+	if (key.endsWith(kTracingTransactionIdKey)) {
+		ryw->setTransactionID(std::stoul(value.toString()));
+	} else if (key.endsWith(kTracingTokenKey)) {
+		if (value.toString() == "true") {
+			ryw->setToken(deterministicRandom()->randomUInt64());
+		} else if (value.toString() == "false") {
+			ryw->setToken(0);
+		} else {
+			ryw->setSpecialKeySpaceErrorMsg("token must be set to true/false");
+			throw special_keys_api_failure();
+		}
 	}
 }
 
@@ -1305,19 +1312,11 @@ Future<Optional<std::string>> TracingOptionsImpl::commit(ReadYourWritesTransacti
 }
 
 void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	if (range.contains(std::string("\xff\xff/tracing/a/transaction_id"))) {
-		ryw->setOption(FDBTransactionOptions::CUSTOM_TRANSACTION_ID);
-	}
-
-	if (range.contains(std::string("\xff\xff/tracing/a/token"))) {
-		ryw->setOption(FDBTransactionOptions::DISABLE_TRACING);
-	}
+	ryw->setSpecialKeySpaceErrorMsg("clear range disabled");
+	throw special_keys_api_failure();
 }
 
 void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	if (key == std::string("\xff\xff/tracing/a/transaction_id")) {
-		ryw->setOption(FDBTransactionOptions::CUSTOM_TRANSACTION_ID);
-	} else if (key == std::string("\xff\xff/tracing/a/token")) {
-		ryw->setOption(FDBTransactionOptions::DISABLE_TRACING);
-	}
+	ryw->setSpecialKeySpaceErrorMsg("clear disabled");
+	throw special_keys_api_failure();
 }

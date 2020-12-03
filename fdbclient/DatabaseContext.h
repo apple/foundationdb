@@ -319,6 +319,8 @@ public:
 
 	int snapshotRywEnabled;
 
+	bool tracingEnabled;
+
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
 
