@@ -61,9 +61,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 
-		// Disable proxy rejection
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
-
 		wait( delay(self->startAfter * deterministicRandom()->random01()) );
 		TraceEvent("AtomicRestore_Start");
 
@@ -108,7 +105,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Done");
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 		return Void();
 	}
 };

@@ -22,8 +22,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Knobs.h"
-
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
@@ -74,9 +72,6 @@ struct BackupToDBAbort : TestWorkload {
 	ACTOR static Future<Void> _start(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
 
-		// Disable proxy rejection to avoid ApplyMutationsError
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
-
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
@@ -94,7 +89,6 @@ struct BackupToDBAbort : TestWorkload {
 			g_simulator.drAgents = ISimulator::NoBackupAgents;
 		}
 
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 		return Void();
 	}
 

@@ -442,9 +442,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_Arguments").detail("BackupTag", printable(self->backupTag)).detail("BackupAfter", self->backupAfter)
 			.detail("AbortAndRestartAfter", self->abortAndRestartAfter).detail("DifferentialAfter", self->stopDifferentialAfter);
 
-		// Disable proxy rejection to avoid ApplyMutationsError
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = false;
-
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		// Increment the backup agent requets
@@ -577,8 +574,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);
 			throw;
 		}
-
-		const_cast<ServerKnobs*>(SERVER_KNOBS)->PROXY_REJECT_BATCH_QUEUED_TOO_LONG = true;
 
 		return Void();
 	}
