@@ -1089,6 +1089,9 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 	if (self->ignorePopRequest && (g_network->now() > self->ignorePopDeadline)) {
 		TraceEvent("EnableTLogPlayAllIgnoredPops").detail("IgnoredPopDeadline", self->ignorePopDeadline);
 		wait(processPopRequests(self, logData));
+		TraceEvent("ResetIgnorePopRequest")
+		    .detail("IgnorePopRequest", self->ignorePopRequest)
+		    .detail("IgnorePopDeadline", self->ignorePopDeadline);
 	}
 	wait(tLogPopCore(self, req.tag, req.to, logData));
 	req.reply.send(Void());
@@ -2145,6 +2148,7 @@ tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData* self, Reference<Lo
 	TraceEvent("EnableTLogPlayAllIgnoredPops2")
 	    .detail("UidStr", enablePopReq.snapUID.toString())
 	    .detail("IgnorePopUid", self->ignorePopUid)
+	    .detail("IgnorePopRequest", self->ignorePopRequest)
 	    .detail("IgnorePopDeadline", self->ignorePopDeadline)
 	    .detail("PersistentDataVersion", logData->persistentDataVersion)
 	    .detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion)
