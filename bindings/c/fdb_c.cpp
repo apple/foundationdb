@@ -227,6 +227,11 @@ fdb_error_t fdb_future_get_int64( FDBFuture* f, int64_t* out_value ) {
 }
 
 extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_bool( FDBFuture* f, bool* out_value ) {
+	CATCH_AND_RETURN( *out_value = TSAV(bool, f)->get(); );
+}
+
+extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
 								int* out_key_length ) {
 	CATCH_AND_RETURN(

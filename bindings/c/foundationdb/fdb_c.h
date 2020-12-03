@@ -53,6 +53,7 @@
 #define FDB_REMOVED_FUNCTION This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION(0)
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "fdb_c_options.g.h"
 
@@ -135,6 +136,9 @@ extern "C" {
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_int64( FDBFuture* f, int64_t* out );
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_bool( FDBFuture* f, bool* out );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
