@@ -1800,7 +1800,6 @@ TEST_CASE("fdb_database_reboot_worker") {
   CHECK(statusJson.HasMember("cluster"));
   CHECK(statusJson["cluster"].HasMember("generation"));
   int new_generation = statusJson["cluster"]["generation"].GetInt();
-  std::cout << "Old gen: " << old_generation << "; New gen: " << new_generation << std::endl;
   // The generation number should increase after the recovery
   CHECK(new_generation > old_generation);
 }

@@ -733,6 +733,12 @@ class FutureInt64(Future):
         self.capi.fdb_future_get_int64(self.fpointer, ctypes.byref(value))
         return value.value
 
+class FutureBool(Future):
+    def wait(self):
+        self.block_until_ready()
+        value = ctypes.c_bool()
+        self.capi.fdb_future_get_bool(self.fpointer, ctypes.byref(value))
+        return value.value
 
 class FutureKeyValueArray(Future):
     def wait(self):
@@ -999,7 +1005,7 @@ class Database(_FDBBase):
     def reboot_worker(self, address, check, duration):
         """Reboot the specified process"""
         addr = paramToBytes(address)
-        return FutureInt64(self.capi.fdb_database_reboot_worker(self.dpointer, addr, len(addr), check, duration))
+        return FutureBool(self.capi.fdb_database_reboot_worker(self.dpointer, addr, len(addr), check, duration))
 
     def _set_option(self, option, param, length):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
@@ -1421,6 +1427,10 @@ def init_c_api():
     _capi.fdb_future_get_int64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int64)]
     _capi.fdb_future_get_int64.restype = ctypes.c_int
     _capi.fdb_future_get_int64.errcheck = check_error_code
+
+    _capi.fdb_future_get_bool.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_bool)]
+    _capi.fdb_future_get_bool.restype = ctypes.c_bool
+    _capi.fdb_future_get_bool.errcheck = check_error_code
 
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]
