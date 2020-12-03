@@ -993,7 +993,7 @@ ACTOR Future<Void> workerServer(
 	    folder, locality.dcId(), locality.zoneId(), locality.machineId(), g_network->getLocalAddress().ip));
 
 	{
-		auto recruited = interf;  //ghetto! don't we all love a good #define
+		auto recruited = interf;
 		DUMPTOKEN(recruited.clientInterface.reboot);
 		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
