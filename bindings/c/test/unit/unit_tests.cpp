@@ -1783,17 +1783,18 @@ TEST_CASE("fdb_database_reboot_worker") {
   CHECK(statusJson["cluster"].HasMember("processes"));
   // Make sure we only have one process in the cluster
   // Thus, rebooting the worker ensures a recovery
-  // Configuration changes may break some contracts here
+  // Configuration changes may break the contract here
   CHECK(statusJson["cluster"]["processes"].MemberCount() == 1);
   auto processPtr = statusJson["cluster"]["processes"].MemberBegin();
   CHECK(processPtr->value.HasMember("address"));
   std::string network_address = processPtr->value["address"].GetString();
   while (1) {
-    FDBFuture* f = fdb_database_reboot_worker(db, (const uint8_t*) network_address.c_str(), network_address.size(), false, 0);
-    fdb_check(fdb_future_block_until_ready(f));
-    bool successful;
-    fdb_check(fdb_future_get_bool(f, &successful));
-    if(successful) break; // retry rebooting until success
+	  fdb::BoolFuture f =
+		  fdb::Database::reboot_worker(db, (const uint8_t*)network_address.c_str(), network_address.size(), false, 0);
+	  fdb_check(wait_future(f));
+	  bool successful;
+	  fdb_check(f.get(&successful));
+	  if (successful) break; // retry rebooting until success
   }
   status_json = get_valid_status_json();
   statusJson.Parse(status_json.c_str());

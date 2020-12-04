@@ -77,6 +77,16 @@ class Future {
   FDBFuture* future_;
 };
 
+class BoolFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_bool when using the
+	// BoolFuture type. It's behavior is identical to fdb_future_get_bool.
+	fdb_error_t get(bool* out);
+
+private:
+	friend class Database;
+	BoolFuture(FDBFuture* f) : Future(f) {}
+};
 
 class Int64Future : public Future {
  public:
@@ -148,6 +158,12 @@ class EmptyFuture : public Future {
   EmptyFuture(FDBFuture* f) : Future(f) {}
 };
 
+// Wrapper around FDBDatabase, providing database-level API
+class Database final {
+public:
+	static BoolFuture reboot_worker(FDBDatabase* db, const uint8_t* address, int address_length, fdb_bool_t check,
+	                                int duration);
+};
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
 // Handles cleanup of memory, removing the need to call
