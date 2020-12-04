@@ -60,7 +60,6 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 	netData.init();
 	if (!g_network->isSimulated() && currentStats.initialized) {
 		{
-			GetHistogramRegistry().logReport();
 			TraceEvent(eventName.c_str())
 			    .detail("Elapsed", currentStats.elapsed)
 			    .detail("CPUSeconds", currentStats.processCPUSeconds)

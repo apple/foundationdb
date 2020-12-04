@@ -112,10 +112,14 @@ struct PageChecksumCodec {
 			// some chance the page was written with another checksum algorithm
 			crc32Sum.part1 = 0;
 			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+<<<<<<< HEAD
 			if (crc32Sum == *pSumInPage) {
 				TEST(true); // Read CRC32 checksum
 				return true;
 			}
+=======
+			if (crc32Sum == *pSumInPage) return true;
+>>>>>>> release-6.3
 		}
 
 		// Try xxhash3
@@ -128,7 +132,14 @@ struct PageChecksumCodec {
 			auto xxHash3 = XXH3_64bits(data, dataLen);
 			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
 			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
+<<<<<<< HEAD
 			if (xxHash3Sum == *pSumInPage) return true;
+=======
+			if (xxHash3Sum == *pSumInPage) {
+				TEST(true); // Read xxHash3 checksum
+				return true;
+			}
+>>>>>>> release-6.3
 		}
 
 		// Try hashlittle2

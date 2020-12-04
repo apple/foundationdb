@@ -88,6 +88,7 @@ set(FLOW_SRCS
   serialize.h
   stacktrace.amalgamation.cpp
   stacktrace.h
+<<<<<<< HEAD
   test_memcpy.cpp
   test_memcpy_perf.cpp
   version.cpp
@@ -97,6 +98,11 @@ set(FLOW_SRCS
 if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)
 endif()
+=======
+  version.cpp
+  xxhash.c
+  xxhash.h)
+>>>>>>> release-6.3
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h)
 

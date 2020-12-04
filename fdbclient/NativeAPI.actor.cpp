@@ -1822,7 +1822,16 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 	}
 }
 
+<<<<<<< HEAD
 // Returns a vector of <ShardRange, storage server location info> pairs.
+=======
+// Get the SS locations for each shard in the 'keys' key-range;
+// Returned vector size is the number of shards in the input keys key-range.
+// Returned vector element is <ShardRange, storage server location info> pairs, where
+// ShardRange is the whole shard key-range, not a part of the given key range.
+// Example: If query the function with  key range (b, d), the returned list of pairs could be something like:
+// [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
+>>>>>>> release-6.3
 template <class F>
 Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database const& cx, KeyRange const& keys, int limit, bool reverse, F StorageServerInterface::*member, TransactionInfo const& info ) {
 	ASSERT (!keys.empty());

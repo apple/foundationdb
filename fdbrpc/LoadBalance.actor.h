@@ -171,6 +171,7 @@ void addLaggingRequest(Future<Optional<Reply>> reply, Promise<Void> requestFinis
 //   failMon's information for load balancing and avoiding failed servers
 // If ALL the servers are failed and the list of servers is not fresh, throws an exception to let the caller refresh the list of servers
 ACTOR template <class Interface, class Request, class Multi>
+<<<<<<< HEAD
 Future< REPLY_TYPE(Request) > loadBalance(
 	Reference<MultiInterface<Multi>> alternatives,
 	RequestStream<Request> Interface::* channel,
@@ -179,6 +180,13 @@ Future< REPLY_TYPE(Request) > loadBalance(
 	bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
 	QueueModel* model = nullptr) 
 {
+=======
+Future<REPLY_TYPE(Request)> loadBalance(
+    Reference<MultiInterface<Multi>> alternatives, RequestStream<Request> Interface::*channel,
+    Request request = Request(), TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
+    bool atMostOnce = false, // if true, throws request_maybe_delivered() instead of retrying automatically
+    QueueModel* model = NULL) {
+>>>>>>> release-6.3
 	state Future<Optional<REPLY_TYPE(Request)>> firstRequest;
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Optional<REPLY_TYPE(Request)>> secondRequest;

@@ -216,7 +216,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 struct ShardMetrics {
 	StorageMetrics metrics;
 	double lastLowBandwidthStartTime;
-	int shardCount;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
 
 	bool operator==(ShardMetrics const& rhs) const {
 		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
@@ -233,6 +233,7 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
+<<<<<<< HEAD
 ACTOR Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> initData,
 	Database cx,
@@ -261,6 +262,24 @@ ACTOR Future<Void> dataDistributionQueue(
 	int singleRegionTeamSize,
 	double* lastLimited,
 	const DDEnabledState* ddEnabledState);
+=======
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+                                           PromiseStream<RelocateShard> output,
+                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> anyZeroHealthyTeams,
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           bool const* trackerCancelled);
+
+ACTOR Future<Void> dataDistributionQueue(
+    Database cx, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input,
+    PromiseStream<GetMetricsRequest> getShardMetrics, Reference<AsyncVar<bool>> processingUnhealthy,
+    vector<TeamCollectionInterface> teamCollection, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+    MoveKeysLock lock, PromiseStream<Promise<int64_t>> getAverageShardBytes, UID distributorId, int teamSize,
+    int singleRegionTeamSize, double* lastLimited);
+>>>>>>> release-6.3
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

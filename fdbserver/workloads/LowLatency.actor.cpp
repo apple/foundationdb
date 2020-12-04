@@ -49,7 +49,17 @@ struct LowLatencyWorkload : TestWorkload {
 
 	std::string description() const override { return "LowLatency"; }
 
+<<<<<<< HEAD
 	Future<Void> setup(Database const& cx) override { return Void(); }
+=======
+	virtual Future<Void> setup( Database const& cx ) {
+		if (g_network->isSimulated()) {
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("min_delay_cc_worst_fit_candidacy_seconds", "5"));
+			ASSERT(const_cast<ServerKnobs*>(SERVER_KNOBS)->setKnob("max_delay_cc_worst_fit_candidacy_seconds", "10"));
+		}
+		return Void();
+	}
+>>>>>>> release-6.3
 
 	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
