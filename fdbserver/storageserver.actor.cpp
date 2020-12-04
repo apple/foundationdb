@@ -25,19 +25,14 @@
 
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
-<<<<<<< HEAD
-#include "flow/Arena.h"
-#include "flow/IRandom.h"
-#include "flow/Tracing.h"
-#include "flow/IndexedSet.h"
-#include "flow/Hash3.h"
-=======
->>>>>>> release-6.3
 #include "flow/ActorCollection.h"
+#include "flow/Arena.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
+#include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
+#include "flow/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"

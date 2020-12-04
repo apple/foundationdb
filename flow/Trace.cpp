@@ -1062,13 +1062,7 @@ TraceEvent& TraceEvent::GetLastError() {
 #endif
 }
 
-<<<<<<< HEAD
 unsigned long TraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = {0, 0, 0, 0, 0};
-=======
-// We're cheating in counting, as in practice, we only use {10,20,30,40}.
-static_assert(SevMaxUsed / 10 + 1 == 5, "Please bump eventCounts[5] to SevMaxUsed/10+1");
-unsigned long TraceEvent::eventCounts[5] = { 0, 0, 0, 0, 0 };
->>>>>>> release-6.3
 
 unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
 	ASSERT(sev <= SevMaxUsed);

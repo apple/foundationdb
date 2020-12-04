@@ -404,14 +404,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
-<<<<<<< HEAD
 	StorageBytes getStorageBytes() const override {
-=======
-	StorageBytes getStorageBytes() override {
 		uint64_t live = 0;
 		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kEstimateLiveDataSize, &live));
 
->>>>>>> release-6.3
 		int64_t free;
 		int64_t total;
 		g_network->getDiskBytes(path, free, total);

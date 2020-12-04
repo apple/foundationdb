@@ -83,15 +83,9 @@ struct RelocateData {
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
 
-<<<<<<< HEAD
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
-	vector<Reference<IDataDistributionTeam>> teams;
-	vector<UID> tempServerIDs;
-=======
-class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
 	std::vector<Reference<IDataDistributionTeam>> teams;
 	std::vector<UID> tempServerIDs;
->>>>>>> release-6.3
 
 	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
@@ -191,13 +185,8 @@ public:
 		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
 	}
 
-<<<<<<< HEAD
 	Future<Void> updateStorageMetrics() override {
-		vector<Future<Void>> futures;
-=======
-	virtual Future<Void> updateStorageMetrics() {
 		std::vector<Future<Void>> futures;
->>>>>>> release-6.3
 
 		for (auto& team : teams) {
 			futures.push_back(team->updateStorageMetrics());

@@ -463,17 +463,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool stopped, initialized;
 	DBRecoveryCount recoveryCount;
 
-<<<<<<< HEAD
-	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion; // The last version number in the portion of the log (written|durable) to persistentData
-	NotifiedVersion version, queueCommittedVersion;
-=======
 	// If persistentDataVersion != persistentDurableDataVersion,
 	// then spilling is happening from persistentDurableDataVersion to persistentDataVersion.
 	// Data less than persistentDataDurableVersion is spilled on disk (or fully popped from the TLog);
 	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion;  // The last version number in the portion of the log (written|durable) to persistentData
 	NotifiedVersion version;
 	NotifiedVersion queueCommittedVersion; // The disk queue has committed up until the queueCommittedVersion version.
->>>>>>> release-6.3
 	Version queueCommittingVersion;
 	Version knownCommittedVersion; // The maximum version that a proxy has told us that is committed (all TLogs have
 	                               // ack'd a commit for this version).
