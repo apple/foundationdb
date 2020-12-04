@@ -60,6 +60,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
 
+std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
+
 Standalone<RangeResultRef> rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr,
                                        const Standalone<RangeResultRef>& res);
 
@@ -1278,11 +1280,17 @@ TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(k
 Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
                                                                 KeyRangeRef kr) const {
 	Standalone<RangeResultRef> result;
-	if (kr.contains(getKeyRange().begin.withSuffix(kTracingTransactionIdKey))) {
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::to_string(ryw->getTransactionInfo().spanID.first())));
-	}
-	if (kr.contains(getKeyRange().begin.withSuffix(kTracingTokenKey))) {
-		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, std::to_string(ryw->getTransactionInfo().spanID.second())));
+	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
+		auto key = getKeyRange().begin.withSuffix(option);
+		if (!kr.contains(key)) {
+			continue;
+		}
+
+		if (key.endsWith(kTracingTransactionIdKey)) {
+			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
+		} else if (key.endsWith(kTracingTokenKey)) {
+			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
+		}
 	}
 	return result;
 }
