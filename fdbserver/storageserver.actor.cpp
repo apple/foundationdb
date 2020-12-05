@@ -1753,7 +1753,6 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 					data->metrics.notifyBytesReadPerKSecond(r.data[r.data.size() - 1].key, bytesReadPerKSecond);
 				}
 
-				r.penalty = data->getPenalty();
 				req.reply.send( r );
 
 				resultSize = req.limitBytes - remainingLimitBytes;

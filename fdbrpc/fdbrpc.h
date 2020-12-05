@@ -382,7 +382,7 @@ public:
 	void send(U && value) const {
 		if (queue->isRemoteEndpoint()) {
 			if(!queue->acknowledgements.getRawEndpoint().isValid()) {
-				value.acknowledgeEndpoint = queue->acknowledgements.getEndpoint();
+				value.acknowledgeEndpoint = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint);
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			if((!queue->acknowledgements.ready.isValid() || queue->acknowledgements.ready.isSet()) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
