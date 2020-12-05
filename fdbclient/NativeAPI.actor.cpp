@@ -1700,6 +1700,7 @@ Future<Standalone<RangeResultRef>> getRange(
 	TransactionInfo const& info,
 	TagSet const& tags);
 
+/*
 Future<Void> getRangeStream(
 	PromiseStream<Standalone<RangeResultRef>> const& results,
 	Database const& cx,
@@ -1710,6 +1711,7 @@ Future<Void> getRangeStream(
 	bool const& reverse,
 	TransactionInfo const& info,
 	TagSet const& tags);
+*/
 
 ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
                                        Reference<TransactionLogInfo> trLogInfo, TagSet tags);
@@ -2669,6 +2671,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	}
 }
 
+/*
 ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> results, Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
 	TransactionInfo info, TagSet tags )
@@ -2747,7 +2750,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 						.detail("ReqVersion", req.version)
 						.detail("Reverse", reverse)
 						.detail("ModifiedSelectors", modifiedSelectors)
-						.detail("Servers", beginServer.second->description());*/
+						.detail("Servers", beginServer.second->description());/
 				}
 
 				++cx->transactionPhysicalReads;
@@ -2773,7 +2776,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 							.detail("ReqEndKey", req.end.getKey())
 							.detail("RepIsMore", rep.more)
 							.detail("VersionReturned", rep.version)
-							.detail("RowsReturned", rep.data.size());*/
+							.detail("RowsReturned", rep.data.size());/
 					}
 
 					ASSERT( !rep.more || rep.data.size() );
@@ -2886,6 +2889,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 		throw;
 	}
 }
+*/
 
 Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
 	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info, TagSet const& tags )
@@ -3204,6 +3208,9 @@ Future<Void> Transaction::getRangeStream(
 	bool snapshot,
 	bool reverse )
 {
+	return Void();
+
+	/*
 	++cx->transactionLogicalReads;
 	++cx->transactionGetRangeRequests;
 
@@ -3238,6 +3245,7 @@ Future<Void> Transaction::getRangeStream(
 	}
 
 	return forwardErrors(::getRangeStream(results, cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, options.readTags), results);
+	*/
 }
 
 Future<Void> Transaction::getRangeStream(
