@@ -66,7 +66,7 @@ public:
 		return addresses.getTLSAddress();
 	}
 
-	Endpoint getAdjustedEndpoint( uint32_t index ) {
+	Endpoint getAdjustedEndpoint( uint32_t index ) const {
 		uint32_t newIndex = token.second();
 		newIndex += index;
 		return Endpoint( addresses, UID(token.first()+(uint64_t(index)<<32), (token.second()&0xffffffff00000000LL) | newIndex) );

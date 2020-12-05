@@ -192,6 +192,21 @@ struct PeerHolder {
 	}
 };
 
+// Implements getRepyStream
+ACTOR template <class X>
+void endStreamOnDisconnect( Future<Void> signal, ReplyPromiseStream<X> stream, Reference<Peer> peer = Reference<Peer>() ) {
+	state PeerHolder holder = PeerHolder(peer);
+	choose {
+		when(wait(signal)) {
+			stream.sendError(request_maybe_delivered());
+		}
+		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+	}
+	return Void();
+}
+
+
+
 // Implements tryGetReply, getReplyUnlessFailedFor
 ACTOR template <class X>
 Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endpoint endpoint, ReplyPromise<X> holdme = ReplyPromise<X>(), Reference<Peer> peer = Reference<Peer>() ) {
@@ -211,12 +226,8 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 			if( e.code() == error_code_actor_cancelled )
 				throw e;
 
-			// broken_promise error normally means an endpoint failure, which in tryGetReply has the same semantics as receiving the failure signal
-			if (e.code() != error_code_broken_promise || signal.isError())
-				return ErrorOr<X>(e);
-
-			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
-			value = Never();
+			ASSERT(e.code() != error_code_broken_promise);
+			return ErrorOr<X>(e);
 		}
 	}
 }

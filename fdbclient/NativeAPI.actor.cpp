@@ -1700,6 +1700,17 @@ Future<Standalone<RangeResultRef>> getRange(
 	TransactionInfo const& info,
 	TagSet const& tags);
 
+Future<Void> getRangeStream(
+	PromiseStream<Standalone<RangeResultRef>> const& results,
+	Database const& cx,
+	Future<Version> const& fVersion,
+	KeySelector const& begin,
+	KeySelector const& end,
+	GetRangeLimits const& limits,
+	bool const& reverse,
+	TransactionInfo const& info,
+	TagSet const& tags);
+
 ACTOR Future<Optional<Value>> getValue(Future<Version> version, Key key, Database cx, TransactionInfo info,
                                        Reference<TransactionLogInfo> trLogInfo, TagSet tags);
 
@@ -2658,6 +2669,224 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	}
 }
 
+ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> results, Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
+	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
+	TransactionInfo info, TagSet tags )
+{
+	state GetRangeLimits originalLimits( limits );
+	state KeySelector originalBegin = begin;
+	state KeySelector originalEnd = end;
+	state Standalone<RangeResultRef> output;
+	state Span span("NAPI:getRange"_loc, info.spanID);
+
+	try {
+		state Version version = wait( fVersion );
+		cx->validateVersion(version);
+
+		state double startTime = now();
+		state Version readVersion = version; // Needed for latestVersion requests; if more, make future requests at the version that the first one completed
+											 // FIXME: Is this really right?  Weaken this and see if there is a problem; if so maybe there is a much subtler problem even with this.
+
+		if( begin.getKey() == allKeys.begin && begin.offset < 1 ) {
+			output.readToBegin = true;
+			begin = KeySelector(firstGreaterOrEqual( begin.getKey() ), begin.arena());
+		}
+
+		ASSERT( !limits.isReached() );
+		ASSERT( (!limits.hasRowLimit() || limits.rows >= limits.minRows) && limits.minRows >= 0 );
+
+		loop {
+			if( end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual()) ) {
+				getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+				return output;
+			}
+
+			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
+			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
+			state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward ) );
+			state KeyRange shard = beginServer.first;
+			state bool modifiedSelectors = false;
+			state GetKeyValuesRequest req;
+
+			req.isFetchKeys = (info.taskID == TaskPriority::FetchKeys);
+			req.version = readVersion;
+
+			if( reverse && (begin-1).isDefinitelyLess(shard.begin) &&
+				( !begin.isFirstGreaterOrEqual() || begin.getKey() != shard.begin ) ) { //In this case we would be setting modifiedSelectors to true, but not modifying anything
+
+				req.begin = firstGreaterOrEqual( shard.begin );
+				modifiedSelectors = true;
+			}
+			else req.begin = begin;
+
+			if( !reverse && end.isDefinitelyGreater(shard.end) ) {
+				req.end = firstGreaterOrEqual( shard.end );
+				modifiedSelectors = true;
+			}
+			else req.end = end;
+
+			transformRangeLimits(limits, reverse, req);
+			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
+
+			req.tags = cx->sampleReadTags() ? tags : Optional<TagSet>();
+			req.debugID = info.debugID;
+			req.spanContext = span.context;
+			try {
+				if( info.debugID.present() ) {
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Before");
+					/*TraceEvent("TransactionDebugGetRangeInfo", info.debugID.get())
+						.detail("ReqBeginKey", req.begin.getKey())
+						.detail("ReqEndKey", req.end.getKey())
+						.detail("OriginalBegin", originalBegin.toString())
+						.detail("OriginalEnd", originalEnd.toString())
+						.detail("Begin", begin.toString())
+						.detail("End", end.toString())
+						.detail("Shard", shard)
+						.detail("ReqLimit", req.limit)
+						.detail("ReqLimitBytes", req.limitBytes)
+						.detail("ReqVersion", req.version)
+						.detail("Reverse", reverse)
+						.detail("ModifiedSelectors", modifiedSelectors)
+						.detail("Servers", beginServer.second->description());*/
+				}
+
+				++cx->transactionPhysicalReads;
+				++cx->transactionGetRangeRequests;
+				state GetKeyValuesReply rep;
+				if (CLIENT_BUGGIFY) {
+					throw deterministicRandom()->randomChoice(std::vector<Error>{
+							transaction_too_old(), future_version()
+								});
+				}
+				//FIXME: load balance requests
+				if(beginServer.second->size() == 0) {
+					wait(Future<Void>(Never()));
+				}
+				state FutureStream<GetKeyValuesStreamReply> repStream = beginServer.second->getInterface(0).getKeyValuesStream.getReplyStream(req);
+				loop {
+					GetKeyValuesStreamReply rep = waitNext(repStream);
+
+					if( info.debugID.present() ) {
+						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
+						/*TraceEvent("TransactionDebugGetRangeDone", info.debugID.get())
+							.detail("ReqBeginKey", req.begin.getKey())
+							.detail("ReqEndKey", req.end.getKey())
+							.detail("RepIsMore", rep.more)
+							.detail("VersionReturned", rep.version)
+							.detail("RowsReturned", rep.data.size());*/
+					}
+
+					ASSERT( !rep.more || rep.data.size() );
+					ASSERT( !limits.hasRowLimit() || rep.data.size() <= limits.rows );
+
+					limits.decrement( rep.data );
+
+					if(reverse && begin.isLastLessOrEqual() && rep.data.size() && rep.data.end()[-1].key == begin.getKey()) {
+						modifiedSelectors = false;
+					}
+
+					bool finished = limits.isReached() || ( !modifiedSelectors && !rep.more ) || limits.hasSatisfiedMinRows();
+					bool readThrough = modifiedSelectors && !rep.more;
+
+					// optimization: first request got all data--just return it
+					if( finished && !output.size() ) {
+						bool readToBegin = output.readToBegin;
+						bool readThroughEnd = output.readThroughEnd;
+
+						output = Standalone<RangeResultRef>( RangeResultRef( rep.data, modifiedSelectors || limits.isReached() || rep.more ), rep.arena );
+						output.readToBegin = readToBegin;
+						output.readThroughEnd = readThroughEnd;
+
+						if( BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows) ) {
+							output.more = true;
+							output.resize(output.arena(), deterministicRandom()->randomInt(std::max(1,originalLimits.minRows),output.size()));
+							getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+							return output;
+						}
+
+						if( readThrough ) {
+							output.arena().dependsOn( shard.arena() );
+							output.readThrough = reverse ? shard.begin : shard.end;
+						}
+
+						getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+						return output;
+					}
+
+					output.arena().dependsOn( rep.arena );
+					output.append(output.arena(), rep.data.begin(), rep.data.size());
+
+					if( finished ) {
+						if( readThrough ) {
+							output.arena().dependsOn( shard.arena() );
+							output.readThrough = reverse ? shard.begin : shard.end;
+						}
+						output.more = modifiedSelectors || limits.isReached() || rep.more;
+
+						getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
+						return output;
+					}
+
+					readVersion = rep.version; // see above comment
+
+					if( !rep.more ) {
+						ASSERT( modifiedSelectors );
+						TEST(true);  // !GetKeyValuesReply.more and modifiedSelectors in getRange
+
+						if( !rep.data.size() ) {
+							Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags ) );
+							getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+							return result;
+						}
+
+						if( reverse )
+							end = firstGreaterOrEqual( shard.begin );
+						else
+							begin = firstGreaterOrEqual( shard.end );
+					} else {
+						TEST(true);  // GetKeyValuesReply.more in getRange
+						if( reverse )
+							end = firstGreaterOrEqual( output[output.size()-1].key );
+						else
+							begin = firstGreaterThan( output[output.size()-1].key );
+					}
+				}
+
+			} catch ( Error& e ) {
+				if( info.debugID.present() ) {
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
+				}
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+					(e.code() == error_code_transaction_too_old && readVersion == latestVersion))
+				{
+					cx->invalidateCache( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
+
+					if (e.code() == error_code_wrong_shard_server) {
+						Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags ) );
+						getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
+						return result;
+					}
+
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+				} else {
+					if (trLogInfo)
+						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, cx->clientLocality.dcId(), static_cast<int>(e.code()), begin.getKey(), end.getKey()));
+
+					throw e;
+				}
+			}
+		}
+	}
+	catch(Error &e) {
+		if(conflictRange.canBeSet()) {
+			conflictRange.send(std::make_pair(Key(), Key()));
+		}
+
+		throw;
+	}
+}
+
 Future<Standalone<RangeResultRef>> getRange( Database const& cx, Future<Version> const& fVersion, KeySelector const& begin, KeySelector const& end,
 	GetRangeLimits const& limits, bool const& reverse, TransactionInfo const& info, TagSet const& tags )
 {
@@ -2965,6 +3194,61 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 	bool reverse )
 {
 	return getRange( begin, end, GetRangeLimits( limit ), snapshot, reverse );
+}
+
+Future<Void> Transaction::getRangeStream(
+	const PromiseStream<Standalone<RangeResultRef>>& results,
+	const KeySelector& begin,
+	const KeySelector& end,
+	GetRangeLimits limits,
+	bool snapshot,
+	bool reverse )
+{
+	++cx->transactionLogicalReads;
+	++cx->transactionGetRangeRequests;
+
+	if( limits.isReached() )
+		return Standalone<RangeResultRef>();
+
+	if( !limits.isValid() )
+		return range_limits_invalid();
+
+	ASSERT(limits.rows != 0);
+
+	KeySelector b = begin;
+	if( b.orEqual ) {
+		TEST(true); // Native begin orEqual==true
+		b.removeOrEqual(b.arena());
+	}
+
+	KeySelector e = end;
+	if( e.orEqual ) {
+		TEST(true); // Native end orEqual==true
+		e.removeOrEqual(e.arena());
+	}
+
+	if( b.offset >= e.offset && b.getKey() >= e.getKey() ) {
+		TEST(true); // Native range inverted
+		return Standalone<RangeResultRef>();
+	}
+
+	Promise<std::pair<Key, Key>> conflictRange;
+	if(!snapshot) {
+		extraConflictRanges.push_back( conflictRange.getFuture() );
+	}
+
+	return forwardErrors(::getRangeStream(results, cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, options.readTags), results);
+}
+
+Future<Void> Transaction::getRangeStream(
+	const PromiseStream<Standalone<RangeResultRef>>& results,
+	const KeySelector& begin,
+	const KeySelector& end,
+	int limit,
+	bool snapshot,
+	bool reverse )
+{
+	return getRangeStream( results, begin, end, GetRangeLimits( limit ), snapshot, reverse );
 }
 
 void Transaction::addReadConflictRange( KeyRangeRef const& keys ) {

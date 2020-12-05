@@ -884,6 +884,11 @@ decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r)
 	return r.reply;
 }
 
+template <class Request>
+decltype(std::declval<Request>().reply) const& getReplyPromiseStream(Request const& r) {
+	return r.reply;
+}
+
 // Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
 #ifdef __GNUG__
 #define REPLY_TYPE(RequestType) decltype(getReplyPromise(std::declval<RequestType>()).getFuture().getValue())
@@ -903,8 +908,22 @@ struct ReplyType<ReplyPromise<T>> {
 #define REPLY_TYPE(RequestType) typename ReplyType<RequestType>::Type
 #endif
 
-
-
+// Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
+#ifdef __GNUG__
+#define REPLYSTREAM_TYPE(RequestType) decltype(getReplyPromiseStream(std::declval<RequestType>()).getFuture().getValue())
+#else
+template <class T>
+struct ReplyStreamType {
+	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
+	//   breaks IntelliSense in VS2010; this is a workaround.
+	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
+};
+template <class T> class ReplyPromiseStream;
+template <class T>
+struct ReplyStreamType<ReplyPromiseStream<T>> {
+	typedef T Type;
+};
+#define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
 
 template <class T>
 class PromiseStream {

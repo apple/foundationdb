@@ -253,6 +253,22 @@ public:
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
 	}
 
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results, const KeySelector& begin, const KeySelector& end,
+	                                                          int limit, bool snapshot = false, bool reverse = false);
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results, const KeySelector& begin, const KeySelector& end,
+	                                                          GetRangeLimits limits, bool snapshot = false,
+	                                                          bool reverse = false);
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results, const KeyRange& keys, int limit, bool snapshot = false,
+	                                                          bool reverse = false) {
+		return getRangeStream(results, KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limit, snapshot, reverse);
+	}
+	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results, const KeyRange& keys, GetRangeLimits limits,
+	                                                          bool snapshot = false, bool reverse = false) {
+		return getRangeStream(results, KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
+		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()), limits, snapshot, reverse);
+	}
+
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
 
 	void enableCheckWrites();
