@@ -859,6 +859,7 @@ ACTOR Future<Void> commitBatch(
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
 			firstStateMutations = false;
+			forceRecovery = false;
 		}
 	}
 	if (forceRecovery) {
