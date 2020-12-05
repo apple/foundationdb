@@ -1688,9 +1688,8 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
 		                             : findKey(data, req.end, version, shard, &offset2, span.context);
-		wait(success(fBegin) && success(fEnd));
-		state Key begin = fBegin.get();
-		state Key end = fEnd.get();
+		state Key begin = wait(fBegin);
+		state Key end = wait(fEnd);
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
@@ -1771,7 +1770,7 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 				if(req.limit >= 0) {
 					begin = keyAfter(r.data.back().key);
 				} else {
-					end = r.data.back();
+					end = r.data.back().key;
 				}
 
 				if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
