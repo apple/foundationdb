@@ -1711,7 +1711,7 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 		// An end offset of 1 is also OK because the end key is exclusive, so if the first key of the next shard is the end the last actual key returned must be from this shard.
 		// A begin offset of 1 is also OK because then either begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1!=1) || (offset2 && offset2!=1)) {
-			TEST(true);  // wrong_shard_server due to offset
+			TEST(true);  // wrong_shard_server due to offset in rangeStream
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end, and return a clipped range rather
 			// than an error (since that is what the NativeAPI.getRange will do anyway via its "slow path"), but we would have to add some flags to the response
 			// to encode whether we went off the beginning and the end, since it needs that information.

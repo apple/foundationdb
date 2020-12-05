@@ -2834,7 +2834,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 					if( !rep.more ) {
 						ASSERT( modifiedSelectors );
-						TEST(true);  // !GetKeyValuesReply.more and modifiedSelectors in getRange
+						TEST(true);  // !GetKeyValuesReply.more and modifiedSelectors in getRangeStream
 
 						if( !rep.data.size() ) {
 							Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info, tags ) );
@@ -2847,7 +2847,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 						else
 							begin = firstGreaterOrEqual( shard.end );
 					} else {
-						TEST(true);  // GetKeyValuesReply.more in getRange
+						TEST(true);  // GetKeyValuesReply.more in getRangeStream
 						if( reverse )
 							end = firstGreaterOrEqual( output[output.size()-1].key );
 						else
@@ -3224,18 +3224,18 @@ Future<Void> Transaction::getRangeStream(
 
 	KeySelector b = begin;
 	if( b.orEqual ) {
-		TEST(true); // Native begin orEqual==true
+		TEST(true); // Native stream begin orEqual==true
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if( e.orEqual ) {
-		TEST(true); // Native end orEqual==true
+		TEST(true); // Native stream end orEqual==true
 		e.removeOrEqual(e.arena());
 	}
 
 	if( b.offset >= e.offset && b.getKey() >= e.getKey() ) {
-		TEST(true); // Native range inverted
+		TEST(true); // Native stream range inverted
 		return Standalone<RangeResultRef>();
 	}
 
