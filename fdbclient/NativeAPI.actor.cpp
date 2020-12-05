@@ -2677,7 +2677,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state Standalone<RangeResultRef> output;
-	state Span span("NAPI:getRange"_loc, info.spanID);
+	state Span span("NAPI:getRangeStream"_loc, info.spanID);
 
 	try {
 		state Version version = wait( fVersion );

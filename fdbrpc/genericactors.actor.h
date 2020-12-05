@@ -202,7 +202,6 @@ void endStreamOnDisconnect( Future<Void> signal, ReplyPromiseStream<X> stream, R
 		}
 		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
 	}
-	return Void();
 }
 
 
