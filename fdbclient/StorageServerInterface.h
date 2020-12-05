@@ -272,6 +272,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 	bool cached = false;
 
 	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
+	GetKeyValuesStreamReply(GetKeyValuesReply r) : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
 
 	int expectedSize() const { return sizeof(GetKeyValuesStreamReply) + data.expectedSize(); }
 

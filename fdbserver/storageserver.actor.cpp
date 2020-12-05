@@ -1711,7 +1711,7 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Send");
 			//.detail("Begin",begin).detail("End",end);
 
-			GetKeyValuesReply none;
+			GetKeyValuesStreamReply none;
 			none.version = version;
 			none.more = false;
 
@@ -1723,7 +1723,7 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 			loop {
 				wait(req.reply.onReady());
 				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context) );
-				GetKeyValuesReply r = _r;
+				GetKeyValuesStreamReply r(_r);
 
 				if( req.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
