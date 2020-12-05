@@ -924,6 +924,7 @@ struct ReplyStreamType<ReplyPromiseStream<T>> {
 	typedef T Type;
 };
 #define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
+#endif
 
 template <class T>
 class PromiseStream {
