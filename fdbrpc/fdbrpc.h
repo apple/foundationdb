@@ -271,7 +271,7 @@ struct NetNotifiedQueueWithErrors final : private SingleCallback<T>, public Flow
 	Error error;
 	AcknowledgementReceiver acknowledgements;
 
-	NetNotifiedQueueWithErrors(int futures, int promises) : futures(futures), promises(promises),  {
+	NetNotifiedQueueWithErrors(int futures, int promises) : futures(futures), promises(promises) {
 		SingleCallback<T>::next = this;
 	}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
