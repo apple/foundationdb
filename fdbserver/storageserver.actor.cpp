@@ -1641,19 +1641,6 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	return Void();
 }
 
-ACTOR Future<Void> getKeyValuesStreamQ( StorageServer* data, GetKeyValuesStreamRequest req )
-{
-	Future<Void> disc = IFailureMonitor::failureMonitor().onDisconnectOrFailure(req.reply.getEndpoint());
-	Future<Void> work = getKeyValuesStreamWork( data, req );
-	choose {
-		when(wait(disc)) {
-			req.reply.sendError(end_of_stream());
-		}
-		when(wait(work)) {}
-	}
-	return Void();
-}
-
 ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStreamRequest req )
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
 // all data from being read in one range read
@@ -1827,6 +1814,19 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 	//										abs(req.end.offset) > maxSelectorOffset);
 	//}
 
+	return Void();
+}
+
+ACTOR Future<Void> getKeyValuesStreamQ( StorageServer* data, GetKeyValuesStreamRequest req )
+{
+	Future<Void> disc = IFailureMonitor::failureMonitor().onDisconnectOrFailure(req.reply.getEndpoint());
+	Future<Void> work = getKeyValuesStreamWork( data, req );
+	choose {
+		when(wait(disc)) {
+			req.reply.sendError(end_of_stream());
+		}
+		when(wait(work)) {}
+	}
 	return Void();
 }
 
