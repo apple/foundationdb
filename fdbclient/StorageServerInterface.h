@@ -131,7 +131,7 @@ struct StorageServerInterface {
 		streams.push_back(watchValue.getReceiver());
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
-		streams.push_back(getKeyValuesStrean.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

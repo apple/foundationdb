@@ -310,7 +310,7 @@ struct NetNotifiedQueueWithErrors final : private SingleCallback<T>, public Flow
 		auto copy = std::move(queue.front());
 		if(acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += copy.expectedSize();
-			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(), true);
+			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), true);
 		}
 		queue.pop();
 		return copy;
@@ -635,7 +635,7 @@ public:
 				return p.getFuture();
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			endStreamOnDisconnect(disc, p, peer)
+			endStreamOnDisconnect(disc, p, peer);
 			return p.getFuture();
 		}
 		else {
