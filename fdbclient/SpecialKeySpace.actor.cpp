@@ -116,7 +116,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
 	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
-	// (It's a wasting of time to walking through the range whose begin key is same as ks->key)
+	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
 	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
 	// Otherwise, we only need to move right if offset > 1, iter points to the range containing the key
 	// Since boundary.end is always a key in the RangeMap, it is always safe to move right
