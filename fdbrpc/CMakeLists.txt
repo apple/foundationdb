@@ -1,6 +1,7 @@
 set(FDBRPC_SRCS
   AsyncFileCached.actor.h
   AsyncFileEIO.actor.h
+  AsyncFileIOUring.actor.h
   AsyncFileKAIO.actor.h
   AsyncFileNonDurable.actor.h
   AsyncFileReadAhead.actor.h
@@ -31,7 +32,11 @@ set(FDBRPC_SRCS
 
 set(FDBRPC_THIRD_PARTY_SRCS
   libcoroutine/Common.c
-  libcoroutine/Coro.c)
+  libcoroutine/Coro.c
+  liburing/queue.c
+  liburing/register.c
+  liburing/setup.c
+  liburing/syscall.c)
 
 if(APPLE)
   list(APPEND FDBRPC_THIRD_PARTY_SRCS libcoroutine/asm.S)
@@ -66,5 +71,7 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+target_include_directories(fdbrpc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/liburing/include)
+target_include_directories(thirdparty PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/liburing/include)
 target_link_libraries(fdbrpc PRIVATE thirdparty)
 target_link_libraries(fdbrpc PUBLIC flow)
