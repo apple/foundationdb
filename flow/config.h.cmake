@@ -15,7 +15,6 @@
 # cmakedefine USE_ASAN
 # cmakedefine USE_MSAN
 # cmakedefine USE_UBSAN
-# define USE_UCONTEXT
 # if defined(USE_ASAN) || \
      defined(USE_MSAN) || \
      defined(USE_UBSAN) || \
