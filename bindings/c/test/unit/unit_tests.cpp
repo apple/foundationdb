@@ -1845,17 +1845,19 @@ TEST_CASE("special-key-space disable tracing") {
   }
 }
 
-TEST_CASE("FDB_DB_OPTION_DISABLE_TRACING") {
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISABLE_TRACING, nullptr, 0));
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
   auto value = get_value("\xff\xff/tracing/a/token", /* snapshot */ false, {});
   REQUIRE(value.has_value());
   uint64_t token = std::stoul(value.value());
   CHECK(token == 0);
+
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
-TEST_CASE("FDB_DB_OPTION_DISABLE_TRACING enable tracing for transaction") {
-  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISABLE_TRACING, nullptr, 0));
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
   fdb::Transaction tr(db);
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
@@ -1882,6 +1884,8 @@ TEST_CASE("FDB_DB_OPTION_DISABLE_TRACING enable tracing for transaction") {
     CHECK(token > 0);
     break;
   }
+
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
 TEST_CASE("special-key-space tracing get range") {
@@ -1892,7 +1896,6 @@ TEST_CASE("special-key-space tracing get range") {
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
                           nullptr, 0));
   while (1) {
-    tr.set("\xff\xff/tracing/a/token", "true");
     fdb::KeyValueArrayFuture f1 = tr.get_range(
         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(
           (const uint8_t *)tracingBegin.c_str(),
@@ -1970,10 +1973,7 @@ TEST_CASE("fdb_error_predicate") {
   CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1040)); // proxy_memory_limit_exceeded
 }
 
-// Feature not live yet, re-enable when checking if a blocking call is made
-// from the network thread is live.
-TEST_CASE("block_from_callback"
-          * doctest::skip(true)) {
+TEST_CASE("block_from_callback") {
   fdb::Transaction tr(db);
   fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
   struct Context {
@@ -1988,7 +1988,7 @@ TEST_CASE("block_from_callback"
         fdb::ValueFuture f2 = context->tr->get("bar", /*snapshot*/ true);
         fdb_error_t error = f2.block_until_ready();
         if (error) {
-          CHECK(error == /*blocked_from_network_thread*/ 2025);
+          CHECK(error == /*blocked_from_network_thread*/ 2026);
         }
         context->event.set();
       },

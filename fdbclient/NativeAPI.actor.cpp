@@ -873,7 +873,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), tracingEnabled(true),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), transactionTracingEnabled(true),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
@@ -1052,7 +1052,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
     GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), tracingEnabled(true) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), transactionTracingEnabled(true) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -1215,9 +1215,13 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				validateOptionValue(value, false);
 				snapshotRywEnabled--;
 				break;
-			case FDBDatabaseOptions::DISABLE_TRACING:
+			case FDBDatabaseOptions::TRANSACTION_TRACE_ENABLE:
 				validateOptionValue(value, false);
-				tracingEnabled = false;
+				transactionTracingEnabled++;
+				break;
+			case FDBDatabaseOptions::TRANSACTION_TRACE_DISABLE:
+				validateOptionValue(value, false);
+				transactionTracingEnabled--;
 				break;
 			default:
 				break;
@@ -2704,9 +2708,9 @@ void debugAddTags(Transaction *tr) {
 
 }
 
-SpanID generateSpanID(bool tracingEnabled) {
+SpanID generateSpanID(int transactionTracingEnabled) {
 	UID uid = deterministicRandom()->randomUniqueID();
-	if (tracingEnabled) {
+	if (transactionTracingEnabled > 0) {
 		return SpanID(uid.first(), uid.second());
 	} else {
 		return SpanID(uid.first(), 0);
@@ -2719,7 +2723,7 @@ Transaction::Transaction()
     span(info.spanID, "Transaction"_loc) {}
 
 Transaction::Transaction(Database const& cx)
-  : cx(cx), info(cx->taskID, generateSpanID(cx->tracingEnabled)), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
+  : cx(cx), info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
     committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
     trLogInfo(createTrLogInfoProbabilistically(cx)), tr(info.spanID), span(info.spanID, "Transaction"_loc) {
 	if (DatabaseContext::debugUseTags) {
