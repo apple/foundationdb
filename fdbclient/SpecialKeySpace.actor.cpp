@@ -1298,7 +1298,8 @@ Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTr
 void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	if (ryw->getApproximateSize() > 0) {
 		ryw->setSpecialKeySpaceErrorMsg("tracing options must be set first");
-		throw special_keys_api_failure();
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+		return;
 	}
 
 	if (key.endsWith(kTracingTransactionIdKey)) {
@@ -1316,6 +1317,9 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 }
 
 Future<Optional<std::string>> TracingOptionsImpl::commit(ReadYourWritesTransaction* ryw) {
+	if (ryw->getSpecialKeySpaceWriteMap().size() > 0) {
+		throw special_keys_api_failure();
+	}
 	return Optional<std::string>();
 }
 

@@ -2709,13 +2709,12 @@ void debugAddTags(Transaction *tr) {
 }
 
 SpanID generateSpanID(int transactionTracingEnabled) {
-	UID uid = deterministicRandom()->randomUniqueID();
+	uint64_t tid = deterministicRandom()->randomUInt64();
 	if (transactionTracingEnabled > 0) {
-		return SpanID(uid.first(), uid.second());
+		return SpanID(tid, deterministicRandom()->randomUInt64());
 	} else {
-		return SpanID(uid.first(), 0);
+		return SpanID(tid, 0);
 	}
-	return uid;
 }
 
 Transaction::Transaction()
