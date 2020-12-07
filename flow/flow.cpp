@@ -26,7 +26,10 @@
 #include <stdarg.h>
 #include <cinttypes>
 
-thread_local ActorLineagePropertyMap* currentLineage = nullptr;
+extern thread_local Reference<ActorLineage> currentLineage;
+
+ActorLineage::ActorLineage() : parent(currentLineage) {
+}
 
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.

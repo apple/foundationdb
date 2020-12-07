@@ -452,6 +452,7 @@ namespace actorcompiler
                     fullClassName,
                     string.Join(", ", actor.parameters.Select(p => p.name).ToArray()));
 
+            writer.WriteLine("restore_lineage _;");
             if (actor.returnType != null)
                 writer.WriteLine("\treturn Future<{1}>({0});", newActor, actor.returnType);
             else

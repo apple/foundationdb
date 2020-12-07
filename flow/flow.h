@@ -20,6 +20,7 @@
 
 #ifndef FLOW_FLOW_H
 #define FLOW_FLOW_H
+#include "flow/FastRef.h"
 #pragma once
 
 #pragma warning( disable: 4244 4267 ) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int conversions like this suppresses)
@@ -408,28 +409,21 @@ struct SingleCallback {
 	}
 };
 
-// in the future we might want to read these from a different thread. std::shared_ptr
-// seems to be better suited for this...
-struct ActorLineagePropertyMap : std::enable_shared_from_this<ActorLineagePropertyMap> {
-	std::shared_ptr<ActorLineagePropertyMap> parent = nullptr;
+struct ActorLineagePropertyMap : ReferenceCounted<ActorLineagePropertyMap> {
 };
 
-extern thread_local ActorLineagePropertyMap* currentLineage;
-
-struct ActorLineage {
-	std::shared_ptr<ActorLineagePropertyMap> properties = std::make_shared<ActorLineagePropertyMap>();
-	ActorLineage() {
-		if (currentLineage) {
-			properties->parent = currentLineage->shared_from_this();
-		}
-	}
+struct ActorLineage : ReferenceCounted<ActorLineage> {
+	Reference<ActorLineagePropertyMap> map;
+	Reference<ActorLineage> parent;
+	ActorLineage();
 };
 
-struct save_lineage {
-	ActorLineagePropertyMap* current = currentLineage;
-	~save_lineage() {
-		currentLineage = current;
-	}
+extern thread_local Reference<ActorLineage> currentLineage;
+
+struct restore_lineage {
+	Reference<ActorLineage> lineage;
+	restore_lineage() : lineage(currentLineage) {}
+	~restore_lineage() { currentLineage = lineage; }
 };
 
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
@@ -447,7 +441,8 @@ public:
 
 	T& value() { return *(T*)&value_storage; }
 
-	SAV(int futures, int promises) : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
+	SAV(int futures, int promises)
+	  : futures(futures), promises(promises), error_state(Error::fromCode(UNSET_ERROR_CODE)) {
 		Callback<T>::prev = Callback<T>::next = this;
 	}
 	~SAV() {
@@ -466,13 +461,14 @@ public:
 	}
 
 	template <class U>
-	void send(U && value) {
+	void send(U&& value) {
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		save_lineage _{};
-		while (Callback<T>::next != this)
+		restore_lineage _;
+		while (Callback<T>::next != this) {
 			Callback<T>::next->fire(this->value());
+		}
 	}
 
 	void send(Never) {
@@ -483,13 +479,15 @@ public:
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		this->error_state = err;
-		save_lineage _{};
-		while (Callback<T>::next != this)
+		restore_lineage _;
+		while (Callback<T>::next != this) {
 			Callback<T>::next->error(err);
+		}
 	}
 
 	template <class U>
 	void sendAndDelPromiseRef(U && value) {
+		restore_lineage _;
 		ASSERT(canBeSet());
 		if (promises == 1 && !futures) {
 			// No one is left to receive the value, so we can just die
@@ -503,8 +501,8 @@ public:
 
 	void finishSendAndDelPromiseRef() {
 		// Call only after value_storage has already been initialized!
+		restore_lineage _;
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		save_lineage _{};
 		while (Callback<T>::next != this)
 			Callback<T>::next->fire(this->value());
 
@@ -520,6 +518,7 @@ public:
 	}
 
 	void sendErrorAndDelPromiseRef(Error err) {
+		restore_lineage _;
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		if (promises == 1 && !futures) {
 			// No one is left to receive the value, so we can just die
@@ -528,7 +527,6 @@ public:
 		}
 
 		this->error_state = err;
-		save_lineage _{};
 		while (Callback<T>::next != this)
 			Callback<T>::next->error(err);
 
@@ -624,6 +622,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid()) return;
 
 		if (SingleCallback<T>::next != this) {
+			restore_lineage _;
 			SingleCallback<T>::next->fire(std::forward<U>(value));
 		}
 		else {
@@ -635,8 +634,10 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid()) return;
 
 		this->error = err;
-		if (SingleCallback<T>::next != this)
+		if (SingleCallback<T>::next != this) {
+			restore_lineage _;
 			SingleCallback<T>::next->error(err);
+		}
 	}
 
 	void addPromiseRef() { promises++; }
@@ -1016,38 +1017,67 @@ static inline void destruct(T& t) {
 }
 
 template <class ReturnValue>
-struct Actor : SAV<ReturnValue>, ActorLineage {
+struct Actor : SAV<ReturnValue> {
+	Reference<ActorLineage> lineage = Reference<ActorLineage>{new ActorLineage() };
 	int8_t actor_wait_state;  // -1 means actor is cancelled; 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(0) {
+		/*++actorCount;*/
+		currentLineage = lineage;
+	}
+
+	Reference<ActorLineage> setLineage() {
+		auto res = currentLineage;
+		currentLineage = lineage;
+		return res;
+	}
 	//~Actor() { --actorCount; }
 };
 
 template <>
-struct Actor<void> : ActorLineage {
+struct Actor<void> {
 	// This specialization is for a void actor (one not returning a future, hence also uncancellable)
 
+	Reference<ActorLineage> lineage = Reference<ActorLineage>{new ActorLineage() };
 	int8_t actor_wait_state;  // 0 means actor is not waiting; 1-N mean waiting in callback group #
 
-	Actor() : actor_wait_state(0) { /*++actorCount;*/ }
+	Actor() : actor_wait_state(0) {
+		/*++actorCount;*/
+		currentLineage = lineage;
+	}
+
+	Reference<ActorLineage> setLineage() {
+		auto res = currentLineage;
+		currentLineage = lineage;
+		return res;
+	}
 	//~Actor() { --actorCount; }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	virtual void fire(ValueType const& value) override {
+		auto _ = static_cast<ActorType*>(this)->setLineage();
+		static_cast<ActorType*>(this)->a_callback_fire(this, value);
+	}
+	virtual void error(Error e) override {
+		auto _ = static_cast<ActorType*>(this)->setLineage();
+		static_cast<ActorType*>(this)->a_callback_error(this, e);
+	}
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
 	virtual void fire(ValueType const& value) override {
+		auto _ = static_cast<ActorType*>(this)->setLineage();
 		static_cast<ActorType*>(this)->a_callback_fire(this, value);
 	}
 	virtual void fire(ValueType && value) override {
+		auto _ = static_cast<ActorType*>(this)->setLineage();
 		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
 	}
 	virtual void error(Error e) override {
+		auto _ = static_cast<ActorType*>(this)->setLineage();
 		static_cast<ActorType*>(this)->a_callback_error(this, e);
 	}
 };
