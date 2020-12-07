@@ -38,7 +38,6 @@ public:
 class SpeedLimit final : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
 	SpeedLimit(int windowLimit, int windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
-		m_budget_max = m_limit * m_seconds;
 		m_last_update = timer();
 	}
 	~SpeedLimit() = default;
@@ -63,7 +62,7 @@ public:
 	void returnUnused(int n) override {
 		if(n < 0)
 			return;
-		m_budget = std::min<int64_t>(m_budget + n, m_budget_max);
+		m_budget = std::min<int64_t>(m_budget + n, m_limit);
 	}
 
 private:
@@ -71,7 +70,6 @@ private:
 	double m_seconds;
 	double m_last_update;
 	int64_t m_budget;
-	int64_t m_budget_max;
 };
 
 // An IRateControl implemenation that enforces no limit
