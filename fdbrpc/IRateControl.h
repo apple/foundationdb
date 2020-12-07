@@ -37,7 +37,7 @@ public:
 // An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds seconds
 class SpeedLimit final : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
-	SpeedLimit(int windowLimit, int windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
+	SpeedLimit(int windowLimit, double windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
 		m_last_update = timer();
 	}
 	~SpeedLimit() = default;
