@@ -26,7 +26,7 @@
 #include <stdarg.h>
 #include <cinttypes>
 
-extern thread_local Reference<ActorLineage> currentLineage;
+thread_local Reference<ActorLineage> currentLineage;
 
 ActorLineage::ActorLineage() : parent(currentLineage) {
 }
