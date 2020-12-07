@@ -191,12 +191,6 @@ protected:
 		serialize_string(span.location.name.toString(), request);
 
 		serialize_vector(span.parents, request);
-
-		// std::stringstream out;
-		// for (int i = 0; i < request.data_size; ++i) {
-		// 	out << std::hex << std::setfill('0') << std::setw(2) << (unsigned int) (unsigned char)request.buffer[i] << " ";
-		// }
-		// TraceEvent("SerializedSpan").detail("Context", span.context).detail("Begin", span.begin).detail("Duration", span.end - span.begin).detail("Name", span.location.name.toString()).detail("NumParents", span.parents.size()).detail("SpanAsHex", out.str());
 	}
 
 private:
