@@ -2809,7 +2809,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	bool recovering = (req.recoverFrom.logSystemType == LogSystemType::tagPartitioned);
 	state Reference<LogData> logData = makeReference<LogData>(
 	    self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID,
-	    currentProtocolVersion, req.spillType, req.allTags, recovering ? "Recovered" : "Recruited");
+	    g_network->protocolVersion(), req.spillType, req.allTags, recovering ? "Recovered" : "Recruited");
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
