@@ -170,6 +170,8 @@ else()
       -fsanitize=address
       -DUSE_SANITIZER
       -DADDRESS_SANITIZER
+      -DBOOST_USE_ASAN
+      -DBOOST_USE_UCONTEXT
       )
     add_link_options(-fsanitize=address)
   endif()
@@ -354,10 +356,15 @@ else()
       -fno-builtin-free)
   endif()
 
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
     # Graviton or later
     # https://github.com/aws/aws-graviton-gettting-started
     add_compile_options(-march=armv8-a+crc+simd)
+    if(APPLE)
+      # Boost coroutine currently doesn't support Apple Silicon, so we have to fall
+      # back to the slower ucontext implementation
+      add_compile_definitions(BOOST_USE_UCONTEXT)
+    endif()
   endif()
 
   # Check whether we can use dtrace probes
