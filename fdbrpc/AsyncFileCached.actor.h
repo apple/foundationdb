@@ -221,6 +221,10 @@ public:
 
 	std::string getFilename() const override { return filename; }
 
+	void setRateControl(Reference<IRateControl> rc) override {
+		rateControl = rc;
+	}
+
 	virtual void addref() { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
 		//TraceEvent("AsyncFileCachedAddRef").detail("Filename", filename).detail("Refcount", debugGetReferenceCount()).backtrace();
@@ -253,6 +257,7 @@ private:
 	Reference<EvictablePageCache> pageCache;
 	Future<Void> currentTruncate;
 	int64_t currentTruncateSize;
+	Reference<IRateControl> rateControl;
 
 	// Map of pointers which hold page buffers for pages which have been overwritten
 	// but at the time of write there were still readZeroCopy holders.
@@ -279,7 +284,7 @@ private:
 	Int64MetricHandle countCacheReadBytes;
 
 	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache )
-		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
+		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
@@ -318,6 +323,10 @@ private:
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
 			auto& of = openFiles[filename];
 			of.f = new AsyncFileCached(f, filename, l, pageCache);
+			// Set rate control if FLOW_KNOBS are set
+			if (FLOW_KNOBS->STORAGE_WRITE_RATE > 0 && FLOW_KNOBS->STORAGE_WRITE_WINDOW > 0) {
+				of.f->setRateControl(makeReference<SpeedLimit>(FLOW_KNOBS->STORAGE_WRITE_RATE, FLOW_KNOBS->STORAGE_WRITE_WINDOW));
+			}
 			of.opened = Future<Reference<IAsyncFile>>();
 			return Reference<IAsyncFile>( of.f );
 		} catch (Error& e) {

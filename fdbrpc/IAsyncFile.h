@@ -24,6 +24,7 @@
 
 #include <ctime>
 #include "flow/flow.h"
+#include "fdbrpc/IRateControl.h"
 
 // All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
 // The desirability of the above semantic is disputed. Some classes (AsyncFileS3BlobStore,
@@ -81,6 +82,10 @@ public:
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset ) {}
 
 	virtual int64_t debugFD() const = 0;
+
+	virtual void setRateControl(Reference<IRateControl> rc) {
+		throw unsupported_operation();
+	}
 };
 
 typedef void (*runCycleFuncPtr)();

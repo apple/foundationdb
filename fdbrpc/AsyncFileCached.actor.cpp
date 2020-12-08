@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 //Page caches used in non-simulated environments
 Optional<Reference<EvictablePageCache>> pc4k, pc64k;
@@ -257,6 +258,12 @@ Future<Void> AsyncFileCached::changeFileSize( int64_t size ) {
 	});
 }
 
+ACTOR static Future<Void> waitForRateControl(const std::vector<Future<Void>>* results, Reference<IRateControl> rc) {
+	wait(rc->getAllowance(results->size()));
+	wait(waitForAll(*results));
+	return Void();
+}
+
 Future<Void> AsyncFileCached::flush() {
 	++countFileCacheWrites;
 	++countCacheWrites;
@@ -273,7 +280,12 @@ Future<Void> AsyncFileCached::flush() {
 	}
 	ASSERT( flushable.size() <= debug_count );
 
-	return waitForAll(unflushed);
+	// If rate control is enabled by setting the flow knobs
+	if (rateControl) {
+		return waitForRateControl(&unflushed, rateControl);
+	} else {
+		return waitForAll(unflushed);
+	}
 }
 
 Future<Void> AsyncFileCached::quiesce() {

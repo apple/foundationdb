@@ -137,6 +137,8 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
 	init( INCREMENTAL_DELETE_INTERVAL,                         1.0 ); //every 1 second
+	init( STORAGE_WRITE_RATE,                                    0 );
+	init( STORAGE_WRITE_WINDOW,                                  0 );
 		
 	//Net2 and FlowTransport
 	init( MIN_COALESCE_DELAY,                                10e-6 ); if( randomize && BUGGIFY ) MIN_COALESCE_DELAY = 0;
