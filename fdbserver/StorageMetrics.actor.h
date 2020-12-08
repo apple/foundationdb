@@ -27,6 +27,11 @@
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
+const StringRef STORAGESERVER_HISTOGRAM_GROUP = LiteralStringRef("StorageServer");
+const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = LiteralStringRef("FetchKeysLatency");
+const StringRef FETCH_KEYS_BYTES_HISTOGRAM = LiteralStringRef("FetchKeysSize");
+const StringRef FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = LiteralStringRef("FetchKeysBandwidth");
+
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
 	int64_t metricUnitsPerSample;

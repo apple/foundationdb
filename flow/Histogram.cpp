@@ -41,6 +41,8 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 // we have a simulated contex here; we'd just use the current context regardless.
 static HistogramRegistry* globalHistograms = nullptr;
 
+#pragma region HistogramRegistry
+
 HistogramRegistry& GetHistogramRegistry() {
 	ISimulator::ProcessInfo* info = g_simulator.getCurrentProcess();
 
@@ -89,6 +91,16 @@ void HistogramRegistry::logReport() {
 	}
 }
 
+#pragma endregion // HistogramRegistry
+
+#pragma region Histogram
+
+const std::unordered_map<Histogram::Unit, std::string> Histogram::UnitToStringMapper = {
+	{ Histogram::Unit::microseconds, "microseconds" },
+	{ Histogram::Unit::bytes, "bytes" },
+	{ Histogram::Unit::bytes_per_second, "bytes_per_second" }
+};
+
 void Histogram::writeToLog() {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
@@ -102,17 +114,19 @@ void Histogram::writeToLog() {
 	}
 
 	TraceEvent e(SevInfo, "Histogram");
-	e.detail("Group", group).detail("Op", op);
+	e.detail("Group", group).detail("Op", op).detail("Unit", UnitToStringMapper.at(unit));
+
 	for (uint32_t i = 0; i < 32; i++) {
+		uint32_t value = ((uint32_t)1) << (i + 1);
+
 		if (buckets[i]) {
 			switch (unit) {
-			case Unit::microseconds: {
-				uint32_t usec = ((uint32_t)1) << (i + 1);
-				e.detail(format("LessThan%u.%03u", usec / 1000, usec % 1000), buckets[i]);
+			case Unit::microseconds:
+				e.detail(format("LessThan%u.%03u", value / 1000, value % 1000), buckets[i]);
 				break;
-			}
 			case Unit::bytes:
-				e.detail(format("LessThan%u", ((uint32_t)1) << (i + 1)), buckets[i]);
+			case Unit::bytes_per_second:
+				e.detail(format("LessThan%u", value), buckets[i]);
 				break;
 			default:
 				ASSERT(false);
@@ -120,6 +134,8 @@ void Histogram::writeToLog() {
 		}
 	}
 }
+
+#pragma endregion // Histogram
 
 TEST_CASE("/flow/histogram/smoke_test") {
 
