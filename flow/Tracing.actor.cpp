@@ -422,6 +422,9 @@ void openTracer(TracerType type) {
 	case TracerType::NETWORK_LOSSY:
 		g_tracer = new FastUDPTracer{};
 		break;
+	case TracerType::END:
+		ASSERT(false);
+		break;
 	}
 }
 
