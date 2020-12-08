@@ -24,6 +24,11 @@
 #include "fdbclient/StatusClient.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+const std::string kTracingTransactionIdKey = "transaction_id";
+const std::string kTracingTokenKey = "token";
+}
+
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -38,7 +43,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/management/"), LiteralStringRef("\xff\xff/management0")) },
 	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) },
 	{ SpecialKeySpace::MODULE::CONFIGURATION,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) },
+	{ SpecialKeySpace::MODULE::TRACING,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -52,6 +59,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
+
+std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
 Standalone<RangeResultRef> rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr,
                                        const Standalone<RangeResultRef>& res);
@@ -1262,4 +1271,64 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	ryw->getTransaction().set(fdbShouldConsistencyCheckBeSuspended,
 	                          BinaryWriter::toValue(entry.present(), Unversioned()));
 	return Optional<std::string>();
+}
+
+TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
+	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
+}
+
+Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                KeyRangeRef kr) const {
+	Standalone<RangeResultRef> result;
+	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
+		auto key = getKeyRange().begin.withSuffix(option);
+		if (!kr.contains(key)) {
+			continue;
+		}
+
+		if (key.endsWith(kTracingTransactionIdKey)) {
+			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
+		} else if (key.endsWith(kTracingTokenKey)) {
+			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
+		}
+	}
+	return result;
+}
+
+void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	if (ryw->getApproximateSize() > 0) {
+		ryw->setSpecialKeySpaceErrorMsg("tracing options must be set first");
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+		return;
+	}
+
+	if (key.endsWith(kTracingTransactionIdKey)) {
+		ryw->setTransactionID(std::stoul(value.toString()));
+	} else if (key.endsWith(kTracingTokenKey)) {
+		if (value.toString() == "true") {
+			ryw->setToken(deterministicRandom()->randomUInt64());
+		} else if (value.toString() == "false") {
+			ryw->setToken(0);
+		} else {
+			ryw->setSpecialKeySpaceErrorMsg("token must be set to true/false");
+			throw special_keys_api_failure();
+		}
+	}
+}
+
+Future<Optional<std::string>> TracingOptionsImpl::commit(ReadYourWritesTransaction* ryw) {
+	if (ryw->getSpecialKeySpaceWriteMap().size() > 0) {
+		throw special_keys_api_failure();
+	}
+	return Optional<std::string>();
+}
+
+void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	ryw->setSpecialKeySpaceErrorMsg("clear range disabled");
+	throw special_keys_api_failure();
+}
+
+void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	ryw->setSpecialKeySpaceErrorMsg("clear disabled");
+	throw special_keys_api_failure();
 }

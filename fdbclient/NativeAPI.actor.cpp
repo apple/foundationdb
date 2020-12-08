@@ -873,7 +873,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), transactionTracingEnabled(true),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
@@ -946,6 +946,14 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    std::make_unique<ConsistencyCheckImpl>(
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    // std::make_unique<TracingOptionsImpl>(
+		    //     SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
+		    // TODO: Temporary fix for an issue with special-key top level ranges.
+		    std::make_unique<TracingOptionsImpl>(
+		        KeyRangeRef(LiteralStringRef("a/"), LiteralStringRef("a0"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING).begin)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1044,7 +1052,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
     GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), transactionTracingEnabled(true) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -1206,6 +1214,14 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
 				validateOptionValue(value, false);
 				snapshotRywEnabled--;
+				break;
+			case FDBDatabaseOptions::TRANSACTION_TRACE_ENABLE:
+				validateOptionValue(value, false);
+				transactionTracingEnabled++;
+				break;
+			case FDBDatabaseOptions::TRANSACTION_TRACE_DISABLE:
+				validateOptionValue(value, false);
+				transactionTracingEnabled--;
 				break;
 			default:
 				break;
@@ -2692,8 +2708,21 @@ void debugAddTags(Transaction *tr) {
 
 }
 
+SpanID generateSpanID(int transactionTracingEnabled) {
+	uint64_t tid = deterministicRandom()->randomUInt64();
+	if (transactionTracingEnabled > 0) {
+		return SpanID(tid, deterministicRandom()->randomUInt64());
+	} else {
+		return SpanID(tid, 0);
+	}
+}
+
+Transaction::Transaction()
+  : info(TaskPriority::DefaultEndpoint, generateSpanID(true)),
+    span(info.spanID, "Transaction"_loc) {}
+
 Transaction::Transaction(Database const& cx)
-  : cx(cx), info(cx->taskID, deterministicRandom()->randomUniqueID()), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
+  : cx(cx), info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
     committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
     trLogInfo(createTrLogInfoProbabilistically(cx)), tr(info.spanID), span(info.spanID, "Transaction"_loc) {
 	if (DatabaseContext::debugUseTags) {
@@ -4603,6 +4632,16 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	}
 
 	return Reference<TransactionLogInfo>();
+}
+
+void Transaction::setTransactionID(uint64_t id) {
+	ASSERT(getSize() == 0);
+	info.spanID = SpanID(id, info.spanID.second());
+}
+
+void Transaction::setToken(uint64_t token) {
+	ASSERT(getSize() == 0);
+	info.spanID = SpanID(info.spanID.first(), token);
 }
 
 void enableClientInfoLogging() {
