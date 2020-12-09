@@ -859,7 +859,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc),
+	transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
     transactionCommittedMutations("CommittedMutations", cc),
@@ -1029,7 +1030,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionLogicalReads("LogicalUncachedReads", cc), transactionPhysicalReads("PhysicalReadRequests", cc),
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
-    transactionGetRangeRequests("GetRangeRequests", cc), transactionWatchRequests("WatchRequests", cc),
+    transactionGetRangeRequests("GetRangeRequests", cc),
+	transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
     transactionCommittedMutations("CommittedMutations", cc),
@@ -2531,7 +2533,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
-				++cx->transactionGetRangeRequests;
 				state GetKeyValuesReply rep;
 				try {
 					if (CLIENT_BUGGIFY) {
@@ -2754,7 +2755,6 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 				}
 
 				++cx->transactionPhysicalReads;
-				++cx->transactionGetRangeRequests;
 				state GetKeyValuesReply rep;
 				if (CLIENT_BUGGIFY) {
 					throw deterministicRandom()->randomChoice(std::vector<Error>{
@@ -3208,11 +3208,8 @@ Future<Void> Transaction::getRangeStream(
 	bool snapshot,
 	bool reverse )
 {
-	return Void();
-
-	/*
 	++cx->transactionLogicalReads;
-	++cx->transactionGetRangeRequests;
+	++cx->transactionGetRangeStreamRequests;
 
 	if( limits.isReached() )
 		return Standalone<RangeResultRef>();
@@ -3245,7 +3242,6 @@ Future<Void> Transaction::getRangeStream(
 	}
 
 	return forwardErrors(::getRangeStream(results, cx, trLogInfo, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse, info, options.readTags), results);
-	*/
 }
 
 Future<Void> Transaction::getRangeStream(
