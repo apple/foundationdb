@@ -661,6 +661,7 @@ ACTOR Future<Void> commitBatch(
 			tr.reply.sendError(transaction_too_old());
 		}
 		++self->stats.commitBatchOut;
+		self->stats.txnCommitOut += trs.size();
 		self->stats.txnConflicts += trs.size();
 		return Void();
 	}
