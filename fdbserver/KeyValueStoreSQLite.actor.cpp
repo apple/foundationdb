@@ -1954,7 +1954,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	//The DB file should not already be open
 	ASSERT(!vfsAsyncIsOpen(filename));
 
-	readCursors.resize(64); //< number of read threads
+	readCursors.resize(SERVER_KNOBS->SQLITE_READER_THREADS); //< number of read threads
 
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
