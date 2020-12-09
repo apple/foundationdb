@@ -495,6 +495,18 @@ struct restore_lineage {
 	~restore_lineage() { currentLineage = prev; }
 };
 
+struct StackLineage : LineageProperties<StackLineage> {
+	static StringRef name;
+	StringRef actorName;
+
+	template<class Value>
+	bool isSet(Value StackLineage::*member) {
+		return true;
+	}
+};
+
+extern std::stack<StringRef> getActorStackTrace();
+
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
 template <class T>
 struct SAV : private Callback<T>, FastAllocated<SAV<T>> {
