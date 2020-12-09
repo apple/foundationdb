@@ -6,7 +6,6 @@
 #endif // FDB_RELEASE
 #cmakedefine OPEN_FOR_IDE
 #ifdef WIN32
-# define USE_USEFIBERS
 # define _WIN32_WINNT ${WINDOWS_TARGET}
 # define WINVER ${WINDOWS_TARGET}
 # define NTDDI_VERSION 0x05020000
