@@ -37,18 +37,23 @@ typedef StringRef ValueRef;
 typedef int64_t Generation;
 
 enum {
-	tagLocalitySpecial = -1,
+	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,
+	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
 	tagLocalityInvalid = -99
-}; //The TLog and LogRouter require these number to be as compact as possible
+}; // The TLog and LogRouter require these number to be as compact as possible
 
 #pragma pack(push, 1)
 struct Tag {
+	// if locality > 0,
+	//    locality decides which DC id the tLog is in;
+	//    id decides which SS owns the tag; id <-> SS mapping is in the system keyspace: serverTagKeys.
+	// if locality < 0, locality decides the type of tLog set: satellite, LR, or remote tLog, etc.
+	//    id decides which tLog in the tLog type will be used.
 	int8_t locality;
 	uint16_t id;
 
@@ -136,6 +141,10 @@ static std::string describe( const int item ) {
 template <class T>
 static std::string describe( Reference<T> const& item ) {
 	return item->toString();
+}
+
+static std::string describe(UID const& item) {
+	return item.shortString();
 }
 
 template <class T>

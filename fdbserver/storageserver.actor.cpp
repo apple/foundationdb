@@ -19,11 +19,16 @@
  */
 
 #include <cinttypes>
+#include <functional>
+#include <type_traits>
+#include <unordered_map>
+
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
-#include "flow/IndexedSet.h"
-#include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
+#include "flow/Hash3.h"
+#include "flow/Histogram.h"
+#include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
@@ -52,11 +57,8 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "flow/TDMetric.actor.h"
-#include <type_traits>
-#include "flow/actorcompiler.h"  // This must be the last #include.
 
-using std::pair;
-using std::make_pair;
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #pragma region Data Structures
 
@@ -240,13 +242,13 @@ struct UpdateEagerReadInfo {
 	void finishKeyBegin() {
 		std::sort(keyBegin.begin(), keyBegin.end());
 		keyBegin.resize( std::unique(keyBegin.begin(), keyBegin.end()) - keyBegin.begin() );
-		std::sort(keys.begin(), keys.end(), [](const pair<KeyRef, int>& lhs, const pair<KeyRef, int>& rhs) { return (lhs.first < rhs.first) || (lhs.first == rhs.first && lhs.second > rhs.second); } );
-		keys.resize(std::unique(keys.begin(), keys.end(), [](const pair<KeyRef, int>& lhs, const pair<KeyRef, int>& rhs) { return lhs.first == rhs.first; } ) - keys.begin());
+		std::sort(keys.begin(), keys.end(), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) { return (lhs.first < rhs.first) || (lhs.first == rhs.first && lhs.second > rhs.second); } );
+		keys.resize(std::unique(keys.begin(), keys.end(), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) { return lhs.first == rhs.first; } ) - keys.begin());
 		//value gets populated in doEagerReads
 	}
 
 	Optional<Value>& getValue(KeyRef key) {
-		int i = std::lower_bound(keys.begin(), keys.end(), pair<KeyRef, int>(key, 0), [](const pair<KeyRef, int>& lhs, const pair<KeyRef, int>& rhs) { return lhs.first < rhs.first; } ) - keys.begin();
+		int i = std::lower_bound(keys.begin(), keys.end(),std::pair<KeyRef, int>(key, 0), [](const std::pair<KeyRef, int>& lhs, const std::pair<KeyRef, int>& rhs) { return lhs.first < rhs.first; } ) - keys.begin();
 		ASSERT( i < keys.size() && keys[i].first == key );
 		return value[i];
 	}
@@ -296,9 +298,63 @@ private:
 	std::map<Version, Standalone<VersionUpdateRef>> mutationLog; // versions (durableVersion, version]
 
 public:
+public:
+	// Histograms
+	struct FetchKeysHistograms {
+		const Reference<Histogram> latency;
+		const Reference<Histogram> bytes;
+		const Reference<Histogram> bandwidth;
+
+		FetchKeysHistograms()
+		  : latency(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP, FETCH_KEYS_LATENCY_HISTOGRAM,
+		                                    Histogram::Unit::microseconds)),
+		    bytes(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP, FETCH_KEYS_BYTES_HISTOGRAM,
+		                                  Histogram::Unit::bytes)),
+		    bandwidth(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP, FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM,
+		                                      Histogram::Unit::bytes_per_second)) {}
+	} fetchKeysHistograms;
+
+	class CurrentRunningFetchKeys {
+		std::unordered_map<UID, double> startTimeMap;
+		std::unordered_map<UID, KeyRangeRef> keyRangeMap;
+
+		static const StringRef emptyString;
+		static const KeyRangeRef emptyKeyRange;
+	public:
+		void recordStart(const UID id, const KeyRange keyRange) {
+			startTimeMap[id] =  now();
+			keyRangeMap[id] = keyRange;
+		}
+
+		void recordFinish(const UID id) {
+			startTimeMap.erase(id);
+			keyRangeMap.erase(id);
+		}
+
+		std::pair<double, KeyRangeRef> longestTime() const {
+			if (numRunning() == 0) {
+				return {-1, emptyKeyRange};
+			}
+
+			const double currentTime = now();
+			double longest = 0;
+			UID UIDofLongest;
+			for (const auto kv: startTimeMap) {
+				const double currentRunningTime = currentTime - kv.second;
+				if (longest < currentRunningTime) {
+					longest = currentRunningTime;
+					UIDofLongest = kv.first;
+				}
+			}
+			return {longest, keyRangeMap.at(UIDofLongest)};
+		}
+
+		int numRunning() const { return startTimeMap.size(); }
+	} currentRunningFetchKeys;
+
 	Tag tag;
-	vector<pair<Version,Tag>> history;
-	vector<pair<Version,Tag>> allHistory;
+	vector<std::pair<Version,Tag>> history;
+	vector<std::pair<Version,Tag>> allHistory;
 	Version poppedAllAfter;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
@@ -345,8 +401,8 @@ public:
 				poppedAllAfter = std::numeric_limits<Version>::max();
 			}
 
-			vector<pair<Version,Tag>>* hist = &history;
-			vector<pair<Version,Tag>> allHistoryCopy;
+			vector<std::pair<Version,Tag>>* hist = &history;
+			vector<std::pair<Version,Tag>> allHistoryCopy;
 			if(popAllTags) {
 				allHistoryCopy = allHistory;
 				hist = &allHistoryCopy;
@@ -535,22 +591,18 @@ public:
 		}
 	} counters;
 
-	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db, StorageServerInterface const& ssi)
-		:	instanceID(deterministicRandom()->randomUniqueID().first()),
-			storage(this, storage), db(db),
-			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-			rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
-			durableInProgress(Void()),
-			versionLag(0), primaryLocality(tagLocalityInvalid),
-			updateEagerReads(0),
-			shardChangeCounter(0),
-			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
-			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
-			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
-			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), versionBehind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
-			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
-	{
+	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db,
+	              StorageServerInterface const& ssi)
+	  : fetchKeysHistograms(), instanceID(deterministicRandom()->randomUniqueID().first()), storage(this, storage),
+	    db(db), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
+	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), durableInProgress(Void()), versionLag(0),
+	    primaryLocality(tagLocalityInvalid), updateEagerReads(0), shardChangeCounter(0),
+	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), shuttingDown(false),
+	    debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0), logProtocol(0),
+	    counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
+	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), behind(false), versionBehind(false),
+	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now()),
+	    poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
 		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
@@ -661,6 +713,9 @@ public:
 		return fun(this, request);
 	}
 };
+
+const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
+const KeyRangeRef StorageServer::CurrentRunningFetchKeys::emptyKeyRange = KeyRangeRef(StorageServer::CurrentRunningFetchKeys::emptyString, StorageServer::CurrentRunningFetchKeys::emptyString);
 
 // If and only if key:=value is in (storage+versionedData),    // NOT ACTUALLY: and key < allKeys.end,
 //   and H(key) < |key+value|/bytesPerSample,
@@ -1622,7 +1677,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 	setDataDurableVersion(data->thisServerID, data->durableVersion.get());
 	if (checkFatalError.isReady()) checkFatalError.get();
 
-	//TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
+	// TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
@@ -1942,16 +1997,56 @@ ACTOR Future<Void> logFetchKeysWarning(AddingShard* shard) {
 	loop {
 		state double waitSeconds = BUGGIFY ? 5.0 : 600.0;
 		wait(delay(waitSeconds));
-		TraceEvent(waitSeconds > 300.0 ? SevWarnAlways : SevInfo, "FetchKeysTooLong").detail("Duration", now() - startTime).detail("Phase", shard->phase).detail("Begin", shard->keys.begin.printable()).detail("End", shard->keys.end.printable());
+
+		const auto traceEventLevel = waitSeconds > SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA ? SevWarnAlways : SevInfo;
+		TraceEvent(traceEventLevel, "FetchKeysTooLong")
+		    .detail("Duration", now() - startTime)
+		    .detail("Phase", shard->phase)
+		    .detail("Begin", shard->keys.begin.printable())
+		    .detail("End", shard->keys.end.printable());
 	}
 }
 
+class FetchKeysMetricReporter {
+	const UID uid;
+	const double startTime;
+	int fetchedBytes;
+	StorageServer::FetchKeysHistograms& histograms;
+	StorageServer::CurrentRunningFetchKeys& currentRunning;
+
+public:
+	FetchKeysMetricReporter(const UID& uid_, const double startTime_, const KeyRange& keyRange, StorageServer::FetchKeysHistograms& histograms_, StorageServer::CurrentRunningFetchKeys& currentRunning_)
+		 : uid(uid_), startTime(startTime_), fetchedBytes(0), histograms(histograms_), currentRunning(currentRunning_) {
+
+		currentRunning.recordStart(uid, keyRange);
+	}
+
+	void addFetchedBytes(const int bytes) { fetchedBytes += bytes; }
+
+	~FetchKeysMetricReporter() {
+		double latency = now() - startTime;
+
+		// If fetchKeys is *NOT* run, i.e. returning immediately, still report a record.
+		if (latency == 0) latency = 1e6;
+
+		const uint32_t bandwidth = fetchedBytes / latency;
+
+		histograms.latency->sampleSeconds(latency);
+		histograms.bytes->sample(fetchedBytes);
+		histograms.bandwidth->sample(bandwidth);
+
+		currentRunning.recordFinish(uid);
+	}
+};
+
 ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
+	state const UID fetchKeysID = deterministicRandom()->randomUniqueID();
 	state TraceInterval interval("FetchKeys");
 	state KeyRange keys = shard->keys;
 	state Future<Void> warningLogger = logFetchKeysWarning(shard);
-	state double startt = now();
+	state const double startTime = now();
 	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
+	state FetchKeysMetricReporter metricReporter(fetchKeysID, startTime, keys, data->fetchKeysHistograms, data->currentRunningFetchKeys);
 
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
 	//  This allows adding->start() to be called inline with CSK.
@@ -1989,7 +2084,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
-		data->counters.fetchWaitingMS += 1000*(executeStart - startt);
+		data->counters.fetchWaitingMS += 1000 * (executeStart - startTime);
 
 		// Fetch keys gets called while the update actor is processing mutations. data->version will not be updated until all mutations for a version
 		// have been processed. We need to take the durableVersionLock to ensure data->version is greater than the version of the mutation which caused
@@ -2029,6 +2124,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				debugKeyRange("fetchRange", fetchVersion, keys);
 				for(auto k = this_block.begin(); k != this_block.end(); ++k) debugMutation("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 
+				metricReporter.addFetchedBytes(expectedSize);
 				data->counters.bytesFetched += expectedSize;
 				if( fetchBlockBytes > expectedSize ) {
 					holdingFKPL.release( fetchBlockBytes - expectedSize );
@@ -2096,8 +2192,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
 
 					//FIXME: remove when we no longer support upgrades from 5.X
-					if(debug_getRangeRetries >= 100) {
+					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
+						// TODO: Add SevWarnAlways to say it was disabled.
 					}
 
 					debug_getRangeRetries++;
@@ -2214,7 +2311,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		TraceEvent(SevError, "FetchKeysError", data->thisServerID)
 			.error(e)
-			.detail("Elapsed", now()-startt)
+			.detail("Elapsed", now() - startTime)
 			.detail("KeyBegin", keys.begin)
 			.detail("KeyEnd",keys.end);
 		if (e.code() != error_code_actor_cancelled)
@@ -3014,7 +3111,9 @@ bool StorageServerDisk::makeVersionMutationsDurable( Version& prevStorageVersion
 void StorageServerDisk::makeVersionDurable( Version version ) {
 	storage->set( KeyValueRef(persistVersion, BinaryWriter::toValue(version, Unversioned())) );
 
-	//TraceEvent("MakeDurable", data->thisServerID).detail("FromVersion", prevStorageVersion).detail("ToVersion", version);
+	// TraceEvent("MakeDurable", data->thisServerID)
+	//     .detail("FromVersion", prevStorageVersion)
+	//     .detail("ToVersion", version);
 }
 
 void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion protocol) {
@@ -3406,7 +3505,10 @@ ACTOR Future<Void> metricsCore( StorageServer* self, StorageServerInterface ssi 
 
 	wait( self->byteSampleRecovery );
 
-	actors.add(traceCounters("StorageMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &self->counters.cc, self->thisServerID.toString() + "/StorageMetrics"));
+	Tag tag = self->tag;
+	actors.add(traceCounters("StorageMetrics", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                         &self->counters.cc, self->thisServerID.toString() + "/StorageMetrics",
+	                         [tag](TraceEvent& te) { te.detail("Tag", tag.toString()); }));
 
 	loop {
 		choose {
@@ -3472,6 +3574,35 @@ ACTOR Future<Void> checkBehind( StorageServer* self ) {
 	}
 }
 
+ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
+	if (!SERVER_KNOBS->REPORT_DD_METRICS) {
+		return Void();
+	}
+
+	loop {
+		wait(delay(SERVER_KNOBS->DD_METRICS_REPORT_INTERVAL));
+
+		const auto numRunningFetchKeys = self->currentRunningFetchKeys.numRunning();
+		if (numRunningFetchKeys == 0) {
+			continue;
+		}
+
+		const auto longestRunningFetchKeys = self->currentRunningFetchKeys.longestTime();
+
+		auto level = SevInfo;
+		if (longestRunningFetchKeys.first >= SERVER_KNOBS->FETCH_KEYS_TOO_LONG_TIME_CRITERIA) {
+			level = SevWarnAlways;
+		}
+
+		TraceEvent(level, "FetchKeyCurrentStatus")
+		    .detail("Timestamp", now())
+		    .detail("LongestRunningTime", longestRunningFetchKeys.first)
+		    .detail("StartKey", longestRunningFetchKeys.second.begin.printable())
+		    .detail("EndKey", longestRunningFetchKeys.second.end.printable())
+		    .detail("NumRunning", numRunningFetchKeys);
+	}
+}
+
 ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterface ssi )
 {
 	state Future<Void> doUpdate = Void();
@@ -3489,6 +3620,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	actors.add(metricsCore(self, ssi));
 	actors.add(logLongByteSampleRecovery(self->byteSampleRecovery));
 	actors.add(checkBehind(self));
+	actors.add(reportStorageServerState(self));
 
 	self->coreStarted.send( Void() );
 

@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include <numeric>
 #include <limits>
+#include <numeric>
+#include <vector>
 
 #include "flow/ActorCollection.h"
 #include "flow/Util.h"
@@ -83,10 +84,10 @@ struct RelocateData {
 
 class ParallelTCInfo : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
 public:
-	vector<Reference<IDataDistributionTeam>> teams;
-	vector<UID> tempServerIDs;
+	std::vector<Reference<IDataDistributionTeam>> teams;
+	std::vector<UID> tempServerIDs;
 
-	ParallelTCInfo() { }
+	ParallelTCInfo() {}
 
 	void addTeam(Reference<IDataDistributionTeam> team) {
 		teams.push_back(team);
@@ -105,11 +106,11 @@ public:
 	}
 
 	template<class T>
-	vector<T> collect(std::function < vector<T>(Reference<IDataDistributionTeam>)> func) {
-		vector<T> result;
+	std::vector<T> collect(std::function<std::vector<T>(Reference<IDataDistributionTeam>)> func) {
+		std::vector<T> result;
 
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			vector<T> newItems = func(*it);
+			std::vector<T> newItems = func(*it);
 			result.insert(result.end(), newItems.begin(), newItems.end());
 		}
 		return result;
@@ -130,7 +131,7 @@ public:
 		});
 	}
 
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() {
+	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() {
 		return collect<StorageServerInterface>([](Reference<IDataDistributionTeam> team) {
 			return team->getLastKnownServerInterfaces();
 		});
@@ -144,10 +145,10 @@ public:
 		return totalSize;
 	}
 
-	virtual vector<UID> const& getServerIDs() {
+	virtual std::vector<UID> const& getServerIDs() {
 		tempServerIDs.clear();
 		for (auto it = teams.begin(); it != teams.end(); it++) {
-			vector<UID> const& childIDs = (*it)->getServerIDs();
+			std::vector<UID> const& childIDs = (*it)->getServerIDs();
 			tempServerIDs.insert(tempServerIDs.end(), childIDs.begin(), childIDs.end());
 		}
 		return tempServerIDs;
@@ -194,7 +195,7 @@ public:
 	}
 
 	virtual Future<Void> updateStorageMetrics() {
-		vector<Future<Void>> futures;
+		std::vector<Future<Void>> futures;
 
 		for (auto it = teams.begin(); it != teams.end(); it++) {
 			futures.push_back((*it)->updateStorageMetrics());
@@ -250,10 +251,19 @@ public:
 		ASSERT(!teams.empty());
 		teams[0]->addServers(servers);
 	}
+
+	std::string getTeamID() override {
+		std::string id;
+		for (int i = 0; i < teams.size(); i++) {
+			auto const& team = teams[i];
+			id += (i == teams.size() - 1) ? team->getTeamID() : format("%s, ", team->getTeamID().c_str());
+		}
+		return id;
+	}
 };
 
 struct Busyness {
-	vector<int> ledger;
+	std::vector<int> ledger;
 
 	Busyness() : ledger( 10, 0 ) {}
 
@@ -553,7 +563,7 @@ struct DDQueueData {
 
 				if(keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for( int shard = 0; shard < keyServersEntries.size(); shard++ ) {
-						vector<UID> src, dest;
+						std::vector<UID> src, dest;
 						decodeKeyServersValue( keyServersEntries[shard].value, src, dest );
 						ASSERT( src.size() );
 						for( int i = 0; i < src.size(); i++ ) {
@@ -852,7 +862,7 @@ struct DDQueueData {
 			startedHere++;
 
 			// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
-			vector<KeyRange> ranges;
+			std::vector<KeyRange> ranges;
 			inFlightActors.getRangesAffectedByInsertion( rd.keys, ranges );
 			inFlightActors.cancel( KeyRangeRef( ranges.front().begin, ranges.back().end ) );
 			inFlight.insert( rd.keys, rd );
@@ -1036,6 +1046,9 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			} else {
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("KeyBegin", rd.keys.begin)
+				    .detail("KeyEnd", rd.keys.end)
+				    .detail("SourceServers", describe(rd.src))
 				    .detail("DestinationTeam", describe(destIds))
 				    .detail("ExtraIds", describe(extraIds));
 			}
@@ -1421,7 +1434,7 @@ ACTOR Future<Void> dataDistributionQueue(
 	state RelocateData launchData;
 	state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
 
-	state vector<Future<Void>> balancingFutures;
+	state std::vector<Future<Void>> balancingFutures;
 
 	state ActorCollectionNoErrors actors;
 	state PromiseStream<KeyRange> rangesComplete;

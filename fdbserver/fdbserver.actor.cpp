@@ -373,6 +373,14 @@ void failAfter( Future<Void> trigger, Endpoint e ) {
 		failAfter( trigger, g_simulator.getProcess( e ) );
 }
 
+ACTOR Future<Void> histogramReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+
+		GetHistogramRegistry().logReport();
+	}
+}
+
 void testSerializationSpeed() {
 	double tstart;
 	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
@@ -492,8 +500,10 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 void memoryTest();
 void skipListTest();
 
-Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
+Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> dcId,
+                                Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
+	initializeSystemMonitorMachineState(
+	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
 	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
@@ -1656,6 +1666,8 @@ int main(int argc, char* argv[]) {
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", testFile);
 
+			auto histogramReportActor = histogramReport();
+
 			clientKnobs->trace();
 			flowKnobs->trace();
 			serverKnobs->trace();
@@ -1786,6 +1798,7 @@ int main(int argc, char* argv[]) {
 
 			vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix, rsssize, whitelistBinPaths) );
+			actors.push_back(histogramReport());
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 			f = stopAfter( waitForAll(actors) );
@@ -1794,13 +1807,13 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == Test) {
-			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
+			auto m = startSystemMonitor(dataFolder, dcId, zoneId, zoneId);
 			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == ConsistencyCheck) {
 			setupSlowTaskProfiler();
 
-			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
+			auto m = startSystemMonitor(dataFolder, dcId, zoneId, zoneId);
 			f = stopAfter( runTests( connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == CreateTemplateDatabase) {
