@@ -22,6 +22,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/RoleLineage.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -46,6 +47,7 @@
 #include "flow/Profiler.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
+#include "flow/flow.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -1810,6 +1812,7 @@ ACTOR Future<Void> fdbd(
 {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+	currentLineage->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	try {
 		ServerCoordinators coordinators( connFile );

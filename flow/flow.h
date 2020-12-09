@@ -20,6 +20,7 @@
 
 #ifndef FLOW_FLOW_H
 #define FLOW_FLOW_H
+#include "flow/Arena.h"
 #include "flow/FastRef.h"
 #pragma once
 
@@ -29,6 +30,7 @@
 
 #include <vector>
 #include <queue>
+#include <stack>
 #include <map>
 #include <unordered_map>
 #include <set>
@@ -409,21 +411,88 @@ struct SingleCallback {
 	}
 };
 
-struct ActorLineagePropertyMap : ReferenceCounted<ActorLineagePropertyMap> {
+struct LineagePropertiesBase {
+};
+
+// helper class to make implementation of LineageProperties easier
+template<class Derived>
+struct LineageProperties : LineagePropertiesBase {
+	// Contract:
+	//
+	// StringRef name = "SomeUniqueName"_str;
+
+
+	// this has to be implemented by subclasses
+	// but can't be made virtual.
+	// A user should implement this for any type
+	// within the properies class.
+	template<class Value>
+	bool isSet(Value Derived::*member) {
+		return true;
+	}
 };
 
 struct ActorLineage : ReferenceCounted<ActorLineage> {
-	Reference<ActorLineagePropertyMap> map;
+private:
+	std::unordered_map<StringRef, LineagePropertiesBase*> properties;
 	Reference<ActorLineage> parent;
+public:
 	ActorLineage();
+	~ActorLineage();
+	bool isRoot() const {
+		return parent.getPtr() == nullptr;
+	}
+	void makeRoot() {
+		parent.clear();
+	}
+	template <class T, class V>
+	V& modify(V T::*member) {
+		auto& res = properties[T::name];
+		if (!res) {
+			res = new T{};
+		}
+		T* map = static_cast<T*>(res);
+		return map->*member;
+	}
+	template <class T, class V>
+	std::optional<V> get(V T::*member) const {
+		auto current = this;
+		while (current != nullptr) {
+			auto iter = current->properties.find(T::name);
+			if (iter != current->properties.end()) {
+				T const& map = static_cast<T const&>(*iter->second);
+				if (map.isSet(member)) {
+					return map.*member;
+				}
+			}
+			current = current->parent.getPtr();
+		}
+		return std::optional<V>{};
+	}
+	template <class T, class V>
+	std::stack<V> stack(V T::*member) const {
+		auto current = this;
+		std::stack<V> res;
+		while (current != nullptr) {
+			auto iter = current->properties.find(T::name);
+			if (iter != current->properties.end()) {
+				T const& map = static_cast<T const&>(*iter->second);
+				if (map.isSet(member)) {
+					res.push(map.*member);
+				}
+			}
+			current = current->parent.getPtr();
+		}
+		return res;
+	}
 };
 
 extern thread_local Reference<ActorLineage> currentLineage;
 
 struct restore_lineage {
-	Reference<ActorLineage> lineage;
-	restore_lineage() : lineage(currentLineage) {}
-	~restore_lineage() { currentLineage = lineage; }
+	Reference<ActorLineage> prev;
+	restore_lineage() : prev(currentLineage) {}
+	~restore_lineage() { currentLineage = prev; }
 };
 
 // SAV is short for Single Assignment Variable: It can be assigned for only once!
@@ -465,7 +534,6 @@ public:
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
-		restore_lineage _;
 		while (Callback<T>::next != this) {
 			Callback<T>::next->fire(this->value());
 		}
@@ -479,7 +547,6 @@ public:
 	void sendError(Error err) {
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		this->error_state = err;
-		restore_lineage _;
 		while (Callback<T>::next != this) {
 			Callback<T>::next->error(err);
 		}
@@ -487,7 +554,6 @@ public:
 
 	template <class U>
 	void sendAndDelPromiseRef(U && value) {
-		restore_lineage _;
 		ASSERT(canBeSet());
 		if (promises == 1 && !futures) {
 			// No one is left to receive the value, so we can just die
@@ -501,7 +567,6 @@ public:
 
 	void finishSendAndDelPromiseRef() {
 		// Call only after value_storage has already been initialized!
-		restore_lineage _;
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
 		while (Callback<T>::next != this)
 			Callback<T>::next->fire(this->value());
@@ -518,7 +583,6 @@ public:
 	}
 
 	void sendErrorAndDelPromiseRef(Error err) {
-		restore_lineage _;
 		ASSERT(canBeSet() && int16_t(err.code()) > 0);
 		if (promises == 1 && !futures) {
 			// No one is left to receive the value, so we can just die
@@ -622,7 +686,6 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid()) return;
 
 		if (SingleCallback<T>::next != this) {
-			restore_lineage _;
 			SingleCallback<T>::next->fire(std::forward<U>(value));
 		}
 		else {
@@ -635,7 +698,6 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 		this->error = err;
 		if (SingleCallback<T>::next != this) {
-			restore_lineage _;
 			SingleCallback<T>::next->error(err);
 		}
 	}
@@ -1025,13 +1087,13 @@ struct Actor : SAV<ReturnValue> {
 		/*++actorCount;*/
 		currentLineage = lineage;
 	}
+	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
 		currentLineage = lineage;
 		return res;
 	}
-	//~Actor() { --actorCount; }
 };
 
 template <>
@@ -1045,13 +1107,13 @@ struct Actor<void> {
 		/*++actorCount;*/
 		currentLineage = lineage;
 	}
+	//~Actor() { --actorCount; }
 
 	Reference<ActorLineage> setLineage() {
 		auto res = currentLineage;
 		currentLineage = lineage;
 		return res;
 	}
-	//~Actor() { --actorCount; }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
