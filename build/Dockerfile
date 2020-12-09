@@ -79,7 +79,7 @@ RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.
 RUN cd /opt/ && curl -L https://github.com/manticoresoftware/manticoresearch/raw/master/misc/junit/ctest2junit.xsl -o ctest2junit.xsl
 
 # Setting this environment variable switches from OpenSSL to BoringSSL
-#ENV OPENSSL_ROOT_DIR=/opt/boringssl
+ENV OPENSSL_ROOT_DIR=/opt/boringssl
 
 # install BoringSSL:  TODO: They don't seem to have releases(?)  I picked today's master SHA.
 RUN cd /opt &&\
