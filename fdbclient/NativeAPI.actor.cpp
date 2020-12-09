@@ -2197,7 +2197,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
-				++cx->transactionGetRangeRequests;
 				state GetKeyValuesReply rep;
 				try {
 					if (CLIENT_BUGGIFY) {
