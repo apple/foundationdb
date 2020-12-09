@@ -29,10 +29,6 @@
 
 namespace {
 
-// Serialized packets will be sent to this port via UDP. In simulation, a UDP
-// server also listens on this port.
-constexpr uint16_t kUdpPort = 8889;
-
 // Initial size of buffer used to store serialized traces. Buffer will be
 // resized when necessary.
 constexpr int kTraceBufferSize = 1024;
@@ -104,8 +100,8 @@ struct TraceRequest {
 
 // A server listening for UDP trace messages, run only in simulation.
 ACTOR Future<Void> simulationStartServer() {
-	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", kUdpPort);
-	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
+	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
+	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 	serverSocket->bind(localAddress);
 
@@ -125,7 +121,7 @@ ACTOR Future<Void> simulationStartServer() {
 }
 
 ACTOR Future<Void> traceSend(FutureStream<TraceRequest> inputStream, std::queue<TraceRequest>* buffers, int* pendingMessages, bool* sendError) {
-	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
+	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 	state Reference<IUDPSocket> socket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 
 	loop choose {
@@ -353,7 +349,7 @@ struct FastUDPTracer : public UDPTracer {
 				udp_server_actor_ = simulationStartServer();
 			}
 
-			NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(kUdpPort));
+			NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 			socket_ = INetworkConnections::net()->createUDPSocket(localAddress);
 		});
 
