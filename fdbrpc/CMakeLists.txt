@@ -51,7 +51,7 @@ endif()
 
 add_library(thirdparty STATIC ${FDBRPC_THIRD_PARTY_SRCS})
 if(WIN32)
-  target_compile_definitions(thirdparty PRIVATE USE_USEFIBERS)
+  target_compile_definitions(thirdparty PRIVATE USE_FIBERS)
 else()
   target_compile_definitions(thirdparty PRIVATE USE_UCONTEXT)
   target_compile_options(thirdparty BEFORE PRIVATE -w) # disable warnings for third party
