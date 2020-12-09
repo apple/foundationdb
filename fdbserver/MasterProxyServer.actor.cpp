@@ -854,6 +854,20 @@ ACTOR Future<Void> releaseResolvingAfter(ProxyCommitData* self, Future<Void> rel
 	return Void();
 }
 
+// Try to identify recovery transaction and backup's apply mutations (blind writes).
+// Both cannot be rejected and are approximated by looking at first mutation
+// starting with 0xff.
+bool canReject(const std::vector<CommitTransactionRequest>& trs) {
+	for (const auto& tr : trs) {
+		if (tr.transaction.mutations.empty()) continue;
+		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
+		    tr.transaction.read_conflict_ranges.empty()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 // Commit one batch of transactions trs
 ACTOR Future<Void> commitBatch(
 	ProxyCommitData* self,
@@ -898,6 +912,7 @@ ACTOR Future<Void> commitBatch(
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.Before");
+	state double timeStart = now();
 
 	if(localBatchNumber-self->latestLocalCommitBatchResolving.get()>SERVER_KNOBS->RESET_MASTER_BATCHES && now()-self->lastMasterReset>SERVER_KNOBS->RESET_MASTER_DELAY) {
 		TraceEvent(SevWarnAlways, "ConnectionResetMaster", self->dbgid)
@@ -913,6 +928,32 @@ ACTOR Future<Void> commitBatch(
 	// Queuing pre-resolution commit processing
 	TEST(self->latestLocalCommitBatchResolving.get() < localBatchNumber - 1);
 	wait(self->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber-1));
+	double queuingDelay = g_network->now() - timeStart;
+	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
+	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01))) &&
+	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
+		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
+		TEST(true); // Reject transactions in the batch
+		TraceEvent(SevWarnAlways, "ProxyReject", self->dbgid)
+		    .suppressFor(0.1)
+		    .detail("QDelay", queuingDelay)
+		    .detail("Transactions", trs.size())
+		    .detail("BatchNumber", localBatchNumber);
+		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
+		self->latestLocalCommitBatchResolving.set(localBatchNumber);
+
+		wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber-1));
+		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
+		self->latestLocalCommitBatchLogging.set(localBatchNumber);
+		for (const auto& tr : trs) {
+			tr.reply.sendError(transaction_too_old());
+		}
+		++self->stats.commitBatchOut;
+		self->stats.txnCommitOut += trs.size();
+		self->stats.txnConflicts += trs.size();
+		return Void();
+	}
+
 	state Future<Void> releaseDelay = delay(std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE, batchOperations*self->commitComputePerOperation[latencyBucket]), TaskPriority::ProxyMasterVersionReply);
 
 	if (debugID.present())
