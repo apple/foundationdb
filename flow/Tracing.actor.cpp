@@ -174,15 +174,15 @@ protected:
 		// here.
 		uint8_t size = 7;
 		if (span.parents.size() == 0) --size;
-		request.write_byte(size | 0b10010000); // write as array
+		request.write_byte(size | 0b10010000);  // write as array
 
-		serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
+		serialize_string(g_network->getLocalAddress().toString(), request);  // ip:port
 
-		serialize_value(span.context.first(), request, 0xcf); // trace id
-		serialize_value(span.context.second(), request, 0xcf); // span id
+		serialize_value(span.context.first(), request, 0xcf);  // trace id
+		serialize_value(span.context.second(), request, 0xcf);  // token (span id)
 
-		serialize_value(span.begin, request, 0xcb);
-		serialize_value(span.end - span.begin, request, 0xcb); // duration
+		serialize_value(span.begin, request, 0xcb);  // start time
+		serialize_value(span.end - span.begin, request, 0xcb);  // duration
 
 		serialize_string(span.location.name.toString(), request);
 
