@@ -38,7 +38,7 @@ public:
 class SpeedLimit : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
 	SpeedLimit(int windowLimit, double windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
-		m_last_update = timer();
+		m_last_update = now();
 	}
 	virtual ~SpeedLimit() {}
 
@@ -47,7 +47,7 @@ public:
 
 	virtual Future<Void> getAllowance(unsigned int n) {
 		// Replenish budget based on time since last update
-		double ts = timer();
+		double ts = now();
 		// returnUnused happens to do exactly what we want here
 		returnUnused((ts - m_last_update) / m_seconds * m_limit);
 		m_last_update = ts;
