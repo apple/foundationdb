@@ -21,7 +21,7 @@ RUN yum -y install devtoolset-8-8.1-1.el6 java-1.8.0-openjdk-devel \
       devtoolset-8-libubsan-devel devtoolset-8-libasan-devel devtoolset-8-valgrind-devel \
       rh-python36-python-devel rh-ruby24 golang python27 rpm-build \
       mono-core debbuild python-pip dos2unix valgrind-devel ccache \
-      distcc wget git lz4 lz4-devel lz4-static &&\
+      distcc wget libxslt git lz4 lz4-devel lz4-static &&\
   pip install boto3==1.1.1
 
 USER root
@@ -51,6 +51,8 @@ RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.1
 
 # install Ninja
 RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip -o ninja.zip &&\
+    echo "8e2e654a418373f10c22e4cc9bdbe9baeca8527ace8d572e0b421e9d9b85b7ef  ninja.zip" > /tmp/ninja-sha.txt &&\
+    sha256sum -c /tmp/ninja-sha.txt &&\
     unzip ninja.zip && cd ninja-1.9.0 && scl enable devtoolset-8 -- ./configure.py --bootstrap && cp ninja /usr/bin &&\
     cd .. && rm -rf ninja-1.9.0 ninja.zip
 
@@ -67,13 +69,48 @@ RUN cd /opt/ && curl -L https://github.com/facebook/rocksdb/archive/v6.10.1.tar.
     echo "d573d2f15cdda883714f7e0bc87b814a8d4a53a82edde558f08f940e905541ee  rocksdb.tar.gz" > rocksdb-sha.txt &&\
     sha256sum -c rocksdb-sha.txt && tar xf rocksdb.tar.gz && rm -rf rocksdb.tar.gz rocksdb-sha.txt
 
+RUN cd /opt/ && curl -L https://github.com/manticoresoftware/manticoresearch/raw/master/misc/junit/ctest2junit.xsl -o ctest2junit.xsl
+
+# Setting this environment variable switches from OpenSSL to BoringSSL
+#ENV OPENSSL_ROOT_DIR=/opt/boringssl
+
+# install BoringSSL:  TODO: They don't seem to have releases(?)  I picked today's master SHA.
+RUN cd /opt &&\
+    git clone https://boringssl.googlesource.com/boringssl &&\
+    cd boringssl &&\
+    git checkout e796cc65025982ed1fb9ef41b3f74e8115092816 &&\
+    mkdir build
+
+# ninja doesn't respect CXXFLAGS, and the boringssl CMakeLists doesn't expose an option to define __STDC_FORMAT_MACROS
+# also, enable -fPIC.
+# this is moderately uglier than creating a patchfile, but easier to maintain.
+RUN cd /opt/boringssl &&\
+	for f in crypto/fipsmodule/rand/fork_detect_test.cc \
+	         include/openssl/bn.h \
+		 ssl/test/bssl_shim.cc ; do \
+		perl -p -i -e 's/#include <inttypes.h>/#define __STDC_FORMAT_MACROS 1\n#include <inttypes.h>/g;' $f ; \
+	done &&\
+	perl -p -i -e 's/-Werror/-Werror -fPIC/' CMakeLists.txt &&\
+	git diff
+
+RUN cd /opt/boringssl/build &&\
+    scl enable devtoolset-8 rh-python36 rh-ruby24 -- cmake -GNinja -DCMAKE_BUILD_TYPE=Release .. &&\
+    scl enable devtoolset-8 rh-python36 rh-ruby24 -- ninja &&\
+	./ssl/ssl_test &&\
+	mkdir -p ../lib && cp crypto/libcrypto.a ssl/libssl.a ../lib
+
 # Localize time zone
 ARG TIMEZONEINFO=America/Los_Angeles
 RUN rm -f /etc/localtime && ln -s /usr/share/zoneinfo/${TIMEZONEINFO} /etc/localtime
 
-LABEL version=0.1.20
-ENV DOCKER_IMAGEVER=0.1.20
+LABEL version=0.1.21
+ENV DOCKER_IMAGEVER=0.1.21
 ENV JAVA_HOME=/usr/lib/jvm/java-1.8.0
 ENV CC=/opt/rh/devtoolset-8/root/usr/bin/gcc
 ENV CXX=/opt/rh/devtoolset-8/root/usr/bin/g++
+
+ENV CCACHE_NOHASHDIR=true
+ENV CCACHE_UMASK=0000
+ENV CCACHE_SLOPPINESS="file_macro,time_macros,include_file_mtime,include_file_ctime,file_stat_matches"
+
 CMD scl enable devtoolset-8 rh-python36 rh-ruby24 -- bash
