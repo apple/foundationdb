@@ -1346,6 +1346,12 @@ void SQLiteDB::open(bool writable) {
 	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
 	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
 
+	// Set Rate control if FLOW_KNOBS are positive
+	if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT > 0 && FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS > 0) {
+		dbFile.get()->setRateControl(Reference(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
+		                                                      FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS)));
+	}
+
 	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("Filename", filename).detail("Writable", writable);
 
 	// Now that the file itself is open and locked, let sqlite open the database

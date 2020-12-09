@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 //Page caches used in non-simulated environments
 Optional<Reference<EvictablePageCache>> pc4k, pc64k;
@@ -252,23 +253,33 @@ Future<Void> AsyncFileCached::changeFileSize( int64_t size ) {
 	});
 }
 
+ACTOR static Future<Void> flushActor(AsyncFileCached* self) {
+	state std::vector<Future<Void>> unflushed;
+	state int debug_count = self->getFlushable().size();
+	state int i = 0;
+	state AFCPage* p;
+
+	for (; i < self->getFlushable().size();) {
+		p = self->getFlushable()[i];
+		// Wait for rate control if it is set
+		if (self->getRateControl()) wait(self->getRateControl()->getAllowance(1));
+		auto f = p->flush();
+		if (!f.isReady() || f.isError()) unflushed.push_back( f );
+		ASSERT((i < self->getFlushable().size() && self->getFlushable()[i] == p) != f.isReady());
+		if (!f.isReady()) i++;
+	}
+
+	ASSERT(self->getFlushable().size() <= debug_count);
+	wait(waitForAll(unflushed));
+
+	return Void();
+}
+
 Future<Void> AsyncFileCached::flush() {
 	++countFileCacheWrites;
 	++countCacheWrites;
 
-	std::vector<Future<Void>> unflushed;
-
-	int debug_count = flushable.size();
-	for(int i=0; i<flushable.size(); ) {
-		auto p = flushable[i];
-		auto f = p->flush();
-		if (!f.isReady() || f.isError()) unflushed.push_back( f );
-		ASSERT( (i<flushable.size() && flushable[i] == p) != f.isReady() );
-		if (!f.isReady()) i++;
-	}
-	ASSERT( flushable.size() <= debug_count );
-
-	return waitForAll(unflushed);
+	return flushActor(this);
 }
 
 Future<Void> AsyncFileCached::quiesce() {

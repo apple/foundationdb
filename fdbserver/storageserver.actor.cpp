@@ -339,7 +339,7 @@ public:
 			const double currentTime = now();
 			double longest = 0;
 			UID UIDofLongest;
-			for (const auto kv: startTimeMap) {
+			for (const auto& kv: startTimeMap) {
 				const double currentRunningTime = currentTime - kv.second;
 				if (longest < currentRunningTime) {
 					longest = currentRunningTime;
