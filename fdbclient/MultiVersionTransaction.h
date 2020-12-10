@@ -296,6 +296,7 @@ private:
 
 struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
+	std::string clientVersion;
 	IClientApi *api;
 	std::string libPath;
 	bool external;
@@ -331,7 +332,7 @@ public:
 	struct DatabaseState;
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
-		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client, std::string clusterFilePath) : dbState(dbState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}
+		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client) : dbState(dbState), client(client), connected(false), cancelled(false) {}
 
 		void connect();
 		void cancel();
@@ -341,7 +342,10 @@ public:
 		void error(const Error& e, int& userParam) override;
 
 		const Reference<ClientInfo> client;
-		const std::string clusterFilePath;
+
+		// TODO: why are clusterFilePath associated with Connector? Shouldn't each connector within a MultiVersionDatabase
+		// have the same clusterFilePath?
+		// const std::string clusterFilePath;
 
 		const Reference<DatabaseState> dbState;
 
@@ -354,15 +358,30 @@ public:
 		bool cancelled;
 	};
 
+	struct ProtocolVersionManager : ThreadCallback, ThreadSafeReferenceCounted<ProtocolVersionManager>{
+		ProtocolVersionManager(Reference<DatabaseState> dbState);
+		
+		bool canFire(int notMadeActive) const override { return true; }
+		void fire(const Void& unused, int& userParam) override;
+		void error(const Error& e, int& userParam) override;
+
+		const Reference<DatabaseState> dbState;
+
+		Future<Void> protocolFuture;
+		PromiseStream<Future<uint64_t>> protocolChangeFutureStream;
+		ThreadFuture<uint64_t> tf;
+	};
+
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState();
+		DatabaseState(std::string clusterFilePath);
 
 		void stateChanged();
-		void addConnection(Reference<ClientInfo> client, std::string clusterFilePath);
+		void addConnection(Reference<ClientInfo> client);
 		void cancelConnections();
 
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
+		const std::string clusterFilePath;
 
 		ThreadFuture<Void> changed;
 
@@ -371,14 +390,14 @@ public:
 		int currentClientIndex;
 		std::vector<Reference<ClientInfo>> clients;
 		std::vector<Reference<Connector>> connectionAttempts;
-		Future<Void> protocolFuture;
 
 		std::vector<std::pair<FDBDatabaseOptions::Option, Optional<Standalone<StringRef>>>> options;
 		UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaultOptions;
 		Mutex optionLock;
 	};
-
+	
 	const Reference<DatabaseState> dbState;
+	const Reference<ProtocolVersionManager> protocolVersionManager;
 	friend class MultiVersionTransaction;
 };
 

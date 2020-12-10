@@ -729,47 +729,79 @@ void MultiVersionTransaction::reset() {
 
 // MultiVersionDatabase
 
+MultiVersionDatabase::ProtocolVersionManager::ProtocolVersionManager(Reference<DatabaseState> dbState) : dbState(dbState) {}
+
+void MultiVersionDatabase::ProtocolVersionManager::fire(const Void &unused, int &userParam) {
+	protocolChangeFutureStream.send(tf.get());
+	delref();
+}
+
+void MultiVersionDatabase::ProtocolVersionManager::error(const Error& e, int& userParam) {
+	// TODO: is it right to do this for every error
+	Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(dbState->clusterFilePath);
+	protocolChangeFutureStream.send(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
+	delref();
+}
+
 ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *api, std::string clusterFilePath) {
 	state std::string clusterFile = ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath)).first;
 	state Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(clusterFile);
 	state uint64_t currentProtocolVersionInt = wait(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
-	loop {
-		// TODO: This doesn't handle multiple compatible clients well
-		state int currentClientIndex = db->dbState->currentClientIndex;
-		state int i = 0;
-		state bool foundCompatible = false;
-		for(; i<db->dbState->connectionAttempts.size(); i++) {
-			auto c = db->dbState->connectionAttempts[i];
-			// why would we use isCompatible? it seems like even if protocol versions are compatible, a server and client can't communicate unless they're on the same version
-			// from FlowTransport::checkCompatible case ReqirePeer::Exactly
-			// if(i != currentClientIndex && ProtocolVersion(currentProtocolVersionInt).isCompatible(c->client->protocolVersion)) {
-			if(i != currentClientIndex && ProtocolVersion(currentProtocolVersionInt) == c->client->protocolVersion) {
-				if(currentClientIndex >= 0) {
-					db->dbState->connectionAttempts[currentClientIndex]->cancel();
-				}
-				c->connect();
 
-				// is this safe? Do we have to use onMainThreadVoid
-				// It can only be safely used from the main thread, on futures which are being set on the main thread
-				uint64_t nextProtocolVersionInt = wait(unsafeThreadFutureToFuture(c->client->api->getServerProtocol(clusterFile.c_str(), &currentProtocolVersionInt)));
-				currentProtocolVersionInt = nextProtocolVersionInt;
-				foundCompatible = true;
-				break;
+	loop {
+		state bool foundCompatible = false;
+
+		std::vector<Reference<MultiVersionDatabase::Connector>> compatibleConnectors;
+		int currentClientIndex = db->dbState->currentClientIndex;
+		for(int i = 0; i<db->dbState->connectionAttempts.size(); i++) {
+			Reference<MultiVersionDatabase::Connector> c = db->dbState->connectionAttempts[i];
+			if(i != currentClientIndex && ProtocolVersion(currentProtocolVersionInt) == c->client->protocolVersion
+				&& !c->client->failed) {
+				compatibleConnectors.push_back(c);
 			}
+		}
+
+		if(!compatibleConnectors.empty()) {
+			state Reference<MultiVersionDatabase::Connector> compatibleConnector = *std::max_element(compatibleConnectors.begin(), compatibleConnectors.end(),
+				[](Reference<MultiVersionDatabase::Connector> l, Reference<MultiVersionDatabase::Connector> r) {
+					return l->client->clientVersion < r->client->clientVersion;
+				});
+
+			if(currentClientIndex >= 0) {
+				db->dbState->connectionAttempts[currentClientIndex]->cancel();
+			}
+			compatibleConnector->connect();
+
+			state Reference<ClientInfo> compatibleClient = compatibleConnector->client;
+
+			// TODO: are these addrefs needed?
+			ccf->addref();
+			compatibleClient->addref();
+			db->protocolVersionManager->addref();
+			onMainThreadVoid([&]() {
+				db->protocolVersionManager->tf = compatibleClient->api->getServerProtocol(ccf->getFilename().c_str(), &currentProtocolVersionInt);
+				ccf->delref();
+				compatibleClient->delref();
+
+				int userParam;
+				db->protocolVersionManager->tf.callOrSetAsCallback(db->protocolVersionManager.getPtr(), userParam, 0);
+			}, nullptr);
+
+			foundCompatible = true;
 		}
 
 		if(!foundCompatible) {
 			waitNext(api->getExternalClientStream());
 		}
+		else {
+			Future<uint64_t> nextProtocolVersionFuture = waitNext(db->protocolVersionManager->protocolChangeFutureStream.getFuture());
+			uint64_t nextProtocolVersionInt = wait(nextProtocolVersionFuture);
+			currentProtocolVersionInt = nextProtocolVersionInt;
+		}
 	}
 }
 
-MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors) : dbState(new DatabaseState()) {
-	// why are these being set here when they could be set in stateChanged?
-	// is this a performance boost - seems to be trying to set the local db ahead of time?
-	// dbState->db = db;
-	// dbState->dbVar->set(db);
-
+MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors) : dbState(new DatabaseState(clusterFilePath)), protocolVersionManager(new ProtocolVersionManager(dbState)) {
 	if(!openConnectors) {
 		dbState->db = db;
 		dbState->dbVar->set(db);
@@ -778,18 +810,19 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi *api, std::string clu
 	else {
 		dbState->currentClientIndex = -1;
 		if(!api->localClientDisabled) {
-			dbState->addConnection(api->getLocalClient(), clusterFilePath);
+			dbState->addConnection(api->getLocalClient());
 		}
 
-		api->runOnExternalClients([this, clusterFilePath](Reference<ClientInfo> client) {
-			dbState->addConnection(client, clusterFilePath);
+		api->runOnExternalClients([this](Reference<ClientInfo> client) {
+			dbState->addConnection(client);
 		});
 
-		dbState->protocolFuture = connectAndMonitor(this, api, clusterFilePath);
+		protocolVersionManager->protocolFuture = connectAndMonitor(this, api, dbState->clusterFilePath);
 	}
 }
 
 MultiVersionDatabase::~MultiVersionDatabase() {
+	protocolVersionManager->protocolFuture.cancel();
 	dbState->cancelConnections();
 }
 
@@ -833,7 +866,7 @@ void MultiVersionDatabase::Connector::connect() {
 				connectionFuture.cancel();
 			}
 			
-			candidateDatabase = client->api->createDatabase(clusterFilePath.c_str());
+			candidateDatabase = client->api->createDatabase(dbState->clusterFilePath.c_str());
 			if(client->external) {
 				connectionFuture = candidateDatabase.castTo<DLDatabase>()->onReady();
 			}
@@ -899,16 +932,16 @@ void MultiVersionDatabase::Connector::error(const Error& e, int& userParam) {
 	delref();
 }
 
-MultiVersionDatabase::DatabaseState::DatabaseState()
-	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), currentClientIndex(-1) {}
+MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath)
+	: dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))), currentClientIndex(-1),
+	  clusterFilePath(ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath)).first) {}
 
 // Only called from main thread
 void MultiVersionDatabase::DatabaseState::stateChanged() {
 	int newIndex = -1;
 	for(int i = 0; i < clients.size(); ++i) {
 		if(i != currentClientIndex && connectionAttempts[i]->connected) {
-			// why is this using canReplace (which relies on ProtocolVersion.isCompatible).
-			// seems like this could disable a client that we might need in the future
+			// TODO: why is client[i] a duplicate client version if client[i] protocol version is less than or equal to other?
 			// if(currentClientIndex >= 0 && !clients[i]->canReplace(clients[currentClientIndex])) {
 			if(currentClientIndex >= 0 && clients[i]->protocolVersion == clients[currentClientIndex]->protocolVersion) {
 				TraceEvent(SevWarn, "DuplicateClientVersion").detail("Keeping", clients[currentClientIndex]->libPath).detail("KeptClientProtocolVersion", clients[currentClientIndex]->protocolVersion.version()).detail("Disabling", clients[i]->libPath).detail("DisabledClientProtocolVersion", clients[i]->protocolVersion.version());
@@ -953,17 +986,16 @@ void MultiVersionDatabase::DatabaseState::stateChanged() {
 
 	if(currentClientIndex >= 0 && connectionAttempts[currentClientIndex]->connected) {
 		connectionAttempts[currentClientIndex]->connected = false;
-		connectionAttempts[currentClientIndex]->connect();
 	}
 
 	ASSERT(newIndex >= 0 && newIndex < clients.size());
 	currentClientIndex = newIndex;
 }
 
-void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client, std::string clusterFilePath) {
+void MultiVersionDatabase::DatabaseState::addConnection(Reference<ClientInfo> client) {
 	clients.push_back(client);
 	connectionAttempts.push_back(
-	    makeReference<Connector>(Reference<DatabaseState>::addRef(this), client, clusterFilePath));
+	    makeReference<Connector>(Reference<DatabaseState>::addRef(this), client));
 }
 
 void MultiVersionDatabase::DatabaseState::cancelConnections() {
@@ -1077,7 +1109,6 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 	callbackOnMainThread = false;
 }
 
-// TODO: if we now only run the compatible client, is there still a purpose in disabling the local client?
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);
 	if(networkStartSetup || multiClientDisabled) {
@@ -1172,7 +1203,6 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 			if(networkSetup) {
 				// TODO: should we also push back on to options?
 				// So if a new client is added, it'll also have this option as well as the older ones
-				// Do we want these network options to be set on all clients?
 				runOnExternalClients(
 				    [option, value](Reference<ClientInfo> client) { client->api->setNetworkOption(option, value); });
 			}
@@ -1214,8 +1244,7 @@ void MultiVersionApi::setupNetwork() {
 		networkSetup = true;
 	}
 
-	// TODO: How to handle options? Should they be cleared?
-	// MultiVersionApi::options gets copied over when initializing external client
+	// TODO: How to handle options? Should they be cleared after the initial setup?
 	// options.clear();
 	updateSupportedVersions();
 }
@@ -1366,7 +1395,7 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 				return;
 			}
 			for(const auto& [clusterFilePath, db] : multiVersionDatabases) {
-				db->dbState->addConnection(newExternalClient, clusterFilePath);
+				db->dbState->addConnection(newExternalClient);
 			}
 			updateSupportedVersions();
 			externalClientStream.send(Void());
@@ -1398,7 +1427,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 					continue;
 				}
 				for(const auto& [clusterFilePath, db] : multiVersionDatabases) {
-					db->dbState->addConnection(newExternalClient, clusterFilePath);
+					db->dbState->addConnection(newExternalClient);
 				}
 				updateSupportedVersions();
 				externalClientStream.send(Void());
@@ -1497,8 +1526,11 @@ void ClientInfo::loadProtocolVersion() {
 	}
 
 	char *next;
-	std::string protocolVersionStr = ClientVersionRef(StringRef(version)).protocolVersion.toString();
+
+	ClientVersionRef versionRef = ClientVersionRef(StringRef(version));
+	std::string protocolVersionStr = versionRef.protocolVersion.toString();
 	protocolVersion = ProtocolVersion(strtoull(protocolVersionStr.c_str(), &next, 16));
+	clientVersion = versionRef.clientVersion.toString();
 
 	ASSERT(protocolVersion.version() != 0 && protocolVersion.version() != ULLONG_MAX);
 	ASSERT(next == &protocolVersionStr[protocolVersionStr.length()]);
