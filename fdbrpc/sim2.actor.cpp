@@ -1800,6 +1800,7 @@ public:
 	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator.getCurrentProcess()), peerAddress(peerAddress),
 	    actors(false), _localAddress(localAddress) {
 		g_sim2.addressMap.emplace(_localAddress, process);
+		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
 		process->boundUDPSockets.emplace(localAddress, this);
 	}
 	~UDPSimSocket() {
@@ -1913,6 +1914,9 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
 		localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 	}
 	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	while (process->boundUDPSockets.find(localAddress) != process->boundUDPSockets.end()) {
+		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	}
 	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
 }
 

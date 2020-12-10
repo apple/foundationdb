@@ -293,9 +293,7 @@ public:
 	void flushTrLogsIfEnabled();
 
 	// These are to permit use as state variables in actors:
-	Transaction()
-	  : info(TaskPriority::DefaultEndpoint, deterministicRandom()->randomUniqueID()),
-	    span(info.spanID, "Transaction"_loc) {}
+	Transaction();
 	void operator=(Transaction&& r) noexcept;
 
 	void reset();
@@ -324,6 +322,9 @@ public:
 	Span span;
 	double startTime;
 	Reference<TransactionLogInfo> trLogInfo;
+
+	void setTransactionID(uint64_t id);
+	void setToken(uint64_t token);
 
 	const vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
