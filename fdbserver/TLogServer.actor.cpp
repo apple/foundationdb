@@ -1431,7 +1431,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, Tag tag, int logRouters ) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	state std::vector<StringRef> relevantMessages;
-	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
+	state BinaryReader rd(commitBlob, AssumeVersion(g_network->protocolVersion()));
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMessage;
 		tagsAndMessage.loadFromArena(&rd, nullptr);
@@ -2834,7 +2834,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	bool recovering = (req.recoverFrom.logSystemType == LogSystemType::tagPartitioned);
 	state Reference<LogData> logData = makeReference<LogData>(
 	    self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID,
-	    currentProtocolVersion, req.spillType, req.allTags, recovering ? "Recovered" : "Recruited");
+	    g_network->protocolVersion(), req.spillType, req.allTags, recovering ? "Recovered" : "Recruited");
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;

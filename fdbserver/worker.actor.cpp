@@ -25,6 +25,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
@@ -46,6 +47,7 @@
 #include "flow/Profiler.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
+#include "flow/network.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -1141,7 +1143,7 @@ ACTOR Future<Void> workerServer(
 
 		loop choose {
 			when( UpdateServerDBInfoRequest req = waitNext( interf.updateServerDBInfo.getFuture() ) ) {
-				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(currentProtocolVersion));
+				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo, AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
 
 				if(localInfo.infoGeneration < dbInfo->get().infoGeneration && localInfo.clusterInterface == dbInfo->get().clusterInterface) {
@@ -1796,6 +1798,16 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 	}
 }
 
+ACTOR Future<Void> serveProtocolInfo() {
+	state RequestStream<ProtocolInfoRequest> protocolInfo(
+	    PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() });
+	protocolInfo.makeWellKnownEndpoint(WLTOKEN_PROTOCOL_INFO, TaskPriority::DefaultEndpoint);
+	loop {
+		state ProtocolInfoRequest req = waitNext(protocolInfo.getFuture());
+		req.reply.send(ProtocolInfoReply{ g_network->protocolVersion() });
+	}
+}
+
 ACTOR Future<Void> fdbd(
 	Reference<ClusterConnectionFile> connFile,
 	LocalityData localities,
@@ -1810,6 +1822,8 @@ ACTOR Future<Void> fdbd(
 {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+
+	actors.push_back(serveProtocolInfo());
 
 	try {
 		ServerCoordinators coordinators( connFile );

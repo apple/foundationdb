@@ -27,6 +27,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/ContinuousSample.h"
 
@@ -116,11 +117,21 @@ namespace std
 	};
 }
 
+enum class RequirePeer { Exactly, AtLeast };
+
+struct PeerCompatibilityPolicy {
+	RequirePeer requirement;
+	ProtocolVersion version;
+};
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
+	virtual PeerCompatibilityPolicy peerCompatibilityPolicy() const {
+		return { RequirePeer::Exactly, g_network->protocolVersion() };
+	}
 };
 
 struct TransportData;
@@ -148,6 +159,8 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
+	Reference<AsyncVar<Optional<ProtocolVersion>>> protocolVersion;
+
 	// Cleared every time stats are logged for this peer.
 	int connectOutgoingCount;
 	int connectIncomingCount;
@@ -231,6 +244,8 @@ public:
 	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 
 	bool incompatibleOutgoingConnectionsPresent();
+
+	Reference<AsyncVar<Optional<ProtocolVersion>>> getPeerProtocolAsyncVar(NetworkAddress addr);
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }

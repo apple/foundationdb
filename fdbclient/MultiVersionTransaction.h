@@ -55,6 +55,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	//Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
+	FDBFuture* (*getServerProtocol)(const char* clusterFilePath, uint64_t* expectedProtocol);
 	fdb_error_t (*setNetworkOption)(FDBNetworkOptions::Option option, uint8_t const *value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
@@ -107,6 +108,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	//Future
 	fdb_error_t (*futureGetDatabase)(FDBFuture *f, FDBDatabase **outDb);
 	fdb_error_t (*futureGetInt64)(FDBFuture *f, int64_t *outValue);
+	fdb_error_t (*futureGetUInt64)(FDBFuture *f, uint64_t *outValue);
 	fdb_error_t (*futureGetError)(FDBFuture *f);
 	fdb_error_t (*futureGetKey)(FDBFuture *f, uint8_t const **outKey, int *outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture *f, fdb_bool_t *outPresent, uint8_t const **outValue, int *outValueLength);
@@ -204,6 +206,7 @@ public:
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath, uint64_t* expectedProtocol) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -293,6 +296,7 @@ private:
 
 struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 	ProtocolVersion protocolVersion;
+	std::string clientVersion;
 	IClientApi *api;
 	std::string libPath;
 	bool external;
@@ -322,11 +326,13 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
-private:
+// TODO: had to expose this to allow DatabaseState to be accessed within an ACTOR.
+// also could introduce some public functions to expose the underlying logic (ie currentClientIndex and Connector).
+// private:
 	struct DatabaseState;
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
-		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client, std::string clusterFilePath) : dbState(dbState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}
+		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client) : dbState(dbState), client(client), connected(false), cancelled(false) {}
 
 		void connect();
 		void cancel();
@@ -336,7 +342,10 @@ private:
 		void error(const Error& e, int& userParam) override;
 
 		const Reference<ClientInfo> client;
-		const std::string clusterFilePath;
+
+		// TODO: why are clusterFilePath associated with Connector? Shouldn't each connector within a MultiVersionDatabase
+		// have the same clusterFilePath?
+		// const std::string clusterFilePath;
 
 		const Reference<DatabaseState> dbState;
 
@@ -349,16 +358,30 @@ private:
 		bool cancelled;
 	};
 
+	struct ProtocolVersionManager : ThreadCallback, ThreadSafeReferenceCounted<ProtocolVersionManager>{
+		ProtocolVersionManager(Reference<DatabaseState> dbState);
+		
+		bool canFire(int notMadeActive) const override { return true; }
+		void fire(const Void& unused, int& userParam) override;
+		void error(const Error& e, int& userParam) override;
+
+		const Reference<DatabaseState> dbState;
+
+		Future<Void> protocolFuture;
+		PromiseStream<Future<uint64_t>> protocolChangeFutureStream;
+		ThreadFuture<uint64_t> tf;
+	};
+
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
-		DatabaseState();
+		DatabaseState(std::string clusterFilePath);
 
 		void stateChanged();
-		void addConnection(Reference<ClientInfo> client, std::string clusterFilePath);
-		void startConnections();
+		void addConnection(Reference<ClientInfo> client);
 		void cancelConnections();
 
 		Reference<IDatabase> db;
 		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
+		const std::string clusterFilePath;
 
 		ThreadFuture<Void> changed;
 
@@ -372,8 +395,9 @@ private:
 		UniqueOrderedOptionList<FDBTransactionOptions> transactionDefaultOptions;
 		Mutex optionLock;
 	};
-
+	
 	const Reference<DatabaseState> dbState;
+	const Reference<ProtocolVersionManager> protocolVersionManager;
 	friend class MultiVersionTransaction;
 };
 
@@ -381,6 +405,7 @@ class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath, uint64_t* expectedProtocol) override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -401,6 +426,8 @@ public:
 
 	static bool apiVersionAtLeast(int minVersion);
 
+	FutureStream<Void> getExternalClientStream();
+
 private:
 	MultiVersionApi();
 
@@ -411,6 +438,8 @@ private:
 	void addExternalLibrary(std::string path);
 	void addExternalLibraryDirectory(std::string path);
 	void disableLocalClient();
+	void loadExternalClientVersion(Reference<ClientInfo> client);
+	void setupExternalClientNetwork(Reference<ClientInfo> client);
 	void setSupportedClientVersions(Standalone<StringRef> versions);
 
 	void setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value);
@@ -418,16 +447,20 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, Reference<ClientInfo>> externalClients;
 
+	std::unordered_map<std::string, Reference<MultiVersionDatabase>> multiVersionDatabases;
+	PromiseStream<Void> externalClientStream;
+
+	std::vector<THREAD_HANDLE> threadHandles;
 	bool networkStartSetup;
-	volatile bool networkSetup;
-	volatile bool bypassMultiClientApi;
-	volatile bool externalClient;
+	std::atomic<bool> networkSetup;
+	std::atomic<bool> multiClientDisabled;
+	std::atomic<bool> externalClient;
 	int apiVersion;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
-	volatile bool envOptionsLoaded;
+	std::atomic<bool> envOptionsLoaded;
 };
 
 #endif
