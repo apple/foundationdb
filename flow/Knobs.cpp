@@ -92,6 +92,8 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
+	init( FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,                   -1 ); if( randomize && BUGGIFY ) FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT = 1e6; // 0 - auto(TODO); Negative - no limit
+	init( FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS,                 -1 ); if( randomize && BUGGIFY ) FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS = 1; // 0 - auto(TODO); Negative - no limit
 
 	//AsyncFileEIO
 	init( EIO_MAX_PARALLELISM,                                  4  );
@@ -114,8 +116,6 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
 	init( INCREMENTAL_DELETE_INTERVAL,                         1.0 ); //every 1 second
-	init( FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,                   -1 ); if( randomize && BUGGIFY ) FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT = deterministicRandom()->randomInt(1e3, 1e6); // 0 - auto(TODO); Negative - no limit
-	init( FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS,                 -1 ); if( randomize && BUGGIFY ) FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS = 0.05 + (10 - 0.05) * deterministicRandom()->random01(); // 0 - auto(TODO); Negative - no limit
 		
 	//Net2 and FlowTransport
 	init( MIN_COALESCE_DELAY,                                10e-6 ); if( randomize && BUGGIFY ) MIN_COALESCE_DELAY = 0;
