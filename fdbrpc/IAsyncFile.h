@@ -84,7 +84,7 @@ public:
 	virtual int64_t debugFD() = 0;
 
 	// Used for rate control, at present, only AsyncFileCached supports it
-	virtual void setRateControl(Reference<IRateControl> rc) { throw unsupported_operation(); }
+	virtual void setRateControl(Reference<IRateControl> const& rc) { throw unsupported_operation(); }
 };
 
 typedef void (*runCycleFuncPtr)();
