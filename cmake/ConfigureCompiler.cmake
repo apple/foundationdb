@@ -5,7 +5,6 @@ env_set(USE_DTRACE ON BOOL "Enable dtrace probes on supported platforms")
 env_set(USE_VALGRIND OFF BOOL "Compile for valgrind usage")
 env_set(USE_VALGRIND_FOR_CTEST ${USE_VALGRIND} BOOL "Use valgrind for ctest")
 env_set(ALLOC_INSTRUMENTATION OFF BOOL "Instrument alloc")
-env_set(WITH_UNDODB OFF BOOL "Use rr or undodb")
 env_set(USE_ASAN OFF BOOL "Compile with address sanitizer")
 env_set(USE_GCOV OFF BOOL "Compile with gcov instrumentation")
 env_set(USE_MSAN OFF BOOL "Compile with memory sanitizer. To avoid false positives you need to dynamically link to a msan-instrumented libc++ and libc++abi, which you must compile separately. See https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo#instrumented-libc.")
@@ -47,35 +46,9 @@ add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-if(ALLOC_INSTRUMENTATION)
-  add_compile_options(-DALLOC_INSTRUMENTATION)
-endif()
-if(WITH_UNDODB)
-  add_compile_options(-DWITH_UNDODB)
-endif()
-if(DEBUG_TASKS)
-  add_compile_options(-DDEBUG_TASKS)
-endif()
-
-if(NDEBUG)
-  add_compile_options(-DNDEBUG)
-endif()
-
-if(FDB_RELEASE)
-  add_compile_options(-DFDB_RELEASE)
-  add_compile_options(-DFDB_CLEAN_BUILD)
-endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_BINARY_DIR})
-if (NOT OPEN_FOR_IDE)
-  add_definitions(-DNO_INTELLISENSE)
-endif()
-if(WIN32)
-  add_definitions(-DUSE_USEFIBERS)
-else()
-  add_definitions(-DUSE_UCONTEXT)
-endif()
 
 if (USE_CCACHE)
   FIND_PROGRAM(CCACHE_FOUND "ccache")
@@ -95,6 +68,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+if(NOT OPEN_FOR_IDE)
+  add_compile_definitions(NO_INTELLISENSE)
+endif()
+
 if(NOT WIN32)
   include(CheckIncludeFile)
   CHECK_INCLUDE_FILE("stdatomic.h" HAS_C11_ATOMICS)
@@ -112,7 +89,6 @@ if(WIN32)
     string(REGEX REPLACE "/W[0-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
   endif()
   add_compile_options(/W0 /EHsc /bigobj $<$<CONFIG:Release>:/Zi> /MP /FC /Gm-)
-  add_compile_definitions(_WIN32_WINNT=${WINDOWS_TARGET} WINVER=${WINDOWS_TARGET} NTDDI_VERSION=0x05020000 BOOST_ALL_NO_LIB)
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 else()
@@ -166,11 +142,7 @@ else()
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
   if(USE_ASAN)
-    add_compile_options(
-      -fsanitize=address
-      -DUSE_SANITIZER
-      -DADDRESS_SANITIZER
-      )
+    add_compile_options(-fsanitize=address)
     add_link_options(-fsanitize=address)
   endif()
 
@@ -180,15 +152,11 @@ else()
     endif()
     add_compile_options(
       -fsanitize=memory
-      -fsanitize-memory-track-origins=2
-      -DUSE_SANITIZER
-      -DMEMORY_SANITIZER
-      )
+      -fsanitize-memory-track-origins=2)
     add_link_options(-fsanitize=memory)
   endif()
 
   if(USE_GCOV)
-    add_compile_options(--coverage -DUSE_GCOV)
     add_link_options(--coverage)
   endif()
 
@@ -196,20 +164,13 @@ else()
     add_compile_options(
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
-      -fno-sanitize=alignment
-      -DUSE_SANITIZER
-      -DUNDEFINED_BEHAVIOR_SANITIZER
-      )
+      -fno-sanitize=alignment)
     add_link_options(-fsanitize=undefined)
   endif()
 
   if(USE_TSAN)
     add_compile_options(
-      -fsanitize=thread
-      -DUSE_SANITIZER
-      -DTHREAD_SANITIZER
-      -DDYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1
-      )
+      -fsanitize=thread)
     add_link_options(-fsanitize=thread)
   endif()
 
@@ -269,9 +230,6 @@ else()
   # for more information.
   #add_compile_options(-fno-builtin-memcpy)
 
-  if (USE_VALGRIND)
-    add_compile_options(-DVALGRIND=1 -DUSE_VALGRIND=1)
-  endif()
   if (CLANG)
     add_compile_options()
     # Clang has link errors unless `atomic` is specifically requested.
@@ -280,7 +238,6 @@ else()
     endif()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
-      add_compile_definitions(WITH_LIBCXX)
       if (NOT APPLE)
         if (STATIC_LINK_LIBCXX)
           add_link_options(-static-libgcc -nostdlib++  -Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic)
@@ -366,10 +323,7 @@ else()
   check_symbol_exists(aligned_alloc stdlib.h HAS_ALIGNED_ALLOC)
   message(STATUS "Has aligned_alloc: ${HAS_ALIGNED_ALLOC}")
   if((SUPPORT_DTRACE) AND (USE_DTRACE))
-    add_compile_definitions(DTRACE_PROBES)
-  endif()
-  if(HAS_ALIGNED_ALLOC)
-    add_compile_definitions(HAS_ALIGNED_ALLOC)
+    set(DTRACE_PROBES 1)
   endif()
 
   if(CMAKE_COMPILER_IS_GNUCXX)

@@ -204,8 +204,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_6.3.5/CycleTestRestart-1.txt
-               restarting/to_6.3.5/CycleTestRestart-2.txt IGNORE)
+    TEST_FILES restarting/to_6.3.10/CycleTestRestart-1.txt
+               restarting/to_6.3.10/CycleTestRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)

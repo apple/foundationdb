@@ -31,7 +31,7 @@
 #include <cctype>
 #include <time.h>
 #include <set>
-
+#include <iomanip>
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/FastRef.h"
@@ -416,6 +416,7 @@ public:
 
 		if (roll) {
 			auto o = new WriterThread::Roll;
+			double time = 0;
 			writer->post(o);
 
 			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
@@ -424,8 +425,14 @@ public:
 					TraceEventFields rolledFields;
 					for(auto itr = events[idx].begin(); itr != events[idx].end(); ++itr) {
 						if(itr->first == "Time") {
-							rolledFields.addField("Time", format("%.6f", TraceEvent::getCurrentTime()));
+							time = TraceEvent::getCurrentTime();
+							rolledFields.addField("Time", format("%.6f", time));
 							rolledFields.addField("OriginalTime", itr->second);
+						}
+						else if (itr->first == "DateTime") {
+							UNSTOPPABLE_ASSERT(time > 0); // "Time" field should always come first
+							rolledFields.addField("DateTime", TraceEvent::printRealTime(time));
+							rolledFields.addField("OriginalDateTime", itr->second);
 						}
 						else if(itr->first == "TrackLatestType") {
 							rolledFields.addField("TrackLatestType", "Rolled");
@@ -854,6 +861,9 @@ bool TraceEvent::init() {
 		detail("Severity", int(severity));
 		detail("Time", "0.000000");
 		timeIndex = fields.size() - 1;
+		if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+			detail("DateTime", "");
+		}
 
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
@@ -1071,7 +1081,11 @@ void TraceEvent::log() {
 		++g_allocation_tracing_disabled;
 		try {
 			if (enabled) {
-				fields.mutate(timeIndex).second = format("%.6f", TraceEvent::getCurrentTime());
+				double time = TraceEvent::getCurrentTime();
+				fields.mutate(timeIndex).second = format("%.6f", time);
+				if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+					fields.mutate(timeIndex + 1).second = TraceEvent::printRealTime(time);
+				}
 
 				if (this->severity == SevError) {
 					severity = SevInfo;
@@ -1140,6 +1154,31 @@ double TraceEvent::getCurrentTime() {
 	else {
 		return timer();
 	}
+}
+
+// converts the given flow time into a string
+// with format: %Y-%m-%dT%H:%M:%S
+// This only has second-resolution for the simple reason
+// that std::put_time does not support higher resolution.
+// This is fine since we always log the flow time as well.
+std::string TraceEvent::printRealTime(double time) {
+	using Clock = std::chrono::system_clock;
+	time_t ts = Clock::to_time_t(Clock::time_point(
+	    std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double, std::ratio<1>>(time))));
+	if (g_network && g_network->isSimulated()) {
+		// The clock is simulated, so return the real time
+		ts = Clock::to_time_t(Clock::now());
+	}
+	std::stringstream ss;
+#ifdef _WIN32
+	// MSVC gmtime is threadsafe
+	ss << std::put_time(::gmtime(&ts), "%Y-%m-%dT%H:%M:%SZ");
+#else
+	// use threadsafe gmt
+	struct tm result;
+	ss << std::put_time(::gmtime_r(&ts, &result), "%Y-%m-%dT%H:%M:%SZ");
+#endif
+	return ss.str();
 }
 
 TraceInterval& TraceInterval::begin() {
@@ -1228,6 +1267,9 @@ void TraceBatch::dump() {
 TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, const char *location) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
+	if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+		fields.addField("DateTime", TraceEvent::printRealTime(time));
+	}
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
 	fields.addField("Location", location);
@@ -1236,6 +1278,9 @@ TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, con
 TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, uint64_t to) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
+	if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+		fields.addField("DateTime", TraceEvent::printRealTime(time));
+	}
 	fields.addField("Type", name);
 	fields.addField("ID", format("%016" PRIx64, id));
 	fields.addField("To", format("%016" PRIx64, to));
@@ -1244,6 +1289,9 @@ TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, u
 TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
+	if (FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
+		fields.addField("DateTime", TraceEvent::printRealTime(time));
+	}
 	fields.addField("Type", "BuggifySection");
 	fields.addField("Activated", format("%d", activated));
 	fields.addField("File", std::move(file));
