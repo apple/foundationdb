@@ -25,7 +25,7 @@ struct RoleLineage : LineageProperties<RoleLineage> {
     static StringRef name;
     ProcessClass::ClusterRole role = ProcessClass::NoRole;
 
-    bool isSet(ProcessClass::ClusterRole RoleLineage::*member) {
+    bool isSet(ProcessClass::ClusterRole RoleLineage::*member) const {
         return this->*member != ProcessClass::NoRole;
     }
 };

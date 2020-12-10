@@ -427,7 +427,7 @@ struct LineageProperties : LineagePropertiesBase {
 	// A user should implement this for any type
 	// within the properies class.
 	template<class Value>
-	bool isSet(Value Derived::*member) {
+	bool isSet(Value Derived::*member) const {
 		return true;
 	}
 };
@@ -498,11 +498,6 @@ struct restore_lineage {
 struct StackLineage : LineageProperties<StackLineage> {
 	static StringRef name;
 	StringRef actorName;
-
-	template<class Value>
-	bool isSet(Value StackLineage::*member) {
-		return true;
-	}
 };
 
 extern std::stack<StringRef> getActorStackTrace();

@@ -88,6 +88,7 @@ set(FDBSERVER_SRCS
   ResolverInterface.h
   ServerDBInfo.actor.h
   ServerDBInfo.h
+  SigStack.cpp
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp

@@ -1798,6 +1798,8 @@ ACTOR Future<Void> monitorLeaderRemotelyWithDelayedCandidacy( Reference<ClusterC
 	}
 }
 
+extern void setupStackSignal();
+
 ACTOR Future<Void> fdbd(
 	Reference<ClusterConnectionFile> connFile,
 	LocalityData localities,
@@ -1812,6 +1814,7 @@ ACTOR Future<Void> fdbd(
 {
 	state vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+	setupStackSignal();
 	currentLineage->modify(&RoleLineage::role) = ProcessClass::Worker;
 
 	try {
