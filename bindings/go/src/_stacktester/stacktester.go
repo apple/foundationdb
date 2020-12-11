@@ -813,6 +813,28 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "CANCEL":
 		sm.currentTransaction().Cancel()
 	case op == "UNIT_TESTS":
+		protocolVersionFuture, err := fdb.GetServerProtocolDefault()
+		if err != nil {
+			panic(err)
+		}
+		protocolVersion := protocolVersionFuture.MustGet()
+		protocolVersionHex := fmt.Sprintf("%x", protocolVersion)
+		if protocolVersionHex[0:3] != "fdb" {
+			panic("Protocol version does not contain 'fdb'")
+		}
+
+		var expectedVersion uint64
+		expectedVersion = 1
+		protocolVersionFutureExpected, err := fdb.GetServerProtocolDefaultWaitChange(&expectedVersion)
+		if err != nil {
+			panic(err)
+		}
+		protocolVersionExpected := protocolVersionFutureExpected.MustGet()
+		protocolVersionHexExpected := fmt.Sprintf("%x", protocolVersionExpected)
+		if protocolVersionHexExpected[0:3] != "fdb" {
+			panic("Protocol version does not contain 'fdb'")
+		}
+
 		db.Options().SetLocationCacheSize(100001)
 		db.Options().SetMaxWatches(10001)
 		db.Options().SetDatacenterId("dc_id")

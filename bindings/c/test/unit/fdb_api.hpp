@@ -89,7 +89,6 @@ class Int64Future : public Future {
   Int64Future(FDBFuture* f) : Future(f) {}
 };
 
-
 class KeyFuture : public Future {
  public:
    // Call this function instead of fdb_future_get_key when using the KeyFuture
@@ -147,7 +146,6 @@ class EmptyFuture : public Future {
   friend class Transaction;
   EmptyFuture(FDBFuture* f) : Future(f) {}
 };
-
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
 // Handles cleanup of memory, removing the need to call

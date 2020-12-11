@@ -170,7 +170,7 @@ struct Root {
 struct TestContextArena {
 	Arena& _arena;
 	Arena& arena() { return _arena; }
-	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return g_network->protocolVersion(); }
 	uint8_t* allocate(size_t size) { return new (_arena) uint8_t[size]; }
 };
 
@@ -228,7 +228,7 @@ struct Arena {
 struct TestContext {
 	Arena& _arena;
 	Arena& arena() { return _arena; }
-	ProtocolVersion protocolVersion() const { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return g_network->protocolVersion(); }
 	uint8_t* allocate(size_t size) { return _arena(size); }
 	TestContext& context() { return *this; }
 };

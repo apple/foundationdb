@@ -102,6 +102,14 @@ When you import the ``fdb`` module, it exposes only one useful symbol:
 
 For API changes between version 13 and |api-version| (for the purpose of porting older programs), see :ref:`release-notes` and :doc:`api-version-upgrade-guide`.
 
+.. function:: get_server_protocol(cluster_file=None, expected_version=None)
+
+    Returns a ``Future`` which will be set to the protocol version of the cluster specified by ``cluster_file``.
+
+    If ``cluster_file`` is None or an empty string, then the the :ref:`default cluster file <default-cluster-file>` will be used.
+
+    If ``expected_version`` is not None, the ``Future`` returned will fulfill when the server's protocol version is not ``expected_version``
+
 Opening a database
 ==================
 
@@ -986,6 +994,10 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 .. class:: FutureInt64
 
     Represents a future integer. You must call the :meth:`Future.wait()` method on this object to retrieve the integer.
+
+.. class:: FutureUInt64
+
+    Represents a future unsigned integer. You must call the :meth:`Future.wait()` method on this object to retrieve the unsigned integer.
 
 .. class:: FutureStringArray
 

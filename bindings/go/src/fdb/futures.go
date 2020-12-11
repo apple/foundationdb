@@ -399,6 +399,48 @@ func (f *futureInt64) MustGet() int64 {
 	return val
 }
 
+// FutureUInt64 represents the asynchronous result of a function that returns a
+// database version. FutureUInt64 is a lightweight object that may be efficiently
+// copied, and is safe for concurrent use by multiple goroutines.
+type FutureUInt64 interface {
+	// Get returns an unsigned 64 bit integer or an error if the asynchronous operation
+	// associated with this future did not successfully complete. The current
+	// goroutine will be blocked until the future is ready.
+	Get() (uint64, error)
+
+	// MustGet returns an unsigned 64 bit integer version, or panics if the asynchronous
+	// operation associated with this future did not successfully complete. The
+	// current goroutine will be blocked until the future is ready.
+	MustGet() uint64
+
+	Future
+}
+
+type futureUInt64 struct {
+	*future
+}
+
+func (f *futureUInt64) Get() (uint64, error) {
+	defer runtime.KeepAlive(f.future)
+
+	f.BlockUntilReady()
+
+	var ver C.uint64_t
+	if err := C.fdb_future_get_uint64(f.ptr, &ver); err != 0 {
+		return 0, Error{int(err)}
+	}
+
+	return uint64(ver), nil
+}
+
+func (f *futureUInt64) MustGet() uint64 {
+	val, err := f.Get()
+	if err != nil {
+		panic(err)
+	}
+	return val
+}
+
 // FutureStringSlice represents the asynchronous result of a function that
 // returns a slice of strings. FutureStringSlice is a lightweight object that
 // may be efficiently copied, and is safe for concurrent use by multiple

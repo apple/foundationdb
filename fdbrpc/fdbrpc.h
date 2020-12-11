@@ -66,6 +66,12 @@ struct FlowReceiver : public NetworkMessageReceiver {
 		endpoint = e;
 	}
 
+	void setPeerCompatibilityPolicy(const PeerCompatibilityPolicy& policy) { peerCompatibilityPolicy_ = policy; }
+
+	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
+		return peerCompatibilityPolicy_.orDefault(NetworkMessageReceiver::peerCompatibilityPolicy());
+	}
+
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
 		ASSERT(!endpoint.isValid());
 		m_isLocalEndpoint = true;
@@ -74,6 +80,7 @@ struct FlowReceiver : public NetworkMessageReceiver {
 	}
 
 private:
+	Optional<PeerCompatibilityPolicy> peerCompatibilityPolicy_;
 	Endpoint endpoint;
 	bool m_isLocalEndpoint;
 	bool m_stream;
@@ -117,6 +124,9 @@ public:
 	bool isSet() { return sav->isSet(); }
 	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
+	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
+		sav->setPeerCompatibilityPolicy(policy);
+	}
 	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() { if (sav) sav->delPromiseRef(); }
@@ -354,6 +364,9 @@ public:
 
 	FutureStream<T> getFuture() const { queue->addFutureRef(); return FutureStream<T>(queue); }
 	RequestStream() : queue(new NetNotifiedQueue<T>(0, 1)) {}
+	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
+		queue->setPeerCompatibilityPolicy(policy);
+	}
 	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
 	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	void operator=(const RequestStream& rhs) {

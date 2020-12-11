@@ -60,6 +60,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"

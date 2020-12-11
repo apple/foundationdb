@@ -27,6 +27,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
@@ -91,8 +92,6 @@ void ISimulator::displayWorkers() const
 
 	return;
 }
-
-const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
 
 int openCount = 0;
 
@@ -999,8 +998,8 @@ public:
 		net2->run();
 	}
 	ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
-	                        LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                        const char* coordinationFolder) override {
+							LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+							const char* coordinationFolder, ProtocolVersion protocol) override {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())
@@ -1043,6 +1042,7 @@ public:
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
+		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
@@ -1707,6 +1707,10 @@ public:
 		if( process->machine == 0 )
 			return Void();
 		return delay( 0, taskID, process->machine->machineProcess );
+	}
+	
+	ProtocolVersion protocolVersion() override {
+		return getCurrentProcess()->protocolVersion;
 	}
 
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because

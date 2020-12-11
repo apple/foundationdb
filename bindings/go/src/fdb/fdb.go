@@ -340,6 +340,50 @@ func createDatabase(clusterFile string) (Database, error) {
 	return Database{db}, nil
 }
 
+// GetServerProtocol returns a FutureUInt64 that holds the protocol version of the cluster
+// identified by clusterFile
+// If expectedVersion is not nil, the FutureUInt64 will be fulfilled when the server's protocol is not *expectedVersion.
+func GetServerProtocol(clusterFile string, expectedVersion *uint64) (FutureUInt64, error) {
+	networkMutex.Lock()
+	defer networkMutex.Unlock()
+
+	if !networkStarted {
+		e := startNetwork()
+		if e != nil {
+			return &futureUInt64{future: nil}, e
+		}
+	}
+
+	var cf *C.char
+	if len(clusterFile) != 0 {
+		cf = C.CString(clusterFile)
+		defer C.free(unsafe.Pointer(cf))
+	}
+
+	var expectedVersionPtr *C.uint64_t
+	if expectedVersion != nil {
+		expectedVersionInt := C.uint64_t(*expectedVersion)
+		expectedVersionPtr = &expectedVersionInt
+	} else {
+		expectedVersionPtr = nil
+	}
+
+	return &futureUInt64{future: newFuture(C.fdb_get_server_protocol(cf, expectedVersionPtr))}, nil
+}
+
+// GetServerProtocolDefault returns a FutureUInt64 that holds the protocol version of the cluster
+// identified by the DefaultClusterFile on the current machine.
+func GetServerProtocolDefault() (FutureUInt64, error) {
+	return GetServerProtocol(DefaultClusterFile, nil)
+}
+
+// GetServerProtocolDefaultWaitChange returns a FutureUInt64 that holds the protocol version of the cluster
+// identified by the DefaultClusterFile on the current machine.
+// If expectedVersion is not nil, the FutureUInt64 will be fulfilled when the server's protocol is not *expectedVersion.
+func GetServerProtocolDefaultWaitChange(expectedVersion *uint64) (FutureUInt64, error) {
+	return GetServerProtocol(DefaultClusterFile, expectedVersion)
+}
+
 // Deprecated: Use OpenDatabase instead.
 // CreateCluster returns a cluster handle to the FoundationDB cluster identified
 // by the provided cluster file.
