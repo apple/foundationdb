@@ -738,15 +738,27 @@ void MultiVersionDatabase::ProtocolVersionManager::fire(const Void &unused, int 
 
 void MultiVersionDatabase::ProtocolVersionManager::error(const Error& e, int& userParam) {
 	// TODO: is it right to do this for every error
-	Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(dbState->clusterFilePath);
-	protocolChangeFutureStream.send(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
-	delref();
+	onMainThreadVoid([this]() {
+		Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(dbState->clusterFilePath);
+		protocolChangeFutureStream.send(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
+		delref();
+	}, nullptr);
 }
 
 ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *api, std::string clusterFilePath) {
 	state std::string clusterFile = ClusterConnectionFile::lookupClusterFileName(std::string(clusterFilePath)).first;
 	state Reference<ClusterConnectionFile> ccf = makeReference<ClusterConnectionFile>(clusterFile);
-	state uint64_t currentProtocolVersionInt = wait(getCoordinatorProtocols(ccf, Optional<ProtocolVersion>()));
+	state Optional<uint64_t> currentProtocolVersionIntOptional = Optional<uint64_t>();
+
+	ccf->addref();
+	db->protocolVersionManager->addref();
+	onMainThreadVoid([&]() {
+		db->protocolVersionManager->tf = api->getServerProtocol(ccf->getFilename().c_str(), nullptr);
+		ccf->delref();
+
+		int userParam;
+		db->protocolVersionManager->tf.callOrSetAsCallback(db->protocolVersionManager.getPtr(), userParam, 0);
+	}, nullptr);
 
 	loop {
 		state bool foundCompatible = false;
@@ -755,7 +767,7 @@ ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *
 		int currentClientIndex = db->dbState->currentClientIndex;
 		for(int i = 0; i<db->dbState->connectionAttempts.size(); i++) {
 			Reference<MultiVersionDatabase::Connector> c = db->dbState->connectionAttempts[i];
-			if(i != currentClientIndex && ProtocolVersion(currentProtocolVersionInt) == c->client->protocolVersion
+			if(currentProtocolVersionIntOptional.present() && ProtocolVersion(currentProtocolVersionIntOptional.get()) == c->client->protocolVersion
 				&& !c->client->failed) {
 				compatibleConnectors.push_back(c);
 			}
@@ -764,11 +776,22 @@ ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *
 		if(!compatibleConnectors.empty()) {
 			state Reference<MultiVersionDatabase::Connector> compatibleConnector = *std::max_element(compatibleConnectors.begin(), compatibleConnectors.end(),
 				[](Reference<MultiVersionDatabase::Connector> l, Reference<MultiVersionDatabase::Connector> r) {
+					if(l->client->protocolVersion != r->client->protocolVersion) {
+						return l->client->protocolVersion < r->client->protocolVersion;
+					}
 					return l->client->clientVersion < r->client->clientVersion;
 				});
 
 			if(currentClientIndex >= 0) {
-				db->dbState->connectionAttempts[currentClientIndex]->cancel();
+				Reference<MultiVersionDatabase::Connector> prevConnector = db->dbState->connectionAttempts[currentClientIndex];
+				prevConnector->addref();
+				onMainThreadVoid([prevConnector]() {
+					prevConnector->connected = false;
+					if(prevConnector->connectionFuture.isValid()) {
+						prevConnector->connectionFuture.cancel();
+					}
+					prevConnector->delref();
+				}, nullptr);
 			}
 			compatibleConnector->connect();
 
@@ -779,7 +802,7 @@ ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *
 			compatibleClient->addref();
 			db->protocolVersionManager->addref();
 			onMainThreadVoid([&]() {
-				db->protocolVersionManager->tf = compatibleClient->api->getServerProtocol(ccf->getFilename().c_str(), &currentProtocolVersionInt);
+				db->protocolVersionManager->tf = compatibleClient->api->getServerProtocol(ccf->getFilename().c_str(), &currentProtocolVersionIntOptional.get());
 				ccf->delref();
 				compatibleClient->delref();
 
@@ -790,13 +813,13 @@ ACTOR Future<Void> connectAndMonitor(MultiVersionDatabase *db, MultiVersionApi *
 			foundCompatible = true;
 		}
 
-		if(!foundCompatible) {
-			waitNext(api->getExternalClientStream());
-		}
-		else {
+		if(foundCompatible || !currentProtocolVersionIntOptional.present()) {
 			Future<uint64_t> nextProtocolVersionFuture = waitNext(db->protocolVersionManager->protocolChangeFutureStream.getFuture());
 			uint64_t nextProtocolVersionInt = wait(nextProtocolVersionFuture);
-			currentProtocolVersionInt = nextProtocolVersionInt;
+			currentProtocolVersionIntOptional = nextProtocolVersionInt;
+		}
+		else {
+			waitNext(api->getExternalClientStream());
 		}
 	}
 }
