@@ -55,6 +55,7 @@ FDBDatabase *fdb_open_database(const char *clusterFile) {
 
 static FDBDatabase *db = nullptr;
 static std::string prefix;
+static std::string clusterFilePath = "";
 
 std::string key(const std::string& key) {
   return prefix + key;
@@ -1537,6 +1538,15 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
   }
 }
 
+TEST_CASE("fdb_get_server_protocol") {
+  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
+  uint64_t out;
+
+  fdb_check(fdb_future_block_until_ready(protocolFuture));
+  fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+  fdb_future_destroy(protocolFuture);
+}
+
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
   // Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
   // should return a watches_disabled error.
@@ -2037,6 +2047,7 @@ int main(int argc, char **argv) {
   std::thread network_thread{ &fdb_run_network };
 
   db = fdb_open_database(argv[1]);
+  clusterFilePath = std::string(argv[1]);
   prefix = argv[2];
   int res = context.run();
   fdb_database_destroy(db);
