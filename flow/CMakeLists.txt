@@ -86,13 +86,23 @@ set(FLOW_SRCS
   rte_memcpy.h
   serialize.cpp
   serialize.h
-  stacktrace.amalgamation.cpp
   stacktrace.h
   test_memcpy.cpp
   test_memcpy_perf.cpp
   version.cpp
   xxhash.c
   xxhash.h)
+
+add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
+if (USE_ASAN)
+  target_compile_definitions(stacktrace PRIVATE ADDRESS_SANITIZER)
+elseif(USE_MSAN)
+  target_compile_definitions(stacktrace PRIVATE MEMORY_SANITIZER)
+elseif(USE_UBSAN)
+  target_compile_definitions(stacktrace PRIVATE UNDEFINED_BEHAVIOR_SANITIZER)
+elseif(USE_TSAN)
+  target_compile_definitions(stacktrace PRIVATE THREAD_SANITIZER DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1)
+endif()
 
 if(UNIX AND NOT APPLE)
   list(APPEND FLOW_SRCS folly_memcpy.S)
@@ -102,6 +112,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
+target_link_libraries(flow PRIVATE stacktrace)
 if (NOT APPLE AND NOT WIN32)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 elseif(WIN32)
