@@ -400,7 +400,18 @@ public class FDB {
 	 * @return a {@code CompletableFuture} that will be set to a BigInteger
 	 */
 	public CompletableFuture<BigInteger> getServerProtocol() throws FDBException {
-		return getServerProtocol(null);
+		return getServerProtocol(null, null);
+	}
+
+	/**
+	 * Initializes networking if required and returns the protocol version of the cluster specified by {@code clusterFilePath}.<br>
+	 *
+	 * @param expectedVersion if not null, the {@code CompletableFuture} returned by this function will complete when the protocol version changes from {@code expectedVersion}
+	 *
+	 * @return a {@code CompletableFuture} that will be set to a BigInteger
+	 */
+	public CompletableFuture<BigInteger> getServerProtocol(Long expectedVersion) throws FDBException {
+		return getServerProtocol(null, expectedVersion, DEFAULT_EXECUTOR);
 	}
 
 	/**
@@ -411,13 +422,14 @@ public class FDB {
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
 	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
+	 * @param expectedVersion if not null, the {@code CompletableFuture} returned by this function will complete when the protocol version changes from {@code expectedVersion}
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a BigInteger
 	 */
-	public CompletableFuture<BigInteger> getServerProtocol(String clusterFilePath) throws FDBException {
-		return getServerProtocol(clusterFilePath, DEFAULT_EXECUTOR);
+	public CompletableFuture<BigInteger> getServerProtocol(String clusterFilePath, Long expectedVersion) throws FDBException {
+		return getServerProtocol(clusterFilePath, expectedVersion, DEFAULT_EXECUTOR);
 	}
-	
+
 	/**
 	 * Initializes networking if required and returns the protocol version of the cluster specified by {@code clusterFilePath}.<br>
 	 *
@@ -426,18 +438,19 @@ public class FDB {
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
 	 *  <a href="/foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
+	 * @param expectedVersion if not null, the {@code CompletableFuture} returned by this function will complete when the protocol version changes from {@code expectedVersion}
 	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a BigInteger
 	 */
-	public CompletableFuture<BigInteger> getServerProtocol(String clusterFilePath, Executor e) throws FDBException {
+	public CompletableFuture<BigInteger> getServerProtocol(String clusterFilePath, Long expectedVersion, Executor e) throws FDBException {
 		synchronized(this) {
 			if(!isConnected()) {
 				startNetwork();
 			}
 		}
 
-		return new FutureUInt64(Database_getServerProtocol(clusterFilePath), e);
+		return new FutureUInt64(Database_getServerProtocol(clusterFilePath, expectedVersion), e);
 	}
 
 	/**
@@ -587,5 +600,5 @@ public class FDB {
 
 	private native long Database_create(String clusterFilePath) throws FDBException;
 
-	private native long Database_getServerProtocol(String clusterFilePath) throws FDBException;
+	private native long Database_getServerProtocol(String clusterFilePath, Long expectedVersion) throws FDBException;
 }

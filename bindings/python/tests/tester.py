@@ -590,6 +590,11 @@ class Tester:
                         protocol = protocol_future.result()
                         assert hex(protocol)[0:5] == '0xfdb'
 
+                        protocol_future_expected = fdb.get_server_protocol(expected_version=1)
+                        protocol_future_expected.wait()
+                        protocol_expected = protocol_future_expected.result()
+                        assert hex(protocol_expected)[0:5] == '0xfdb'
+
                         test_db_options(db)
                         test_options(db)
                         test_watches(db)

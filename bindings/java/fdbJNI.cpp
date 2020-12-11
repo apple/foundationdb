@@ -20,6 +20,7 @@
 
 #include <jni.h>
 #include <string.h>
+#include <memory>
 
 #define FDB_API_VERSION 700
 
@@ -982,7 +983,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1getServerProtocol(JNIEnv *jenv, jobject, jstring clusterFileName) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1getServerProtocol(JNIEnv *jenv, jobject, jstring clusterFileName, jobject expectedVersion) {
 	const char* fileName = nullptr;
 	if(clusterFileName != JNI_NULL) {
 		fileName = jenv->GetStringUTFChars(clusterFileName, JNI_NULL);
@@ -991,7 +992,15 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1getServerProto
 		}
 	}
 
-	FDBFuture* f = fdb_get_server_protocol(fileName);
+	std::unique_ptr<uint64_t> expectedVersionPtr(nullptr);
+	if(expectedVersion != JNI_NULL) {
+		jclass javaLongClass = jenv->FindClass("java/lang/Long");
+		jmethodID getLongMethodId = jenv->GetMethodID(javaLongClass, "longValue", "()J");
+		jlong expectedVersionLong = jenv->CallLongMethod(expectedVersion, getLongMethodId);
+		expectedVersionPtr = std::make_unique<uint64_t>((uint64_t) expectedVersionLong);
+	}
+
+	FDBFuture* f = fdb_get_server_protocol(fileName, expectedVersionPtr.get());
 
 	if(clusterFileName != JNI_NULL) {
 		jenv->ReleaseStringUTFChars(clusterFileName, fileName);

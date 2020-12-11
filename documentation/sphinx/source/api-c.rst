@@ -170,11 +170,13 @@ Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. T
 
    Returns ``FDB_API_VERSION``, the current version of the FoundationDB C API.  This is the maximum version that may be passed to :func:`fdb_select_api_version()`.
 
-.. function:: FDBFuture* fdb_get_server_protocol(const char* cluster_file_path)
+.. function:: FDBFuture* fdb_get_server_protocol(const char* cluster_file_path, uint64_t* expected_version)
 
    |future-return0| the protocol version of the cluster specified by ``clusterFilePath``.
    
    If ``cluster_file_path`` is NULL or an empty string, then the :ref:`default cluster file <default-cluster-file>` will be used.
+
+   If ``expected_version`` is not nullptr, then the ``FDBFuture*`` returned will fulfill when the server's protocol version is not ``expected_version``
 
 Network
 =======

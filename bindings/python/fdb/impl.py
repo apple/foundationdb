@@ -1733,13 +1733,13 @@ open_databases = {}
 
 cacheLock = threading.Lock()
 
-def get_server_protocol(clusterFilePath=None, expectedVersion=None):
+def get_server_protocol(cluster_file=None, expected_version=None):
     with _network_thread_reentrant_lock:
         if not _network_thread:
             init()
 
-    expected = ctypes.byref(ctypes.c_uint64(expectedVersion)) if expectedVersion is not None else None
-    return FutureUInt64(_capi.fdb_get_server_protocol(optionalParamToBytes(clusterFilePath)[0], expected))
+    expected = ctypes.byref(ctypes.c_uint64(expected_version)) if expected_version is not None else None
+    return FutureUInt64(_capi.fdb_get_server_protocol(optionalParamToBytes(cluster_file)[0], expected))
 
 def open(cluster_file=None, event_model=None):
     """Opens the given database (or the default database of the cluster indicated

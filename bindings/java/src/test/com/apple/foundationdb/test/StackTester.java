@@ -448,6 +448,10 @@ public class StackTester {
 						String hexProtocolVersion = f.join().toString(16);
 						assert hexProtocolVersion.substring(0, 3).toLowerCase().equals("fdb");
 
+						CompletableFuture<BigInteger> fExpected = fdb.getServerProtocol(Long.valueOf(1));
+						String hexProtocolVersionExpected = fExpected.join().toString(16);
+						assert hexProtocolVersionExpected.substring(0, 3).toLowerCase().equals("fdb");
+
 						Database db = tr.getDatabase();
 						db.options().setLocationCacheSize(100001);
 						db.options().setMaxWatches(10001);
