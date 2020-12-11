@@ -1348,8 +1348,10 @@ void SQLiteDB::open(bool writable) {
 
 	// Set Rate control if FLOW_KNOBS are positive
 	if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT > 0 && FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS > 0) {
-		dbFile.get()->setRateControl(Reference(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
-		                                                      FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS)));
+		Reference<SpeedLimit> rc(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
+		                                        FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS));
+		dbFile.get()->setRateControl(rc);
+		walFile.get()->setRateControl(rc);
 	}
 
 	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("Filename", filename).detail("Writable", writable);
