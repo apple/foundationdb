@@ -4193,8 +4193,6 @@ ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConne
 }
 
 ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
-	// TODO: let client know if server is present but before this feature is introduced
-	std::cout << "MAKING GET PROTOCOL REQUEST" << std::endl;
 	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
 	return protocolVersion.version();
 }

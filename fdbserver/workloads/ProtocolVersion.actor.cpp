@@ -21,41 +21,31 @@
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct ProtocolVersionWorkload : TestWorkload {
-    ProtocolVersionWorkload(WorkloadContext const& wcx)
-	: TestWorkload(wcx) {
-        
-    }
+	ProtocolVersionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
-	std::string description() const override {
-		return "ProtocolVersionWorkload";
-	}
+	std::string description() const override { return "ProtocolVersionWorkload"; }
 
-	Future<Void> start(Database const& cx) override {
-       return _start(this, cx);
-	}
+	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
-    ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
-        state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
-        state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess = find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p){
-            return p->protocolVersion != currentProtocolVersion;
-        });
-        
-        ASSERT(diffVersionProcess != allProcesses.end());
+	ACTOR Future<Void> _start(ProtocolVersionWorkload* self, Database cx) {
+		state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
+		state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess =
+		    find_if(allProcesses.begin(), allProcesses.end(),
+		            [](const ISimulator::ProcessInfo* p) { return p->protocolVersion != currentProtocolVersion; });
 
-        RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { (*diffVersionProcess)->addresses }, WLTOKEN_PROTOCOL_INFO } };
-        ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
-        
-        ASSERT(reply.version != g_network->protocolVersion());
+		ASSERT(diffVersionProcess != allProcesses.end());
+
+		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{ { (*diffVersionProcess)->addresses },
+			                                                        WLTOKEN_PROTOCOL_INFO } };
+		ProtocolInfoReply reply = wait(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+
+		ASSERT(reply.version != g_network->protocolVersion());
 		return Void();
 	}
 
-    Future<bool> check(Database const& cx) override {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<ProtocolVersionWorkload> ProtocolVersionWorkloadFactory("ProtocolVersion");
- 

@@ -181,6 +181,7 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	}
 
 	void receive(ArenaObjectReader& reader) override {
+		// Remote machine tells us it doesn't have endpoint e
 		Endpoint e;
 		reader.deserialize(e);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
