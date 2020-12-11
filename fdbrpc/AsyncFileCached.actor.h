@@ -512,6 +512,10 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			wait( self->notReading && self->notFlushing );
 
 			if (dirty) {
+				// Wait for rate control if it is set
+				if (self->owner->getRateControl())
+					wait(self->owner->getRateControl()->getAllowance(1));
+
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
 					ASSERT(self->pageOffset < self->owner->length);
 					memset( static_cast<uint8_t *>(self->data) + self->owner->length - self->pageOffset, 0, self->pageCache->pageSize - (self->owner->length - self->pageOffset) );
