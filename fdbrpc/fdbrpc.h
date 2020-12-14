@@ -368,9 +368,7 @@ public:
 
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
 		if(!queue->getRawEndpoint().isValid()) {
-			Endpoint res = queue->getEndpoint(taskID);
-			printf("Registered Endpoint: %s\n", res.token.toString());
-			return res;
+			printf("Registered Endpoint: %s\n", queue->getEndpoint(taskID).token.toString());
 		}
 		return queue->getEndpoint(taskID); 
 	}
