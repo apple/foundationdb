@@ -126,7 +126,7 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 }
 
 void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
-	//TraceEvent("NotifyDisconnect").detail("Address", address);
+	TraceEvent("NotifyDisconnect").detail("Address", address);
 	endpointKnownFailed.triggerRange(Endpoint({ address }, UID()), Endpoint({ address }, UID(-1, -1)));
 }
 
