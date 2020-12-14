@@ -267,10 +267,13 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 
 	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
-	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {}
+	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {
+		  printf("NetNotified create with remote endpoint: %s\n", remoteEndpoint.token.toString().c_str());
+	  }
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
+		printf("NetNotifiedReceived\n");
 		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
@@ -297,6 +300,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		}
 		return res;
 	}
+
+	~NetNotifiedQueueWithErrors() {
+		printf("NetNotifiedQueue destructor\n");
+	}
 };
 
 template <class T>
@@ -315,17 +322,22 @@ public:
 			if((!queue->acknowledgements.ready.isValid() || queue->acknowledgements.ready.isSet()) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
 				queue->acknowledgements.ready = Promise<Void>();
 			}
-			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::forward<U>(value)), getEndpoint(), true);
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
 		}
-		else
+		else {
 			queue->send(std::forward<U>(value));
+		}
 	}
 
 	template <class E>
 	void sendError(const E& exc) const { 
-		queue->sendError(exc);
-		if(errors && errors->canBeSet()) {
-			errors->sendError(exc);
+		if (queue->isRemoteEndpoint()) {
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(exc), getEndpoint(), false);
+		} else {
+			queue->sendError(exc);
+			if(errors && errors->canBeSet()) {
+				errors->sendError(exc);
+			}
 		}
 	}
 
@@ -354,7 +366,14 @@ public:
 			errors->delPromiseRef();
 	}
 
-	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const { return queue->getEndpoint(taskID); }
+	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
+		if(!queue->getRawEndpoint().isValid()) {
+			Endpoint res = queue->getEndpoint(taskID);
+			printf("Registered Endpoint: %s\n", res.token.toString());
+			return res;
+		}
+		return queue->getEndpoint(taskID); 
+	}
 	
 	bool operator == (const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
@@ -396,14 +415,15 @@ private:
 
 template <class Ar, class T>
 void save(Ar& ar, const ReplyPromiseStream<T>& value) {
-	auto const& ep = value.getEndpoint();
+	auto const& ep = value.getEndpoint().token;
 	ar << ep;
 }
 
 template <class Ar, class T>
 void load(Ar& ar, ReplyPromiseStream<T>& value) {
-	Endpoint endpoint;
-	ar >> endpoint;
+	UID token;
+	ar >> token;
+	Endpoint endpoint = FlowTransport::transport().loadedEndpoint(token);
 	value = ReplyPromiseStream<T>(endpoint);
 }
 

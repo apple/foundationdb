@@ -248,7 +248,7 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 	}
 
 	state std::vector<Future<Void>> clients;
-	for (int i = 0; i < FLOW_KNOBS->NETWORK_TEST_CLIENT_COUNT; i++) {
+	for (int i = 0; i < 1; i++) {
 		clients.push_back(testClient(interfs, &sent, &completed, &latency));
 	}
 	clients.push_back(logger(&sent, &completed, &latency));
