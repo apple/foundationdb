@@ -3385,7 +3385,7 @@ Future<Void> Transaction::getRangeStream(
 	}
 
 	if( !limits.isValid() ) {
-		results.send(range_limits_invalid());
+		results.sendError(range_limits_invalid());
 		return Void();
 	}
 
