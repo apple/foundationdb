@@ -74,9 +74,10 @@ ACTOR Future<Void> networkTestServer() {
 
 	loop {
 		choose {
-			when(NetworkTestStreamingRequest req = waitNext(interf.test.getFuture())) {
-				LatencyStats::sample sample = latency.tick();
-				for (int i = 0; i < 1e6; ++i) {
+			when(state NetworkTestStreamingRequest req = waitNext(interf.test.getFuture())) {
+				state LatencyStats::sample sample = latency.tick();
+				state int i = 0;
+				for (; i < 1e6; ++i) {
 					wait(req.reply.onReady());
 					req.reply.send(NetworkTestStreamingReply{ i });
 				}
