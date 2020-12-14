@@ -77,10 +77,13 @@ ACTOR Future<Void> networkTestServer() {
 			when(state NetworkTestStreamingRequest req = waitNext(interf.test.getFuture())) {
 				state LatencyStats::sample sample = latency.tick();
 				state int i = 0;
-				for (; i < 1e6; ++i) {
+				for (; i < 100; ++i) {
+					fprintf(stderr, "Wait onReady %d\n", i);
 					wait(req.reply.onReady());
+					fprintf(stderr, "Send reply %d\n", i);
 					req.reply.send(NetworkTestStreamingReply{ i });
 				}
+				fprintf(stderr, "Send end_of_stream\n");
 				req.reply.sendError(end_of_stream());
 				latency.tock(sample);
 				sent++;
@@ -134,9 +137,7 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 			loop {
 				NetworkTestStreamingReply rep = waitNext(stream.getFuture());
 				ASSERT(rep.index == j++);
-				if (rep.index % 100000 == 0) {
-					printf("%d\n", rep.index);
-				}
+				printf("Result: %d\n", rep.index);
 			}
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_end_of_stream);
