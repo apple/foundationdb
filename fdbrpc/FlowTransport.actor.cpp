@@ -1497,6 +1497,7 @@ void FlowTransport::cancelReliable( ReliablePacket* p ) {
 }
 
 Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection ) {
+	printf("Send Unreliable: %s %s\n", destination.getPrimaryAddress().toString().c_str(), destination.token.toString().c_str());
 	if (self->isLocalAddress(destination.getPrimaryAddress())) {
 		sendLocal( self, what, destination );
 		return Reference<Peer>();
