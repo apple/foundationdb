@@ -2735,7 +2735,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 								return Void();
 							}
 
-							when(GetKeyValuesStreamReply _rep = waitNext(replyStream) {
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream)) {
 								rep = _rep;
 							}
 						}
