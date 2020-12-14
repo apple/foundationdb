@@ -284,7 +284,7 @@ public:
 	[[nodiscard]] Future<Standalone<StringRef>>
 	getVersionstamp(); // Will be fulfilled only after commit() returns success
 
-	Future<uint64_t> getProtocolVersion() override;
+	Future<uint64_t> getProtocolVersion();
 
 	Promise<Standalone<StringRef>> versionstampPromise;
 
