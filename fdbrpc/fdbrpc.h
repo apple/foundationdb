@@ -259,7 +259,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 };
 
 template <class T>
-struct NetNotifiedQueueWithErrors final : NotifiedQueue, FlowReceiver, FastAllocated<NetNotifiedQueueWithErrors<T>> {
+struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueueWithErrors<T>> {
 	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator new;
 	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator delete;
 
@@ -292,7 +292,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue, FlowReceiver, FastAlloc
 	T pop() override {
 		T res = popImpl();
 		if(acknowledgements.getRawEndpoint().isValid()) {
-			acknowledgements.bytesAcknowledged += copy.expectedSize();
+			acknowledgements.bytesAcknowledged += res.expectedSize();
 			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), true);
 		}
 		return res;
