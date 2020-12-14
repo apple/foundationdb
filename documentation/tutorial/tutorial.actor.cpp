@@ -153,7 +153,7 @@ struct StreamReply : ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeEndpoint, index);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, index);
 	}
 };
 

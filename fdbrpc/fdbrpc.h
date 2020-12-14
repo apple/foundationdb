@@ -218,7 +218,7 @@ template <class Reply>
 void setReplyPriority(const ReplyPromise<Reply> & p, TaskPriority taskID) { p.getEndpoint(taskID); }
 
 struct ReplyPromiseStreamReply {
-	Optional<Endpoint> acknowledgeEndpoint;
+	Optional<UID> acknowledgeToken;
 	ReplyPromiseStreamReply() {}
 };
 
@@ -285,8 +285,8 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 			}
 			this->sendError(message.getError());
 		} else {
-			if(message.get().asUnderlyingType().acknowledgeEndpoint.present()) {
-				acknowledgements = AcknowledgementReceiver(message.get().asUnderlyingType().acknowledgeEndpoint.get());
+			if(message.get().asUnderlyingType().acknowledgeToken.present()) {
+				acknowledgements = AcknowledgementReceiver(FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
 				printf("Acknowledgements create with remote endpoint: %s %s\n", acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 			}
 			this->send(std::move(message.get().asUnderlyingType()));
@@ -319,7 +319,7 @@ public:
 	void send(U && value) const {
 		if (queue->isRemoteEndpoint()) {
 			if(!queue->acknowledgements.getRawEndpoint().isValid()) {
-				value.acknowledgeEndpoint = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint);
+				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token;
 				printf("Registered Ack Endpoint: %s\n", queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token.toString().c_str());
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
