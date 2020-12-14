@@ -98,8 +98,11 @@ public:
 	// The next time the known status for the endpoint changes, returns the new status.
 	virtual Future<Void> onStateChanged(Endpoint const& endpoint) = 0;
 
-	// Returns when onFailed(endpoint) || transport().onDisconnect( endpoint.getPrimaryAddress() ), but more efficiently
+	// Returns when onFailed(endpoint) || transport().onDisconnect( endpoint.getPrimaryAddress() )
 	virtual Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) = 0;
+
+	// Returns when transport().onDisconnect( endpoint.getPrimaryAddress() ) or the endpoint is permanently failed
+	virtual Future<Void> onDisconnect(Endpoint const& endpoint) = 0;
 
 	// Returns true if the endpoint is failed but the address of the endpoint is not failed.
 	virtual bool onlyEndpointFailed(Endpoint const& endpoint) const = 0;
@@ -146,6 +149,7 @@ public:
 	FailureStatus getState(Endpoint const& endpoint) const override;
 	FailureStatus getState(NetworkAddress const& address) const override;
 	Future<Void> onDisconnectOrFailure(Endpoint const& endpoint) override;
+	Future<Void> onDisconnect(Endpoint const& endpoint) override;
 	bool onlyEndpointFailed(Endpoint const& endpoint) const override;
 	bool permanentlyFailed(Endpoint const& endpoint) const override;
 

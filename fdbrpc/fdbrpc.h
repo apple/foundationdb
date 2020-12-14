@@ -538,7 +538,7 @@ public:
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
+			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint(taskID));
 			auto& p = getReplyPromiseStream(value);
 			if (disc.isReady()) {
 				p.sendError(request_maybe_delivered());
@@ -556,7 +556,7 @@ public:
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
-			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
+			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
 			if (disc.isReady()) {
 				p.sendError(request_maybe_delivered());

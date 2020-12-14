@@ -144,6 +144,15 @@ Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoin
 	return endpointKnownFailed.onChange(endpoint);
 }
 
+Future<Void> SimpleFailureMonitor::onDisconnect(Endpoint const& endpoint) {
+	// If the endpoint is permanently failed, return right away
+	if (failedEndpoints.count(endpoint)) {
+		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
+		return Void();
+	}
+	return endpointKnownFailed.onChange(endpoint);
+}
+
 Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
 	// Wait on endpointKnownFailed if it is false, to pick up both endpointNotFound errors (which set it to true)
 	//   and changes to addressStatus (which trigger a range).  Don't wait on endpointKnownFailed if it is true, because
