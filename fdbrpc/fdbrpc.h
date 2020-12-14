@@ -24,6 +24,7 @@
 
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "flow/genericactors.actor.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
