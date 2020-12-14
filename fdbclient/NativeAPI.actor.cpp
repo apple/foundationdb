@@ -2678,11 +2678,11 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 	if( !snapshot ) {
 		//FIXME: this conflict range is too large, and should be updated continously as results are returned
-		conflictRange.send(std::make_pair(std::min(b, begin.getKey()), std::max(e, end.getKey())));
+		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(),begin.arena)), std::max(e, Key(end.getKey(),end.arena))));
 	}
 
 	if (b >= e) {
-		results.send(end_of_stream());
+		results.sendError(end_of_stream());
 		return Void();
 	}
 
@@ -2699,13 +2699,14 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 		loop {
 			const KeyRangeRef& range = locations[shard].first;
 
-			GetKeyValuesStreamRequest req;
+			state GetKeyValuesStreamRequest req;
 			req.version = version;
 			req.begin = firstGreaterOrEqual( range.begin );
 			req.end = firstGreaterOrEqual( range.end );
 			req.spanContext = span.context;
+			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 
-			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			//FIXME: buggify byte limits on internal functions that use them, instead of globally
@@ -2746,7 +2747,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					Standalone<RangeResultRef> output = rep.data;
+					Standalone<RangeResultRef> output( rep.data, rep.arena );
 
 					bool more = rep.more;
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
@@ -2780,13 +2781,13 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 							if(begin >= end) {
 								output.more = false;
 								if(b == allKeys.begin) {
-									r.readToBegin = true;
+									output.readToBegin = true;
 								}
 								if(e == allKeys.end) {
-									r.readThroughEnd = true;
+									output.readThroughEnd = true;
 								}
 								int64_t bytes = 0;
-								for(const KeyValueRef &kv : result) {
+								for(const KeyValueRef &kv : output) {
 									bytes += kv.key.size() + kv.value.size();
 								}
 
@@ -2813,13 +2814,13 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 					if(output.size() > 0) {
 						output.more = true;
 						if(b == allKeys.begin && !reverse) {
-							r.readToBegin = true;
+							output.readToBegin = true;
 						}
 						if(e == allKeys.end && reverse) {
-							r.readThroughEnd = true;
+							output.readThroughEnd = true;
 						}
 						int64_t bytes = 0;
-						for(const KeyValueRef &kv : result) {
+						for(const KeyValueRef &kv : output) {
 							bytes += kv.key.size() + kv.value.size();
 						}
 
