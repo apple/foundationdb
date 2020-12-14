@@ -290,7 +290,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	}
 
 	T pop() override {
-		T res = popImpl();
+		T res = this->popImpl();
 		if(acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
 			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), true);
@@ -364,7 +364,8 @@ public:
 		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
 			return Void();
 		}
-		return queue->acknowledgements.ready.getFuture() || tagError(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID)), request_maybe_delivered());
+		return queue->acknowledgements.ready.getFuture() || 
+		       tagError(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint)), request_maybe_delivered());
 	}
 
 	void operator=(const ReplyPromiseStream& rhs) {
