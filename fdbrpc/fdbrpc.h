@@ -24,7 +24,6 @@
 
 #include "flow/flow.h"
 #include "flow/serialize.h"
-#include "flow/genericactors.actor.h"
 #include "fdbrpc/FlowTransport.h" // NetworkMessageReceiver Endpoint
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
@@ -366,7 +365,7 @@ public:
 			return Void();
 		}
 		return queue->acknowledgements.ready.getFuture() || 
-		       tagError(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint)), request_maybe_delivered());
+		       tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint)), request_maybe_delivered());
 	}
 
 	void operator=(const ReplyPromiseStream& rhs) {
