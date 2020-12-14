@@ -535,41 +535,41 @@ public:
 	//FIXME comment
 
 	template <class X>
-	FutureStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value, TaskPriority taskID) const {
+	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
 			auto& p = getReplyPromiseStream(value);
 			if (disc.isReady()) {
 				p.sendError(request_maybe_delivered());
-				return p.getFuture();
+				return p;
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			endStreamOnDisconnect(disc, p, peer);
-			return p.getFuture();
+			return p;
 		}
 		send(value);
 		auto& p = getReplyPromiseStream(value);
-		return p.getFuture();
+		return p;
 	}
 
 	template <class X>
-	FutureStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
+	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
 			if (disc.isReady()) {
 				p.sendError(request_maybe_delivered());
-				return p.getFuture();
+				return p;
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			endStreamOnDisconnect(disc, p, peer);
-			return p.getFuture();
+			return p;
 		}
 		else {
 			send(value);
 			auto& p = getReplyPromiseStream(value);
-			return p.getFuture();
+			return p;
 		}
 	}
 

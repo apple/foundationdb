@@ -126,22 +126,19 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 	while (moreRequestsPending(*sent)) {
 		(*sent)++;
 		sample = latency->tick();
-		fprintf(stderr, "Before getReplyStream\n");
-		state FutureStream<NetworkTestStreamingReply> stream =
+		state ReplyPromiseStream<NetworkTestStreamingReply> stream =
 		    interfs[deterministicRandom()->randomInt(0, interfs.size())].test.getReplyStream(
 		        NetworkTestStreamingRequest{});
 		state int j = 0;
-		fprintf(stderr, "Starting waitNext\n");
 		try {
 			loop {
-				NetworkTestStreamingReply rep = waitNext(stream);
+				NetworkTestStreamingReply rep = waitNext(stream.getFuture());
 				ASSERT(rep.index == j++);
 				if (rep.index % 100000 == 0) {
 					printf("%d\n", rep.index);
 				}
 			}
 		} catch (Error& e) {
-			fprintf(stderr, "Error: %s\n", e.what());
 			ASSERT(e.code() == error_code_end_of_stream);
 		}
 		latency->tock(sample);

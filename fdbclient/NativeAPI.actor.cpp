@@ -2727,7 +2727,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 				}
 
 				//FIXME: add load balancing
-				state FutureStream<GetKeyValuesStreamReply> replyStream = locations[shard].second->getInterface(0).getKeyValuesStream.getReplyStream(req);
+				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream = locations[shard].second->getInterface(0).getKeyValuesStream.getReplyStream(req);
 				loop {
 					try {
 						choose {
@@ -2736,7 +2736,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 								return Void();
 							}
 
-							when(GetKeyValuesStreamReply _rep = waitNext(replyStream)) {
+							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) {
 								rep = _rep;
 							}
 						}
@@ -2940,9 +2940,9 @@ ACTOR Future<Void> getRangeStreamSingleShard( PromiseStream<Standalone<RangeResu
 				if(beginServer.second->size() == 0) {
 					wait(Future<Void>(Never()));
 				}
-				state FutureStream<GetKeyValuesStreamReply> repStream = beginServer.second->getInterface(0).getKeyValuesStream.getReplyStream(req);
+				state ReplyPromiseStream<GetKeyValuesStreamReply> repStream = beginServer.second->getInterface(0).getKeyValuesStream.getReplyStream(req);
 				loop {
-					GetKeyValuesStreamReply rep = waitNext(repStream);
+					GetKeyValuesStreamReply rep = waitNext(repStream.getFuture());
 
 					if( info.debugID.present() ) {
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
