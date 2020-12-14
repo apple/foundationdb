@@ -74,9 +74,13 @@ ACTOR Future<Void> networkTestServer() {
 
 	loop {
 		choose {
-			when( NetworkTestRequest req = waitNext( interf.test.getFuture() ) ) {
+			when(NetworkTestStreamingRequest req = waitNext(interf.test.getFuture())) {
 				LatencyStats::sample sample = latency.tick();
-				req.reply.send( NetworkTestReply( Value( std::string( req.replySize, '.' ) ) ) );
+				for (int i = 0; i < 1e6; ++i) {
+					wait(req.reply.onReady());
+					req.reply.send(NetworkTestStreamingReply{ i });
+				}
+				req.reply.sendError(end_of_stream());
 				latency.tock(sample);
 				sent++;
 			}
@@ -121,9 +125,21 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 	while (moreRequestsPending(*sent)) {
 		(*sent)++;
 		sample = latency->tick();
-		NetworkTestReply rep = wait(
-		    retryBrokenPromise(interfs[deterministicRandom()->randomInt(0, interfs.size())].test,
-		                       NetworkTestRequest(StringRef(request_payload), FLOW_KNOBS->NETWORK_TEST_REPLY_SIZE)));
+		state FutureStream<NetworkTestStreamingReply> stream =
+		    interfs[deterministicRandom()->randomInt(0, interfs.size())].test.getReplyStream(
+		        NetworkTestStreamingRequest{});
+		state int j = 0;
+		try {
+			loop {
+				NetworkTestStreamingReply rep = waitNext(stream);
+				ASSERT(rep.index == j++);
+				if (rep.index % 100000 == 0) {
+					printf("%d\n", rep.index);
+				}
+			}
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_end_of_stream);
+		}
 		latency->tock(sample);
 		(*completed)++;
 	}
