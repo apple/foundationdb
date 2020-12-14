@@ -259,26 +259,17 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 };
 
 template <class T>
-struct NetNotifiedQueueWithErrors final : private SingleCallback<T>, public FlowReceiver, FastAllocated<NetNotifiedQueueWithErrors<T>> {
+struct NetNotifiedQueueWithErrors final : NotifiedQueue, FlowReceiver, FastAllocated<NetNotifiedQueueWithErrors<T>> {
 	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator new;
 	using FastAllocated<NetNotifiedQueueWithErrors<T>>::operator delete;
 
-	int promises; // one for each promise (and one for an active actor if this is an actor)
-	int futures;  // one for each future and one more if there are any callbacks
-
-	// Invariant: SingleCallback<T>::next==this || (queue.empty() && !error.isValid())
-	std::queue<T, Deque<T>> queue;
-	Error error;
 	AcknowledgementReceiver acknowledgements;
 
-	NetNotifiedQueueWithErrors(int futures, int promises) : futures(futures), promises(promises) {
-		SingleCallback<T>::next = this;
-	}
+	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
-	  : futures(futures), promises(promises), FlowReceiver(remoteEndpoint, false) {
-		SingleCallback<T>::next = this;
-	}
+	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {}
 
+	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
 		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
@@ -298,78 +289,14 @@ struct NetNotifiedQueueWithErrors final : private SingleCallback<T>, public Flow
 		this->delPromiseRef();
 	}
 
-	bool isReady() const { return !queue.empty() || error.isValid(); }
-	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
-	uint32_t size() const { return queue.size(); }
-
-	T pop() {
-		if (queue.empty()) {
-			if (error.isValid()) throw error;
-			throw internal_error();
-		}
-		auto copy = std::move(queue.front());
+	T pop() override {
+		T res = popImpl();
 		if(acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += copy.expectedSize();
 			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), true);
 		}
-		queue.pop();
-		return copy;
+		return res;
 	}
-
-	template <class U>
-	void send(U && value) {
-		if (error.isValid()) return;
-
-		if (SingleCallback<T>::next != this) {
-			SingleCallback<T>::next->fire(std::forward<U>(value));
-		}
-		else {
-			queue.emplace(std::forward<U>(value));
-		}
-	}
-
-	void sendError(Error err) {
-		if (error.isValid()) return;
-
-		this->error = err;
-		if (SingleCallback<T>::next != this)
-			SingleCallback<T>::next->error(err);
-	}
-
-	void addPromiseRef() { promises++; }
-	void addFutureRef() { futures++; }
-
-	void delPromiseRef() {
-		if (!--promises) {
-			if (futures) {
-				sendError(broken_promise());
-			}
-			else
-				destroy();
-		}
-	}
-	void delFutureRef() {
-		if (!--futures) {
-			if (promises)
-				cancel();
-			else
-				destroy();
-		}
-	}
-
-	int getFutureReferenceCount() const { return futures; }
-	int getPromiseReferenceCount() const { return promises; }
-
-	virtual void destroy() { delete this; }
-	virtual void cancel() {}
-
-	void addCallbackAndDelFutureRef(SingleCallback<T>* cb) {
-		ASSERT(SingleCallback<T>::next == this);
-		cb->insert(this);
-	}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
 };
 
 template <class T>
@@ -437,7 +364,7 @@ public:
 		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
 			return Void();
 		}
-		return queue->acknowledgements.ready.getFuture();
+		return queue->acknowledgements.ready.getFuture() || tagError(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID)), request_maybe_delivered());
 	}
 
 	void operator=(const ReplyPromiseStream& rhs) {

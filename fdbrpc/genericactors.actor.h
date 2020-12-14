@@ -192,7 +192,11 @@ struct PeerHolder {
 	}
 };
 
-// Implements getRepyStream
+// Implements getRepyStream, this a void actor with the same lifetime as the input ReplyPromiseStream.
+// Because this actor holds a reference to the stream, normally it would be impossible to know when there are no other references.
+// To get around this, there is a SAV inside the stream that has one less promise reference than
+// it should (caused by getErrorFutureAndDelPromiseRef()). When that SAV gets a broken promise because no one besides this void actor
+// is referencing it, this void actor will get a broken_promise dropping the final reference to the full ReplyPromiseStream
 ACTOR template <class X>
 void endStreamOnDisconnect( Future<Void> signal, ReplyPromiseStream<X> stream, Reference<Peer> peer = Reference<Peer>() ) {
 	state PeerHolder holder = PeerHolder(peer);

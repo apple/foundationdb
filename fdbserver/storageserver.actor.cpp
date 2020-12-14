@@ -2251,7 +2251,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 			loop {
 				Standalone<RangeResultRef> rep = waitNext( results.getFuture() );
 				limits.decrement( rep );
-
+				//FIXME: this is only returning the first result from the stream and then cancelling the stream
 				if( limits.isReached() || !rep.more ) {
 					if( output.size() ) {
 						output.arena().dependsOn( rep.arena() );
