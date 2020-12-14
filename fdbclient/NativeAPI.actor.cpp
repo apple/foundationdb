@@ -2678,7 +2678,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 	if( !snapshot ) {
 		//FIXME: this conflict range is too large, and should be updated continously as results are returned
-		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(),begin.arena)), std::max(e, Key(end.getKey(),end.arena))));
+		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(),begin.arena())), std::max(e, Key(end.getKey(),end.arena()))));
 	}
 
 	if (b >= e) {
@@ -2747,7 +2747,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					Standalone<RangeResultRef> output( rep.data, rep.arena );
+					Standalone<RangeResultRef> output( RangeResultRef(rep.data, rep.more), rep.arena );
 
 					bool more = rep.more;
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
@@ -2792,7 +2792,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 								}
 
 								cx->transactionBytesRead += bytes;
-								cx->transactionKeysRead += result.size();
+								cx->transactionKeysRead += output.size();
 
 								//FIXME: figure out appropriate metrics for the client event log
 								//if( trLogInfo ) {
@@ -2825,7 +2825,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 						}
 
 						cx->transactionBytesRead += bytes;
-						cx->transactionKeysRead += result.size();
+						cx->transactionKeysRead += output.size();
 
 						//FIXME: figure out appropriate metrics for the client event log
 						//if( trLogInfo ) {
