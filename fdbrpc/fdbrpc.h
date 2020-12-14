@@ -356,7 +356,9 @@ public:
 		ASSERT(errors && errors->getPromiseReferenceCount() > 1);
 		errors->addFutureRef();
 		errors->delPromiseRef();
-		return Future<Void>(errors);
+		Future<Void> res(errors);
+		errors = nullptr;
+		return res;
 	}
 	
 	~ReplyPromiseStream() {

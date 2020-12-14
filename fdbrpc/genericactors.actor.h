@@ -200,15 +200,11 @@ struct PeerHolder {
 ACTOR template <class X>
 void endStreamOnDisconnect( Future<Void> signal, ReplyPromiseStream<X> stream, Reference<Peer> peer = Reference<Peer>() ) {
 	state PeerHolder holder = PeerHolder(peer);
-	try {
-		choose {
-			when(wait(signal)) {
-				stream.sendError(request_maybe_delivered());
-			}
-			when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+	choose {
+		when(wait(signal)) {
+			stream.sendError(request_maybe_delivered());
 		}
-	} catch (Error &e) {
-		wait(delay(0));
+		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
 	}
 }
 
