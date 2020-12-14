@@ -427,14 +427,15 @@ void load(Ar& ar, ReplyPromiseStream<T>& value) {
 
 template <class T>
 struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
-	template <class Archiver>
-	static void serialize(Archiver& ar, ReplyPromiseStream<T>& stream) {
+	template<class Archiver>
+	static void serialize(Archiver& ar, ReplyPromiseStream<T>& p) {
 		if constexpr (Archiver::isDeserializing) {
-			Endpoint endpoint;
-			serializer(ar, endpoint);
-			stream = ReplyPromiseStream<T>(endpoint);
+			UID token;
+			serializer(ar, token);
+			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
+			p = ReplyPromiseStream<T>(endpoint);
 		} else {
-			const auto& ep = stream.getEndpoint();
+			const auto& ep = p.getEndpoint().token;
 			serializer(ar, ep);
 		}
 	}
