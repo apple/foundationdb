@@ -302,7 +302,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	}
 
 	~NetNotifiedQueueWithErrors() {
-		printf("NetNotifiedQueue destructor\n");
+		printf("NetNotifiedQueue destructor %s\n", getRawEndpoint().token.toString().c_str());
 	}
 };
 
