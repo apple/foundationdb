@@ -89,6 +89,7 @@ void EndpointMap::realloc() {
 }
 
 void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
+	printf("Endpoint Map Insert: %s\n", token.toString().c_str());
 	if (firstFree == uint32_t(-1)) realloc();
 	int index = firstFree;
 	firstFree = data[index].nextFree;
@@ -148,6 +149,7 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 }
 
 void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
+	printf("Endpoint Map Remove: %s\n", token.toString().c_str());
 	uint32_t index = token.second();
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
 		data[index].receiver = 0;
