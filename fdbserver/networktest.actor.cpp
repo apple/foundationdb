@@ -135,11 +135,13 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 		state int j = 0;
 		try {
 			loop {
+				printf("Wait for result\n", rep.index);
 				NetworkTestStreamingReply rep = waitNext(stream.getFuture());
 				ASSERT(rep.index == j++);
 				printf("Result: %d\n", rep.index);
 			}
 		} catch (Error& e) {
+			printf("Error: %s\n", e.what());
 			ASSERT(e.code() == error_code_end_of_stream);
 		}
 		latency->tock(sample);
