@@ -100,10 +100,11 @@ struct EchoServerInterface {
 	RequestStream<struct GetInterfaceRequest> getInterface;
 	RequestStream<struct EchoRequest> echo;
 	RequestStream<struct ReverseRequest> reverse;
+	RequestStream<struct StreamRequest> stream;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, echo, reverse);
+		serializer(ar, echo, reverse, stream);
 	}
 };
 
@@ -141,6 +142,31 @@ struct ReverseRequest {
 	}
 };
 
+struct StreamReply : ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 440804;
+
+	int index = 0;
+	StreamReply() = default;
+	explicit StreamReply(int index) : index(index) {}
+
+	size_t expectedSize() const { return 2e6; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeEndpoint, index);
+	}
+};
+
+struct StreamRequest {
+	constexpr static FileIdentifier file_identifier = 5410805;
+	ReplyPromiseStream<StreamReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 uint64_t tokenCounter = 1;
 
 ACTOR Future<Void> echoServer() {
@@ -154,6 +180,15 @@ ACTOR Future<Void> echoServer() {
 			when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
 			when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
 				req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
+			}
+			when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
+				state int i = 0;
+				for (; i < 100; ++i) {
+					wait(req.reply.onReady());
+					std::cout << "Send " << i << std::endl;
+					req.reply.send(StreamReply{ i });
+				}
+				req.reply.sendError(end_of_stream());
 			}
 		}
 	}
@@ -172,6 +207,18 @@ ACTOR Future<Void> echoClient() {
 	reverseRequest.message = "Hello World";
 	std::string reverseString = wait(server.reverse.getReply(reverseRequest));
 	std::cout << format("Sent %s to reverse, received %s\n", "Hello World", reverseString.c_str());
+
+	state ReplyPromiseStream<StreamReply> stream = server.stream.getReplyStream(StreamRequest{});
+	state int j = 0;
+	try {
+		loop {
+			StreamReply rep = waitNext(stream.getFuture());
+			std::cout << "Rep: " << rep.index << std::endl;
+			ASSERT(rep.index == j++);
+		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_request_maybe_delivered);
+	}
 	return Void();
 }
 
