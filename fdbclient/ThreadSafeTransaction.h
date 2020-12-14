@@ -92,7 +92,7 @@ public:
 	Version getCommittedVersion() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
-	ThreadFuture<uint64_t> getProtocolVersion() override;
+	ThreadFuture<uint64_t> getProtocolVersion();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() ) override;
 
