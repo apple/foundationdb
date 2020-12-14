@@ -142,7 +142,7 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 			}
 		} catch (Error& e) {
 			printf("Error: %s\n", e.what());
-			ASSERT(e.code() == error_code_end_of_stream);
+			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_request_maybe_delivered);
 		}
 		latency->tock(sample);
 		(*completed)++;
