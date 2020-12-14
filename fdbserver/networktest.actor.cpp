@@ -135,7 +135,7 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 		state int j = 0;
 		try {
 			loop {
-				printf("Wait for result\n", rep.index);
+				printf("Wait for result\n");
 				NetworkTestStreamingReply rep = waitNext(stream.getFuture());
 				ASSERT(rep.index == j++);
 				printf("Result: %d\n", rep.index);
