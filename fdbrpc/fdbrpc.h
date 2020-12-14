@@ -248,6 +248,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
 
 	void receive(ArenaObjectReader& reader) override {
+		printf("AcknowledgementReceived\n");
 		ErrorOr<EnsureTable<AcknowledgementReply>> message;
 		reader.deserialize(message);
 		ASSERT(!message.isError() && message.get().asUnderlyingType().bytes > bytesAcknowledged);
@@ -286,6 +287,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		} else {
 			if(message.get().asUnderlyingType().acknowledgeEndpoint.present()) {
 				acknowledgements = AcknowledgementReceiver(message.get().asUnderlyingType().acknowledgeEndpoint.get());
+				printf("Acknowledgements create with remote endpoint: %s %s\n", acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 			}
 			this->send(std::move(message.get().asUnderlyingType()));
 		}
@@ -296,7 +298,8 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		T res = this->popImpl();
 		if(acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
-			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), true);
+			printf("Sending acknowledgement to endpoint: %d %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
+			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 		}
 		return res;
 	}
@@ -317,6 +320,7 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			if(!queue->acknowledgements.getRawEndpoint().isValid()) {
 				value.acknowledgeEndpoint = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint);
+				printf("Registered Ack Endpoint: %s\n", queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token.toString().c_str());
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			if((!queue->acknowledgements.ready.isValid() || queue->acknowledgements.ready.isSet()) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
