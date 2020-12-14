@@ -2890,7 +2890,7 @@ ACTOR Future<Void> getRangeStreamSingleShard( PromiseStream<Standalone<RangeResu
 			if( end.getKey() == allKeys.begin && (end.offset < 1 || end.isFirstGreaterOrEqual()) ) {
 				getRangeFinished(cx, trLogInfo, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, output);
 				results.send(output);
-				results.send(end_of_stream());
+				results.sendError(end_of_stream());
 				return Void();
 			}
 
@@ -3380,7 +3380,7 @@ Future<Void> Transaction::getRangeStream(
 	++cx->transactionGetRangeStreamRequests;
 
 	if( limits.isReached() ) {
-		results.send(end_of_stream());
+		results.sendError(end_of_stream());
 		return Void();
 	}
 
@@ -3405,7 +3405,7 @@ Future<Void> Transaction::getRangeStream(
 
 	if( b.offset >= e.offset && b.getKey() >= e.getKey() ) {
 		TEST(true); // Native stream range inverted
-		results.send(end_of_stream());
+		results.sendError(end_of_stream());
 		return Void();
 	}
 

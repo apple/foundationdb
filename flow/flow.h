@@ -908,24 +908,6 @@ struct ReplyType<ReplyPromise<T>> {
 #define REPLY_TYPE(RequestType) typename ReplyType<RequestType>::Type
 #endif
 
-// Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
-#ifdef __GNUG__
-#define REPLYSTREAM_TYPE(RequestType) decltype(getReplyPromiseStream(std::declval<RequestType>()).getFuture().getValue())
-#else
-template <class T>
-struct ReplyStreamType {
-	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
-	//   breaks IntelliSense in VS2010; this is a workaround.
-	typedef decltype(std::declval<T>().reply.getFuture().getValue()) Type;
-};
-template <class T> class ReplyPromiseStream;
-template <class T>
-struct ReplyStreamType<ReplyPromiseStream<T>> {
-	typedef T Type;
-};
-#define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
-#endif
-
 template <class T>
 class PromiseStream {
 public:
@@ -998,6 +980,23 @@ private:
 	NotifiedQueue<T>* queue;
 };
 
+// Neither of these implementations of REPLY_TYPE() works on both MSVC and g++, so...
+#ifdef __GNUG__
+#define REPLYSTREAM_TYPE(RequestType) decltype(getReplyPromiseStream(std::declval<RequestType>()).getFuture().pop())
+#else
+template <class T>
+struct ReplyStreamType {
+	// Doing this calculation directly in the return value declaration for PromiseStream<T>::getReply()
+	//   breaks IntelliSense in VS2010; this is a workaround.
+	typedef decltype(std::declval<T>().reply.getFuture().pop()) Type;
+};
+template <class T> class ReplyPromiseStream;
+template <class T>
+struct ReplyStreamType<ReplyPromiseStream<T>> {
+	typedef T Type;
+};
+#define REPLYSTREAM_TYPE(RequestType) typename ReplyStreamType<RequestType>::Type
+#endif
 
 //extern int actorCount;
 
