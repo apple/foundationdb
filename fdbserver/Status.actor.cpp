@@ -1607,6 +1607,7 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 	return results;
 }
 
+// Returns the number of zones eligble for recruiting new tLogs after failures, to maintain the current replication factor.
 static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
 	std::map<Key,std::set<StringRef>> dcId_zone;
