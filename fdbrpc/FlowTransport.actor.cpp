@@ -1226,9 +1226,6 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 		peer = makeReference<Peer>(this, address);
 		if(startConnectionKeeper && !isLocalAddress(address)) {
 			printf("getOrOpen %s\n", address.toString().c_str());
-			if(!address.ip.isValid()) {
-				crashAndDie();
-			}
 			peer->connect = connectionKeeper(peer);
 		}
 		peers[address] = peer;
@@ -1323,7 +1320,7 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().ip.isValid())
+	if (!isStream || !endpoint.getPrimaryAddress().isValid())
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
