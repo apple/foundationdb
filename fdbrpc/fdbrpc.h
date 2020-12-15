@@ -323,11 +323,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	}
 
 	~NetNotifiedQueueWithErrors() {
+		printf("NetNotifiedQueue destructor %s\n", getRawEndpoint().token.toString().c_str());
 		if(acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(request_maybe_delivered()), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 			printf("NetNotifiedQueue destructor with error %s\n", getRawEndpoint().token.toString().c_str());
-		} else {
-			printf("NetNotifiedQueue destructor %s\n", getRawEndpoint().token.toString().c_str());
 		}
 	}
 };
@@ -407,7 +406,13 @@ public:
 	uint32_t size() const { return queue->size(); }
 
 	Future<Void> onReady() {
+		printf("OnReady Start\n");
+		if(queue->acknowledgements.failures.isError() || (queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError()) {
+			printf("OnReady Error\n");
+			return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
+		}
 		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
+			printf("OnReady Skip\n");
 			return Void();
 		}
 		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
