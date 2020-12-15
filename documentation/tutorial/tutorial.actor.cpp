@@ -394,7 +394,7 @@ ACTOR Future<Void> multipleClients() {
 
 std::string clusterFile = "fdb.cluster";
 
-ACTOR Future<Void> fdbClient() {
+ACTOR Future<Void> fdbClientStream() {
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state Transaction tx(db);
 	state PromiseStream<Standalone<RangeResultRef>> results;
@@ -406,13 +406,34 @@ ACTOR Future<Void> fdbClient() {
 			                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> range = waitNext(results.getFuture());
-				std::cout << "Got " << range.expectedSize() << std::endl;
+				std::cout << "Got " << range.expectedSize() << " next: " << printable(next) << std::endl;
 				next = keyAfter(range.back().key);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
 				break;
 			}
+			wait(tx.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> fdbClientGetRange() {
+	state Database db = Database::createDatabase(clusterFile, 300);
+	state Transaction tx(db);
+	state Key next;
+	loop {
+		try {
+			Standalone<RangeResultRef> range = wait(tx.getRange(
+			    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(normalKeys.end)),
+			    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+			std::cout << "Got " << range.expectedSize() << " next: " << printable(next) << std::endl;
+			if (!range.more) {
+				break;
+			}
+			next = keyAfter(range.back().key);
+		} catch (Error& e) {
 			wait(tx.onError(e));
 		}
 	}
@@ -433,16 +454,19 @@ ACTOR Future<Void> fdbStatusStresser() {
 	}
 }
 
-std::unordered_map<std::string, std::function<Future<Void>()>> actors = { { "timer", &simpleTimer }, // ./tutorial timer
-	                                                                      { "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
-	                                                                      { "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
-	                                                                      { "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
-	                                                                      { "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
-	                                                                      { "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
-	                                                                      { "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
-	                                                                      { "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
-	                                                                      { "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
-	                                                                      { "fdbStatusStresser", &fdbStatusStresser } }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
+std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
+	{ "timer", &simpleTimer }, // ./tutorial timer
+	{ "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
+	{ "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
+	{ "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
+	{ "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
+	{ "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
+	{ "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
+	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
+	{ "fdbClientStream", &fdbClientStream }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientStream
+	{ "fdbClientGetRange", &fdbClientGetRange }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientGetRange
+	{ "fdbStatusStresser", &fdbStatusStresser }
+}; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
 
 int main(int argc, char* argv[]) {
 	bool isServer = false;

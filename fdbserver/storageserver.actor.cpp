@@ -1641,9 +1641,9 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	return Void();
 }
 
-ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStreamRequest req )
-// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
-// all data from being read in one range read
+ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest req)
+// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
+// selector offset prevents all data from being read in one range read
 {
 	state Span span("SS:getKeyValuesStream"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
@@ -1719,17 +1719,11 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 			req.reply.send( none );
 			req.reply.sendError( end_of_stream() );
 		} else {
-			state int remainingLimitBytes = req.limitBytes;
 			loop {
 				wait(req.reply.onReady());
-				printf("Issuing getRange for stream impl. begin: %s end: %s limit: %d limitBytes: %d\n",
-				       printable(begin).c_str(), printable(end).c_str(), req.limit, remainingLimitBytes);
-				state int byteLimit = std::min(remainingLimitBytes, CLIENT_KNOBS->REPLY_BYTE_LIMIT);
-				state int byteLimitBefore = byteLimit;
+				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context) );
-				remainingLimitBytes -= byteLimitBefore - byteLimit;
 				GetKeyValuesStreamReply r(_r);
-				printf("Result. size: %d more: %d \n", int(r.data.expectedSize()), int(r.more));
 
 				if( req.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
@@ -1761,8 +1755,6 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 
 				req.reply.send( r );
 
-				resultSize = req.limitBytes - remainingLimitBytes;
-				data->counters.bytesQueried += resultSize;
 				data->counters.rowsQueried += r.data.size();
 				if(r.data.size() == 0) {
 					++data->counters.emptyQueries;
@@ -1820,19 +1812,6 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 	//										abs(req.end.offset) > maxSelectorOffset);
 	//}
 
-	return Void();
-}
-
-ACTOR Future<Void> getKeyValuesStreamQ( StorageServer* data, GetKeyValuesStreamRequest req )
-{
-	Future<Void> disc = IFailureMonitor::failureMonitor().onDisconnectOrFailure(req.reply.getEndpoint());
-	Future<Void> work = getKeyValuesStreamWork( data, req );
-	choose {
-		when(wait(disc)) {
-			req.reply.sendError(end_of_stream());
-		}
-		when(wait(work)) {}
-	}
 	return Void();
 }
 

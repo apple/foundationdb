@@ -2665,6 +2665,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 {
 	//FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
+	ASSERT(!limits.hasByteLimit());
 	state Span span("NAPI:getRangeStream"_loc, info.spanID);
 
 	state Version version = wait( fVersion );
@@ -2693,7 +2694,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 	//or allKeys.begin exists in the database and will be part of the conflict range anyways
 
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info ) );
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream, info ) );
 		ASSERT( locations.size() );
 		state int shard = 0;
 		loop {
@@ -2705,11 +2706,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 			req.end = firstGreaterOrEqual( range.end );
 			req.spanContext = span.context;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-			if (limits.hasByteLimit()) {
-				req.limitBytes = limits.bytes;
-			} else {
-				req.limitBytes = std::numeric_limits<int>::max();
-			}
+			req.limitBytes = std::numeric_limits<int>::max();
 
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -2732,6 +2729,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 				//FIXME: add load balancing
 				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream = locations[shard].second->getInterface(0).getKeyValuesStream.getReplyStream(req);
+				state bool breakAgain = false;
 				loop {
 					try {
 						choose {
@@ -2742,13 +2740,16 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) {
 								rep = _rep;
-								limits.decrement(rep.data);
 							}
 						}
 						++cx->transactionPhysicalReadsCompleted;
-					} catch(Error&) {
+					} catch (Error& e) {
 						++cx->transactionPhysicalReadsCompleted;
-						throw;
+						if (e.code() == error_code_end_of_stream) {
+							rep = GetKeyValuesStreamReply();
+						} else {
+							throw;
+						}
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
@@ -2776,7 +2777,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 							locations[shard].first = KeyRangeRef( keyAfter( output[output.size()-1].key ), locations[shard].first.end );
 					}
 
-					if (!more || locations[shard].first.empty() || limits.isReached()) {
+					if (!more || locations[shard].first.empty()) {
 						TEST(true); // getRangeStream (!more || locations[shard].first.empty())
 						if(shard == locations.size()-1) {
 							const KeyRangeRef& range = locations[shard].first;
@@ -2810,10 +2811,12 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 							}
 
 							keys = KeyRangeRef(begin, end);
+							breakAgain = true;
 							break;
 						}
 
 						++shard;
+						break;
 					}
 
 					if(output.size() > 0) {
@@ -2838,6 +2841,9 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 						//}
 						results.send(output);
 					}
+				}
+				if (breakAgain) {
+					break;
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
