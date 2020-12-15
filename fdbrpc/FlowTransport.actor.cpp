@@ -1225,6 +1225,10 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 	if(!peer) {
 		peer = makeReference<Peer>(this, address);
 		if(startConnectionKeeper && !isLocalAddress(address)) {
+			fprintf("getOrOpen %s\n", address.toString().c_str());
+			if(!address.ip.isValid()) {
+				crashAndDie();
+			}
 			peer->connect = connectionKeeper(peer);
 		}
 		peers[address] = peer;
