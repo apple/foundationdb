@@ -109,7 +109,7 @@ void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatu
 
 void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	// SOMEDAY: Expiration (this "leaks" memory)
-	printf("endpointNotFound %s\n", endpoint.token.toString().c_str());
+	printf("endpointNotFound %s %s\n", endpoint.getPrimaryAddress().toString().c_str(), endpoint.token.toString().c_str());
 	if (endpoint.token.first() == -1) {
 		TraceEvent("WellKnownEndpointNotFound")
 		    .suppressFor(1.0)
@@ -142,6 +142,7 @@ Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoin
 	// Return when the endpoint is triggered, which means that either the endpoint has become known failed, or the
 	//   address has changed state (and since it was previously not failed, it must now be failed), or
 	//   notifyDisconnect() has been called.
+	printf("OnDisconnect %s %s\n", endpoint.getPrimaryAddress().toString().c_str(), endpoint.token.toString().c_str());
 	return endpointKnownFailed.onChange(endpoint);
 }
 
