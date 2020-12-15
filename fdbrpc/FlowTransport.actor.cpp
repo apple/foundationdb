@@ -1323,7 +1323,7 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid())
+	if (!isStream || !endpoint.getPrimaryAddress().ip.isValid())
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
