@@ -407,7 +407,7 @@ public:
 
 	Future<Void> onReady() {
 		printf("OnReady Start\n");
-		if(queue->acknowledgements.failures.isError() || (queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError()) {
+		if(queue->acknowledgements.failures.isError() || (queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError())) {
 			printf("OnReady Error\n");
 			return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
 		}
