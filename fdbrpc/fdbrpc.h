@@ -242,6 +242,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	int64_t bytesSent;
 	int64_t bytesAcknowledged;
 	Promise<Void> ready;
+	Future<Void> failures;
 
 	AcknowledgementReceiver() : bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
 	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false),
@@ -269,6 +270,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
 	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {
+		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(remoteEndpoint), request_maybe_delivered());
 		  printf("NetNotified create with remote endpoint: %s\n", remoteEndpoint.token.toString().c_str());
 	  }
 
@@ -395,8 +397,7 @@ public:
 		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
 			return Void();
 		}
-		return queue->acknowledgements.ready.getFuture() || 
-		       tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint)), request_maybe_delivered());
+		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
 	}
 
 	void operator=(const ReplyPromiseStream& rhs) {
