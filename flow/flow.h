@@ -653,6 +653,10 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	bool shouldFireImmediately() {
 		return SingleCallback<T>::next != this;
 	}
+
+	bool hasError() {
+		return error.isValid();
+	}
 };
 
 
