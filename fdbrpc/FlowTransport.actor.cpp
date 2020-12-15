@@ -843,6 +843,7 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 	}
 
 	auto receiver = self->endpoints.get(destination.token);
+	printf("Deliver %d %s\n", (bool)receiver, destination.token.toString().c_str());
 	if (receiver) {
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;

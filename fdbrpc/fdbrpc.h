@@ -407,10 +407,13 @@ public:
 
 	Future<Void> onReady() {
 		printf("OnReady Start\n");
-		if(queue->acknowledgements.failures.isError() || 
-		  (queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError())) {
-			printf("OnReady Error\n");
-			return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
+		if(queue->acknowledgements.failures.isError()) {
+			printf("OnReady Error1\n");
+			return queue->acknowledgements.failures.getError();
+		}
+		if(queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError())) {
+			printf("OnReady Error2\n");
+			return queue->acknowledgements.ready.getFuture().getError();
 		}
 		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
 			printf("OnReady Skip\n");
@@ -598,6 +601,7 @@ public:
 				return p;
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
+			//FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, peer);
 			return p;
 		}
@@ -616,6 +620,7 @@ public:
 				return p;
 			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+			//FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, peer);
 			return p;
 		}
