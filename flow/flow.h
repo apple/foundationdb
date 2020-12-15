@@ -580,18 +580,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	bool isError() const { return queue.empty() && error.isValid(); }  // the *next* thing queued is an error
 	uint32_t size() const { return queue.size(); }
 
-	T pop() {
-		if (queue.empty()) {
-			if (error.isValid()) throw error;
-			throw internal_error();
-		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		popAction();
-		return copy;
+	virtual T pop() {
+		return popImpl();
 	}
-
-	virtual void popAction() {}
 
 	template <class U>
 	void send(U && value) {
@@ -647,6 +638,17 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	virtual void unwait() override { delFutureRef(); }
 	virtual void fire(T const&) override { ASSERT(false); }
 	virtual void fire(T&&) override { ASSERT(false); }
+
+	protected:
+	T popImpl() {
+		if (queue.empty()) {
+			if (error.isValid()) throw error;
+			throw internal_error();
+		}
+		auto copy = std::move(queue.front());
+		queue.pop();
+		return copy;
+	}
 };
 
 

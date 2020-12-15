@@ -289,19 +289,29 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 				acknowledgements = AcknowledgementReceiver(FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
 				printf("Acknowledgements create with remote endpoint: %s %s\n", acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 			}
+			if(SingleCallback<T>::next != this) {
+				if(acknowledgements.getRawEndpoint().isValid()) {
+					acknowledgements.bytesAcknowledged += res.expectedSize();
+					printf("Sending acknowledgement1 to endpoint: %d %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
+					FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
+				}
+			}
+
 			this->send(std::move(message.get().asUnderlyingType()));
 		}
 		this->delPromiseRef();
 	}
 
-	void popAction() override {
+	T pop() override {
+		T res = this->popImpl();
 		if(acknowledgements.getRawEndpoint().isValid()) {
-			acknowledgements.bytesAcknowledged++;
-			printf("Sending acknowledgement to endpoint: %d %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
+			acknowledgements.bytesAcknowledged += res.expectedSize();
+			printf("Sending acknowledgement2 to endpoint: %d %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 			FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 		}
+		return res;
 	}
-	
+
 	~NetNotifiedQueueWithErrors() {
 		printf("NetNotifiedQueue destructor %s\n", getRawEndpoint().token.toString().c_str());
 	}
