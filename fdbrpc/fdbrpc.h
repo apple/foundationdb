@@ -346,7 +346,7 @@ public:
 				printf("Registered Ack Endpoint: %s\n", queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token.toString().c_str());
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
-			if((queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.isError()) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
+			if((queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError()) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
 				queue->acknowledgements.ready = Promise<Void>();
 			}
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
