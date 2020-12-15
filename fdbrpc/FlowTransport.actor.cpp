@@ -1136,6 +1136,7 @@ ACTOR static Future<Void> connectionReader(
 					}
 				}
 				if (compatible) {
+					printf("Peer Addr: %s\n", peerAddress.toString().c_str());
 					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 				}
 				else if(!expectConnectPacket) {
