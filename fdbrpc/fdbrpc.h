@@ -253,7 +253,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		reader.deserialize(message);
 		ASSERT(message.bytes > bytesAcknowledged);
 		bytesAcknowledged = message.bytes;
-		if(bytesSent - bytesAcknowledged < 2e6) {
+		if (bytesSent - bytesAcknowledged < 2e6 && ready.isValid() && ready.canBeSet()) {
 			ready.send(Void());
 		}
 	}
