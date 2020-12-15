@@ -1009,6 +1009,7 @@ ACTOR static Future<Void> connectionReader(
 	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
+	printf("Peer Add1: %s\n", peerAddress.toString().c_str());
 	if (!peer) {
 		ASSERT( !peerAddress.isPublic() );
 	}
@@ -1122,6 +1123,7 @@ ACTOR static Future<Void> connectionReader(
 							if (pkt.canonicalRemotePort) {
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
+								printf("Peer Addr2: %s\n", peerAddress.toString().c_str());
 							}
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
@@ -1136,7 +1138,7 @@ ACTOR static Future<Void> connectionReader(
 					}
 				}
 				if (compatible) {
-					printf("Peer Addr: %s\n", peerAddress.toString().c_str());
+					printf("Peer Addr3: %s\n", peerAddress.toString().c_str());
 					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 				}
 				else if(!expectConnectPacket) {
