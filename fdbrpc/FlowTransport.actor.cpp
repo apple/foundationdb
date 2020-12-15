@@ -1009,7 +1009,7 @@ ACTOR static Future<Void> connectionReader(
 	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
-	printf("Peer Add1: %s\n", peerAddress.toString().c_str());
+	printf("Peer Add1: %d %s\n", (bool) peer, peerAddress.toString().c_str());
 	if (!peer) {
 		ASSERT( !peerAddress.isPublic() );
 	}
