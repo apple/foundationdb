@@ -109,6 +109,7 @@ void SimpleFailureMonitor::setStatus(NetworkAddress const& address, FailureStatu
 
 void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	// SOMEDAY: Expiration (this "leaks" memory)
+	printf("endpointNotFound %s\n", endpoint.token.toString().c_str());
 	if (endpoint.token.first() == -1) {
 		TraceEvent("WellKnownEndpointNotFound")
 		    .suppressFor(1.0)
