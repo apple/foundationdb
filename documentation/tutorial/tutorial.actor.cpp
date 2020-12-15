@@ -395,36 +395,28 @@ ACTOR Future<Void> multipleClients() {
 std::string clusterFile = "fdb.cluster";
 
 ACTOR Future<Void> fdbClient() {
-	wait(delay(30));
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state Transaction tx(db);
-	state std::string keyPrefix = "/tut/";
-	state Key startKey;
-	state KeyRef endKey = LiteralStringRef("/tut0");
-	state int beginIdx = 0;
+	state PromiseStream<Standalone<RangeResultRef>> results;
+	state Key next;
 	loop {
 		try {
-			tx.reset();
-			// this workload is stupidly simple:
-			// 1. select a random key between 1
-			//    and 1e8
-			// 2. select this key plus the 100
-			//    next ones
-			// 3. write 10 values in [k, k+100]
-			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
-			startKey = keyPrefix + std::to_string(beginIdx);
-			Standalone<RangeResultRef> range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
-			for (int i = 0; i < 10; ++i) {
-				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
-				tx.set(k, LiteralStringRef("foo"));
+			state Future<Void> stream =
+			    tx.getRangeStream(results, KeySelector(firstGreaterOrEqual(next), next.arena()),
+			                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
+			loop {
+				Standalone<RangeResultRef> range = waitNext(results.getFuture());
+				std::cout << "Got " << range.expectedSize() << std::endl;
+				next = keyAfter(range.back().key);
 			}
-			wait(tx.commit());
-			std::cout << "Committed\n";
-			wait(delay(2.0));
 		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
 			wait(tx.onError(e));
 		}
 	}
+	return Void();
 }
 
 ACTOR Future<Void> fdbStatusStresser() {

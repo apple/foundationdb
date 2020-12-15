@@ -372,7 +372,6 @@ public:
 		state Reference<Connection> self( new Connection(*ios) );
 
 		self->peer_address = addr;
-		printf("Updating peer_addr1: %s\n", addr.toString().c_str());
 		try {
 			auto to = tcpEndpoint(addr);
 			BindPromise p("N2_ConnectError", self->id);
@@ -391,7 +390,6 @@ public:
 
 	// This is not part of the IConnection interface, because it is wrapped by IListener::accept()
 	void accept(NetworkAddress peerAddr) {
-		printf("Updating peer_addr2: %s\n", peerAddr.toString().c_str());
 		this->peer_address = peerAddr;
 		init();
 	}

@@ -1722,8 +1722,14 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 			state int remainingLimitBytes = req.limitBytes;
 			loop {
 				wait(req.reply.onReady());
-				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context) );
+				printf("Issuing getRange for stream impl. begin: %s end: %s limit: %d limitBytes: %d\n",
+				       printable(begin).c_str(), printable(end).c_str(), req.limit, remainingLimitBytes);
+				state int byteLimit = std::min(remainingLimitBytes, CLIENT_KNOBS->REPLY_BYTE_LIMIT);
+				state int byteLimitBefore = byteLimit;
+				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context) );
+				remainingLimitBytes -= byteLimitBefore - byteLimit;
 				GetKeyValuesStreamReply r(_r);
+				printf("Result. size: %d more: %d \n", int(r.data.expectedSize()), int(r.more));
 
 				if( req.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
@@ -1765,6 +1771,7 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 					req.reply.sendError(end_of_stream());
 					break;
 				}
+				ASSERT(r.data.size());
 
 				if(req.limit >= 0) {
 					begin = keyAfter(r.data.back().key);

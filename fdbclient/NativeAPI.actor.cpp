@@ -2705,7 +2705,11 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 			req.end = firstGreaterOrEqual( range.end );
 			req.spanContext = span.context;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-			req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			if (limits.hasByteLimit()) {
+				req.limitBytes = limits.bytes;
+			} else {
+				req.limitBytes = std::numeric_limits<int>::max();
+			}
 
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -2738,6 +2742,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 							when(GetKeyValuesStreamReply _rep = waitNext(replyStream.getFuture())) {
 								rep = _rep;
+								limits.decrement(rep.data);
 							}
 						}
 						++cx->transactionPhysicalReadsCompleted;
@@ -2771,7 +2776,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 							locations[shard].first = KeyRangeRef( keyAfter( output[output.size()-1].key ), locations[shard].first.end );
 					}
 
-					if (!more || locations[shard].first.empty()) {
+					if (!more || locations[shard].first.empty() || limits.isReached()) {
 						TEST(true); // getRangeStream (!more || locations[shard].first.empty())
 						if(shard == locations.size()-1) {
 							const KeyRangeRef& range = locations[shard].first;

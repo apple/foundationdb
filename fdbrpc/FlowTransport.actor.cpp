@@ -89,7 +89,6 @@ void EndpointMap::realloc() {
 }
 
 void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
-	printf("Endpoint Map Insert: %s\n", token.toString().c_str());
 	if (firstFree == uint32_t(-1)) realloc();
 	int index = firstFree;
 	firstFree = data[index].nextFree;
@@ -149,7 +148,6 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 }
 
 void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
-	printf("Endpoint Map Remove: %s\n", token.toString().c_str());
 	uint32_t index = token.second();
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
 		data[index].receiver = 0;
@@ -579,7 +577,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				                                 ? "OK"
 				                                 : "FAILED");
 				++self->connectOutgoingCount;
-				printf("FlowTransport connect: %s\n", self->destination.toString().c_str());
 				try {
 					choose {
 						when(Reference<IConnection> _conn =
@@ -1009,7 +1006,6 @@ ACTOR static Future<Void> connectionReader(
 	state ProtocolVersion peerProtocolVersion;
 
 	peerAddress = conn->getPeerAddress();
-	printf("Peer Add1: %d %s\n", (bool) peer, peerAddress.toString().c_str());
 	if (!peer) {
 		ASSERT( !peerAddress.isPublic() );
 	}
@@ -1123,7 +1119,6 @@ ACTOR static Future<Void> connectionReader(
 							if (pkt.canonicalRemotePort) {
 								peerAddress = NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort, true,
 								                             peerAddress.isTLS());
-								printf("Peer Addr2: %s\n", peerAddress.toString().c_str());
 							}
 							peer = transport->getOrOpenPeer(peerAddress, false);
 							peer->compatible = compatible;
@@ -1138,7 +1133,6 @@ ACTOR static Future<Void> connectionReader(
 					}
 				}
 				if (compatible) {
-					printf("Peer Addr3: %s\n", peerAddress.toString().c_str());
 					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 				}
 				else if(!expectConnectPacket) {
@@ -1225,7 +1219,6 @@ Reference<Peer> TransportData::getOrOpenPeer( NetworkAddress const& address, boo
 	if(!peer) {
 		peer = makeReference<Peer>(this, address);
 		if(startConnectionKeeper && !isLocalAddress(address)) {
-			printf("getOrOpen %s\n", address.toString().c_str());
 			peer->connect = connectionKeeper(peer);
 		}
 		peers[address] = peer;
@@ -1501,7 +1494,6 @@ void FlowTransport::cancelReliable( ReliablePacket* p ) {
 }
 
 Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection ) {
-	printf("Send Unreliable: %s %s\n", destination.getPrimaryAddress().toString().c_str(), destination.token.toString().c_str());
 	if (self->isLocalAddress(destination.getPrimaryAddress())) {
 		sendLocal( self, what, destination );
 		return Reference<Peer>();
