@@ -411,7 +411,7 @@ public:
 			printf("OnReady Error1\n");
 			return queue->acknowledgements.failures.getError();
 		}
-		if(queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError())) {
+		if(queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError()) {
 			printf("OnReady Error2\n");
 			return queue->acknowledgements.ready.getFuture().getError();
 		}
