@@ -579,7 +579,7 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				                                 ? "OK"
 				                                 : "FAILED");
 				++self->connectOutgoingCount;
-				printf("FlowTransport connect: %s\n", self->destination.toString());
+				printf("FlowTransport connect: %s\n", self->destination.toString().c_str());
 				try {
 					choose {
 						when(Reference<IConnection> _conn =
