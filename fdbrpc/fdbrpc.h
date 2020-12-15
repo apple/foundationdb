@@ -253,7 +253,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
 		if(message.isError()) {
-			if(ready.isSet()) {
+			if(!ready.isValid() || ready.isSet()) {
 				ready = Promise<Void>();
 			}
 			ready.sendError(message.getError());
@@ -345,7 +345,7 @@ public:
 				printf("Registered Ack Endpoint: %s\n", queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token.toString().c_str());
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
-			if((queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError()) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
+			if((!queue->acknowledgements.ready.isValid() || (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
 				queue->acknowledgements.ready = Promise<Void>();
 			}
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
@@ -407,7 +407,8 @@ public:
 
 	Future<Void> onReady() {
 		printf("OnReady Start\n");
-		if(queue->acknowledgements.failures.isError() || (queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError())) {
+		if(queue->acknowledgements.failures.isError() || 
+		  (queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError())) {
 			printf("OnReady Error\n");
 			return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
 		}
