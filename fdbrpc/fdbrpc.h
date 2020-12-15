@@ -291,7 +291,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 			}
 			if(SingleCallback<T>::next != this) {
 				if(acknowledgements.getRawEndpoint().isValid()) {
-					acknowledgements.bytesAcknowledged += res.expectedSize();
+					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
 					printf("Sending acknowledgement1 to endpoint: %d %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 					FlowTransport::transport().sendUnreliable(SerializeSource<AcknowledgementReply>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 				}
