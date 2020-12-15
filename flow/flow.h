@@ -600,7 +600,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid()) return;
 
 		this->error = err;
-		if (SingleCallback<T>::next != this)
+		if (shouldFireImmediately())
 			SingleCallback<T>::next->error(err);
 	}
 
@@ -648,6 +648,10 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
+	}
+
+	bool shouldFireImmediately() {
+		return SingleCallback<T>::next != this;
 	}
 };
 
