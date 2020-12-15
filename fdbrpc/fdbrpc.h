@@ -248,15 +248,11 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
 
 	void receive(ArenaObjectReader& reader) override {
-		ErrorOr<EnsureTable<AcknowledgementReply>> message;
+		printf("AcknowledgementReceived\n");
+		AcknowledgementReply message;
 		reader.deserialize(message);
-		if(message.isError()) {
-			printf("AcknowledgementReceived Error\n");
-		} else {
-			printf("AcknowledgementReceived %d %d\n", message.get().asUnderlyingType().bytes, bytesAcknowledged);
-		}
-		ASSERT(!message.isError() && message.get().asUnderlyingType().bytes >= bytesAcknowledged);
-		bytesAcknowledged = message.get().asUnderlyingType().bytes;
+		ASSERT(message.bytes > bytesAcknowledged);
+		bytesAcknowledged = message.bytes;
 		if(bytesSent - bytesAcknowledged < 2e6) {
 			ready.send(Void());
 		}
