@@ -329,6 +329,9 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 			printf("NetNotifiedQueue destructor with error %s\n", getRawEndpoint().token.toString().c_str());
 		}
 	}
+
+	//FIXME: creating the FlowReceiver as a stream will mean that every cancelled read will lead to a permanent endpoint in the failed endpoints map
+	bool isStream() const override { return true; }
 };
 
 template <class T>
