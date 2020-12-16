@@ -1641,9 +1641,9 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	return Void();
 }
 
-ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStreamRequest req )
-// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large selector offset prevents
-// all data from being read in one range read
+ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRequest req)
+// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
+// selector offset prevents all data from being read in one range read
 {
 	state Span span("SS:getKeyValuesStream"_loc, { req.spanContext });
 	state int64_t resultSize = 0;
@@ -1719,10 +1719,10 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 			req.reply.send( none );
 			req.reply.sendError( end_of_stream() );
 		} else {
-			state int remainingLimitBytes = req.limitBytes;
 			loop {
 				wait(req.reply.onReady());
-				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes, span.context) );
+				state int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				GetKeyValuesReply _r = wait( readRange(data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context) );
 				GetKeyValuesStreamReply r(_r);
 
 				if( req.debugID.present() )
@@ -1755,8 +1755,6 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 
 				req.reply.send( r );
 
-				resultSize = req.limitBytes - remainingLimitBytes;
-				data->counters.bytesQueried += resultSize;
 				data->counters.rowsQueried += r.data.size();
 				if(r.data.size() == 0) {
 					++data->counters.emptyQueries;
@@ -1765,6 +1763,7 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 					req.reply.sendError(end_of_stream());
 					break;
 				}
+				ASSERT(r.data.size());
 
 				if(req.limit >= 0) {
 					begin = keyAfter(r.data.back().key);
@@ -1793,9 +1792,11 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 			}
 		}
 	} catch (Error& e) {
-		if(!canReplyWith(e))
-			throw;
-		req.reply.sendError(e);
+		if(e.code() != error_code_operation_obsolete) {
+			if(!canReplyWith(e))
+				throw;
+			req.reply.sendError(e);
+		}
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
@@ -1813,19 +1814,6 @@ ACTOR Future<Void> getKeyValuesStreamWork( StorageServer* data, GetKeyValuesStre
 	//										abs(req.end.offset) > maxSelectorOffset);
 	//}
 
-	return Void();
-}
-
-ACTOR Future<Void> getKeyValuesStreamQ( StorageServer* data, GetKeyValuesStreamRequest req )
-{
-	Future<Void> disc = IFailureMonitor::failureMonitor().onDisconnectOrFailure(req.reply.getEndpoint());
-	Future<Void> work = getKeyValuesStreamWork( data, req );
-	choose {
-		when(wait(disc)) {
-			req.reply.sendError(end_of_stream());
-		}
-		when(wait(work)) {}
-	}
 	return Void();
 }
 

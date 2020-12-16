@@ -121,12 +121,19 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	    .suppressFor(1.0)
 	    .detail("Address", endpoint.getPrimaryAddress())
 	    .detail("Token", endpoint.token);
-	failedEndpoints.insert(endpoint);
+	if(endpoint.getPrimaryAddress().isPublic()) {
+		if(failedEndpoints.size() > 100000) {
+			TraceEvent(SevWarnAlways, "TooManyFailedEndpoints")
+				.suppressFor(1.0);
+			failedEndpoints.clear();
+		}
+		failedEndpoints.insert(endpoint);
+	}
 	endpointKnownFailed.trigger(endpoint);
 }
 
 void SimpleFailureMonitor::notifyDisconnect(NetworkAddress const& address) {
-	TraceEvent("NotifyDisconnect").detail("Address", address);
+	//TraceEvent("NotifyDisconnect").detail("Address", address);
 	endpointKnownFailed.triggerRange(Endpoint({ address }, UID()), Endpoint({ address }, UID(-1, -1)));
 }
 

@@ -2664,12 +2664,8 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
                                           Reference<TransactionLogInfo> trLogInfo, Version version, KeyRangeRef keys,
                                           GetRangeLimits limits, bool snapshot, bool reverse, TransactionInfo info,
                                           TagSet tags, SpanID spanContext) {
-	// if keys.end is allKeys.end, we have read through the end of the database
-	// if keys.begin is allKeys.begin, we have either read through the beginning of the database,
-	// or allKeys.begin exists in the database and will be part of the conflict range anyways
-
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info ) );
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream, info ) );
 		ASSERT( locations.size() );
 		state int shard = 0;
 		loop {
@@ -2681,7 +2677,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 			req.end = firstGreaterOrEqual( range.end );
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-			req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			req.limitBytes = std::numeric_limits<int>::max();
 
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
@@ -2704,6 +2700,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 
 				//FIXME: add load balancing
 				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream = locations[shard].second->getInterface(0).getKeyValuesStream.getReplyStream(req);
+				state bool breakAgain = false;
 				loop {
 					try {
 						choose {
@@ -2717,9 +2714,13 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							}
 						}
 						++cx->transactionPhysicalReadsCompleted;
-					} catch(Error&) {
+					} catch (Error& e) {
 						++cx->transactionPhysicalReadsCompleted;
-						throw;
+						if (e.code() == error_code_end_of_stream) {
+							rep = GetKeyValuesStreamReply();
+						} else {
+							throw;
+						}
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
@@ -2781,10 +2782,12 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							}
 
 							keys = KeyRangeRef(begin, end);
+							breakAgain = true;
 							break;
 						}
 
 						++shard;
+						break;
 					}
 
 					if(output.size() > 0) {
@@ -2810,11 +2813,14 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 						results->send(std::move(output));
 					}
 				}
+				if (breakAgain) {
+					break;
+				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) {
 					throw;
 				}
-				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_connection_failed) {
 					const KeyRangeRef& range = locations[shard].first;
 
 					if( reverse )
@@ -2868,6 +2874,10 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 	}
 
 	state KeyRangeRef keys(b, e);
+
+	//if e is allKeys.end, we have read through the end of the database
+	//if b is allKeys.begin, we have either read through the beginning of the database,
+	//or allKeys.begin exists in the database and will be part of the conflict range anyways
 
 	state Standalone<VectorRef<KeyRef>> splitPoints =
 	    wait(getRangeSplitPoints(cx, keys, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));

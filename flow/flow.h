@@ -582,13 +582,6 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	virtual T pop() {
 		return popImpl();
-		if (queue.empty()) {
-			if (error.isValid()) throw error;
-			throw internal_error();
-		}
-		auto copy = std::move(queue.front());
-		queue.pop();
-		return copy;
 	}
 
 	template <class U>
@@ -607,7 +600,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid()) return;
 
 		this->error = err;
-		if (SingleCallback<T>::next != this)
+		if (shouldFireImmediately())
 			SingleCallback<T>::next->error(err);
 	}
 
@@ -655,6 +648,14 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		auto copy = std::move(queue.front());
 		queue.pop();
 		return copy;
+	}
+
+	bool shouldFireImmediately() {
+		return SingleCallback<T>::next != this;
+	}
+
+	bool hasError() {
+		return error.isValid();
 	}
 };
 
@@ -897,7 +898,7 @@ decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r)
 }
 
 template <class Request>
-decltype(std::declval<Request>().reply) const& getReplyPromiseStream(Request const& r) {
+auto const& getReplyPromiseStream(Request const& r) {
 	return r.reply;
 }
 

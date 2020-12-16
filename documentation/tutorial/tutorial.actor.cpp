@@ -153,7 +153,7 @@ struct StreamReply : ReplyPromiseStreamReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, ReplyPromiseStreamReply::acknowledgeEndpoint, index);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, index);
 	}
 };
 
@@ -173,22 +173,29 @@ ACTOR Future<Void> echoServer() {
 	state EchoServerInterface echoServer;
 	echoServer.getInterface.makeWellKnownEndpoint(UID(-1, ++tokenCounter), TaskPriority::DefaultEndpoint);
 	loop {
-		choose {
-			when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
-				req.reply.send(echoServer);
-			}
-			when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
-			when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
-				req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
-			}
-			when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
-				state int i = 0;
-				for (; i < 100; ++i) {
-					wait(req.reply.onReady());
-					std::cout << "Send " << i << std::endl;
-					req.reply.send(StreamReply{ i });
+		try {
+			choose {
+				when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
+					req.reply.send(echoServer);
 				}
-				req.reply.sendError(end_of_stream());
+				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
+				when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
+					req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
+				}
+				when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
+					state int i = 0;
+					for (; i < 100; ++i) {
+						wait(req.reply.onReady());
+						std::cout << "Send " << i << std::endl;
+						req.reply.send(StreamReply{ i });
+					}
+					req.reply.sendError(end_of_stream());
+				}
+			}
+		} catch (Error &e) {
+			if(e.code() != error_code_operation_obsolete) {
+				fprintf(stderr, "Error: %s\n", e.what());
+				throw e;
 			}
 		}
 	}
@@ -217,7 +224,7 @@ ACTOR Future<Void> echoClient() {
 			ASSERT(rep.index == j++);
 		}
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_request_maybe_delivered);
+		ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
 	}
 	return Void();
 }
@@ -394,37 +401,62 @@ ACTOR Future<Void> multipleClients() {
 
 std::string clusterFile = "fdb.cluster";
 
-ACTOR Future<Void> fdbClient() {
-	wait(delay(30));
+ACTOR Future<Void> logThroughput(int64_t* v) {
+	loop {
+		state int64_t last = *v;
+		wait(delay(1));
+		printf("throughput: %ld bytes/s\n", *v - last);
+	}
+}
+
+ACTOR Future<Void> fdbClientStream() {
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state Transaction tx(db);
-	state std::string keyPrefix = "/tut/";
-	state Key startKey;
-	state KeyRef endKey = LiteralStringRef("/tut0");
-	state int beginIdx = 0;
+	state PromiseStream<Standalone<RangeResultRef>> results;
+	state Key next;
+	state int64_t bytes = 0;
+	state Future<Void> logFuture = logThroughput(&bytes);
 	loop {
 		try {
-			tx.reset();
-			// this workload is stupidly simple:
-			// 1. select a random key between 1
-			//    and 1e8
-			// 2. select this key plus the 100
-			//    next ones
-			// 3. write 10 values in [k, k+100]
-			beginIdx = deterministicRandom()->randomInt(0, 1e8 - 100);
-			startKey = keyPrefix + std::to_string(beginIdx);
-			Standalone<RangeResultRef> range = wait(tx.getRange(KeyRangeRef(startKey, endKey), 100));
-			for (int i = 0; i < 10; ++i) {
-				Key k = Key(keyPrefix + std::to_string(beginIdx + deterministicRandom()->randomInt(0, 100)));
-				tx.set(k, LiteralStringRef("foo"));
+			state Future<Void> stream =
+			    tx.getRangeStream(results, KeySelector(firstGreaterOrEqual(next), next.arena()),
+			                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
+			loop {
+				Standalone<RangeResultRef> range = waitNext(results.getFuture());
+				bytes += range.expectedSize();
+				next = keyAfter(range.back().key);
 			}
-			wait(tx.commit());
-			std::cout << "Committed\n";
-			wait(delay(2.0));
+		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
+			wait(tx.onError(e));
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> fdbClientGetRange() {
+	state Database db = Database::createDatabase(clusterFile, 300);
+	state Transaction tx(db);
+	state Key next;
+	state int64_t bytes = 0;
+	state Future<Void> logFuture = logThroughput(&bytes);
+	loop {
+		try {
+			Standalone<RangeResultRef> range = wait(tx.getRange(
+			    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(normalKeys.end)),
+			    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+			bytes += range.expectedSize();
+			if (!range.more) {
+				break;
+			}
+			next = keyAfter(range.back().key);
 		} catch (Error& e) {
 			wait(tx.onError(e));
 		}
 	}
+	return Void();
 }
 
 ACTOR Future<Void> fdbStatusStresser() {
@@ -441,16 +473,19 @@ ACTOR Future<Void> fdbStatusStresser() {
 	}
 }
 
-std::unordered_map<std::string, std::function<Future<Void>()>> actors = { { "timer", &simpleTimer }, // ./tutorial timer
-	                                                                      { "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
-	                                                                      { "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
-	                                                                      { "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
-	                                                                      { "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
-	                                                                      { "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
-	                                                                      { "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
-	                                                                      { "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
-	                                                                      { "fdbClient", &fdbClient }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClient
-	                                                                      { "fdbStatusStresser", &fdbStatusStresser } }; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
+std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
+	{ "timer", &simpleTimer }, // ./tutorial timer
+	{ "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
+	{ "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
+	{ "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
+	{ "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
+	{ "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
+	{ "kvSimpleClient", &kvSimpleClient }, // ./tutorial -s 127.0.0.1:6666 kvSimpleClient
+	{ "multipleClients", &multipleClients }, // ./tutorial -s 127.0.0.1:6666 multipleClients
+	{ "fdbClientStream", &fdbClientStream }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientStream
+	{ "fdbClientGetRange", &fdbClientGetRange }, // ./tutorial -C $CLUSTER_FILE_PATH fdbClientGetRange
+	{ "fdbStatusStresser", &fdbStatusStresser }
+}; // ./tutorial -C $CLUSTER_FILE_PATH fdbStatusStresser
 
 int main(int argc, char* argv[]) {
 	bool isServer = false;

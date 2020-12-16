@@ -73,32 +73,39 @@ ACTOR Future<Void> networkTestServer() {
 	state LatencyStats latency;
 
 	loop {
-		choose {
-			when(state NetworkTestStreamingRequest req = waitNext(interf.test.getFuture())) {
-				state LatencyStats::sample sample = latency.tick();
-				state int i = 0;
-				for (; i < 100; ++i) {
-					fprintf(stderr, "Wait onReady %d\n", i);
-					wait(req.reply.onReady());
-					fprintf(stderr, "Send reply %d\n", i);
-					req.reply.send(NetworkTestStreamingReply{ i });
+		try {
+			choose {
+				when(state NetworkTestStreamingRequest req = waitNext(interf.test.getFuture())) {
+					state LatencyStats::sample sample = latency.tick();
+					state int i = 0;
+					for (; i < 100; ++i) {
+						fprintf(stderr, "Wait onReady %d\n", i);
+						wait(req.reply.onReady());
+						fprintf(stderr, "Send reply %d\n", i);
+						req.reply.send(NetworkTestStreamingReply{ i });
+					}
+					fprintf(stderr, "Send end_of_stream\n");
+					req.reply.sendError(end_of_stream());
+					latency.tock(sample);
+					sent++;
 				}
-				fprintf(stderr, "Send end_of_stream\n");
-				req.reply.sendError(end_of_stream());
-				latency.tock(sample);
-				sent++;
+				when( wait( logging ) ) {
+					auto spd = sent / (now() - lastTime);
+					if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
+						fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
+					} else {
+						fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
+					}
+					latency.reset();
+					lastTime = now();
+					sent = 0;
+					logging = delay( 1.0 );
+				}
 			}
-			when( wait( logging ) ) {
-				auto spd = sent / (now() - lastTime);
-				if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
-					fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
-				} else {
-					fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
-				}
-				latency.reset();
-				lastTime = now();
-				sent = 0;
-				logging = delay( 1.0 );
+		} catch (Error &e) {
+			if(e.code() != error_code_operation_obsolete) {
+				fprintf(stderr, "Error: %s\n", e.what());
+				throw e;
 			}
 		}
 	}
@@ -142,7 +149,7 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 			}
 		} catch (Error& e) {
 			printf("Error: %s\n", e.what());
-			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_request_maybe_delivered);
+			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
 		}
 		latency->tock(sample);
 		(*completed)++;

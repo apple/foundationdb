@@ -89,7 +89,6 @@ void EndpointMap::realloc() {
 }
 
 void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
-	printf("Endpoint Map Insert: %s\n", token.toString().c_str());
 	if (firstFree == uint32_t(-1)) realloc();
 	int index = firstFree;
 	firstFree = data[index].nextFree;
@@ -149,7 +148,6 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 }
 
 void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
-	printf("Endpoint Map Remove: %s\n", token.toString().c_str());
 	uint32_t index = token.second();
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
 		data[index].receiver = 0;
@@ -167,8 +165,9 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	}
 	void receive(ArenaObjectReader& reader) override {
 		// Remote machine tells us it doesn't have endpoint e
-		Endpoint e;
-		reader.deserialize(e);
+		UID token;
+		reader.deserialize(token);
+		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
 };
@@ -579,7 +578,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				                                 ? "OK"
 				                                 : "FAILED");
 				++self->connectOutgoingCount;
-
 				try {
 					choose {
 						when(Reference<IConnection> _conn =
@@ -866,10 +864,10 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (destination.token.first() != -1) {
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
-				sendLocal(self, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
+				sendLocal(self, SerializeSource<UID>(destination.token), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
 				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
-				sendPacket(self, peer, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
+				sendPacket(self, peer, SerializeSource<UID>(destination.token), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
 			}
 		}
 	}
@@ -1316,7 +1314,7 @@ Endpoint FlowTransport::loadedEndpoint( const UID& token ) {
 }
 
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid())
+	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic())
 		return;
 
 	Reference<Peer> peer = self->getOrOpenPeer(endpoint.getPrimaryAddress());
@@ -1328,7 +1326,7 @@ void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 }
 
 void FlowTransport::removePeerReference(const Endpoint& endpoint, bool isStream) {
-	if (!isStream || !endpoint.getPrimaryAddress().isValid()) return;
+	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic()) return;
 	Reference<Peer> peer = self->getPeer(endpoint.getPrimaryAddress());
 	if(peer) {
 		peer->peerReferences--;
@@ -1497,7 +1495,6 @@ void FlowTransport::cancelReliable( ReliablePacket* p ) {
 }
 
 Reference<Peer> FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection ) {
-	printf("Send Unreliable: %s %s\n", destination.getPrimaryAddress().toString().c_str(), destination.token.toString().c_str());
 	if (self->isLocalAddress(destination.getPrimaryAddress())) {
 		sendLocal( self, what, destination );
 		return Reference<Peer>();

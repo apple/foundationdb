@@ -62,6 +62,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
+	init( ACKNOWLEDGE_LIMIT_BYTES,                             2e6 ); if( randomize && BUGGIFY ) ACKNOWLEDGE_LIMIT_BYTES = 1;
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;

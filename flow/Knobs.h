@@ -70,6 +70,7 @@ public:
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
 	bool WRITE_TRACING_ENABLED;
+	int64_t ACKNOWLEDGE_LIMIT_BYTES;
 
 	//run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
