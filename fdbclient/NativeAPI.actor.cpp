@@ -2660,13 +2660,16 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 }
 
 class ResultStream {
+	FlowLock semaphore;
+
 public:
 	class FragmentStream {
 		ResultStream* resultStream;
 		std::deque<RangeResult> buffer;
 		bool completed{ false };
 		friend class ResultStream;
-		FragmentStream(ResultStream* resultStream) : resultStream(resultStream) {}
+		FlowLock::Releaser releaser;
+		FragmentStream(ResultStream* resultStream) : resultStream(resultStream), releaser(resultStream->semaphore) {}
 
 	public:
 		void send(const RangeResult& rangeResult) { buffer.push_back(rangeResult); }
@@ -2675,6 +2678,7 @@ public:
 			ASSERT(!completed);
 			completed = true;
 			resultStream->flushToClient();
+			releaser.release();
 		}
 	};
 
@@ -2692,6 +2696,7 @@ private:
 				fragment.buffer.pop_front();
 			}
 			if (fragment.completed) {
+				fragment.releaser.release();
 				++nextFragment;
 			} else {
 				break;
@@ -2700,12 +2705,14 @@ private:
 	}
 
 public:
-	ResultStream(PromiseStream<RangeResult> results) : results(results) {}
+	ResultStream(PromiseStream<RangeResult> results, size_t concurrency) : results(results), semaphore(concurrency) {}
 
-	FragmentStream& createFragmentStream() {
-		fragments.push_back(FragmentStream(this));
-		return fragments.back();
+	ACTOR static Future<FragmentStream*> createFragmentStreamImpl(ResultStream* self) {
+		wait(self->semaphore.take());
+		return &self->fragments.emplace_back(FragmentStream(self));
 	}
+
+	Future<FragmentStream*> createFragmentStream() { return createFragmentStreamImpl(this); }
 
 	void sendError(Error e) { results.sendError(e); }
 };
@@ -2713,13 +2720,10 @@ public:
 ACTOR Future<Void> getRangeStreamFragment(ResultStream::FragmentStream* results, Database cx,
                                           Reference<TransactionLogInfo> trLogInfo, Version version, KeyRangeRef keys,
                                           GetRangeLimits limits, bool snapshot, bool reverse, TransactionInfo info,
-                                          TagSet tags, SpanID spanContext, FlowLock* semaphore) {
+                                          TagSet tags, SpanID spanContext) {
 	// if keys.end is allKeys.end, we have read through the end of the database
 	// if keys.begin is allKeys.begin, we have either read through the beginning of the database,
 	// or allKeys.begin exists in the database and will be part of the conflict range anyways
-
-	wait(semaphore->take());
-	state FlowLock::Releaser releaser(*semaphore);
 
 	loop {
 		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info ) );
@@ -2894,8 +2898,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
                                   KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
                                   bool snapshot, bool reverse, TransactionInfo info, TagSet tags) {
 
-	state FlowLock semaphore(CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
-	state ResultStream results(_results);
+	state ResultStream results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
@@ -2939,10 +2942,11 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 		toSend.emplace_back(b, e);
 	}
 
-	for (const auto& range : toSend) {
-		auto& fragmentStream = results.createFragmentStream();
-		outstandingRequests.push_back(getRangeStreamFragment(&fragmentStream, cx, trLogInfo, version, range, limits,
-		                                                     snapshot, reverse, info, tags, span.context, &semaphore));
+	state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
+	for (; toSendIt != toSend.end(); ++toSendIt) {
+		ResultStream::FragmentStream* fragmentStream = wait(results.createFragmentStream());
+		outstandingRequests.push_back(getRangeStreamFragment(fragmentStream, cx, trLogInfo, version, *toSendIt, limits,
+		                                                     snapshot, reverse, info, tags, span.context));
 	}
 
 	try {
