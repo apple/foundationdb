@@ -423,8 +423,10 @@ ACTOR Future<Void> fdbClientStream() {
 			                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> range = waitNext(results.getFuture());
-				bytes += range.expectedSize();
-				next = keyAfter(range.back().key);
+				if (range.size()) {
+					bytes += range.expectedSize();
+					next = keyAfter(range.back().key);
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {

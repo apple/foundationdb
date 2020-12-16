@@ -2779,9 +2779,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 								//}
 
-								if (output.size()) {
-									results->send(std::move(output));
-								}
+								results->send(std::move(output));
 								results->finish();
 								return Void();
 							}
