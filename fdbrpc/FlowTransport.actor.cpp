@@ -645,7 +645,6 @@ ACTOR Future<Void> connectionKeeper( Reference<Peer> self,
 				throw e;
 			}
 		} catch (Error& e) {
-			self->outgoingConnectionIdle = true;
 			delayedHealthUpdateF.cancel();
 			if(now() - self->lastConnectTime > FLOW_KNOBS->RECONNECTION_RESET_TIME) {
 				self->reconnectionDelay = FLOW_KNOBS->INITIAL_RECONNECTION_TIME;
