@@ -50,6 +50,7 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
+  ParallelStream.actor.cpp
   ParallelStream.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h

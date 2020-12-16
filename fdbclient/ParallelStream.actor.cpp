@@ -65,3 +65,5 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	wait(consumer);
 	return Void();
 }
+
+void forceLinkParallelStreamTests() {}
