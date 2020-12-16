@@ -24,6 +24,8 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace ParallelStreamTest {
+
 ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int i) {
 	wait(delay(deterministicRandom()->random01()));
 	fragment->send(i);
@@ -46,17 +48,20 @@ ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
 	}
 }
 
-TEST_CASE("/fdbclient/parallel_stream") {
+} // namespace ParallelStreamTest
+
+TEST_CASE("/parallel_stream") {
 	state PromiseStream<int> results;
 	state ParallelStream<int> parallelStream(results, 10);
-	state Future<Void> consumer = consume(results.getFuture(), 100);
+	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), 100);
 	state std::vector<Future<Void>> producers;
 	state int i = 0;
 	for (; i < 100; ++i) {
 		ParallelStream<int>::Fragment* fragment = wait(parallelStream.createFragment());
-		producers.push_back(produce(fragment, i));
+		producers.push_back(ParallelStreamTest::produce(fragment, i));
 	}
 	wait(waitForAll(producers));
 	results.sendError(end_of_stream());
+	wait(consumer);
 	return Void();
 }
