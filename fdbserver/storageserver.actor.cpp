@@ -2338,8 +2338,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 			state Future<Void> hold = tr.getRangeStream(results, keys, GetRangeLimits(), true);
 			state Key nfk = keys.begin;
 
-			loop {
-				try {
+			try {
+				loop {
 					TEST(true);		// Fetching keys for transferred shard
 					state Standalone<RangeResultRef> this_block = waitNext( results.getFuture() );
 
@@ -2370,53 +2370,53 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 					nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
 					this_block = Standalone<RangeResultRef>();
-				} catch( Error &e ) {
-					if(e.code() != error_code_end_of_stream || e.code() != error_code_connection_failed || e.code() != error_code_transaction_too_old ||
-					   e.code() != error_code_future_version || e.code() != error_code_process_behind) {
-						throw;
-					}
-					if(nfk == keys.begin) {
-						TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
-
-						//FIXME: remove when we no longer support upgrades from 5.X
-						if(debug_getRangeRetries >= 100) {
-							data->cx->enableLocalityLoadBalance = false;
-						}
-
-						debug_getRangeRetries++;
-						if (debug_nextRetryToLog==debug_getRangeRetries){
-							debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
-							TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
-						}
-						wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
-						continue;
-					}
-					if(nfk < keys.end) {
-						std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
-
-						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
-						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
-						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
-						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
-						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
-						warningLogger = logFetchKeysWarning(shard);
-						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
-						keys = shard->keys;
-
-						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
-						// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
-						// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
-						std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
-						for(; u != updatesToSplit.end(); ++u) {
-							splitMutations(data, data->shards, *u);
-						}
-
-						TEST( true );  // fetchkeys has more
-						TEST( shard->updates.size() ); // Shard has updates
-						ASSERT( otherShard->updates.empty() );
-					}
-					break;
 				}
+			} catch( Error &e ) {
+				if(e.code() != error_code_end_of_stream || e.code() != error_code_connection_failed || e.code() != error_code_transaction_too_old ||
+					e.code() != error_code_future_version || e.code() != error_code_process_behind) {
+					throw;
+				}
+				if(nfk == keys.begin) {
+					TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
+
+					//FIXME: remove when we no longer support upgrades from 5.X
+					if(debug_getRangeRetries >= 100) {
+						data->cx->enableLocalityLoadBalance = false;
+					}
+
+					debug_getRangeRetries++;
+					if (debug_nextRetryToLog==debug_getRangeRetries){
+						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
+						TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
+					}
+					wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
+					continue;
+				}
+				if(nfk < keys.end) {
+					std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
+
+					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
+					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
+					shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
+					shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
+					shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+					warningLogger = logFetchKeysWarning(shard);
+					AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+					keys = shard->keys;
+
+					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
+					// and the ones delivered to the new shard will be discarded because it is in WaitPrevious phase (hasn't chosen a fetchVersion yet).
+					// What we are doing here is expensive and could get more expensive if we started having many more blocks per shard. May need optimization in the future.
+					std::deque< Standalone<VerUpdateRef> >::iterator u = updatesToSplit.begin();
+					for(; u != updatesToSplit.end(); ++u) {
+						splitMutations(data, data->shards, *u);
+					}
+
+					TEST( true );  // fetchkeys has more
+					TEST( shard->updates.size() ); // Shard has updates
+					ASSERT( otherShard->updates.empty() );
+				}
+				break;
 			}
 		}
 
