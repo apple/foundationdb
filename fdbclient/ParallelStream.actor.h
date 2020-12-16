@@ -57,8 +57,8 @@ public:
 		void finish() {
 			ASSERT(!completed);
 			completed = true;
+			releaser.release(); // Release before destruction to free up pending fragments
 			parallelStream->flushToClient();
-			releaser.release();
 		}
 	};
 
