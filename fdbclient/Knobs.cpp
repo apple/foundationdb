@@ -94,6 +94,8 @@ void ClientKnobs::initialize(bool randomize) {
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
 	init( MID_SHARD_SIZE_MAX_STALENESS,           10.0 );
 	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
+	init( RANGESTREAM_FRAGMENT_SIZE,               1e6 );
+	init( RANGESTREAM_CONCURRENT_FRAGMENTS,         10 );
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
