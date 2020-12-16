@@ -2779,42 +2779,48 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 								//}
 
-								results->send(std::move(output));
+								if (output.size()) {
+									results->send(std::move(output));
+								}
 								results->finish();
 								return Void();
 							}
 
+							ASSERT(output.size());
+							results->send(std::move(output));
 							keys = KeyRangeRef(begin, end);
 							breakAgain = true;
 							break;
 						}
 
+						ASSERT(output.size());
+						results->send(std::move(output));
 						++shard;
 						break;
 					}
 
-					if(output.size() > 0) {
-						output.more = true;
-						if (keys.begin == allKeys.begin && !reverse) {
-							output.readToBegin = true;
-						}
-						if (keys.end == allKeys.end && reverse) {
-							output.readThroughEnd = true;
-						}
-						int64_t bytes = 0;
-						for(const KeyValueRef &kv : output) {
-							bytes += kv.key.size() + kv.value.size();
-						}
-
-						cx->transactionBytesRead += bytes;
-						cx->transactionKeysRead += output.size();
-
-						//FIXME: figure out appropriate metrics for the client event log
-						//if( trLogInfo ) {
-						//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
-						//}
-						results->send(std::move(output));
+					ASSERT(output.size());
+					output.more = true;
+					if (keys.begin == allKeys.begin && !reverse) {
+						output.readToBegin = true;
 					}
+					if (keys.end == allKeys.end && reverse) {
+						output.readThroughEnd = true;
+					}
+					int64_t bytes = 0;
+					for (const KeyValueRef& kv : output) {
+						bytes += kv.key.size() + kv.value.size();
+					}
+
+					cx->transactionBytesRead += bytes;
+					cx->transactionKeysRead += output.size();
+
+					// FIXME: figure out appropriate metrics for the client event log
+					// if( trLogInfo ) {
+					//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(),
+					//now()-startTime, bytes, begin.getKey(), end.getKey()));
+					//}
+					results->send(std::move(output));
 				}
 				if (breakAgain) {
 					break;
@@ -2900,6 +2906,9 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 
 	state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
 	for (; toSendIt != toSend.end(); ++toSendIt) {
+		if (toSendIt->empty()) {
+			continue;
+		}
 		ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
 		outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, *toSendIt, limits,
 		                                                     snapshot, reverse, info, tags, span.context));
@@ -4996,9 +5005,9 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> Transaction::getReadHotRa
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize) {
 	state Span span("NAPI:GetRangeSplitPoints"_loc);
 	loop {
-		state vector<pair<KeyRange, Reference<LocationInfo>>> locations =
-		    wait(getKeyRangeLocations(cx, keys, 100, false, &StorageServerInterface::getRangeSplitPoints,
-		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
+		state vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(
+		    getKeyRangeLocations(cx, keys, CLIENT_KNOBS->TOO_MANY, false, &StorageServerInterface::getRangeSplitPoints,
+		                         TransactionInfo(TaskPriority::DataDistribution, span.context)));
 		try {
 			state int nLocs = locations.size();
 			state vector<Future<SplitRangeReply>> fReplies(nLocs);
