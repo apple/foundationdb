@@ -76,7 +76,7 @@ private:
 				continue;
 			}
 			while (!fragment->buffer.empty()) {
-				results.send(fragment->buffer.front());
+				results.send(std::move(fragment->buffer.front()));
 				fragment->buffer.pop_front();
 			}
 			if (fragment->completed) {
