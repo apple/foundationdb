@@ -37,16 +37,20 @@
 template <class T>
 class ParallelStream {
 	FlowLock semaphore;
+	struct FragmentConstructorTag {
+		explicit FragmentConstructorTag() = default;
+	};
 
 public:
 	class Fragment {
 		ParallelStream* parallelStream;
 		std::deque<T> buffer;
 		bool completed{ false };
-		friend class ParallelStream;
 		FlowLock::Releaser releaser;
+		friend class ParallelStream;
+
 	public:
-		Fragment(ParallelStream* parallelStream)
+		Fragment(ParallelStream* parallelStream, FragmentConstructorTag)
 		  : parallelStream(parallelStream), releaser(parallelStream->semaphore) {}
 		template<class U>
 		void send(U &&value) {
@@ -93,7 +97,7 @@ public:
 
 	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
 		wait(self->semaphore.take());
-		self->fragments.push_back(std::make_unique<Fragment>(self));
+		self->fragments.push_back(std::make_unique<Fragment>(self, FragmentConstructorTag()));
 		ASSERT(self->fragments[self->fragmentsProcessed]);
 		return self->fragments.back().get();
 	}
