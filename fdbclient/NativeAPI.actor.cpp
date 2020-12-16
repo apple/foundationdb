@@ -44,6 +44,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/ResultStream.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -2659,68 +2660,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	}
 }
 
-class ResultStream {
-	FlowLock semaphore;
-
-public:
-	class FragmentStream {
-		ResultStream* resultStream;
-		std::deque<RangeResult> buffer;
-		bool completed{ false };
-		friend class ResultStream;
-		FlowLock::Releaser releaser;
-		FragmentStream(ResultStream* resultStream) : resultStream(resultStream), releaser(resultStream->semaphore) {}
-
-	public:
-		void send(const RangeResult& rangeResult) {
-			buffer.push_back(rangeResult);
-			resultStream->flushToClient();
-		}
-		void sendError(Error e) { resultStream->sendError(e); }
-		void finish() {
-			ASSERT(!completed);
-			completed = true;
-			resultStream->flushToClient();
-			releaser.release();
-		}
-	};
-
-private:
-	std::vector<FragmentStream> fragments;
-	decltype(fragments)::iterator nextFragment = fragments.begin();
-	PromiseStream<RangeResult> results;
-
-	// TODO: Fix potential slow tasks
-	void flushToClient() {
-		while (nextFragment != fragments.end()) {
-			auto& fragment = *nextFragment;
-			while (!fragment.buffer.empty()) {
-				results.send(std::move(fragment.buffer.front()));
-				fragment.buffer.pop_front();
-			}
-			if (fragment.completed) {
-				fragment.releaser.release();
-				++nextFragment;
-			} else {
-				break;
-			}
-		}
-	}
-
-public:
-	ResultStream(PromiseStream<RangeResult> results, size_t concurrency) : results(results), semaphore(concurrency) {}
-
-	ACTOR static Future<FragmentStream*> createFragmentStreamImpl(ResultStream* self) {
-		wait(self->semaphore.take());
-		return &self->fragments.emplace_back(FragmentStream(self));
-	}
-
-	Future<FragmentStream*> createFragmentStream() { return createFragmentStreamImpl(this); }
-
-	void sendError(Error e) { results.sendError(e); }
-};
-
-ACTOR Future<Void> getRangeStreamFragment(ResultStream::FragmentStream* results, Database cx,
+ACTOR Future<Void> getRangeStreamFragment(ResultStream<RangeResult>::FragmentStream* results, Database cx,
                                           Reference<TransactionLogInfo> trLogInfo, Version version, KeyRangeRef keys,
                                           GetRangeLimits limits, bool snapshot, bool reverse, TransactionInfo info,
                                           TagSet tags, SpanID spanContext) {
@@ -2783,7 +2723,7 @@ ACTOR Future<Void> getRangeStreamFragment(ResultStream::FragmentStream* results,
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					Standalone<RangeResultRef> output( RangeResultRef(rep.data, rep.more), rep.arena );
+					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
 
 					bool more = rep.more;
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
@@ -2901,7 +2841,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
                                   KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
                                   bool snapshot, bool reverse, TransactionInfo info, TagSet tags) {
 
-	state ResultStream results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
+	state ResultStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
@@ -2947,7 +2887,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 
 	state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
 	for (; toSendIt != toSend.end(); ++toSendIt) {
-		ResultStream::FragmentStream* fragmentStream = wait(results.createFragmentStream());
+		ResultStream<RangeResult>::FragmentStream* fragmentStream = wait(results.createFragmentStream());
 		outstandingRequests.push_back(getRangeStreamFragment(fragmentStream, cx, trLogInfo, version, *toSendIt, limits,
 		                                                     snapshot, reverse, info, tags, span.context));
 	}

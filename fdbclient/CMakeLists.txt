@@ -55,6 +55,8 @@ set(FDBCLIENT_SRCS
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreWorkerInterface.actor.h
+  ResultStream.actor.cpp
+  ResultStream.actor.h
   RunTransaction.actor.h
   RYWIterator.cpp
   RYWIterator.h
