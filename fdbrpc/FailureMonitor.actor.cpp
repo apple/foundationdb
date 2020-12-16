@@ -122,7 +122,9 @@ void SimpleFailureMonitor::endpointNotFound(Endpoint const& endpoint) {
 	    .suppressFor(1.0)
 	    .detail("Address", endpoint.getPrimaryAddress())
 	    .detail("Token", endpoint.token);
-	failedEndpoints.insert(endpoint);
+	if(endpoint.getPrimaryAddress().isValid()) {
+		failedEndpoints.insert(endpoint);
+	}
 	endpointKnownFailed.trigger(endpoint);
 }
 
@@ -152,7 +154,13 @@ Future<Void> SimpleFailureMonitor::onDisconnect(Endpoint const& endpoint) {
 		TraceEvent("AlreadyDisconnected").detail("Addr", endpoint.getPrimaryAddress()).detail("Tok", endpoint.token);
 		return Void();
 	}
-	return endpointKnownFailed.onChange(endpoint);
+	if(endpoint.getPrimaryAddress().isPublic()) {
+		return endpointKnownFailed.onChange(endpoint);
+	} else {
+		Endpoint stripped;
+		stripped.token = endpoint.token;
+		return endpointKnownFailed.onChange(endpoint) || endpointKnownFailed.onChange(stripped);
+	}
 }
 
 Future<Void> SimpleFailureMonitor::onStateChanged(Endpoint const& endpoint) {
