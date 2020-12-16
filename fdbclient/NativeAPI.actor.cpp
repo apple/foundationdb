@@ -2908,13 +2908,15 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 			toSend.emplace_back(b, e);
 		}
 
-		state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
-		for (; toSendIt != toSend.end(); ++toSendIt) {
-			if (toSendIt->empty()) {
+		state int idx = 0;
+		state int useIdx = 0;
+		for (; idx < toSend.size(); ++idx) {
+			useIdx = reverse ? toSend.size() - idx - 1 : idx;
+			if (toSend[useIdx].empty()) {
 				continue;
 			}
 			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
-			outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, *toSendIt, limits,
+			outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, toSend[useIdx], limits,
 																snapshot, reverse, info, tags, span.context));
 		}
 		if(reverse) {
