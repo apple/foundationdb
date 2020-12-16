@@ -165,8 +165,9 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	}
 	void receive(ArenaObjectReader& reader) override {
 		// Remote machine tells us it doesn't have endpoint e
-		Endpoint e;
-		reader.deserialize(e);
+		UID token;
+		reader.deserialize(token);
+		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
 };
@@ -863,10 +864,10 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (destination.token.first() != -1) {
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
-				sendLocal(self, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
+				sendLocal(self, SerializeSource<UID>(destination.token), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
 			} else {
 				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
-				sendPacket(self, peer, SerializeSource<Endpoint>(Endpoint(self->localAddresses, destination.token)), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
+				sendPacket(self, peer, SerializeSource<UID>(destination.token), Endpoint(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND), false);
 			}
 		}
 	}
