@@ -1,5 +1,5 @@
 /*
- * ParallelStream.actor.cpp
+ * ParallelStreamCorrectness.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -50,7 +50,7 @@ ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
 
 } // namespace ParallelStreamTest
 
-TEST_CASE("/parallel_stream") {
+TEST_CASE("/fdbclient/ParallelStream") {
 	state PromiseStream<int> results;
 	state ParallelStream<int> parallelStream(results, 10);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), 100);
