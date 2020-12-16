@@ -18,9 +18,45 @@
  * limitations under the License.
  */
 
+#include <vector>
+
 #include "fdbclient/ParallelStream.actor.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int i) {
+	wait(delay(deterministicRandom()->random01()));
+	fragment->send(i);
+	wait(delay(deterministicRandom()->random01()));
+	fragment->finish();
+	return Void();
+}
+
+ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
+	state int next;
+	try {
+		loop {
+			int i = waitNext(stream);
+			ASSERT(i == next++);
+		}
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_end_of_stream);
+		ASSERT(next == expected);
+		return Void();
+	}
+}
 
 TEST_CASE("/fdbclient/parallel_stream") {
+	state PromiseStream<int> results;
+	state ParallelStream<int> parallelStream(results, 10);
+	state Future<Void> consumer = consume(results.getFuture(), 100);
+	state std::vector<Future<Void>> producers;
+	state int i = 0;
+	for (; i < 100; ++i) {
+		ParallelStream<int>::Fragment* fragment = wait(parallelStream.createFragment());
+		producers.push_back(produce(fragment, i));
+	}
+	wait(waitForAll(producers));
+	results.sendError(end_of_stream());
 	return Void();
 }
