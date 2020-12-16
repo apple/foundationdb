@@ -2876,7 +2876,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 	state std::vector<Future<Void>> outstandingRequests;
 
 	if (!splitPoints.empty()) {
-		toSend.emplace_back(splitPoints.front(), b);
+		toSend.emplace_back(b, splitPoints.front());
 		for (int i = 0; i < splitPoints.size() - 1; ++i) {
 			toSend.emplace_back(splitPoints[i], splitPoints[i + 1]);
 		}
