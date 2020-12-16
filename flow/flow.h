@@ -898,7 +898,7 @@ decltype(std::declval<Request>().reply) const& getReplyPromise(Request const& r)
 }
 
 template <class Request>
-decltype(std::declval<Request>().reply) const& getReplyPromiseStream(Request const& r) {
+auto const& getReplyPromiseStream(Request const& r) {
 	return r.reply;
 }
 
