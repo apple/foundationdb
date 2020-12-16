@@ -1,5 +1,5 @@
 /*
- * ResultStream.actor.h
+ * ParallelStream.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,11 +22,11 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RESULTSTREAM_ACTOR_G_H)
-#define FDBCLIENT_RESULTSTREAM_ACTOR_G_H
-#include "fdbclient/ResultStream.actor.g.h"
-#elif !defined(FDBCLIENT_RESULTSTREAM_ACTOR_H)
-#define FDBCLIENT_RESULTSTREAM_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_PARALLEL_STREAM_ACTOR_G_H)
+#define FDBCLIENT_PARALLEL_STREAM_ACTOR_G_H
+#include "fdbclient/ParallelStream.actor.g.h"
+#elif !defined(FDBCLIENT_PARALLEL_STREAM_ACTOR_H)
+#define FDBCLIENT_PARALLEL_STREAM_ACTOR_H
 
 #include <deque>
 #include <vector>
@@ -35,35 +35,36 @@
 #include "flow/actorcompiler.h" // must be last include
 
 template <class T>
-class ResultStream {
+class ParallelStream {
 	FlowLock semaphore;
 
 public:
-	class FragmentStream {
-		ResultStream* resultStream;
+	class Fragment {
+		ParallelStream* parallelStream;
 		std::deque<T> buffer;
 		bool completed{ false };
-		friend class ResultStream;
+		friend class ParallelStream;
 		FlowLock::Releaser releaser;
-		FragmentStream(ResultStream* resultStream) : resultStream(resultStream), releaser(resultStream->semaphore) {}
+		Fragment(ParallelStream* parallelStream)
+		  : parallelStream(parallelStream), releaser(parallelStream->semaphore) {}
 
 	public:
 		void send(const T& value) {
 			buffer.push_back(value);
-			resultStream->flushToClient();
+			parallelStream->flushToClient();
 		}
-		void sendError(Error e) { resultStream->sendError(e); }
+		void sendError(Error e) { parallelStream->sendError(e); }
 		void finish() {
 			ASSERT(!completed);
 			completed = true;
-			resultStream->flushToClient();
+			parallelStream->flushToClient();
 			releaser.release();
 		}
 	};
 
 private:
-	std::vector<FragmentStream> fragments;
-	typename std::vector<FragmentStream>::iterator nextFragment = fragments.begin();
+	std::vector<Fragment> fragments;
+	typename std::vector<Fragment>::iterator nextFragment = fragments.begin();
 	PromiseStream<T> results;
 
 	// TODO: Fix potential slow task
@@ -84,14 +85,14 @@ private:
 	}
 
 public:
-	ResultStream(PromiseStream<T> results, size_t concurrency) : results(results), semaphore(concurrency) {}
+	ParallelStream(PromiseStream<T> results, size_t concurrency) : results(results), semaphore(concurrency) {}
 
-	ACTOR static Future<FragmentStream*> createFragmentStreamImpl(ResultStream<T>* self) {
+	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
 		wait(self->semaphore.take());
-		return &self->fragments.emplace_back(FragmentStream(self));
+		return &self->fragments.emplace_back(Fragment(self));
 	}
 
-	Future<FragmentStream*> createFragmentStream() { return createFragmentStreamImpl(this); }
+	Future<Fragment*> createFragment() { return createFragmentImpl(this); }
 
 	void sendError(Error e) { results.sendError(e); }
 };

@@ -1,5 +1,5 @@
 /*
- * ResultStream.actor.cpp
+ * ParallelStream.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ResultStream.actor.h"
+#include "fdbclient/ParallelStream.actor.h"
 #include "flow/UnitTest.h"
 
-TEST_CASE("/fdbclient/result_stream") {
+TEST_CASE("/fdbclient/parallel_stream") {
 	return Void();
 }

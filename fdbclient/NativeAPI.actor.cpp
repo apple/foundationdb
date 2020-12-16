@@ -44,7 +44,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/ResultStream.actor.h"
+#include "fdbclient/ParallelStream.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -2660,7 +2660,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	}
 }
 
-ACTOR Future<Void> getRangeStreamFragment(ResultStream<RangeResult>::FragmentStream* results, Database cx,
+ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results, Database cx,
                                           Reference<TransactionLogInfo> trLogInfo, Version version, KeyRangeRef keys,
                                           GetRangeLimits limits, bool snapshot, bool reverse, TransactionInfo info,
                                           TagSet tags, SpanID spanContext) {
@@ -2841,7 +2841,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
                                   KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
                                   bool snapshot, bool reverse, TransactionInfo info, TagSet tags) {
 
-	state ResultStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
+	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
@@ -2887,8 +2887,8 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 
 	state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
 	for (; toSendIt != toSend.end(); ++toSendIt) {
-		ResultStream<RangeResult>::FragmentStream* fragmentStream = wait(results.createFragmentStream());
-		outstandingRequests.push_back(getRangeStreamFragment(fragmentStream, cx, trLogInfo, version, *toSendIt, limits,
+		ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+		outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, *toSendIt, limits,
 		                                                     snapshot, reverse, info, tags, span.context));
 	}
 
