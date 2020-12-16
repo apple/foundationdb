@@ -259,7 +259,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		} else {
 			ASSERT(message.get().bytes > bytesAcknowledged);
 			bytesAcknowledged = message.get().bytes;
-			if (bytesSent - bytesAcknowledged < 2e6 && ready.isValid() && ready.canBeSet()) {
+			if (bytesSent - bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES && ready.isValid() && ready.canBeSet()) {
 				ready.send(Void());
 			}
 		}
@@ -337,7 +337,7 @@ public:
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token;
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
-			if((!queue->acknowledgements.ready.isValid() || (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
+			if((!queue->acknowledgements.ready.isValid() || (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
 				queue->acknowledgements.ready = Promise<Void>();
 			}
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), getEndpoint(), false);
@@ -401,7 +401,7 @@ public:
 		if(queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError()) {
 			return queue->acknowledgements.ready.getFuture().getError();
 		}
-		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
+		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < FLOW_KNOBS->ACKNOWLEDGE_LIMIT_BYTES) {
 			return Void();
 		}
 		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
