@@ -614,7 +614,7 @@ public:
 			versionLag(0), primaryLocality(tagLocalityInvalid),
 			updateEagerReads(0),
 			shardChangeCounter(0),
-			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
+			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0), numWatches(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
@@ -2218,70 +2218,6 @@ void coalesceShards(StorageServer *data, KeyRangeRef keys) {
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version version, KeyRangeRef keys, GetRangeLimits limits, bool* isTooOld ) {
-	state Transaction tr( cx );
-	state Standalone<RangeResultRef> output;
-	state KeySelectorRef begin = firstGreaterOrEqual( keys.begin );
-	state KeySelectorRef end = firstGreaterOrEqual( keys.end );
-
-	if( *isTooOld )
-		throw transaction_too_old();
-
-	ASSERT(!cx->switchable);
-	tr.setVersion( version );
-	tr.info.taskID = TaskPriority::FetchKeys;
-	limits.minRows = 0;
-
-	try {
-		loop {
-			state PromiseStream<Standalone<RangeResultRef>> results;
-			state Future<Void> hold = tr.getRangeStream(results, begin, end, limits, true);
-			loop {
-				Standalone<RangeResultRef> rep = waitNext( results.getFuture() );
-				limits.decrement( rep );
-				//FIXME: this is only returning the first result from the stream and then cancelling the stream
-				if( limits.isReached() || !rep.more ) {
-					if( output.size() ) {
-						output.arena().dependsOn( rep.arena() );
-						output.append( output.arena(), rep.begin(), rep.size() );
-						if( limits.isReached() && rep.readThrough.present() )
-							output.readThrough = rep.readThrough.get();
-					} else {
-						output = rep;
-					}
-
-					output.more = limits.isReached();
-
-					return output;
-				} else if( rep.readThrough.present() ) {
-					output.arena().dependsOn( rep.arena() );
-					if( rep.size() ) {
-						output.append( output.arena(), rep.begin(), rep.size() );
-						ASSERT( rep.readThrough.get() > rep.end()[-1].key );
-					} else {
-						ASSERT( rep.readThrough.get() > keys.begin );
-					}
-					begin = firstGreaterOrEqual( rep.readThrough.get() );
-				} else {
-					output.arena().dependsOn( rep.arena() );
-					output.append( output.arena(), rep.begin(), rep.size() );
-					begin = firstGreaterThan( output.end()[-1].key );
-				}
-			}
-		}
-	} catch( Error &e ) {
-		if( begin.getKey() != keys.begin && ( e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_process_behind ) ) {
-			if( e.code() == error_code_transaction_too_old )
-				*isTooOld = true;
-			output.more = true;
-			if( begin.isFirstGreaterOrEqual() )
-				output.readThrough = begin.getKey();
-			return output;
-		}
-		throw;
-	}
-}
-
 template <class T>
 void addMutation( T& target, Version version, MutationRef const& mutation ) {
 	target.addMutation( version, mutation );
@@ -2332,8 +2268,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 	state KeyRange keys = shard->keys;
 	state Future<Void> warningLogger = logFetchKeysWarning(shard);
 	state double startt = now();
-	state int fetchBlockBytes = BUGGIFY ? SERVER_KNOBS->BUGGIFY_BLOCK_BYTES : SERVER_KNOBS->FETCH_BLOCK_BYTES;
-
+	
 	// delay(0) to force a return to the run loop before the work of fetchKeys is started.
 	//  This allows adding->start() to be called inline with CSK.
 	wait( data->coreStarted.getFuture() && delay( 0 ) );
@@ -2365,8 +2300,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		TraceEvent(SevDebug, "FetchKeysVersionSatisfied", data->thisServerID).detail("FKID", interval.pairID);
 
-		wait( data->fetchKeysParallelismLock.take( TaskPriority::DefaultYield, fetchBlockBytes ) );
-		state FlowLock::Releaser holdingFKPL( data->fetchKeysParallelismLock, fetchBlockBytes );
+		wait( data->fetchKeysParallelismLock.take( TaskPriority::DefaultYield ) );
+		state FlowLock::Releaser holdingFKPL( data->fetchKeysParallelismLock );
 
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
@@ -2378,8 +2313,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		wait( data->durableVersionLock.take() );
 
 		shard->phase = AddingShard::Fetching;
-		state Version fetchVersion = data->version.get();
-
+		
 		data->durableVersionLock.release();
 
 		wait(delay(0));
@@ -2395,49 +2329,69 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		data->cx->invalidateCache(keys);
 
 		loop {
-			try {
-				TEST(true);		// Fetching keys for transferred shard
+			state Transaction tr( data->cx );
+			state Version fetchVersion = data->version.get();
+			while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
+			tr.setVersion( fetchVersion );
+			tr.info.taskID = TaskPriority::FetchKeys;
+			state PromiseStream<Standalone<RangeResultRef>> results;
+			state Future<Void> hold = tr.getRangeStream(results, keys, GetRangeLimits(), true);
+			state Key nfk = keys.begin;
 
-				//FIXME: this is inefficient because we are restarting the getRangeStreaming for every block
-				state Standalone<RangeResultRef> this_block =
-				    wait(tryGetRange(data->cx, fetchVersion, keys,
-				                     GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, fetchBlockBytes), &isTooOld));
+			loop {
+				try {
+					TEST(true);		// Fetching keys for transferred shard
+					state Standalone<RangeResultRef> this_block = waitNext( results.getFuture() );
 
-				int expectedSize = (int)this_block.expectedSize() + (8-(int)sizeof(KeyValueRef))*this_block.size();
+					int expectedSize = (int)this_block.expectedSize() + (8-(int)sizeof(KeyValueRef))*this_block.size();
 
-				TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID).detail("FKID", interval.pairID)
-					.detail("BlockRows", this_block.size()).detail("BlockBytes", expectedSize)
-					.detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end)
-					.detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
-					.detail("Version", fetchVersion).detail("More", this_block.more);
-				DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
-				for(auto k = this_block.begin(); k != this_block.end(); ++k) DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
+					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID).detail("FKID", interval.pairID)
+						.detail("BlockRows", this_block.size()).detail("BlockBytes", expectedSize)
+						.detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end)
+						.detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
+						.detail("Version", fetchVersion).detail("More", this_block.more);
+					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys);
+					for(auto k = this_block.begin(); k != this_block.end(); ++k) DEBUG_MUTATION("fetch", fetchVersion, MutationRef(MutationRef::SetValue, k->key, k->value));
 
-				data->counters.bytesFetched += expectedSize;
-				if( fetchBlockBytes > expectedSize ) {
-					holdingFKPL.release( fetchBlockBytes - expectedSize );
-				}
+					data->counters.bytesFetched += expectedSize;
 
-				// Wait for permission to proceed
-				//wait( data->fetchKeysStorageWriteLock.take() );
-				//state FlowLock::Releaser holdingFKSWL( data->fetchKeysStorageWriteLock );
+					// Write this_block to storage
+					state KeyValueRef *kvItr = this_block.begin();
+					for(; kvItr != this_block.end(); ++kvItr) {
+						data->storage.writeKeyValue( *kvItr );
+						wait(yield());
+					}
 
-				// Write this_block to storage
-				state KeyValueRef *kvItr = this_block.begin();
-				for(; kvItr != this_block.end(); ++kvItr) {
-					data->storage.writeKeyValue( *kvItr );
-					wait(yield());
-				}
+					kvItr = this_block.begin();
+					for(; kvItr != this_block.end(); ++kvItr) {
+						data->byteSampleApplySet( *kvItr, invalidVersion );
+						wait(yield());
+					}
 
-				kvItr = this_block.begin();
-				for(; kvItr != this_block.end(); ++kvItr) {
-					data->byteSampleApplySet( *kvItr, invalidVersion );
-					wait(yield());
-				}
+					nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
+					this_block = Standalone<RangeResultRef>();
+				} catch( Error &e ) {
+					if(e.code() != error_code_end_of_stream || e.code() != error_code_connection_failed || e.code() != error_code_transaction_too_old ||
+					   e.code() != error_code_future_version || e.code() != error_code_process_behind) {
+						throw;
+					}
+					if(nfk == keys.begin) {
+						TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
 
-				if (this_block.more) {
-					Key nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
-					if (nfk != keys.end) {
+						//FIXME: remove when we no longer support upgrades from 5.X
+						if(debug_getRangeRetries >= 100) {
+							data->cx->enableLocalityLoadBalance = false;
+						}
+
+						debug_getRangeRetries++;
+						if (debug_nextRetryToLog==debug_getRangeRetries){
+							debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
+							TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
+						}
+						wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
+						continue;
+					}
+					if(nfk < keys.end) {
 						std::deque< Standalone<VerUpdateRef> > updatesToSplit = std::move( shard->updates );
 
 						// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
@@ -2461,40 +2415,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						TEST( shard->updates.size() ); // Shard has updates
 						ASSERT( otherShard->updates.empty() );
 					}
+					break;
 				}
-
-				this_block = Standalone<RangeResultRef>();
-
-				if (BUGGIFY) wait( delay( 1 ) );
-
-				break;
-			} catch (Error& e) {
-				TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
-				if (e.code() == error_code_transaction_too_old){
-					TEST(true); // A storage server has forgotten the history data we are fetching
-					Version lastFV = fetchVersion;
-					fetchVersion = data->version.get();
-					isTooOld = false;
-
-					// Throw away deferred updates from before fetchVersion, since we don't need them to use blocks fetched at that version
-					while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
-
-					//FIXME: remove when we no longer support upgrades from 5.X
-					if(debug_getRangeRetries >= 100) {
-						data->cx->enableLocalityLoadBalance = false;
-					}
-
-					debug_getRangeRetries++;
-					if (debug_nextRetryToLog==debug_getRangeRetries){
-						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
-						TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
-					}
-				} else if (e.code() == error_code_future_version || e.code() == error_code_process_behind) {
-					TEST(true); // fetchKeys got future_version or process_behind, so there must be a huge storage lag somewhere.  Keep trying.
-				} else {
-					throw;
-				}
-				wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 			}
 		}
 
