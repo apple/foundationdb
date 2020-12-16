@@ -202,7 +202,7 @@ void endStreamOnDisconnect( Future<Void> signal, ReplyPromiseStream<X> stream, R
 	state PeerHolder holder = PeerHolder(peer);
 	choose {
 		when(wait(signal)) {
-			stream.sendError(request_maybe_delivered());
+			stream.sendError(connection_failed());
 		}
 		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
 	}

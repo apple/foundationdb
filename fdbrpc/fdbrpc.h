@@ -223,7 +223,7 @@ struct ReplyPromiseStreamReply {
 };
 
 struct AcknowledgementReply {
-	constexpr static FileIdentifier file_identifier = 1378929;
+	constexpr static FileIdentifier file_identifier = 1389929;
 	int64_t bytes;
 
 	AcknowledgementReply() : bytes(0) {}
@@ -276,8 +276,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	NetNotifiedQueueWithErrors(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
 	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
-		  //FIXME: creating the FlowReceiver as a stream will mean that every cancelled read will lead to a permanent endpoint in the failed endpoints map
-		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), request_maybe_delivered());
+		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), operation_obsolete());
 	  }
 
 	void destroy() override { delete this; }
@@ -318,11 +317,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 
 	~NetNotifiedQueueWithErrors() {
 		if(acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
-			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(request_maybe_delivered()), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
+			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 		}
 	}
 
-	//FIXME: creating the FlowReceiver as a stream will mean that every cancelled read will lead to a permanent endpoint in the failed endpoints map
 	bool isStream() const override { return true; }
 };
 
@@ -583,10 +581,6 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint(taskID));
 			auto& p = getReplyPromiseStream(value);
-			if (disc.isReady()) {
-				p.sendError(request_maybe_delivered());
-				return p;
-			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(taskID), true);
 			//FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, peer);
@@ -602,10 +596,6 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc = makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			if (disc.isReady()) {
-				p.sendError(request_maybe_delivered());
-				return p;
-			}
 			Reference<Peer> peer = FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			//FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, peer);

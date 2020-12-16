@@ -103,7 +103,7 @@ ACTOR Future<Void> networkTestServer() {
 				}
 			}
 		} catch (Error &e) {
-			if(e.code() != error_code_request_maybe_delivered) {
+			if(e.code() != error_code_operation_obsolete) {
 				fprintf(stderr, "Error: %s\n", e.what());
 				throw e;
 			}
@@ -149,7 +149,7 @@ ACTOR Future<Void> testClient(std::vector<NetworkTestInterface> interfs, int* se
 			}
 		} catch (Error& e) {
 			printf("Error: %s\n", e.what());
-			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_request_maybe_delivered);
+			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
 		}
 		latency->tock(sample);
 		(*completed)++;

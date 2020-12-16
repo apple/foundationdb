@@ -173,22 +173,29 @@ ACTOR Future<Void> echoServer() {
 	state EchoServerInterface echoServer;
 	echoServer.getInterface.makeWellKnownEndpoint(UID(-1, ++tokenCounter), TaskPriority::DefaultEndpoint);
 	loop {
-		choose {
-			when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
-				req.reply.send(echoServer);
-			}
-			when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
-			when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
-				req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
-			}
-			when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
-				state int i = 0;
-				for (; i < 100; ++i) {
-					wait(req.reply.onReady());
-					std::cout << "Send " << i << std::endl;
-					req.reply.send(StreamReply{ i });
+		try {
+			choose {
+				when(GetInterfaceRequest req = waitNext(echoServer.getInterface.getFuture())) {
+					req.reply.send(echoServer);
 				}
-				req.reply.sendError(end_of_stream());
+				when(EchoRequest req = waitNext(echoServer.echo.getFuture())) { req.reply.send(req.message); }
+				when(ReverseRequest req = waitNext(echoServer.reverse.getFuture())) {
+					req.reply.send(std::string(req.message.rbegin(), req.message.rend()));
+				}
+				when(state StreamRequest req = waitNext(echoServer.stream.getFuture())) {
+					state int i = 0;
+					for (; i < 100; ++i) {
+						wait(req.reply.onReady());
+						std::cout << "Send " << i << std::endl;
+						req.reply.send(StreamReply{ i });
+					}
+					req.reply.sendError(end_of_stream());
+				}
+			}
+		} catch (Error &e) {
+			if(e.code() != error_code_operation_obsolete) {
+				fprintf(stderr, "Error: %s\n", e.what());
+				throw e;
 			}
 		}
 	}
@@ -217,7 +224,7 @@ ACTOR Future<Void> echoClient() {
 			ASSERT(rep.index == j++);
 		}
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_request_maybe_delivered);
+		ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
 	}
 	return Void();
 }

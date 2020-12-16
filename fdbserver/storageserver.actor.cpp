@@ -1792,9 +1792,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			}
 		}
 	} catch (Error& e) {
-		if(!canReplyWith(e))
-			throw;
-		req.reply.sendError(e);
+		if(e.code() != error_code_operation_obsolete) {
+			if(!canReplyWith(e))
+				throw;
+			req.reply.sendError(e);
+		}
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
