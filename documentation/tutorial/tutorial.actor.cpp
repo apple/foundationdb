@@ -394,11 +394,21 @@ ACTOR Future<Void> multipleClients() {
 
 std::string clusterFile = "fdb.cluster";
 
+ACTOR Future<Void> logThroughput(int64_t* v) {
+	loop {
+		state int64_t last = *v;
+		wait(delay(1));
+		printf("throughput: %ld bytes/s\n", *v - last);
+	}
+}
+
 ACTOR Future<Void> fdbClientStream() {
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state Transaction tx(db);
 	state PromiseStream<Standalone<RangeResultRef>> results;
 	state Key next;
+	state int64_t bytes = 0;
+	state Future<Void> logFuture = logThroughput(&bytes);
 	loop {
 		try {
 			state Future<Void> stream =
@@ -406,7 +416,7 @@ ACTOR Future<Void> fdbClientStream() {
 			                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> range = waitNext(results.getFuture());
-				std::cout << "Got " << range.expectedSize() << " next: " << printable(next) << std::endl;
+				bytes += range.expectedSize();
 				next = keyAfter(range.back().key);
 			}
 		} catch (Error& e) {
@@ -423,12 +433,14 @@ ACTOR Future<Void> fdbClientGetRange() {
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state Transaction tx(db);
 	state Key next;
+	state int64_t bytes = 0;
+	state Future<Void> logFuture = logThroughput(&bytes);
 	loop {
 		try {
 			Standalone<RangeResultRef> range = wait(tx.getRange(
 			    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(normalKeys.end)),
 			    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
-			std::cout << "Got " << range.expectedSize() << " next: " << printable(next) << std::endl;
+			bytes += range.expectedSize();
 			if (!range.more) {
 				break;
 			}
