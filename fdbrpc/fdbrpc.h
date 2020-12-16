@@ -249,7 +249,6 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 		bytesSent(0), bytesAcknowledged(0), ready(nullptr) {}
 
 	void receive(ArenaObjectReader& reader) override {
-		printf("AcknowledgementReceived\n");
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
 		if(message.isError()) {
@@ -279,12 +278,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
 		  //FIXME: creating the FlowReceiver as a stream will mean that every cancelled read will lead to a permanent endpoint in the failed endpoints map
 		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), request_maybe_delivered());
-		  printf("NetNotified create with remote endpoint: %s\n", remoteEndpoint.token.toString().c_str());
 	  }
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
-		printf("NetNotifiedReceived\n");
 		this->addPromiseRef();
 		ErrorOr<EnsureTable<T>> message;
 		reader.deserialize(message);
@@ -297,12 +294,10 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		} else {
 			if(message.get().asUnderlyingType().acknowledgeToken.present()) {
 				acknowledgements = AcknowledgementReceiver(FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
-				printf("Acknowledgements create with remote endpoint: %s %s\n", acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 			}
 			if(this->shouldFireImmediately()) {
 				if(acknowledgements.getRawEndpoint().isValid()) {
 					acknowledgements.bytesAcknowledged += message.get().asUnderlyingType().expectedSize();
-					printf("Sending acknowledgement1 to endpoint: %ld %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 					FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 				}
 			}
@@ -316,17 +311,14 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 		T res = this->popImpl();
 		if(acknowledgements.getRawEndpoint().isValid()) {
 			acknowledgements.bytesAcknowledged += res.expectedSize();
-			printf("Sending acknowledgement2 to endpoint: %d %s %s\n", acknowledgements.bytesAcknowledged, acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).getPrimaryAddress().toString().c_str(), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint).token.toString().c_str());
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(AcknowledgementReply(acknowledgements.bytesAcknowledged)), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
 		}
 		return res;
 	}
 
 	~NetNotifiedQueueWithErrors() {
-		printf("NetNotifiedQueue destructor %s\n", getRawEndpoint().token.toString().c_str());
 		if(acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
 			FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<AcknowledgementReply>>(request_maybe_delivered()), acknowledgements.getEndpoint(TaskPriority::DefaultPromiseEndpoint), false);
-			printf("NetNotifiedQueue destructor with error %s\n", getRawEndpoint().token.toString().c_str());
 		}
 	}
 
@@ -345,7 +337,6 @@ public:
 		if (queue->isRemoteEndpoint()) {
 			if(!queue->acknowledgements.getRawEndpoint().isValid()) {
 				value.acknowledgeToken = queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token;
-				printf("Registered Ack Endpoint: %s\n", queue->acknowledgements.getEndpoint(TaskPriority::DefaultEndpoint).token.toString().c_str());
 			}
 			queue->acknowledgements.bytesSent += value.expectedSize();
 			if((!queue->acknowledgements.ready.isValid() || (queue->acknowledgements.ready.isSet() && !queue->acknowledgements.ready.getFuture().isError())) && queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged >= 2e6) {
@@ -398,9 +389,6 @@ public:
 	}
 
 	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
-		if(!queue->getRawEndpoint().isValid()) {
-			printf("Registered Endpoint: %s\n", queue->getEndpoint(taskID).token.toString().c_str());
-		}
 		return queue->getEndpoint(taskID); 
 	}
 	
@@ -409,17 +397,13 @@ public:
 	uint32_t size() const { return queue->size(); }
 
 	Future<Void> onReady() {
-		printf("OnReady Start %s\n", getEndpoint().token.toString().c_str());
 		if(queue->acknowledgements.failures.isError()) {
-			printf("OnReady Error1\n");
 			return queue->acknowledgements.failures.getError();
 		}
 		if(queue->acknowledgements.ready.isValid() && queue->acknowledgements.ready.isSet() && queue->acknowledgements.ready.getFuture().isError()) {
-			printf("OnReady Error2\n");
 			return queue->acknowledgements.ready.getFuture().getError();
 		}
 		if(queue->acknowledgements.bytesSent - queue->acknowledgements.bytesAcknowledged < 2e6) {
-			printf("OnReady Skip\n");
 			return Void();
 		}
 		return queue->acknowledgements.ready.getFuture() || queue->acknowledgements.failures;
