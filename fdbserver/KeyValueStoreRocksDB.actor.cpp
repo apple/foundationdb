@@ -345,6 +345,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		: path(path)
 		, id(id)
 	{
+		int nReaders = SERVER_KNOBS->ROCKSDB_READ_PARALLELISM;
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
 		if (g_network->isSimulated()) {
@@ -354,7 +355,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		} else {
 			writeThread->addThread(new Writer(this));
 		}
-		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
+		for (unsigned i = 0; i < nReaders; ++i) {
 			readThreads->addThread(new Reader(this));
 		}
 	}
