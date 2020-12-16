@@ -401,22 +401,22 @@ ACTOR Future<Void> multipleClients() {
 
 std::string clusterFile = "fdb.cluster";
 
-ACTOR Future<Void> logThroughput(int64_t* v) {
+ACTOR Future<Void> logThroughput(int64_t* v, Key* next) {
 	loop {
 		state int64_t last = *v;
 		wait(delay(1));
-		printf("throughput: %ld bytes/s\n", *v - last);
+		printf("throughput: %ld bytes/s, next: %s\n", *v - last, printable(*next).c_str());
 	}
 }
 
 ACTOR Future<Void> fdbClientStream() {
 	state Database db = Database::createDatabase(clusterFile, 300);
 	state Transaction tx(db);
-	state PromiseStream<Standalone<RangeResultRef>> results;
 	state Key next;
 	state int64_t bytes = 0;
-	state Future<Void> logFuture = logThroughput(&bytes);
+	state Future<Void> logFuture = logThroughput(&bytes, &next);
 	loop {
+		state PromiseStream<Standalone<RangeResultRef>> results;
 		try {
 			state Future<Void> stream =
 			    tx.getRangeStream(results, KeySelector(firstGreaterOrEqual(next), next.arena()),
@@ -441,7 +441,7 @@ ACTOR Future<Void> fdbClientGetRange() {
 	state Transaction tx(db);
 	state Key next;
 	state int64_t bytes = 0;
-	state Future<Void> logFuture = logThroughput(&bytes);
+	state Future<Void> logFuture = logThroughput(&bytes, &next);
 	loop {
 		try {
 			Standalone<RangeResultRef> range = wait(tx.getRange(
