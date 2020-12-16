@@ -2699,7 +2699,10 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 				}
 
 				//FIXME: add load balancing
-				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream = locations[shard].second->getInterface(0).getKeyValuesStream.getReplyStream(req);
+				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream =
+				    locations[shard]
+				        .second->getInterface(deterministicRandom()->randomInt(0, locations[shard].second->size()))
+				        .getKeyValuesStream.getReplyStream(req);
 				state bool breakAgain = false;
 				loop {
 					try {
