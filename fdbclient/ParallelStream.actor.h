@@ -48,8 +48,9 @@ public:
 	public:
 		Fragment(ParallelStream* parallelStream)
 		  : parallelStream(parallelStream), releaser(parallelStream->semaphore) {}
-		void send(const T& value) {
-			buffer.push_back(value);
+		template<class U>
+		void send(U &&value) {
+			buffer.push_back(std::forward<U>(value));
 			parallelStream->flushToClient();
 		}
 		void sendError(Error e) { parallelStream->sendError(e); }
