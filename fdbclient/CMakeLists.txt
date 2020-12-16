@@ -18,6 +18,7 @@ set(FDBCLIENT_SRCS
   ClientLogEvents.h
   ClientWorkerInterface.h
   ClusterInterface.h
+  CommitProxyInterface.h
   CommitTransaction.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
@@ -40,7 +41,6 @@ set(FDBCLIENT_SRCS
   Knobs.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
-  CommitProxyInterface.h
   MonitorLeader.actor.cpp
   MonitorLeader.h
   MultiVersionAssignmentVars.h
@@ -50,8 +50,7 @@ set(FDBCLIENT_SRCS
   NativeAPI.actor.cpp
   NativeAPI.actor.h
   Notified.h
-  SpecialKeySpace.actor.cpp
-  SpecialKeySpace.actor.h
+  ParallelStream.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
   RestoreWorkerInterface.actor.h
@@ -62,6 +61,8 @@ set(FDBCLIENT_SRCS
   Schemas.cpp
   Schemas.h
   SnapshotCache.h
+  SpecialKeySpace.actor.cpp
+  SpecialKeySpace.actor.h
   Status.h
   StatusClient.actor.cpp
   StatusClient.h

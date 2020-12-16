@@ -44,6 +44,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/ParallelStream.actor.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -2659,40 +2660,10 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 	}
 }
 
-ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> results, Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
-	KeySelector begin, KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange, bool snapshot, bool reverse,
-	TransactionInfo info, TagSet tags )
-{
-	//FIXME: better handling to disable row limits
-	ASSERT(!limits.hasRowLimit());
-	ASSERT(!limits.hasByteLimit());
-	state Span span("NAPI:getRangeStream"_loc, info.spanID);
-
-	state Version version = wait( fVersion );
-	cx->validateVersion(version);
-
-	Future<Key> fb = resolveKey(cx, begin, version, info, tags);
-	state Future<Key> fe = resolveKey(cx, end, version, info, tags);
-
-	state Key b = wait(fb);
-	state Key e = wait(fe);
-
-	if( !snapshot ) {
-		//FIXME: this conflict range is too large, and should be updated continously as results are returned
-		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(),begin.arena())), std::max(e, Key(end.getKey(),end.arena()))));
-	}
-
-	if (b >= e) {
-		results.sendError(end_of_stream());
-		return Void();
-	}
-
-	state KeyRangeRef keys(b, e);
-
-	//if e is allKeys.end, we have read through the end of the database
-	//if b is allKeys.begin, we have either read through the beginning of the database,
-	//or allKeys.begin exists in the database and will be part of the conflict range anyways
-
+ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results, Database cx,
+                                          Reference<TransactionLogInfo> trLogInfo, Version version, KeyRangeRef keys,
+                                          GetRangeLimits limits, bool snapshot, bool reverse, TransactionInfo info,
+                                          TagSet tags, SpanID spanContext) {
 	loop {
 		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream, info ) );
 		ASSERT( locations.size() );
@@ -2704,7 +2675,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 			req.version = version;
 			req.begin = firstGreaterOrEqual( range.begin );
 			req.end = firstGreaterOrEqual( range.end );
-			req.spanContext = span.context;
+			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
 
@@ -2723,7 +2694,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 				if( locations[shard].second->size() == 0 ) {
 					wait(cx->connectionFileChanged());
-					results.sendError( transaction_too_old() );
+					results->sendError(transaction_too_old());
 					return Void();
 				}
 
@@ -2734,7 +2705,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 					try {
 						choose {
 							when(wait(cx->connectionFileChanged())) {
-								results.sendError( transaction_too_old() );
+								results->sendError(transaction_too_old());
 								return Void();
 							}
 
@@ -2753,7 +2724,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					Standalone<RangeResultRef> output( RangeResultRef(rep.data, rep.more), rep.arena );
+					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
 
 					bool more = rep.more;
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
@@ -2786,10 +2757,10 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 							if(begin >= end) {
 								output.more = false;
-								if(b == allKeys.begin) {
+								if (range.begin == allKeys.begin) {
 									output.readToBegin = true;
 								}
-								if(e == allKeys.end) {
+								if (range.end == allKeys.end) {
 									output.readThroughEnd = true;
 								}
 								int64_t bytes = 0;
@@ -2805,8 +2776,8 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 								//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 								//}
 
-								results.send(output);
-								results.sendError(end_of_stream());
+								results->send(std::move(output));
+								results->finish();
 								return Void();
 							}
 
@@ -2821,10 +2792,10 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 
 					if(output.size() > 0) {
 						output.more = true;
-						if(b == allKeys.begin && !reverse) {
+						if (keys.begin == allKeys.begin && !reverse) {
 							output.readToBegin = true;
 						}
-						if(e == allKeys.end && reverse) {
+						if (keys.end == allKeys.end && reverse) {
 							output.readThroughEnd = true;
 						}
 						int64_t bytes = 0;
@@ -2839,7 +2810,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 						//if( trLogInfo ) {
 						//	trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, cx->clientLocality.dcId(), now()-startTime, bytes, begin.getKey(), end.getKey()));
 						//}
-						results.send(output);
+						results->send(std::move(output));
 					}
 				}
 				if (breakAgain) {
@@ -2861,7 +2832,7 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 					wait( delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID ));
 					break;
 				} else {
-					results.sendError(e);
+					results->sendError(e);
 					return Void();
 				}
 			}
@@ -2869,6 +2840,76 @@ ACTOR Future<Void> getRangeStream( PromiseStream<Standalone<RangeResultRef>> res
 	}
 }
 
+ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize);
+
+ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database cx,
+                                  Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion, KeySelector begin,
+                                  KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
+                                  bool snapshot, bool reverse, TransactionInfo info, TagSet tags) {
+
+	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
+
+	// FIXME: better handling to disable row limits
+	ASSERT(!limits.hasRowLimit());
+	state Span span("NAPI:getRangeStream"_loc, info.spanID);
+
+	state Version version = wait(fVersion);
+	cx->validateVersion(version);
+
+	Future<Key> fb = resolveKey(cx, begin, version, info, tags);
+	state Future<Key> fe = resolveKey(cx, end, version, info, tags);
+
+	state Key b = wait(fb);
+	state Key e = wait(fe);
+
+	if (!snapshot) {
+		// FIXME: this conflict range is too large, and should be updated continously as results are returned
+		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(), begin.arena())),
+		                                  std::max(e, Key(end.getKey(), end.arena()))));
+	}
+
+	if (b >= e) {
+		results.sendError(end_of_stream());
+		return Void();
+	}
+
+	state KeyRangeRef keys(b, e);
+
+	//if e is allKeys.end, we have read through the end of the database
+	//if b is allKeys.begin, we have either read through the beginning of the database,
+	//or allKeys.begin exists in the database and will be part of the conflict range anyways
+
+	state Standalone<VectorRef<KeyRef>> splitPoints =
+	    wait(getRangeSplitPoints(cx, keys, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+	state std::vector<KeyRangeRef> toSend;
+	// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
+	state std::vector<Future<Void>> outstandingRequests;
+
+	if (!splitPoints.empty()) {
+		toSend.emplace_back(b, splitPoints.front());
+		for (int i = 0; i < splitPoints.size() - 1; ++i) {
+			toSend.emplace_back(splitPoints[i], splitPoints[i + 1]);
+		}
+		toSend.emplace_back(splitPoints.back(), e);
+	} else {
+		toSend.emplace_back(b, e);
+	}
+
+	state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
+	for (; toSendIt != toSend.end(); ++toSendIt) {
+		ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+		outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, *toSendIt, limits,
+		                                                     snapshot, reverse, info, tags, span.context));
+	}
+
+	try {
+		wait(waitForAll(outstandingRequests));
+	} catch (Error& e) {
+		results.sendError(e);
+	}
+	results.sendError(end_of_stream());
+	return Void();
+}
 
 /*
 ACTOR Future<Void> getRangeStreamSingleShard( PromiseStream<Standalone<RangeResultRef>> results, Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion,
