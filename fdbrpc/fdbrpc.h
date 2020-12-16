@@ -278,7 +278,7 @@ struct NetNotifiedQueueWithErrors final : NotifiedQueue<T>, FlowReceiver, FastAl
 	NetNotifiedQueueWithErrors(int futures, int promises, const Endpoint& remoteEndpoint)
 	  :  NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
 		  //FIXME: creating the FlowReceiver as a stream will mean that every cancelled read will lead to a permanent endpoint in the failed endpoints map
-		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(remoteEndpoint), request_maybe_delivered());
+		  acknowledgements.failures = tagError<Void>(makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint), request_maybe_delivered());
 		  printf("NetNotified create with remote endpoint: %s\n", remoteEndpoint.token.toString().c_str());
 	  }
 
@@ -409,7 +409,7 @@ public:
 	uint32_t size() const { return queue->size(); }
 
 	Future<Void> onReady() {
-		printf("OnReady Start\n");
+		printf("OnReady Start %s\n", getEndpoint().token.toString().c_str());
 		if(queue->acknowledgements.failures.isError()) {
 			printf("OnReady Error1\n");
 			return queue->acknowledgements.failures.getError();
