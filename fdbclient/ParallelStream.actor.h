@@ -63,24 +63,24 @@ public:
 
 private:
 	std::vector<std::unique_ptr<Fragment>> fragments;
-	typename std::vector<std::unique_ptr<Fragment>>::iterator nextFragment;
+	size_t fragmentsProcessed { 0 };
 	PromiseStream<T> results;
 
 	// TODO: Fix potential slow task
 	void flushToClient() {
-		while (nextFragment != fragments.end()) {
-			if (!*nextFragment) {
-				++nextFragment;
+		while (fragmentsProcessed < fragments.size()) {
+			auto &fragment = fragments[fragmentsProcessed];
+			if (!fragment) {
+				++fragmentsProcessed;
 				continue;
 			}
-			auto fragment = nextFragment->get();
 			while (!fragment->buffer.empty()) {
 				results.send(fragment->buffer.front());
 				fragment->buffer.pop_front();
 			}
 			if (fragment->completed) {
-				nextFragment->reset();
-				++nextFragment;
+				fragment.reset();
+				++fragmentsProcessed;
 			} else {
 				break;
 			}
@@ -93,10 +93,7 @@ public:
 	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
 		wait(self->semaphore.take());
 		self->fragments.push_back(std::make_unique<Fragment>(self));
-		if (self->fragments.size() == 1) {
-			self->nextFragment = self->fragments.begin();
-		}
-		ASSERT(*self->nextFragment);
+		ASSERT(self->fragments[self->fragmentsProcessed]);
 		return self->fragments.back().get();
 	}
 
