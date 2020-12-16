@@ -65,6 +65,7 @@ struct ProxyStats {
 	Version lastCommitVersionAssigned;
 	double transactionRateAllowed, batchTransactionRateAllowed;
 	double transactionLimit, batchTransactionLimit;
+	double commitBatchInterval;
 	// how much of the GRV requests queue was processed in one attempt to hand out read version.
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
@@ -122,6 +123,7 @@ struct ProxyStats {
 		               [this]() { return this->percentageOfDefaultGRVQueueProcessed; });
 		specialCounter(cc, "PercentageOfBatchGRVQueueProcessed",
 		               [this]() { return this->percentageOfBatchGRVQueueProcessed; });
+		specialCounter(cc, "DynamicCommitBatchWindow", [this]() { return this->commitBatchInterval; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };
@@ -1253,6 +1255,7 @@ ACTOR Future<Void> commitBatch(
 			std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX, 
 				target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA + self->commitBatchInterval * (1-SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
 
+	self->stats.commitBatchInterval = self->commitBatchInterval;
 
 	self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 	ASSERT_ABORT(self->commitBatchesMemBytesCount >= 0);
