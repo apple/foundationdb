@@ -45,10 +45,9 @@ public:
 		bool completed{ false };
 		friend class ParallelStream;
 		FlowLock::Releaser releaser;
+	public:
 		Fragment(ParallelStream* parallelStream)
 		  : parallelStream(parallelStream), releaser(parallelStream->semaphore) {}
-
-	public:
 		void send(const T& value) {
 			buffer.push_back(value);
 			parallelStream->flushToClient();
@@ -63,20 +62,24 @@ public:
 	};
 
 private:
-	std::vector<Fragment> fragments;
-	typename std::vector<Fragment>::iterator nextFragment = fragments.begin();
+	std::vector<std::unique_ptr<Fragment>> fragments;
+	typename std::vector<std::unique_ptr<Fragment>>::iterator nextFragment;
 	PromiseStream<T> results;
 
 	// TODO: Fix potential slow task
 	void flushToClient() {
 		while (nextFragment != fragments.end()) {
-			auto& fragment = *nextFragment;
-			while (!fragment.buffer.empty()) {
-				results.send(std::move(fragment.buffer.front()));
-				fragment.buffer.pop_front();
+			if (!*nextFragment) {
+				++nextFragment;
+				continue;
 			}
-			if (fragment.completed) {
-				fragment.releaser.release();
+			auto fragment = nextFragment->get();
+			while (!fragment->buffer.empty()) {
+				results.send(fragment->buffer.front());
+				fragment->buffer.pop_front();
+			}
+			if (fragment->completed) {
+				nextFragment->reset();
 				++nextFragment;
 			} else {
 				break;
@@ -89,7 +92,12 @@ public:
 
 	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
 		wait(self->semaphore.take());
-		return &self->fragments.emplace_back(Fragment(self));
+		self->fragments.push_back(std::make_unique<Fragment>(self));
+		if (self->fragments.size() == 1) {
+			self->nextFragment = self->fragments.begin();
+		}
+		ASSERT(*self->nextFragment);
+		return self->fragments.back().get();
 	}
 
 	Future<Fragment*> createFragment() { return createFragmentImpl(this); }
