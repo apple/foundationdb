@@ -229,7 +229,6 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 			if( e.code() == error_code_actor_cancelled )
 				throw e;
 
-			ASSERT(e.code() != error_code_broken_promise);
 			return ErrorOr<X>(e);
 		}
 	}
