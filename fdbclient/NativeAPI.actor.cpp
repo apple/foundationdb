@@ -2789,6 +2789,11 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							keys = KeyRangeRef(begin, end);
 							breakAgain = true;
 							break;
+						} else {
+							output.more = true;
+							output.arena().dependsOn( locations[shard].first.arena() );
+							output.readThrough = reverse ? locations[shard].first.begin : locations[shard].first.end;
+							results->send(std::move(output));
 						}
 
 						ASSERT(output.size());
@@ -2880,38 +2885,47 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 		return Void();
 	}
 
-	state KeyRangeRef keys(b, e);
-
 	//if e is allKeys.end, we have read through the end of the database
 	//if b is allKeys.begin, we have either read through the beginning of the database,
 	//or allKeys.begin exists in the database and will be part of the conflict range anyways
 
-	state Standalone<VectorRef<KeyRef>> splitPoints =
-	    wait(getRangeSplitPoints(cx, keys, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
-	state std::vector<KeyRangeRef> toSend;
-	// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
-	state std::vector<Future<Void>> outstandingRequests;
+	loop {
+		state pair<KeyRange, Reference<LocationInfo>> ssi = 
+			wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
+		state Standalone<VectorRef<KeyRef>> splitPoints =
+			wait(getRangeSplitPoints(cx, ssi.first, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+		state std::vector<KeyRangeRef> toSend;
+		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
+		state std::vector<Future<Void>> outstandingRequests;
 
-	if (!splitPoints.empty()) {
-		toSend.emplace_back(b, splitPoints.front());
-		for (int i = 0; i < splitPoints.size() - 1; ++i) {
-			toSend.emplace_back(splitPoints[i], splitPoints[i + 1]);
+		if (!splitPoints.empty()) {
+			toSend.emplace_back(b, splitPoints.front());
+			for (int i = 0; i < splitPoints.size() - 1; ++i) {
+				toSend.emplace_back(splitPoints[i], splitPoints[i + 1]);
+			}
+			toSend.emplace_back(splitPoints.back(), e);
+		} else {
+			toSend.emplace_back(b, e);
 		}
-		toSend.emplace_back(splitPoints.back(), e);
-	} else {
-		toSend.emplace_back(b, e);
-	}
 
-	state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
-	for (; toSendIt != toSend.end(); ++toSendIt) {
-		if (toSendIt->empty()) {
-			continue;
+		state std::vector<KeyRangeRef>::iterator toSendIt = toSend.begin();
+		for (; toSendIt != toSend.end(); ++toSendIt) {
+			if (toSendIt->empty()) {
+				continue;
+			}
+			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+			outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, *toSendIt, limits,
+																snapshot, reverse, info, tags, span.context));
 		}
-		ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
-		outstandingRequests.push_back(getRangeStreamFragment(fragment, cx, trLogInfo, version, *toSendIt, limits,
-		                                                     snapshot, reverse, info, tags, span.context));
+		if(reverse) {
+			e = ssi.first.begin;
+		} else {
+			b = ssi.first.end;
+		}
+		if(b >= e) {
+			break;
+		}
 	}
-
 	try {
 		wait(waitForAll(outstandingRequests));
 	} catch (Error& e) {
