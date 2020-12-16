@@ -2672,7 +2672,10 @@ public:
 		FragmentStream(ResultStream* resultStream) : resultStream(resultStream), releaser(resultStream->semaphore) {}
 
 	public:
-		void send(const RangeResult& rangeResult) { buffer.push_back(rangeResult); }
+		void send(const RangeResult& rangeResult) {
+			buffer.push_back(rangeResult);
+			resultStream->flushToClient();
+		}
 		void sendError(Error e) { resultStream->sendError(e); }
 		void finish() {
 			ASSERT(!completed);
