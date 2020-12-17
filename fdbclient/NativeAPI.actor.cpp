@@ -2859,7 +2859,8 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
                                   KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
                                   bool snapshot, bool reverse, TransactionInfo info, TagSet tags) {
 
-	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS);
+	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_CONCURRENT_FRAGMENTS,
+	                                          CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
