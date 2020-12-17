@@ -27,8 +27,8 @@
 #include "flow/FileIdentifier.h"
 
 struct NetworkTestInterface {
-	// RequestStream< struct NetworkTestRequest > test;
-	RequestStream<struct NetworkTestStreamingRequest> test;
+	RequestStream< struct NetworkTestRequest > test;
+	RequestStream<struct NetworkTestStreamingRequest> testStream;
 	NetworkTestInterface() {}
 	NetworkTestInterface( NetworkAddress remote );
 	NetworkTestInterface( INetwork* local );

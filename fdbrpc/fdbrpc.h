@@ -573,7 +573,11 @@ public:
 		}
 	}
 
-	//FIXME comment
+	// stream.getReplyStream( request )
+	//   Unreliable at most once delivery. 
+	//   Registers the request with the remote endpoint which sends back a stream of replies, followed by an end_of_stream error.
+	//   If the connection is ever broken the remote endpoint will stop attempting to send replies.
+    //   The caller sends acknowledgements to the remote endpoint so that at most 2MB of replies is ever inflight.
 
 	template <class X>
 	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value, TaskPriority taskID) const {
