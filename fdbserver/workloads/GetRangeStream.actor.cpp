@@ -27,9 +27,15 @@
 struct GetRangeStream : TestWorkload {
 	PerfIntCounter bytesRead;
 	bool useGetRange;
+	Key begin;
+	Key end;
+	bool printKVPairs;
 
 	GetRangeStream(WorkloadContext const& wcx) : TestWorkload(wcx), bytesRead("BytesRead") {
 		useGetRange = getOption(options, LiteralStringRef("useGetRange"), false);
+		begin = getOption(options, LiteralStringRef("begin"), normalKeys.begin);
+		end = getOption(options, LiteralStringRef("end"), normalKeys.end);
+		printKVPairs = getOption(options, LiteralStringRef("printKVPairs"), false);
 	}
 
 	std::string description() const override { return "GetRangeStreamWorkload"; }
@@ -59,15 +65,19 @@ struct GetRangeStream : TestWorkload {
 
 	ACTOR static Future<Void> fdbClientGetRange(Database db, GetRangeStream* self) {
 		state Transaction tx(db);
-		state Key next;
+		state Key next = self->begin;
 		state Future<Void> logFuture = logThroughput(self, &next);
 		loop {
 			try {
-				Standalone<RangeResultRef> range = wait(
-				    tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                KeySelector(firstGreaterOrEqual(normalKeys.end)),
-				                GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+				Standalone<RangeResultRef> range = wait(tx.getRange(
+				    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(self->end)),
+				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
 				self->bytesRead += range.expectedSize();
+				if (self->printKVPairs) {
+					for (const auto & [ k, v ] : range) {
+						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
+					}
+				}
 				if (!range.more) {
 					break;
 				}
@@ -81,16 +91,21 @@ struct GetRangeStream : TestWorkload {
 
 	ACTOR static Future<Void> fdbClientStream(Database db, GetRangeStream* self) {
 		state Transaction tx(db);
-		state Key next;
+		state Key next = self->begin;
 		state Future<Void> logFuture = logThroughput(self, &next);
 		loop {
 			state PromiseStream<Standalone<RangeResultRef>> results;
 			try {
 				state Future<Void> stream =
 				    tx.getRangeStream(results, KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                      KeySelector(firstGreaterOrEqual(normalKeys.end)), GetRangeLimits());
+				                      KeySelector(firstGreaterOrEqual(self->end)), GetRangeLimits());
 				loop {
 					Standalone<RangeResultRef> range = waitNext(results.getFuture());
+					if (self->printKVPairs) {
+						for (const auto & [ k, v ] : range) {
+							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
+						}
+					}
 					if (range.size()) {
 						self->bytesRead += range.expectedSize();
 						next = keyAfter(range.back().key);
