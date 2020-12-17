@@ -2661,7 +2661,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 }
 
 ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment* results, Database cx,
-                                          Reference<TransactionLogInfo> trLogInfo, Version version, KeyRangeRef keys,
+                                          Reference<TransactionLogInfo> trLogInfo, Version version, KeyRange keys,
                                           GetRangeLimits limits, bool snapshot, bool reverse, TransactionInfo info,
                                           TagSet tags, SpanID spanContext) {
 	loop {
@@ -2766,6 +2766,11 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								if (range.end == allKeys.end) {
 									output.readThroughEnd = true;
 								}
+								if(!output.size()) {
+									output.arena().dependsOn( keys.arena() );
+									output.readThrough = reverse ? keys.begin : keys.end;
+								}
+
 								int64_t bytes = 0;
 								for(const KeyValueRef &kv : output) {
 									bytes += kv.key.size() + kv.value.size();
@@ -2894,18 +2899,18 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 			wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
 		state Standalone<VectorRef<KeyRef>> splitPoints =
 			wait(getRangeSplitPoints(cx, ssi.first, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
-		state std::vector<KeyRangeRef> toSend;
+		state std::vector<KeyRange> toSend;
 		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
 		state std::vector<Future<Void>> outstandingRequests;
 
 		if (!splitPoints.empty()) {
-			toSend.emplace_back(b, splitPoints.front());
+			toSend.push_back(KeyRange(KeyRangeRef(b, splitPoints.front()), splitPoints.arena()));
 			for (int i = 0; i < splitPoints.size() - 1; ++i) {
-				toSend.emplace_back(splitPoints[i], splitPoints[i + 1]);
+				toSend.push_back(KeyRange(KeyRangeRef(splitPoints[i], splitPoints[i + 1]), splitPoints.arena()));
 			}
-			toSend.emplace_back(splitPoints.back(), e);
+			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), e), splitPoints.arena()));
 		} else {
-			toSend.emplace_back(b, e);
+			toSend.push_back(KeyRange(KeyRangeRef(b, e), splitPoints.arena()));
 		}
 
 		state int idx = 0;

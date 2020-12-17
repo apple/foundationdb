@@ -2368,6 +2368,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						wait(yield());
 					}
 
+					ASSERT(this_block.readThrough.present() || this_block.size());
 					nfk = this_block.readThrough.present() ? this_block.readThrough.get() : keyAfter( this_block.end()[-1].key );
 					this_block = Standalone<RangeResultRef>();
 				}
