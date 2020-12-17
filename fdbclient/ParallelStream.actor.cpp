@@ -58,10 +58,15 @@ ACTOR static Future<Void> consume(FutureStream<Data> stream, int expected) {
 TEST_CASE("/fdbclient/ParallelStream") {
 	state PromiseStream<ParallelStreamTest::Data> results;
 	state size_t concurrency = deterministicRandom()->randomInt(1,11);
+	state size_t bufferLimit = concurrency + deterministicRandom()->randomInt(0, 11);
 	state size_t numProducers = deterministicRandom()->randomInt(1,1001);
-	state ParallelStream<ParallelStreamTest::Data> parallelStream(results, concurrency);
+	state ParallelStream<ParallelStreamTest::Data> parallelStream(results, concurrency, bufferLimit);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), numProducers);
 	state std::vector<Future<Void>> producers;
+	TraceEvent("StartingParallelStreamTest")
+	    .detail("Concurrency", concurrency)
+	    .detail("BufferLimit", bufferLimit)
+	    .detail("NumProducers", numProducers);
 	state int i = 0;
 	for (; i < numProducers; ++i) {
 		ParallelStream<ParallelStreamTest::Data>::Fragment* fragment = wait(parallelStream.createFragment());

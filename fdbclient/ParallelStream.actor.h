@@ -33,7 +33,7 @@
 
 template <class T>
 class ParallelStream {
-	FlowLock semaphore;
+	BoundedFlowLock semaphore;
 	struct FragmentConstructorTag {
 		explicit FragmentConstructorTag() = default;
 	};
@@ -42,12 +42,11 @@ public:
 	class Fragment : public ReferenceCounted<Fragment> {
 		ParallelStream* parallelStream;
 		PromiseStream<T> stream;
-		FlowLock::Releaser releaser;
+		BoundedFlowLock::Releaser releaser;
 		friend class ParallelStream;
-
 	public:
-		Fragment(ParallelStream* parallelStream, FragmentConstructorTag)
-		  : parallelStream(parallelStream), releaser(parallelStream->semaphore) {}
+		Fragment(ParallelStream* parallelStream, int64_t permitNumber, FragmentConstructorTag)
+		  : parallelStream(parallelStream), releaser(&parallelStream->semaphore, permitNumber) {}
 		template<class U>
 		void send(U &&value) {
 			stream.send(std::forward<U>(value));
@@ -102,13 +101,14 @@ public:
 		}
 	}
 
-	ParallelStream(PromiseStream<T> results, size_t concurrency) : results(results), semaphore(concurrency) {
+	ParallelStream(PromiseStream<T> results, size_t concurrency, size_t bufferLimit)
+	  : results(results), semaphore(concurrency, bufferLimit) {
 		flusher = flushToClient(this);
 	}
 
 	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
-		wait(self->semaphore.take());
-		auto fragment = makeReference<Fragment>(self, FragmentConstructorTag());
+		int64_t permitNumber = wait(self->semaphore.take());
+		auto fragment = makeReference<Fragment>(self, permitNumber, FragmentConstructorTag());
 		self->fragments.send(fragment);
 		return fragment.getPtr();
 	}
