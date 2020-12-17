@@ -51,7 +51,7 @@ public:
 		void send(U &&value) {
 			stream.send(std::forward<U>(value));
 		}
-		void sendError(Error e) { parallelStream->sendError(e); }
+		void sendError(Error e) { stream.sendError(e); }
 		void finish() {
 			releaser.release(); // Release before destruction to free up pending fragments
 			stream.sendError(end_of_stream());
@@ -65,39 +65,46 @@ private:
 	Future<Void> flusher;
 
 public:
-
-	ACTOR static Future<Void> flushToClient(ParallelStream<T> *self) {
+	ACTOR static Future<Void> flushToClient(ParallelStream<T>* self) {
 		state const int bytesPerTaskLimit = BUGGIFY ? 1 : 1e6;
-		state int bytesFlushedInTask = 0;
-		loop {
-			if (!self->fragments.getFuture().isReady()) {
-				bytesFlushedInTask = 0;
-			}
-			if (bytesFlushedInTask > bytesPerTaskLimit) {
-				wait(yield());
-			}
-			state Reference<Fragment> fragment = waitNext(self->fragments.getFuture());
+		try {
+			state int bytesFlushedInTask = 0;
 			loop {
-				try {
-					if (!fragment->stream.getFuture().isReady()) {
-						bytesFlushedInTask = 0;
-					}
-					if (bytesFlushedInTask > bytesPerTaskLimit) {
-						wait(yield());
-					}
-					T value = waitNext(fragment->stream.getFuture());
-					bytesFlushedInTask += value.expectedSize();
-					self->results.send(value);
+				if (!self->fragments.getFuture().isReady()) {
+					bytesFlushedInTask = 0;
+				}
+				if (bytesFlushedInTask > bytesPerTaskLimit) {
 					wait(yield());
-				} catch (Error &e) {
-					if (e.code() == error_code_end_of_stream) {
-						fragment.clear();
-						break;
-					} else {
-						throw e;
+				}
+				state Reference<Fragment> fragment = waitNext(self->fragments.getFuture());
+				loop {
+					try {
+						if (!fragment->stream.getFuture().isReady()) {
+							bytesFlushedInTask = 0;
+						}
+						if (bytesFlushedInTask > bytesPerTaskLimit) {
+							wait(yield());
+						}
+						T value = waitNext(fragment->stream.getFuture());
+						bytesFlushedInTask += value.expectedSize();
+						self->results.send(value);
+						wait(yield());
+					} catch (Error& e) {
+						if (e.code() == error_code_end_of_stream) {
+							fragment.clear();
+							break;
+						} else {
+							throw e;
+						}
 					}
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			self->results.sendError(e);
+			return Void();
 		}
 	}
 
@@ -115,7 +122,10 @@ public:
 
 	Future<Fragment*> createFragment() { return createFragmentImpl(this); }
 
-	void sendError(Error e) { results.sendError(e); }
+	Future<Void> finish() {
+		fragments.sendError(end_of_stream());
+		return flusher;
+	}
 };
 
 #include "flow/unactorcompiler.h"

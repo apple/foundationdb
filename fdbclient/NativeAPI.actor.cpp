@@ -2786,16 +2786,14 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								return Void();
 							}
 
-							ASSERT(output.size());
 							results->send(std::move(output));
 							keys = KeyRangeRef(begin, end);
 							breakAgain = true;
 							break;
 						} else {
-							ASSERT(output.size());
 							output.arena().dependsOn( range.arena() );
 							output.readThrough = reverse ? range.begin : range.end;
-							results.send(std::move(output));
+							results->send(std::move(output));
 							++shard;
 							break;
 						}
@@ -2884,7 +2882,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 	}
 
 	if (b >= e) {
-		results.sendError(end_of_stream());
+		wait(results.finish());
 		return Void();
 	}
 
@@ -2932,12 +2930,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 			break;
 		}
 	}
-	try {
-		wait(waitForAll(outstandingRequests));
-	} catch (Error& e) {
-		results.sendError(e);
-	}
-	results.sendError(end_of_stream());
+	wait(waitForAll(outstandingRequests) && results.finish());
 	return Void();
 }
 
