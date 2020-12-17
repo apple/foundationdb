@@ -2899,13 +2899,13 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 		state std::vector<Future<Void>> outstandingRequests;
 
 		if (!splitPoints.empty()) {
-			toSend.push_back(KeyRange(KeyRangeRef(b, splitPoints.front()), splitPoints.arena()));
+			toSend.push_back(KeyRange(KeyRangeRef(ssi.first.begin, splitPoints.front()), splitPoints.arena()));
 			for (int i = 0; i < splitPoints.size() - 1; ++i) {
 				toSend.push_back(KeyRange(KeyRangeRef(splitPoints[i], splitPoints[i + 1]), splitPoints.arena()));
 			}
-			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), e), splitPoints.arena()));
+			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), ssi.first.end), splitPoints.arena()));
 		} else {
-			toSend.push_back(KeyRange(KeyRangeRef(b, e), splitPoints.arena()));
+			toSend.push_back(KeyRange(KeyRangeRef(ssi.first.begin, ssi.first.end), splitPoints.arena()));
 		}
 
 		state int idx = 0;
