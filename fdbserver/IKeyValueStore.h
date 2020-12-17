@@ -40,15 +40,27 @@ public:
 	virtual KeyValueStoreType getType() = 0;
 	virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) = 0;
 	virtual void clear( KeyRangeRef range, const Arena* arena = NULL ) = 0;
+	virtual Future<Void> commit(Version version, bool sequential = false) { return commit(sequential); }
 	virtual Future<Void> commit(bool sequential = false) = 0;  // returns when prior sets and clears are (atomically) durable
 
+	virtual Future<Optional<Value>> readValue(KeyRef key, Version version, Optional<UID> debugID = Optional<UID>()) {
+		return readValue(key, debugID);
+	}
 	virtual Future<Optional<Value>> readValue( KeyRef key, Optional<UID> debugID = Optional<UID>() ) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
+	virtual Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Version version,
+	                                                Optional<UID> debugID = Optional<UID>()) {
+		return readValuePrefix(key, maxLength, debugID);
+	}
 	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>() ) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
+	virtual Future<Standalone<RangeResultRef>> readRange(KeyRangeRef keys, Version version, int rowLimit = 1 << 30,
+	                                                     int byteLimit = 1 << 30) {
+		return readRange(keys, rowLimit, byteLimit);
+	}
 	virtual Future<Standalone<RangeResultRef>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 ) = 0;
 
 	// To debug MEMORY_RADIXTREE type ONLY
