@@ -67,13 +67,27 @@ private:
 
 public:
 
-	// TODO: Fix potential slow task
 	ACTOR static Future<Void> flushToClient(ParallelStream<T> *self) {
+		state const int bytesPerTaskLimit = 1e6; // TODO: buggify
+		state int bytesFlushedInTask = 0;
 		loop {
+			if (!self->fragments.getFuture().isReady()) {
+				bytesFlushedInTask = 0;
+			}
+			if (bytesFlushedInTask > bytesPerTaskLimit) {
+				wait(yield());
+			}
 			state Reference<Fragment> fragment = waitNext(self->fragments.getFuture());
 			loop {
 				try {
+					if (!fragment->stream.getFuture().isReady()) {
+						bytesFlushedInTask = 0;
+					}
+					if (bytesFlushedInTask > bytesPerTaskLimit) {
+						wait(yield());
+					}
 					T value = waitNext(fragment->stream.getFuture());
+					bytesFlushedInTask += value.expectedSize();
 					self->results.send(value);
 					wait(yield());
 				} catch (Error &e) {
