@@ -26,9 +26,9 @@
 
 namespace ParallelStreamTest {
 
-ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int i) {
+ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int value) {
 	wait(delay(deterministicRandom()->random01()));
-	fragment->send(i);
+	fragment->send(value);
 	wait(delay(deterministicRandom()->random01()));
 	fragment->finish();
 	return Void();
@@ -38,8 +38,8 @@ ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
 	state int next;
 	try {
 		loop {
-			int i = waitNext(stream);
-			ASSERT(i == next++);
+			int value = waitNext(stream);
+			ASSERT(value == next++);
 		}
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_end_of_stream);
@@ -65,3 +65,5 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	wait(consumer);
 	return Void();
 }
+
+void forceLinkParallelStreamTests() {}

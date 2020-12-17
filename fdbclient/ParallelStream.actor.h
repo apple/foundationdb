@@ -28,74 +28,74 @@
 #elif !defined(FDBCLIENT_PARALLEL_STREAM_ACTOR_H)
 #define FDBCLIENT_PARALLEL_STREAM_ACTOR_H
 
-#include <deque>
-#include <vector>
-
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // must be last include
 
 template <class T>
 class ParallelStream {
 	FlowLock semaphore;
+	struct FragmentConstructorTag {
+		explicit FragmentConstructorTag() = default;
+	};
 
 public:
-	class Fragment {
+	class Fragment : public ReferenceCounted<Fragment> {
 		ParallelStream* parallelStream;
-		std::deque<T> buffer;
-		bool completed{ false };
-		friend class ParallelStream;
+		PromiseStream<T> stream;
 		FlowLock::Releaser releaser;
+		friend class ParallelStream;
+
 	public:
-		Fragment(ParallelStream* parallelStream)
+		Fragment(ParallelStream* parallelStream, FragmentConstructorTag)
 		  : parallelStream(parallelStream), releaser(parallelStream->semaphore) {}
 		template<class U>
 		void send(U &&value) {
-			buffer.push_back(std::forward<U>(value));
-			parallelStream->flushToClient();
+			stream.send(std::forward<U>(value));
 		}
 		void sendError(Error e) { parallelStream->sendError(e); }
 		void finish() {
-			ASSERT(!completed);
-			completed = true;
 			releaser.release(); // Release before destruction to free up pending fragments
-			parallelStream->flushToClient();
+			stream.sendError(end_of_stream());
 		}
 	};
 
 private:
-	std::vector<std::unique_ptr<Fragment>> fragments;
+	PromiseStream<Reference<Fragment>> fragments;
 	size_t fragmentsProcessed { 0 };
 	PromiseStream<T> results;
+	Future<Void> flusher;
+
+public:
 
 	// TODO: Fix potential slow task
-	void flushToClient() {
-		while (fragmentsProcessed < fragments.size()) {
-			auto &fragment = fragments[fragmentsProcessed];
-			if (!fragment) {
-				++fragmentsProcessed;
-				continue;
-			}
-			while (!fragment->buffer.empty()) {
-				results.send(fragment->buffer.front());
-				fragment->buffer.pop_front();
-			}
-			if (fragment->completed) {
-				fragment.reset();
-				++fragmentsProcessed;
-			} else {
-				break;
+	ACTOR static Future<Void> flushToClient(ParallelStream<T> *self) {
+		loop {
+			state Reference<Fragment> fragment = waitNext(self->fragments.getFuture());
+			loop {
+				try {
+					T value = waitNext(fragment->stream.getFuture());
+					self->results.send(value);
+				} catch (Error &e) {
+					if (e.code() == error_code_end_of_stream) {
+						fragment.clear();
+						break;
+					} else {
+						throw e;
+					}
+				}
 			}
 		}
 	}
 
-public:
-	ParallelStream(PromiseStream<T> results, size_t concurrency) : results(results), semaphore(concurrency) {}
+	ParallelStream(PromiseStream<T> results, size_t concurrency) : results(results), semaphore(concurrency) {
+		flusher = flushToClient(this);
+	}
 
 	ACTOR static Future<Fragment*> createFragmentImpl(ParallelStream<T>* self) {
 		wait(self->semaphore.take());
-		self->fragments.push_back(std::make_unique<Fragment>(self));
-		ASSERT(self->fragments[self->fragmentsProcessed]);
-		return self->fragments.back().get();
+		auto fragment = makeReference<Fragment>(self, FragmentConstructorTag());
+		self->fragments.send(fragment);
+		return fragment.getPtr();
 	}
 
 	Future<Fragment*> createFragment() { return createFragmentImpl(this); }
