@@ -68,7 +68,7 @@ private:
 public:
 
 	ACTOR static Future<Void> flushToClient(ParallelStream<T> *self) {
-		state const int bytesPerTaskLimit = 1e6; // TODO: buggify
+		state const int bytesPerTaskLimit = BUGGIFY ? 1 : 1e6;
 		state int bytesFlushedInTask = 0;
 		loop {
 			if (!self->fragments.getFuture().isReady()) {
