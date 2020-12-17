@@ -2727,7 +2727,7 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					}
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
-					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
+					RangeResult output(RangeResultRef(rep.data, true), rep.arena);
 
 					bool more = rep.more;
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
@@ -2759,17 +2759,14 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							KeyRef end = reverse ? range.begin : keys.end;
 
 							if(begin >= end) {
-								output.more = false;
 								if (range.begin == allKeys.begin) {
 									output.readToBegin = true;
 								}
 								if (range.end == allKeys.end) {
 									output.readThroughEnd = true;
 								}
-								if(!output.size()) {
-									output.arena().dependsOn( keys.arena() );
-									output.readThrough = reverse ? keys.begin : keys.end;
-								}
+								output.arena().dependsOn( keys.arena() );
+								output.readThrough = reverse ? keys.begin : keys.end;
 
 								int64_t bytes = 0;
 								for(const KeyValueRef &kv : output) {
@@ -2795,9 +2792,8 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 							breakAgain = true;
 							break;
 						} else {
-							output.more = true;
-							output.arena().dependsOn( locations[shard].first.arena() );
-							output.readThrough = reverse ? locations[shard].first.begin : locations[shard].first.end;
+							output.arena().dependsOn( range.arena() );
+							output.readThrough = reverse ? range.begin : range.end;
 							results->send(std::move(output));
 						}
 
@@ -2808,7 +2804,6 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 					}
 
 					ASSERT(output.size());
-					output.more = true;
 					if (keys.begin == allKeys.begin && !reverse) {
 						output.readToBegin = true;
 					}

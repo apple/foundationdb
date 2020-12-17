@@ -2373,8 +2373,8 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					this_block = Standalone<RangeResultRef>();
 				}
 			} catch( Error &e ) {
-				if(e.code() != error_code_end_of_stream || e.code() != error_code_connection_failed || e.code() != error_code_transaction_too_old ||
-					e.code() != error_code_future_version || e.code() != error_code_process_behind) {
+				if(e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed && e.code() != error_code_transaction_too_old &&
+					e.code() != error_code_future_version && e.code() != error_code_process_behind) {
 					throw;
 				}
 				if(nfk == keys.begin) {
