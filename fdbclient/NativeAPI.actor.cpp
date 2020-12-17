@@ -2786,13 +2786,11 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 								return Void();
 							}
 
-							ASSERT(output.size());
 							results->send(std::move(output));
 							keys = KeyRangeRef(begin, end);
 							breakAgain = true;
 							break;
 						} else {
-							ASSERT(output.size());
 							output.arena().dependsOn( range.arena() );
 							output.readThrough = reverse ? range.begin : range.end;
 							results.send(std::move(output));
