@@ -66,29 +66,19 @@ private:
 
 public:
 	ACTOR static Future<Void> flushToClient(ParallelStream<T>* self) {
-		state const int bytesPerTaskLimit = BUGGIFY ? 1 : 1e6;
+		state const int messagesBetweenYields = 1000;
+		state int messagesSinceYield = 0;
 		try {
-			state int bytesFlushedInTask = 0;
 			loop {
-				if (!self->fragments.getFuture().isReady()) {
-					bytesFlushedInTask = 0;
-				}
-				if (bytesFlushedInTask > bytesPerTaskLimit) {
-					wait(yield());
-				}
 				state Reference<Fragment> fragment = waitNext(self->fragments.getFuture());
 				loop {
 					try {
-						if (!fragment->stream.getFuture().isReady()) {
-							bytesFlushedInTask = 0;
-						}
-						if (bytesFlushedInTask > bytesPerTaskLimit) {
-							wait(yield());
-						}
 						T value = waitNext(fragment->stream.getFuture());
-						bytesFlushedInTask += value.expectedSize();
 						self->results.send(value);
-						wait(yield());
+						if (++messagesSinceYield == messagesBetweenYields) {
+							wait(yield());
+							messagesSinceYield = 0;
+						}
 					} catch (Error& e) {
 						if (e.code() == error_code_end_of_stream) {
 							fragment.clear();
