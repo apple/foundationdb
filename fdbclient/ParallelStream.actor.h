@@ -42,7 +42,6 @@ public:
 	class Fragment : public ReferenceCounted<Fragment> {
 		ParallelStream* parallelStream;
 		PromiseStream<T> stream;
-		bool completed{ false };
 		FlowLock::Releaser releaser;
 		friend class ParallelStream;
 
@@ -55,9 +54,8 @@ public:
 		}
 		void sendError(Error e) { parallelStream->sendError(e); }
 		void finish() {
-			ASSERT(!completed);
-			completed = true;
 			releaser.release(); // Release before destruction to free up pending fragments
+			stream.sendError(end_of_stream());
 		}
 	};
 
