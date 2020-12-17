@@ -229,7 +229,11 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 			if( e.code() == error_code_actor_cancelled )
 				throw e;
 
-			return ErrorOr<X>(e);
+			// broken_promise error normally means an endpoint failure, which in tryGetReply has the same semantics as receiving the failure signal
+			if (e.code() != error_code_broken_promise || signal.isError())
+				return ErrorOr<X>(e);
+
+			value = Never();
 		}
 	}
 }
