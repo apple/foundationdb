@@ -75,6 +75,7 @@ public:
 				try {
 					T value = waitNext(fragment->stream.getFuture());
 					self->results.send(value);
+					wait(yield());
 				} catch (Error &e) {
 					if (e.code() == error_code_end_of_stream) {
 						fragment.clear();
