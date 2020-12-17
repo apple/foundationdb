@@ -26,25 +26,20 @@
 
 namespace ParallelStreamTest {
 
-struct Data {
-	static constexpr size_t expectedSize() { return sizeof(Data); }
-	int v;
-};
-
-ACTOR static Future<Void> produce(ParallelStream<Data>::Fragment* fragment, int value) {
+ACTOR static Future<Void> produce(ParallelStream<int>::Fragment* fragment, int value) {
 	wait(delay(deterministicRandom()->random01()));
-	fragment->send(Data{value});
+	fragment->send(value);
 	wait(delay(deterministicRandom()->random01()));
 	fragment->finish();
 	return Void();
 }
 
-ACTOR static Future<Void> consume(FutureStream<Data> stream, int expected) {
+ACTOR static Future<Void> consume(FutureStream<int> stream, int expected) {
 	state int next;
 	try {
 		loop {
-			Data data = waitNext(stream);
-			ASSERT(data.v == next++);
+			int value = waitNext(stream);
+			ASSERT(value == next++);
 		}
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_end_of_stream);
@@ -56,11 +51,11 @@ ACTOR static Future<Void> consume(FutureStream<Data> stream, int expected) {
 } // namespace ParallelStreamTest
 
 TEST_CASE("/fdbclient/ParallelStream") {
-	state PromiseStream<ParallelStreamTest::Data> results;
+	state PromiseStream<int> results;
 	state size_t concurrency = deterministicRandom()->randomInt(1,11);
 	state size_t bufferLimit = concurrency + deterministicRandom()->randomInt(0, 11);
 	state size_t numProducers = deterministicRandom()->randomInt(1,1001);
-	state ParallelStream<ParallelStreamTest::Data> parallelStream(results, concurrency, bufferLimit);
+	state ParallelStream<int> parallelStream(results, concurrency, bufferLimit);
 	state Future<Void> consumer = ParallelStreamTest::consume(results.getFuture(), numProducers);
 	state std::vector<Future<Void>> producers;
 	TraceEvent("StartingParallelStreamTest")
@@ -69,11 +64,10 @@ TEST_CASE("/fdbclient/ParallelStream") {
 	    .detail("NumProducers", numProducers);
 	state int i = 0;
 	for (; i < numProducers; ++i) {
-		ParallelStream<ParallelStreamTest::Data>::Fragment* fragment = wait(parallelStream.createFragment());
+		ParallelStream<int>::Fragment* fragment = wait(parallelStream.createFragment());
 		producers.push_back(ParallelStreamTest::produce(fragment, i));
 	}
-	wait(waitForAll(producers));
-	results.sendError(end_of_stream());
+	wait(parallelStream.finish());
 	wait(consumer);
 	return Void();
 }
