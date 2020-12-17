@@ -2854,6 +2854,10 @@ ACTOR Future<Void> getRangeStreamFragment(ParallelStream<RangeResult>::Fragment*
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Database cx, KeyRange keys, int64_t chunkSize);
 
+static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
+	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
+}
+
 ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database cx,
                                   Reference<TransactionLogInfo> trLogInfo, Future<Version> fVersion, KeySelector begin,
                                   KeySelector end, GetRangeLimits limits, Promise<std::pair<Key, Key>> conflictRange,
@@ -2894,19 +2898,20 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 	loop {
 		state pair<KeyRange, Reference<LocationInfo>> ssi = 
 			wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
+		state KeyRange shardIntersection = intersect(ssi.first, KeyRangeRef(b, e));
 		state Standalone<VectorRef<KeyRef>> splitPoints =
-			wait(getRangeSplitPoints(cx, ssi.first, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+		    wait(getRangeSplitPoints(cx, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
 		state std::vector<KeyRange> toSend;
 		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
 
 		if (!splitPoints.empty()) {
-			toSend.push_back(KeyRange(KeyRangeRef(ssi.first.begin, splitPoints.front()), splitPoints.arena()));
+			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, splitPoints.front()), splitPoints.arena()));
 			for (int i = 0; i < splitPoints.size() - 1; ++i) {
 				toSend.push_back(KeyRange(KeyRangeRef(splitPoints[i], splitPoints[i + 1]), splitPoints.arena()));
 			}
-			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), ssi.first.end), splitPoints.arena()));
+			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), shardIntersection.end), splitPoints.arena()));
 		} else {
-			toSend.push_back(KeyRange(KeyRangeRef(ssi.first.begin, ssi.first.end), splitPoints.arena()));
+			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, shardIntersection.end)));
 		}
 
 		state int idx = 0;
@@ -2921,9 +2926,9 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 																snapshot, reverse, info, tags, span.context));
 		}
 		if(reverse) {
-			e = ssi.first.begin;
+			e = shardIntersection.begin;
 		} else {
-			b = ssi.first.end;
+			b = shardIntersection.end;
 		}
 		if(b >= e) {
 			break;

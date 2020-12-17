@@ -72,11 +72,11 @@ struct GetRangeStream : TestWorkload {
 				Standalone<RangeResultRef> range = wait(tx.getRange(
 				    KeySelector(firstGreaterOrEqual(next), next.arena()), KeySelector(firstGreaterOrEqual(self->end)),
 				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
-				self->bytesRead += range.expectedSize();
-				if (self->printKVPairs) {
-					for (const auto & [ k, v ] : range) {
+				for (const auto & [ k, v ] : range) {
+					if (self->printKVPairs) {
 						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 					}
+					self->bytesRead += k.size() + v.size();
 				}
 				if (!range.more) {
 					break;
@@ -101,13 +101,13 @@ struct GetRangeStream : TestWorkload {
 				                      KeySelector(firstGreaterOrEqual(self->end)), GetRangeLimits());
 				loop {
 					Standalone<RangeResultRef> range = waitNext(results.getFuture());
-					if (self->printKVPairs) {
-						for (const auto & [ k, v ] : range) {
+					for (const auto & [ k, v ] : range) {
+						if (self->printKVPairs) {
 							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 						}
+						self->bytesRead += k.size() + v.size();
 					}
 					if (range.size()) {
-						self->bytesRead += range.expectedSize();
 						next = keyAfter(range.back().key);
 					}
 				}
