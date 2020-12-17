@@ -2890,6 +2890,7 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 	//if b is allKeys.begin, we have either read through the beginning of the database,
 	//or allKeys.begin exists in the database and will be part of the conflict range anyways
 
+	state std::vector<Future<Void>> outstandingRequests;
 	loop {
 		state pair<KeyRange, Reference<LocationInfo>> ssi = 
 			wait(getKeyLocation(cx, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, info, reverse));
@@ -2897,7 +2898,6 @@ ACTOR Future<Void> getRangeStream(PromiseStream<RangeResult> _results, Database 
 			wait(getRangeSplitPoints(cx, ssi.first, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
 		state std::vector<KeyRange> toSend;
 		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
-		state std::vector<Future<Void>> outstandingRequests;
 
 		if (!splitPoints.empty()) {
 			toSend.push_back(KeyRange(KeyRangeRef(ssi.first.begin, splitPoints.front()), splitPoints.arena()));
