@@ -78,6 +78,8 @@ struct ProxyStats {
 	LatencyBands commitLatencyBands;
 	LatencyBands grvLatencyBands;
 
+	LatencySample commitBatchingWindowSize;
+
 	Future<Void> logger;
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion,
@@ -101,6 +103,8 @@ struct ProxyStats {
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    grvLatencySample("GRVLatencyMetrics", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    commitBatchingWindowSize("CommitBatchingWindowSize", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    grvLatencyBands("GRVLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue", id, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1253,6 +1257,7 @@ ACTOR Future<Void> commitBatch(
 			std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX, 
 				target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA + self->commitBatchInterval * (1-SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
 
+	self->stats.commitBatchingWindowSize.addMeasurement(self->commitBatchInterval);
 
 	self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 	ASSERT_ABORT(self->commitBatchesMemBytesCount >= 0);
