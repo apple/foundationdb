@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
@@ -821,11 +822,15 @@ public:
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
 	}
 
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, std::string host) override {
+		return SimExternalConnection::connect(toAddr);
+	}
+
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 
-  Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string host, std::string service) override {
-		throw lookup_failed();
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string host, std::string service) override {
+		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);

@@ -130,6 +130,7 @@ public:
 
 	// INetworkConnections interface
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
+	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, std::string host);
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr);
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6);
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
@@ -1715,6 +1716,10 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 #endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
+}
+
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, std::string host) {
+	return connect(toAddr, host);
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {

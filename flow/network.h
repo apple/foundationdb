@@ -582,6 +582,8 @@ public:
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of connection problems!
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host = "") = 0;
 
+	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, std::string host = "") = 0;
+
 	// Make an outgoing udp connection and connect to the passed address.
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;
 	// Make an outgoing udp connection without establishing a connection
