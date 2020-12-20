@@ -57,7 +57,13 @@ int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 }
 
 NetworkAddress SimExternalConnection::getPeerAddress() const {
-	return NetworkAddress{};
+	auto endpoint = socket.remote_endpoint();
+	auto addr = endpoint.address();
+	if (addr.is_v6()) {
+		return NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+	} else {
+		return NetworkAddress(addr.to_v4().to_ulong(), endpoint.port());
+	}
 }
 
 UID SimExternalConnection::getDebugID() const {
