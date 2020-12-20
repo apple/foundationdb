@@ -50,7 +50,12 @@ Future<Void> SimExternalConnection::onReadable() {
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
-	return 0;
+	boost::system::error_code err;
+	size_t toRead = end - begin;
+	size_t size = socket.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
+	ASSERT(!err);
+	ASSERT(size);
+	return size;
 }
 
 int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
