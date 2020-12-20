@@ -28,9 +28,11 @@
 
 #include <boost/asio.hpp>
 
-class SimExternalConnection : public IConnection, public ReferenceCounted<SimExternalConnection> {
+class SimExternalConnection final : public IConnection, public ReferenceCounted<SimExternalConnection> {
 	boost::asio::ip::tcp::socket socket;
 	SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
+	UID dbgid;
+	std::deque<uint8_t> readBuffer;
 
 public:
 	void addref() override { return ReferenceCounted<SimExternalConnection>::addref(); }

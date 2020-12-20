@@ -20,6 +20,8 @@
 
 #include <boost/asio.hpp>
 #include <boost/range.hpp>
+#include <chrono>
+#include <thread>
 
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -50,21 +52,32 @@ Future<Void> SimExternalConnection::onReadable() {
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
-	boost::system::error_code err;
 	size_t toRead = end - begin;
-	size_t size = socket.read_some(boost::asio::mutable_buffers_1(begin, toRead), err);
-	ASSERT(!err);
-	ASSERT(size);
-	return size;
+	ASSERT(toRead <= readBuffer.size());
+	// TODO: Improve performance
+	for (int i = 0; i < toRead; ++i) {
+		*(begin + i) = readBuffer.front();
+		readBuffer.pop_front();
+	}
+	return toRead;
 }
 
 int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	boost::system::error_code err;
-	int sent = socket.write_some(
+	int bytesSent = socket.write_some(
 	    boost::iterator_range<SendBufferIterator>(SendBufferIterator(buffer, limit), SendBufferIterator()), err);
 	ASSERT(!err);
-	ASSERT(sent);
-	return sent;
+	ASSERT(bytesSent > 0);
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	const auto bytesReadable = socket.available();
+	std::vector<uint8_t> tempReadBuffer(bytesReadable);
+	for (int index = 0; index < bytesReadable;) {
+		index += socket.read_some(mutable_buffers_1(&tempReadBuffer[index], bytesReadable), err);
+	}
+	std::copy(tempReadBuffer.begin(), tempReadBuffer.end(), std::inserter(readBuffer, readBuffer.end()));
+	ASSERT(!err);
+	ASSERT(socket.available() == 0);
+	return bytesSent;
 }
 
 NetworkAddress SimExternalConnection::getPeerAddress() const {
@@ -78,7 +91,7 @@ NetworkAddress SimExternalConnection::getPeerAddress() const {
 }
 
 UID SimExternalConnection::getDebugID() const {
-	return UID{};
+	return dbgid;
 }
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
@@ -114,4 +127,5 @@ Future<Reference<IConnection>> SimExternalConnection::connect(NetworkAddress toA
 	return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
 }
 
-SimExternalConnection::SimExternalConnection(ip::tcp::socket&& socket) : socket(std::move(socket)) {}
+SimExternalConnection::SimExternalConnection(ip::tcp::socket&& socket)
+  : socket(std::move(socket)), dbgid(deterministicRandom()->randomUniqueID()) {}
