@@ -35,7 +35,6 @@ void SimExternalConnection::close() {
 }
 
 Future<Void> SimExternalConnection::acceptHandshake() {
-	ASSERT(false);
 	return Void();
 }
 
@@ -48,7 +47,7 @@ Future<Void> SimExternalConnection::onWritable() {
 }
 
 Future<Void> SimExternalConnection::onReadable() {
-	return Void();
+	return onReadableTrigger.onTrigger();
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
@@ -64,6 +63,7 @@ int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
 
 int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	boost::system::error_code err;
+	bool triggerReaders = (socket.available() == 0);
 	int bytesSent = socket.write_some(
 	    boost::iterator_range<SendBufferIterator>(SendBufferIterator(buffer, limit), SendBufferIterator()), err);
 	ASSERT(!err);
@@ -77,6 +77,9 @@ int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	std::copy(tempReadBuffer.begin(), tempReadBuffer.end(), std::inserter(readBuffer, readBuffer.end()));
 	ASSERT(!err);
 	ASSERT(socket.available() == 0);
+	if (triggerReaders) {
+		onReadableTrigger.trigger();
+	}
 	return bytesSent;
 }
 
