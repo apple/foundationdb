@@ -19,6 +19,7 @@
  */
 
 #include <boost/asio.hpp>
+#include <boost/range.hpp>
 
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -53,7 +54,12 @@ int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
 }
 
 int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
-	return 0;
+	boost::system::error_code err;
+	int sent = socket.write_some(
+	    boost::iterator_range<SendBufferIterator>(SendBufferIterator(buffer, limit), SendBufferIterator()), err);
+	ASSERT(!err);
+	ASSERT(sent);
+	return sent;
 }
 
 NetworkAddress SimExternalConnection::getPeerAddress() const {

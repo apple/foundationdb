@@ -603,4 +603,24 @@ public:
 	// Returns the interface that should be used to make and accept socket connections
 };
 
+// TODO: Move into header file that is included only where necessary
+struct SendBufferIterator {
+	typedef boost::asio::const_buffer value_type;
+	typedef std::forward_iterator_tag iterator_category;
+	typedef size_t difference_type;
+	typedef boost::asio::const_buffer* pointer;
+	typedef boost::asio::const_buffer& reference;
+
+	SendBuffer const* p;
+	int limit;
+
+	SendBufferIterator(SendBuffer const* p = nullptr, int limit = std::numeric_limits<int>::max());
+
+	bool operator==(SendBufferIterator const& r) const { return p == r.p; }
+	bool operator!=(SendBufferIterator const& r) const { return p != r.p; }
+	void operator++();
+
+	boost::asio::const_buffer operator*() const;
+};
+
 #endif

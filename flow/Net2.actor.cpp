@@ -325,34 +325,6 @@ public:
 	}
 };
 
-struct SendBufferIterator {
-	typedef boost::asio::const_buffer value_type;
-	typedef std::forward_iterator_tag iterator_category;
-	typedef size_t difference_type;
-	typedef boost::asio::const_buffer* pointer;
-	typedef boost::asio::const_buffer& reference;
-
-	SendBuffer const* p;
-	int limit;
-
-	SendBufferIterator(SendBuffer const* p=0, int limit = std::numeric_limits<int>::max()) : p(p), limit(limit) {
-		ASSERT(limit > 0);
-	}
-
-	bool operator == (SendBufferIterator const& r) const { return p == r.p; }
-	bool operator != (SendBufferIterator const& r) const { return p != r.p; }
-	void operator++() {
-		limit -= p->bytes_written - p->bytes_sent;
-		if(limit > 0)
-			p = p->next;
-		else
-			p = nullptr;
-	}
-
-	boost::asio::const_buffer operator*() const {
-		return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
-	}
-};
 
 class Connection : public IConnection, ReferenceCounted<Connection> {
 public:
@@ -1901,7 +1873,7 @@ void ASIOReactor::wake() {
 	ios.post( nullCompletionHandler );
 }
 
-} // namespace net2
+} // namespace N2
 
 INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {
@@ -2062,3 +2034,19 @@ void net2_test() {
 	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 	*/
 };
+
+SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
+	ASSERT(limit > 0);
+}
+
+void SendBufferIterator::operator++() {
+	limit -= p->bytes_written - p->bytes_sent;
+	if (limit > 0)
+		p = p->next;
+	else
+		p = nullptr;
+}
+
+boost::asio::const_buffer SendBufferIterator::operator*() const {
+	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
+}
