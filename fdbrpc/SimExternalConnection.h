@@ -29,7 +29,8 @@
 #include <boost/asio.hpp>
 
 class SimExternalConnection : public IConnection, public ReferenceCounted<SimExternalConnection> {
-	static boost::asio::io_service ios;
+	boost::asio::ip::tcp::socket socket;
+	SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
 
 public:
 	void addref() override { return ReferenceCounted<SimExternalConnection>::addref(); }

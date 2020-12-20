@@ -25,9 +25,11 @@
 
 using namespace boost::asio;
 
-io_service SimExternalConnection::ios;
+static io_service ios;
 
-void SimExternalConnection::close() {}
+void SimExternalConnection::close() {
+	socket.close();
+}
 
 Future<Void> SimExternalConnection::acceptHandshake() {
 	ASSERT(false);
@@ -83,5 +85,16 @@ Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(co
 }
 
 Future<Reference<IConnection>> SimExternalConnection::connect(NetworkAddress toAddr) {
-	return Reference<IConnection>(new SimExternalConnection);
+	ip::tcp::socket socket(ios);
+	auto ip = toAddr.ip;
+	ip::address address;
+	if (ip.isV6()) {
+		address = boost::asio::ip::address_v6(ip.toV6());
+	} else {
+		address = boost::asio::ip::address_v4(ip.toV4());
+	}
+	socket.connect(ip::tcp::endpoint(address, toAddr.port));
+	return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
 }
+
+SimExternalConnection::SimExternalConnection(ip::tcp::socket&& socket) : socket(std::move(socket)) {}
