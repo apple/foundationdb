@@ -69,8 +69,9 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 
 ThreadFuture<bool> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	DatabaseContext *db = this->db;
-	return onMainThread( [db, address, check, duration]() -> Future<bool> {
-		return db->rebootWorker(address, check, duration);
+	Key addressKey = address;
+	return onMainThread( [db, addressKey, check, duration]() -> Future<bool> {
+		return db->rebootWorker(addressKey, check, duration);
 	} );
 }
 
