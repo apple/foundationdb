@@ -4735,11 +4735,11 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// fetch the addresses of all workers
 	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
-	// TODO : find out when this is invalid
 	if (!cx->getConnectionFile())
 		return 0;
 	Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
 	ASSERT(!kvs.more);
+	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 	std::vector<Future<Void>> addInterfs;
 	for( auto it : kvs ) {
