@@ -1754,7 +1754,7 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 }
 
 TEST_CASE("special-key-space valid transaction ID") {
-  auto value = get_value("\xff\xff/tracing/a/transaction_id", /* snapshot */ false, {});
+  auto value = get_value("\xff\xff/tracing/transaction_id", /* snapshot */ false, {});
   REQUIRE(value.has_value());
   uint64_t transaction_id = std::stoul(value.value());
   CHECK(transaction_id > 0);
@@ -1765,8 +1765,8 @@ TEST_CASE("special-key-space custom transaction ID") {
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
                           nullptr, 0));
   while (1) {
-    tr.set("\xff\xff/tracing/a/transaction_id", std::to_string(ULONG_MAX));
-    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/a/transaction_id",
+    tr.set("\xff\xff/tracing/transaction_id", std::to_string(ULONG_MAX));
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
                                  /* snapshot */ false);
 
     fdb_error_t err = wait_future(f1);
@@ -1794,8 +1794,8 @@ TEST_CASE("special-key-space set transaction ID after write") {
                           nullptr, 0));
   while (1) {
     tr.set(key("foo"), "bar");
-    tr.set("\xff\xff/tracing/a/transaction_id", "0");
-    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/a/transaction_id",
+    tr.set("\xff\xff/tracing/transaction_id", "0");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
                                  /* snapshot */ false);
 
     fdb_error_t err = wait_future(f1);
@@ -1823,8 +1823,8 @@ TEST_CASE("special-key-space set token after write") {
                           nullptr, 0));
   while (1) {
     tr.set(key("foo"), "bar");
-    tr.set("\xff\xff/tracing/a/token", "false");
-    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/a/token",
+    tr.set("\xff\xff/tracing/token", "false");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
                                  /* snapshot */ false);
 
     fdb_error_t err = wait_future(f1);
@@ -1847,7 +1847,7 @@ TEST_CASE("special-key-space set token after write") {
 }
 
 TEST_CASE("special-key-space valid token") {
-  auto value = get_value("\xff\xff/tracing/a/token", /* snapshot */ false, {});
+  auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
   REQUIRE(value.has_value());
   uint64_t token = std::stoul(value.value());
   CHECK(token > 0);
@@ -1858,8 +1858,8 @@ TEST_CASE("special-key-space disable tracing") {
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
                           nullptr, 0));
   while (1) {
-    tr.set("\xff\xff/tracing/a/token", "false");
-    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/a/token",
+    tr.set("\xff\xff/tracing/token", "false");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
                                  /* snapshot */ false);
 
     fdb_error_t err = wait_future(f1);
@@ -1884,7 +1884,7 @@ TEST_CASE("special-key-space disable tracing") {
 TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE") {
   fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
 
-  auto value = get_value("\xff\xff/tracing/a/token", /* snapshot */ false, {});
+  auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
   REQUIRE(value.has_value());
   uint64_t token = std::stoul(value.value());
   CHECK(token == 0);
@@ -1899,8 +1899,8 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transactio
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
                           nullptr, 0));
   while (1) {
-    tr.set("\xff\xff/tracing/a/token", "true");
-    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/a/token",
+    tr.set("\xff\xff/tracing/token", "true");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
                                  /* snapshot */ false);
 
     fdb_error_t err = wait_future(f1);
@@ -1925,8 +1925,8 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transactio
 }
 
 TEST_CASE("special-key-space tracing get range") {
-  std::string tracingBegin = "\xff\xff/tracing/a/";
-  std::string tracingEnd = "\xff\xff/tracing/a0";
+  std::string tracingBegin = "\xff\xff/tracing/";
+  std::string tracingEnd = "\xff\xff/tracing0";
 
   fdb::Transaction tr(db);
   fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
@@ -1937,7 +1937,7 @@ TEST_CASE("special-key-space tracing get range") {
           (const uint8_t *)tracingBegin.c_str(),
           tracingBegin.size()
         ),
-        FDB_KEYSEL_LAST_LESS_OR_EQUAL(
+        FDB_KEYSEL_LAST_LESS_THAN(
           (const uint8_t *)tracingEnd.c_str(),
           tracingEnd.size()
         ) + 1, /* limit */ 0, /* target_bytes */ 0,
