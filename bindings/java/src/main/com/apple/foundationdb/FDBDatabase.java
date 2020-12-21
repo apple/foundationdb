@@ -130,6 +130,16 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<Boolean> rebootWorker(byte[] address, boolean check, int duration) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBoolean(Database_rebootWorker(getPtr(), address, check, duration), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public void setOption(int code, byte[] value) {
 		pointerReadLock.lock();
 		try {
@@ -150,6 +160,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	private native long Database_createTransaction(long cPtr);
+	private native long Database_rebootWorker(long cPtr, byte[] address, boolean check, int duration);
 	private native void Database_dispose(long cPtr);
 	private native void Database_setOption(long cPtr, int code, byte[] value) throws FDBException;
 }
