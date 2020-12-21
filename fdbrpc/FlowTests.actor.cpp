@@ -20,6 +20,7 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
@@ -249,6 +250,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	void setCurrentTask(TaskPriority taskID) override { baseNetwork->setCurrentTask(taskID); }
 	double now() const override { return baseNetwork->now(); }
 	double timer() override { return baseNetwork->timer(); }
+	double timer_monotonic() override { return baseNetwork->timer_monotonic(); }
 	void stop() override { return baseNetwork->stop(); }
 	void addStopCallback(std::function<void()> fn) override {
 		ASSERT(false);
@@ -279,6 +281,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
+	}
+	ProtocolVersion protocolVersion() override {
+		return baseNetwork->protocolVersion();
 	}
 };
 

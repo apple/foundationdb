@@ -60,6 +60,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
@@ -316,6 +317,14 @@ void failAfter( Future<Void> trigger, Endpoint e ) {
 		failAfter( trigger, g_simulator.getProcess( e ) );
 }
 
+ACTOR Future<Void> histogramReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+
+		GetHistogramRegistry().logReport();
+	}
+}
+
 void testSerializationSpeed() {
 	double tstart;
 	double build = 0, serialize = 0, deserialize = 0, copy = 0, deallocate = 0;
@@ -435,8 +444,10 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 void memoryTest();
 void skipListTest();
 
-Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
-	initializeSystemMonitorMachineState(SystemMonitorMachineState(dataFolder, zoneId, machineId, g_network->getLocalAddress().ip));
+Future<Void> startSystemMonitor(std::string dataFolder, Optional<Standalone<StringRef>> dcId,
+                                Optional<Standalone<StringRef>> zoneId, Optional<Standalone<StringRef>> machineId) {
+	initializeSystemMonitorMachineState(
+	    SystemMonitorMachineState(dataFolder, dcId, zoneId, machineId, g_network->getLocalAddress().ip));
 
 	systemMonitor();
 	return recurring( &systemMonitor, 5.0, TaskPriority::FlushTrace );
@@ -1635,6 +1646,7 @@ int main(int argc, char* argv[]) {
 			//startOldSimulator();
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED), static_cast<int>(TracerType::END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback( Net2FileSystem::stop );
@@ -1735,6 +1747,8 @@ int main(int argc, char* argv[]) {
 
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", opts.testFile);
+
+			auto histogramReportActor = histogramReport();
 
 			clientKnobs->trace();
 			flowKnobs->trace();
@@ -1893,6 +1907,7 @@ int main(int argc, char* argv[]) {
 				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
 				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
 				                      opts.whitelistBinPaths));
+				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 				f = stopAfter(waitForAll(actors));
@@ -1906,14 +1921,14 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == Test) {
 			setupRunLoopProfiler();
-			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(),
 			                       opts.localities));
 			g_network->run();
 		} else if (role == ConsistencyCheck) {
 			setupRunLoopProfiler();
 
-			auto m = startSystemMonitor(opts.dataFolder, opts.zoneId, opts.zoneId);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,
 			                       StringRef(), opts.localities));
 			g_network->run();

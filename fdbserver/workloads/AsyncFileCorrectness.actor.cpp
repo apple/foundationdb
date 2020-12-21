@@ -22,6 +22,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -374,15 +375,6 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		return false;
 	}
 
-	//Populates a buffer with a random sequence of bytes
-	void generateRandomData(unsigned char* buffer, int length) const {
-		for(int i = 0; i < length; i+= sizeof(uint32_t))
-		{
-			uint32_t val = deterministicRandom()->randomUInt32();
-			memcpy(&buffer[i], &val, std::min(length - i, (int)sizeof(uint32_t)));
-		}
-	}
-
 	//Performs an operation on a file and the memory representation of that file
 	ACTOR Future<OperationInfo> processOperation(AsyncFileCorrectnessWorkload *self, OperationInfo info)
 	{
@@ -413,7 +405,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		else if(info.operation == WRITE)
 		{
 			info.data = self->allocateBuffer(info.length);
-			self->generateRandomData(info.data->buffer, info.length);
+			generateRandomData(reinterpret_cast<uint8_t*>(info.data->buffer), info.length);
 			memcpy(&self->memoryFile->buffer[info.offset], info.data->buffer, info.length);
 			memset(&self->fileValidityMask[info.offset], 0xFF, info.length);
 

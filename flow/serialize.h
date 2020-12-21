@@ -30,6 +30,7 @@
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/network.h"
 #include <algorithm>
 #include <deque>
 
@@ -711,15 +712,17 @@ public:
 struct PacketBuffer : SendBuffer {
 private:
 	int reference_count;
-	uint32_t size_;
+	uint32_t const size_;
 	static constexpr size_t PACKET_BUFFER_MIN_SIZE = 16384;
-	static constexpr size_t PACKET_BUFFER_OVERHEAD = 32;
+	static constexpr size_t PACKET_BUFFER_OVERHEAD = 40;
 
 public:
+	double const enqueue_time;
+
 	size_t size() const { return size_; }
 
 private:
-	explicit PacketBuffer(size_t size) : reference_count(1), size_(size) {
+	explicit PacketBuffer(size_t size) : reference_count(1), size_(size), enqueue_time(g_network->now()) {
 		next = nullptr;
 		bytes_written = bytes_sent = 0;
 		_data = reinterpret_cast<uint8_t*>(this + 1);

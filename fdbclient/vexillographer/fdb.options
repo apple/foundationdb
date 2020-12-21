@@ -182,6 +182,10 @@ description is not currently required but encouraged.
     <Option name="transaction_include_port_in_address" code="505"
             description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
+    <Option name="transaction_trace_enable" code="600"
+            description="Enable tracing for all transactions. This is the default." />
+    <Option name="transaction_trace_disable" code="601"
+            description="Disable tracing for all transactions." />
   </Scope>
   
   <Scope name="TransactionOption">

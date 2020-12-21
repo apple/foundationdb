@@ -849,7 +849,7 @@ struct LogPushData : NonCopyable {
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
 				for(int i = 0; i < log.tLogs.size(); i++) {
-					messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
+					messagesWriter.push_back( BinaryWriter( AssumeVersion(g_network->protocolVersion()) ) );
 				}
 			}
 		}
@@ -916,7 +916,7 @@ struct LogPushData : NonCopyable {
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations, allLocations);
 
-		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
+		BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
 
 		// Metadata messages (currently LogProtocolMessage is the only metadata
 		// message) should be written before span information. If this isn't a

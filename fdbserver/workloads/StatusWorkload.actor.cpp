@@ -27,8 +27,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-extern bool noUnseed;
-
 struct StatusWorkload : TestWorkload {
 	double testDuration, requestsPerSecond;
 	bool enableLatencyBands;
@@ -53,8 +51,6 @@ struct StatusWorkload : TestWorkload {
 			// This is sort of a hack, but generate code coverage *requirements* for everything in schema
 			schemaCoverageRequirements(parsedSchema.get());
 		}
-
-		noUnseed = true;
 	}
 
 	std::string description() const override { return "StatusWorkload"; }
@@ -170,7 +166,7 @@ struct StatusWorkload : TestWorkload {
 				state double issued = now();
 				StatusObject result = wait(StatusClient::statusFetcher(cx));
 				++self->replies;
-				BinaryWriter br(AssumeVersion(currentProtocolVersion));
+				BinaryWriter br(AssumeVersion(g_network->protocolVersion()));
 				save(br, result);
 				self->totalSize += br.getLength();
 				TraceEvent("StatusWorkloadReply").detail("ReplySize", br.getLength()).detail("Latency", now() - issued);//.detail("Reply", json_spirit::write_string(json_spirit::mValue(result)));

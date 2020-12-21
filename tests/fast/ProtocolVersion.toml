@@ -1,0 +1,7 @@
+startIncompatibleProcess = true
+
+[[test]]
+testTitle = 'ProtocolVersionTest'
+
+    [[test.workload]]
+    testName = 'ProtocolVersion'

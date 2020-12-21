@@ -80,6 +80,10 @@ uint32_t DeterministicRandom::randomUInt32() {
 	return gen64();
 }
 
+uint64_t DeterministicRandom::randomUInt64() {
+	return gen64();
+}
+
 uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
 	std::uniform_real_distribution<double> distribution(std::log(min), std::log(maxPlusOne - 1));
 	double logpower = distribution(random);
@@ -119,4 +123,11 @@ void DeterministicRandom::addref() {
 }
 void DeterministicRandom::delref() {
 	ReferenceCounted<DeterministicRandom>::delref();
+}
+
+void generateRandomData(uint8_t* buffer, int length) {
+	for (int i = 0; i < length; i += sizeof(uint32_t)) {
+		uint32_t val = deterministicRandom()->randomUInt32();
+		memcpy(&buffer[i], &val, std::min(length - i, (int)sizeof(uint32_t)));
+	}
 }

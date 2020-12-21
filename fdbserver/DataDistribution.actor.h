@@ -58,10 +58,12 @@ struct IDataDistributionTeam {
 	virtual bool isWrongConfiguration() const = 0;
 	virtual void setWrongConfiguration(bool) = 0;
 	virtual void addServers(const vector<UID> &servers) = 0;
+	virtual std::string getTeamID() const = 0;
 
 	std::string getDesc() const {
 		const auto& servers = getLastKnownServerInterfaces();
-		std::string s = format("Size %d; ", servers.size());
+		std::string s = format("TeamID:%s", getTeamID().c_str());
+		s += format("Size %d; ", servers.size());
 		for(int i=0; i<servers.size(); i++) {
 			if (i) s += ", ";
 			s += servers[i].address().toString() + " " + servers[i].id().shortString();
@@ -214,7 +216,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 struct ShardMetrics {
 	StorageMetrics metrics;
 	double lastLowBandwidthStartTime;
-	int shardCount;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
 
 	bool operator==(ShardMetrics const& rhs) const {
 		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
@@ -231,18 +233,15 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-ACTOR Future<Void> dataDistributionTracker(
-	Reference<InitialDataDistribution> initData,
-	Database cx,
-	PromiseStream<RelocateShard> output,
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-	PromiseStream<GetMetricsRequest> getShardMetrics,
-	PromiseStream<GetMetricsListRequest> getShardMetricsList,
-	FutureStream<Promise<int64_t>> getAverageShardBytes,
-	Promise<Void> readyToStart,
-	Reference<AsyncVar<bool>> zeroHealthyTeams,
-	UID distributorId,
-	KeyRangeMap<ShardTrackedData>* shards);
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+                                           PromiseStream<RelocateShard> output,
+                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           bool const* trackerCancelled);
 
 ACTOR Future<Void> dataDistributionQueue(
 	Database cx,

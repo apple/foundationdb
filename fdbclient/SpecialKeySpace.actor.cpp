@@ -24,6 +24,11 @@
 #include "fdbclient/StatusClient.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+const std::string kTracingTransactionIdKey = "transaction_id";
+const std::string kTracingTokenKey = "token";
+}
+
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -38,7 +43,9 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/management/"), LiteralStringRef("\xff\xff/management0")) },
 	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) },
 	{ SpecialKeySpace::MODULE::CONFIGURATION,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) }
+	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) },
+	{ SpecialKeySpace::MODULE::TRACING,
+	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -52,6 +59,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
+
+std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
 Standalone<RangeResultRef> rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr,
                                        const Standalone<RangeResultRef>& res);
@@ -139,27 +148,46 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
+	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
+	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
+	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
+	// Otherwise, we only need to move right if offset > 1, iter points to the range containing the key
+	// Since boundary.end is always a key in the RangeMap, it is always safe to move right
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter =
 	    ks->offset < 1 ? sks->getReadImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getReadImpls().rangeContaining(ks->getKey());
-	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
+	while ((ks->offset < 1 && iter->begin() >= boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
 		if (iter->value() != nullptr) {
 			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
 		}
-		ks->offset < 1 ? --iter : ++iter;
+		// Check if we can still move the iterator left
+		if (ks->offset < 1) {
+			if (iter == sks->getReadImpls().ranges().begin()) {
+				break;
+			} else {
+				--iter;
+			}
+		} else if (ks->offset > 1) {
+			// Always safe to move right
+			++iter;
+		}
 	}
 	*actualOffset = ks->offset;
-	if (iter->begin() == boundary.begin || iter->begin() == boundary.end) ks->setKey(iter->begin());
 
 	if (!ks->isFirstGreaterOrEqual()) {
-		// The Key Selector clamps up to the legal key space
 		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
-		if (ks->offset < 1)
+		// If still not normalized after moving to the boundary, 
+		// let key selector clamp up to the boundary
+		if (ks->offset < 1) {
 			result->readToBegin = true;
-		else
+			ks->setKey(boundary.begin);
+		}
+		else {
 			result->readThroughEnd = true;
+			ks->setKey(boundary.end);
+		}
 		ks->offset = 1;
 	}
 	return Void();
@@ -560,7 +588,7 @@ ACTOR Future<Standalone<RangeResultRef>> ddMetricsGetRangeActor(ReadYourWritesTr
 			return result;
 		} catch (Error& e) {
 			state Error err(e);
-			if (e.code() == error_code_operation_failed) {
+			if (e.code() == error_code_dd_not_found) {
 				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
 				    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
 				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
@@ -1262,4 +1290,64 @@ Future<Optional<std::string>> ConsistencyCheckImpl::commit(ReadYourWritesTransac
 	ryw->getTransaction().set(fdbShouldConsistencyCheckBeSuspended,
 	                          BinaryWriter::toValue(entry.present(), Unversioned()));
 	return Optional<std::string>();
+}
+
+TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
+	TraceEvent("TracingOptionsImpl::TracingOptionsImpl").detail("Range", kr);
+}
+
+Future<Standalone<RangeResultRef>> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                                KeyRangeRef kr) const {
+	Standalone<RangeResultRef> result;
+	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
+		auto key = getKeyRange().begin.withSuffix(option);
+		if (!kr.contains(key)) {
+			continue;
+		}
+
+		if (key.endsWith(kTracingTransactionIdKey)) {
+			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.first())));
+		} else if (key.endsWith(kTracingTokenKey)) {
+			result.push_back_deep(result.arena(), KeyValueRef(key, std::to_string(ryw->getTransactionInfo().spanID.second())));
+		}
+	}
+	return result;
+}
+
+void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	if (ryw->getApproximateSize() > 0) {
+		ryw->setSpecialKeySpaceErrorMsg("tracing options must be set first");
+		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
+		return;
+	}
+
+	if (key.endsWith(kTracingTransactionIdKey)) {
+		ryw->setTransactionID(std::stoul(value.toString()));
+	} else if (key.endsWith(kTracingTokenKey)) {
+		if (value.toString() == "true") {
+			ryw->setToken(deterministicRandom()->randomUInt64());
+		} else if (value.toString() == "false") {
+			ryw->setToken(0);
+		} else {
+			ryw->setSpecialKeySpaceErrorMsg("token must be set to true/false");
+			throw special_keys_api_failure();
+		}
+	}
+}
+
+Future<Optional<std::string>> TracingOptionsImpl::commit(ReadYourWritesTransaction* ryw) {
+	if (ryw->getSpecialKeySpaceWriteMap().size() > 0) {
+		throw special_keys_api_failure();
+	}
+	return Optional<std::string>();
+}
+
+void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	ryw->setSpecialKeySpaceErrorMsg("clear range disabled");
+	throw special_keys_api_failure();
+}
+
+void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	ryw->setSpecialKeySpaceErrorMsg("clear disabled");
+	throw special_keys_api_failure();
 }

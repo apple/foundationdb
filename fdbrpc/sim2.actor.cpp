@@ -27,6 +27,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
@@ -92,10 +93,6 @@ void ISimulator::displayWorkers() const
 	return;
 }
 
-const UID TOKEN_ENDPOINT_NOT_FOUND(-1, -1);
-
-ISimulator* g_pSimulator = 0;
-thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = 0;
 int openCount = 0;
 
 struct SimClogging {
@@ -749,6 +746,8 @@ public:
 		return timerTime;
 	}
 
+	double timer_monotonic() override { return timer(); }
+
 	Future<class Void> delay(double seconds, TaskPriority taskID) override {
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay( seconds, taskID, currentProcess );
@@ -999,8 +998,8 @@ public:
 		net2->run();
 	}
 	ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
-	                        LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                        const char* coordinationFolder) override {
+							LocalityData locality, ProcessClass startingClass, const char* dataFolder,
+							const char* coordinationFolder, ProtocolVersion protocol) override {
 		ASSERT( locality.machineId().present() );
 		MachineInfo& machine = machines[ locality.machineId().get() ];
 		if (!machine.machineId.present())
@@ -1043,6 +1042,7 @@ public:
 		currentlyRebootingProcesses.erase(addresses.address);
 		m->excluded = g_simulator.isExcluded(NetworkAddress(ip, port, true, false));
 		m->cleared = g_simulator.isCleared(addresses.address);
+		m->protocolVersion = protocol;
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
@@ -1708,6 +1708,10 @@ public:
 			return Void();
 		return delay( 0, taskID, process->machine->machineProcess );
 	}
+	
+	ProtocolVersion protocolVersion() override {
+		return getCurrentProcess()->protocolVersion;
+	}
 
 	//time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
 	//time should only be modified from the main thread.
@@ -1796,6 +1800,7 @@ public:
 	  : id(deterministicRandom()->randomUniqueID()), process(g_simulator.getCurrentProcess()), peerAddress(peerAddress),
 	    actors(false), _localAddress(localAddress) {
 		g_sim2.addressMap.emplace(_localAddress, process);
+		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
 		process->boundUDPSockets.emplace(localAddress, this);
 	}
 	~UDPSimSocket() {
@@ -1909,6 +1914,9 @@ Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
 		localAddress.ip = IPAddress(process->address.ip.toV4() + deterministicRandom()->randomInt(0, 256));
 	}
 	localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	while (process->boundUDPSockets.find(localAddress) != process->boundUDPSockets.end()) {
+		localAddress.port = deterministicRandom()->randomInt(40000, 60000);
+	}
 	return Reference<IUDPSocket>(new UDPSimSocket(localAddress, toAddr));
 }
 

@@ -1119,7 +1119,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx, W
 }
 
 ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionOptions::Option> priority = Optional<FDBTransactionOptions::Option>()) {
-	state double start = timer_monotonic();
+	state double start = g_network->timer_monotonic();
 
 	loop {
 		try {
@@ -1129,7 +1129,7 @@ ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionO
 			}
 
 			wait(success(tr->getReadVersion()));
-			return timer_monotonic() - start;
+			return g_network->timer_monotonic() - start;
 		}
 		catch(Error &e) {
 			wait(tr->onError(e));
@@ -1143,13 +1143,13 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction *tr
 		throw grv.getError();
 	}
 
-	state double start = timer_monotonic();
+	state double start = g_network->timer_monotonic();
 
 	loop {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Optional<Standalone<StringRef> > _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
-			return timer_monotonic() - start;
+			return g_network->timer_monotonic() - start;
 		}
 		catch(Error &e) {
 			wait(tr->onError(e));
@@ -1167,7 +1167,7 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 	ASSERT(sourceTr->getReadVersion().isReady());
 	tr->setVersion(sourceTr->getReadVersion().get());
 
-	state double start = timer_monotonic();
+	state double start = g_network->timer_monotonic();
 
 	loop {
 		try {
@@ -1175,7 +1175,7 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->makeSelfConflicting();
 			wait(tr->commit());
-			return timer_monotonic() - start;
+			return g_network->timer_monotonic() - start;
 		}
 		catch(Error &e) {
 			wait(tr->onError(e));
@@ -2518,7 +2518,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject data_overlay;
 
-		statusObj["protocol_version"] = format("%" PRIx64, currentProtocolVersion.version());
+		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
 
 		state Optional<DatabaseConfiguration> configuration;
@@ -2739,7 +2739,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["messages"] = messages;
 
-		int64_t clusterTime = time(0);
+		int64_t clusterTime = g_network->timer();
 		if (clusterTime != -1){
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}

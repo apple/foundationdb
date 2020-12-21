@@ -24,6 +24,13 @@
 
 #include "fdbclient/CoordinationInterface.h"
 
+constexpr UID WLTOKEN_LEADERELECTIONREG_CANDIDACY(-1, 4);
+constexpr UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT(-1, 5);
+constexpr UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT(-1, 6);
+constexpr UID WLTOKEN_LEADERELECTIONREG_FORWARD(-1, 7);
+constexpr UID WLTOKEN_GENERATIONREG_READ(-1, 8);
+constexpr UID WLTOKEN_GENERATIONREG_WRITE(-1, 9);
+
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
 	RequestStream< struct GenerationRegReadRequest > read;

@@ -5,6 +5,15 @@ Release Notes
 6.3.10
 ======
 
+Packaging
+---------
+
+* Create versioned RPM and DEB packages. This will allow users to install multiple versions of FoundationDB on the same machine and use alternatives to switch between versions. `(PR #3983) <https://github.com/apple/foundationdb/pull/3983>`_
+* Remove support for RHEL 6 and CentOS 6. This version reached EOL and is not anymore officially supported by FoundationDB. `(PR #3983) <https://github.com/apple/foundationdb/pull/3983>`_
+
+6.3.9
+=====
+
 Features
 --------
 

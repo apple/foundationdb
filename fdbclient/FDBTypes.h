@@ -39,16 +39,16 @@ typedef int64_t Generation;
 typedef UID SpanID;
 
 enum {
-	tagLocalitySpecial = -1,
+	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
+	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
 	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
-}; //The TLog and LogRouter require these number to be as compact as possible
+}; // The TLog and LogRouter require these number to be as compact as possible
 
 inline bool isPseudoLocality(int8_t locality) {
 	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
@@ -56,6 +56,11 @@ inline bool isPseudoLocality(int8_t locality) {
 
 #pragma pack(push, 1)
 struct Tag {
+	// if locality > 0,
+	//    locality decides which DC id the tLog is in;
+	//    id decides which SS owns the tag; id <-> SS mapping is in the system keyspace: serverTagKeys.
+	// if locality < 0, locality decides the type of tLog set: satellite, LR, or remote tLog, etc.
+	//    id decides which tLog in the tLog type will be used.
 	int8_t locality;
 	uint16_t id;
 
@@ -191,6 +196,10 @@ static std::string describe(const std::string& s) {
 template <class T>
 std::string describe( Reference<T> const& item ) {
 	return item->toString();
+}
+
+static std::string describe(UID const& item) {
+	return item.shortString();
 }
 
 template <class T>
