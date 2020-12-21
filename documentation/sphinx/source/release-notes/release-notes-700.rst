@@ -35,7 +35,8 @@ Status
 Bindings
 --------
 * Python: The function ``get_estimated_range_size_bytes`` will now throw an error if the ``begin_key`` or ``end_key`` is ``None``. `(PR #3394) <https://github.com/apple/foundationdb/pull/3394>`_
-
+* Added a new API to reboot the specified process, e.g., ``fdb_database_reboot_worker`` in the C binding. `(PR #4094) <https://github.com/apple/foundationdb/pull/4094>`_.
+* C: Added ``fdb_future_get_bool`` to read a bool value from FDBFuture. `(PR #4094) <https://github.com/apple/foundationdb/pull/4094>`_.
 
 Other Changes
 -------------

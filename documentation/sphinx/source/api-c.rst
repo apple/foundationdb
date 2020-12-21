@@ -301,6 +301,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
+.. function:: fdb_error_t fdb_future_get_bool(FDBFuture* future, bool* out)
+
+   Extracts a bool from an :type:`FDBFuture*` into a caller-provided variable of type ``bool``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
 .. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
 
    Extracts an array of :type:`FDBKey` from an :type:`FDBFuture*` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
@@ -425,6 +431,25 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
+
+.. function:: FDBFuture* fdb_database_reboot_worker(FDBDatabase* database, uint8_t const* address, int address_length, fdb_bool_t check, int duration)
+
+   Reboot the specified process in the database.
+
+   |future-return0| a :type:`bool` represents whether the reboot request is successful or not. |future-return1| call :func:`fdb_future_get_bool()` to extract the result, |future-return2|
+
+   ``address``
+        A pointer to the network address of the process.
+
+   ``address_length``
+        |length-of| ``address``.
+   
+   ``check``
+        whether to make sure the data is durable on disk
+   
+   ``duration``
+        If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
+
 
 Transaction
 ===========
