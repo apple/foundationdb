@@ -4808,6 +4808,8 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 }
 
 ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+	// ignore negative value
+	if (duration < 0) duration = 0;
 	// fetch the addresses of all workers
 	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
 	if (!cx->getConnectionFile())
@@ -4820,11 +4822,11 @@ ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool ch
 	for( auto it : kvs ) {
 		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
 	}
-	wait( waitForAll(addInterfs) );
-	if (!address_interface.count(addr))
-		return 0;
+	wait(waitForAll(addInterfs));
+	if (!address_interface.count(addr)) return 0;
 
-	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion()).reboot.send( RebootRequest(false, check, duration));
+	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
+	    .reboot.send(RebootRequest(false, check, duration));
 	return 1;
 }
 
