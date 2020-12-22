@@ -294,6 +294,11 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
+triggerddteaminfolog
+--------------------
+
+The ``triggerddteaminfolog`` command would trigger the data distributor to log very detailed teams information into trace event logs.
+
 unlock
 ------
 

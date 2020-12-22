@@ -122,6 +122,9 @@ UID decodeProcessClassKeyOld( KeyRef const& key );
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
+// Change the value of this key to anything and that will trigger detailed data distribution team info log.
+extern const KeyRef triggerDDTeamInfoPrintKey;
+
 //   "\xff/conf/excluded/1.2.3.4" := ""
 //   "\xff/conf/excluded/1.2.3.4:4000" := ""
 //   These are inside configKeysPrefix since they represent a form of configuration and they are convenient
