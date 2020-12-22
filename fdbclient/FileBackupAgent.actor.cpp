@@ -3813,6 +3813,9 @@ public:
 
 		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= nowStr)) {
 			fprintf(stderr, "WARNING: The last backup `%s' appears to have started in the future.\n", printable(lastBackupTimestamp.get()).c_str());
+			if(lastBackupTimestamp.get() == nowStr) {
+				throw backup_error();
+			}
 		}
 
 		KeyRangeMap<int> backupRangeSet;
