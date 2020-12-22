@@ -1434,15 +1434,13 @@ def init_c_api():
     _capi.fdb_future_get_int64.restype = ctypes.c_int
     _capi.fdb_future_get_int64.errcheck = check_error_code
 
-<<<<<<< HEAD
-    _capi.fdb_future_get_bool.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_bool)]
-    _capi.fdb_future_get_bool.restype = ctypes.c_bool
-    _capi.fdb_future_get_bool.errcheck = check_error_code
-=======
     _capi.fdb_future_get_uint64.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64)]
     _capi.fdb_future_get_uint64.restype = ctypes.c_uint
     _capi.fdb_future_get_uint64.errcheck = check_error_code
->>>>>>> upstream/master
+
+    _capi.fdb_future_get_bool.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_bool)]
+    _capi.fdb_future_get_bool.restype = ctypes.c_bool
+    _capi.fdb_future_get_bool.errcheck = check_error_code
 
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]
