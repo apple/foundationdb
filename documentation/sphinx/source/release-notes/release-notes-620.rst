@@ -8,6 +8,7 @@ Release Notes
 ======
 * Fix invalid memory access on data distributor when snapshotting large clusters. `(PR #4076) <https://github.com/apple/foundationdb/pull/4076>`_
 * Add human-readable DateTime to trace events `(PR #4087) <https://github.com/apple/foundationdb/pull/4087>`_
+* Proxy rejects transaction batch that exceeds MVCC window `(PR #4113) <https://github.com/apple/foundationdb/pull/4113>`_
 * Add a command in fdbcli to manually trigger the detailed teams information loggings in data distribution. `(PR #4060) <https://github.com/apple/foundationdb/pull/4060>`_
 
 6.2.28
