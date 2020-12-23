@@ -1509,20 +1509,13 @@ ACTOR Future<Void> commitBatch(
 
 	// Dynamic batching for commits
 	double target_latency = (now() - t1) * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
-<<<<<<< HEAD
 	self->commitBatchInterval = std::max(
 	    SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN,
 	    std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX,
 	             target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 	                 self->commitBatchInterval * (1 - SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-=======
-	self->commitBatchInterval = 
-		std::max(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN, 
-			std::min(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MAX, 
-				target_latency * SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA + self->commitBatchInterval * (1-SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
 
 	self->stats.commitBatchingWindowSize.addMeasurement(self->commitBatchInterval);
->>>>>>> 5a2b1ab258ecb3cb8992823e6ffe50637ff7e545
 
 	self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 	ASSERT_ABORT(self->commitBatchesMemBytesCount >= 0);
