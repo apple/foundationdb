@@ -129,11 +129,11 @@ public:
 	void initMetrics();
 
 	// INetworkConnections interface
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
-	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, std::string host);
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, const std::string &host );
+	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string &host);
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr);
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6);
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( const std::string &host, const std::string &service);
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
 	// INetwork interface
@@ -1679,7 +1679,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 	return ::startThread(func, arg);
 }
 
-Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
+Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, const std::string &host ) {
 #ifndef TLS_DISABLED
 	initTLS(ETLSInitState::CONNECT);
 	if ( toAddr.isTLS() ) {
@@ -1690,7 +1690,7 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::stri
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, std::string host) {
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string &host) {
 	return connect(toAddr, host);
 }
 
@@ -1741,7 +1741,7 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
-Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( const std::string &host, const std::string &service) {
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 

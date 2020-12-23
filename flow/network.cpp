@@ -125,10 +125,10 @@ std::string NetworkAddress::toString() const {
 	return formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
 }
 
-std::string toIPVectorString(std::vector<uint32_t> ips) {
+std::string toIPVectorString(const std::vector<uint32_t> &ips) {
 	std::string output;
 	const char* space = "";
-	for (auto ip : ips) {
+	for (const auto &ip : ips) {
 		output += format("%s%d.%d.%d.%d", space, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 		space = " ";
 	}
@@ -150,7 +150,7 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
-Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
+Future<Reference<IConnection>> INetworkConnections::connect( const std::string &host, const std::string &service, bool useTLS ) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
 		NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
