@@ -1,7 +1,7 @@
 {
     "name": "TestContainer",
     "build": {
-	"dockerfile": "Dockerfile",
+	"dockerfile": "../build/Dockerfile.c7.layered",
     },
 
     "settings": {
