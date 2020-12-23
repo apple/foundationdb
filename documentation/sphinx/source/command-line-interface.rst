@@ -393,6 +393,7 @@ status json
 
 ``status json`` will provide the cluster status in its JSON format. For a detailed description of this format, see :doc:`mr-status`.
 
+<<<<<<< HEAD
 .. _cli-throttle:
 
 throttle
@@ -468,6 +469,12 @@ list
 Prints a list of currently active transaction tag throttles.
 
 ``LIMIT`` - The number of throttles to print. Defaults to 100.
+=======
+triggerddteaminfolog
+--------------------
+
+The ``triggerddteaminfolog`` command would trigger the data distributor to log very detailed teams information into trace event logs.
+>>>>>>> 5a2b1ab258ecb3cb8992823e6ffe50637ff7e545
 
 unlock
 ------
