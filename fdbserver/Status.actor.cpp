@@ -1945,7 +1945,14 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 			if(currentFaultTolerance >= 0) {
 				localSetsWithNonNegativeFaultTolerance++;
 			}
-			minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+
+			if (tLogs[i].locality == tagLocalitySatellite) {
+				// FIXME: This hack to bump satellite fault tolerance, is to make it consistent
+				//  with 6.2.
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance + 1);
+			} else {
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+			}
 		}
 
 		if (tLogs[i].isLocal && tLogs[i].locality == tagLocalitySatellite) {
