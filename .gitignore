@@ -71,7 +71,6 @@ trace.*.xml
 .idea/
 .project
 .pydevproject
-.vscode
 .vs/
 FoundationDB.xcodeproj
 foundationdb.VC.db
