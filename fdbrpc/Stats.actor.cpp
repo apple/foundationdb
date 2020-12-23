@@ -45,7 +45,7 @@ double Counter::getRate() const {
 }
 
 double Counter::getRoughness() const {
-	double elapsed = now() - roughness_interval_start;
+	double elapsed = last_event - roughness_interval_start;
 	if(elapsed == 0) {
 		return -1;
 	}
@@ -87,7 +87,9 @@ void CounterCollection::logToTraceEvent(TraceEvent &te) const {
 	}
 }
 
-ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, double interval, CounterCollection* counters, std::string trackLatestName) {
+ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, double interval,
+                                 CounterCollection* counters, std::string trackLatestName,
+                                 std::function<void(TraceEvent&)> decorator) {
 	wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
 
 	for (ICounter* c : counters->counters)
@@ -100,6 +102,7 @@ ACTOR Future<Void> traceCounters(std::string traceEventName, UID traceEventID, d
 		te.detail("Elapsed", now() - last_interval);
 
 		counters->logToTraceEvent(te);
+		decorator(te);
 
 		if (!trackLatestName.empty()) {
 			te.trackLatest(trackLatestName);

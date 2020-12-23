@@ -38,13 +38,11 @@ struct RYWDisableWorkload : TestWorkload {
 		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
 	}
 
-	virtual std::string description() { return "RYWDisable"; }
+	std::string description() const { return "RYWDisable"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if( clientId == 0 )
 			return _start( cx, this );
 		return Void();
@@ -102,7 +100,7 @@ struct RYWDisableWorkload : TestWorkload {
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		bool ok = true;
 		for( int i = 0; i < clients.size(); i++ )
 			if( clients[i].isError() )
@@ -111,8 +109,7 @@ struct RYWDisableWorkload : TestWorkload {
 		return ok;
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	Key keyForIndex( uint64_t index ) {
 		Key result = makeString( keyBytes );

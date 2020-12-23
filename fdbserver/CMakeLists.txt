@@ -25,6 +25,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.h
   GrvProxyServer.actor.cpp
   IDiskQueue.h
+  IKeyValueContainer.h
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
@@ -46,7 +47,9 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
-  MasterProxyServer.actor.cpp
+  MetricLogger.actor.cpp
+  MetricLogger.h
+  CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
   MutationTracking.cpp
@@ -63,6 +66,7 @@ set(FDBSERVER_SRCS
   pubsub.h
   QuietDatabase.actor.cpp
   QuietDatabase.h
+  RadixTree.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
@@ -87,6 +91,7 @@ set(FDBSERVER_SRCS
   SimulatedCluster.actor.cpp
   SimulatedCluster.h
   SkipList.cpp
+  SpanContextMessage.h
   Status.actor.cpp
   Status.h
   StorageCache.actor.cpp
@@ -122,6 +127,7 @@ set(FDBSERVER_SRCS
   workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
   workloads/ParallelRestore.actor.cpp
+  workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
@@ -172,6 +178,7 @@ set(FDBSERVER_SRCS
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp
+  workloads/ProtocolVersion.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
   workloads/RandomClogging.actor.cpp
@@ -181,6 +188,8 @@ set(FDBSERVER_SRCS
   workloads/ReadWrite.actor.cpp
   workloads/RemoveServersSafely.actor.cpp
   workloads/ReportConflictingKeys.actor.cpp
+  workloads/RestoreBackup.actor.cpp
+  workloads/RestoreFromBlob.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
@@ -189,12 +198,14 @@ set(FDBSERVER_SRCS
   workloads/SelectorCorrectness.actor.cpp
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
+  workloads/SimpleAtomicAdd.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
+  workloads/SubmitBackup.actor.cpp
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
@@ -208,6 +219,7 @@ set(FDBSERVER_SRCS
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
+  workloads/UDPWorkload.actor.cpp
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
@@ -233,6 +245,10 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
+  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
+  # statically, so find the static library here.
+  find_library(lz4_STATIC_LIBRARIES
+    NAMES liblz4.a REQUIRED)
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -253,16 +269,14 @@ target_include_directories(fdbserver PRIVATE
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()
 
-add_dependencies(fdbserver toml11)
-target_include_directories(fdbserver PRIVATE ${TOML11_INCLUDE_DIR})
+target_link_libraries(fdbserver PRIVATE toml11_target)
 
 if (GPERFTOOLS_FOUND)
-  add_compile_definitions(USE_GPERFTOOLS)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 

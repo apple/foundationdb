@@ -17,16 +17,16 @@
 # limitations under the License.
 #
 
+import os
 from flask import Flask
 import fdb
-import os
 
 app = Flask(__name__)
 
 fdb.api_version(int(os.getenv('FDB_API_VERSION')))
-db=fdb.open()
+db = fdb.open()
 
-COUNTER_KEY=fdb.tuple.pack(('counter',))
+COUNTER_KEY = fdb.tuple.pack(('counter',))
 def _increment_counter(tr):
     counter_value = tr[COUNTER_KEY]
     if counter_value == None:
@@ -41,8 +41,8 @@ def get_counter():
     counter_value = db[COUNTER_KEY]
     if counter_value == None:
         return '0'
-    else:
-        return str(fdb.tuple.unpack(counter_value)[0])
+
+    return str(fdb.tuple.unpack(counter_value)[0])
 
 @app.route("/counter/increment", methods=['POST'])
 def increment_counter():

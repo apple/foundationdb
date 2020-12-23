@@ -39,7 +39,7 @@ class ProtocolVersion {
 public: // constants
 	static constexpr uint64_t versionFlagMask = 0x0FFFFFFFFFFFFFFFLL;
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
-	static constexpr uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
+	static constexpr uint64_t compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000LL;
 	static constexpr uint64_t minValidProtocolVersion = 0x0FDB00A200060001LL;
 
 public:
@@ -49,6 +49,7 @@ public:
 	constexpr bool isCompatible(ProtocolVersion other) const {
 		return (other.version() & compatibleProtocolVersionMask) == (version() & compatibleProtocolVersionMask);
 	}
+
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
@@ -128,7 +129,9 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.

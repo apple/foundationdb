@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml.Linq;
 using System.IO;
@@ -148,7 +149,7 @@ namespace SummarizeTest
                     {
                         var xout = new XElement("TestHarnessError",
                             new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                            new XAttribute("ErrorMessage", e.Message));
+                            new XAttribute("ErrorMessage", e.ToString()));
 
                         AppendXmlMessageToSummary("summary.xml", xout, true);
                         throw;
@@ -214,6 +215,30 @@ namespace SummarizeTest
             return ((System.Collections.IStructuralComparable)version1).CompareTo(version2, System.Collections.Generic.Comparer<int>.Default) >= 0;
         }
 
+        static bool versionLessThan(string ver1, string ver2) {
+            return !versionGreaterThanOrEqual(ver1, ver2);
+        }
+
+        static string getFdbserverVersion(string fdbserverName) {
+           using (var process = new System.Diagnostics.Process())
+           {
+              process.StartInfo.UseShellExecute = false;
+              process.StartInfo.RedirectStandardOutput = true;
+              process.StartInfo.FileName = fdbserverName;
+              process.StartInfo.Arguments = "--version";
+              process.StartInfo.RedirectStandardError = true;
+
+              process.Start();
+              var output = process.StandardOutput.ReadToEnd();
+              // If the process finished successfully, we call the parameterless WaitForExit to ensure that output buffers get flushed
+              process.WaitForExit();
+
+              var match = Regex.Match(output, @"v(\d+\.\d+\.\d+)");
+              if (match.Groups.Count < 1) return "";
+              return match.Groups[1].Value;
+            }
+        }
+
         static int Run(string fdbserverName, string tlsPluginFile, string testFolder, string summaryFileName, string errorFileName, string runDir, string oldBinaryFolder, bool useValgrind, int maxTries, bool traceToStdout = false, string tlsPluginFile_5_1 = "")
         {
             int seed = random.Next(1000000000);
@@ -264,16 +289,23 @@ namespace SummarizeTest
                     }
                     uniqueFiles = uniqueFileSet.ToArray();
                     testFile = random.Choice(uniqueFiles);
-                    string oldBinaryVersionLowerBound = "0.0.0";
+                    // The on-disk format changed in 4.0.0, and 5.x can't load files from 3.x.
+                    string oldBinaryVersionLowerBound = "4.0.0";
                     string lastFolderName = Path.GetFileName(Path.GetDirectoryName(testFile));
                     if (lastFolderName.Contains("from_") || lastFolderName.Contains("to_")) // Only perform upgrade/downgrade tests from certain versions
                     {
                         oldBinaryVersionLowerBound = lastFolderName.Split('_').Last();
                     }
+                    string oldBinaryVersionUpperBound = getFdbserverVersion(fdbserverName);
+                    if (versionGreaterThanOrEqual("4.0.0", oldBinaryVersionUpperBound)) {
+                        // If the binary under test is from 3.x, then allow upgrade tests from 3.x binaries.
+                        oldBinaryVersionLowerBound = "0.0.0";
+                    }
                     string[] currentBinary = { fdbserverName };
                     IEnumerable<string> oldBinaries = Array.FindAll(
                                                          Directory.GetFiles(oldBinaryFolder),
-                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound));
+                                                         x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
+                                                           && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     oldBinaries = oldBinaries.Concat(currentBinary);
                     oldServerName = random.Choice(oldBinaries.ToList<string>());
                 }
@@ -307,10 +339,13 @@ namespace SummarizeTest
                     int unseed;
                     string uid = Guid.NewGuid().ToString();
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile + "-1.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
+                    bool useToml = File.Exists(testFile + "-1.toml");
+                    string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout);
                     if (result == 0)
                     {
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile + "-2.txt", runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
+                        string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout);
                     }
                 }
                 else

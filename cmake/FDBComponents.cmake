@@ -106,10 +106,10 @@ endif()
 # RocksDB
 ################################################################################
 
-set(SSD_ROCKSDB_EXPERIMENTAL OFF CACHE BOOL "Build with experimental RocksDB support")
+set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL OR GCC)
+if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)
@@ -121,7 +121,24 @@ endif()
 
 # TOML can download and install itself into the binary directory, so it should
 # always be available.
-find_package(TOML11)
+find_package(toml11 QUIET)
+if(toml11_FOUND)
+  add_library(toml11_target INTERFACE)
+  add_dependencies(toml11_target INTERFACE toml11::toml11)
+else()
+  include(ExternalProject)
+
+  ExternalProject_add(toml11Project
+    URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
+    URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
+    CMAKE_CACHE_ARGS
+      -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/toml11
+      -Dtoml11_BUILD_TEST:BOOL=OFF
+    BUILD_ALWAYS ON)
+  add_library(toml11_target INTERFACE)
+  add_dependencies(toml11_target toml11Project)
+  target_include_directories(toml11_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/toml11/include)
+endif()
 
 ################################################################################
 

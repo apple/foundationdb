@@ -22,6 +22,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -79,7 +80,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 	PerfIntCounter numOperations;
 
 	AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
-		: AsyncFileWorkload(wcx), success(true), numOperations("Num Operations"), memoryFile(NULL)
+		: AsyncFileWorkload(wcx), success(true), numOperations("Num Operations"), memoryFile(nullptr)
 	{
 		maxOperationSize = getOption(options, LiteralStringRef("maxOperationSize"), 4096);
 		numSimultaneousOperations = getOption(options, LiteralStringRef("numSimultaneousOperations"), 10);
@@ -97,13 +98,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 
 	virtual ~AsyncFileCorrectnessWorkload(){ }
 
-	virtual std::string description()
-	{
-		return "AsyncFileCorrectness";
-	}
+	std::string description() const override { return "AsyncFileCorrectness"; }
 
-	Future<Void> setup(Database const& cx)
-	{
+	Future<Void> setup(Database const& cx) override {
 		if(enabled)
 			return _setup(this);
 
@@ -147,8 +144,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		fileSize = newFileSize;
 	}
 
-	Future<Void> start(Database const& cx)
-	{
+	Future<Void> start(Database const& cx) override {
 		if(enabled)
 			return _start(this);
 
@@ -371,23 +367,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 
 	//Checks if a file is already locked for a given set of bytes.  The file is locked if it is being written (fileLock[i] = 0xFFFFFFFF)
 	//or if we are trying to perform a write and the read count is nonzero (fileLock[i] != 0)
-	bool checkFileLocked(int operation, int offset, int length)
-	{
+	bool checkFileLocked(int operation, int offset, int length) const {
 		for(int i = offset; i < offset + length && i < fileLock.size(); i++)
 			if(fileLock[i] == 0xFFFFFFFF || (fileLock[i] != 0 && operation == WRITE))
 				return true;
 
 		return false;
-	}
-
-	//Populates a buffer with a random sequence of bytes
-	void generateRandomData(unsigned char *buffer, int length)
-	{
-		for(int i = 0; i < length; i+= sizeof(uint32_t))
-		{
-			uint32_t val = deterministicRandom()->randomUInt32();
-			memcpy(&buffer[i], &val, std::min(length - i, (int)sizeof(uint32_t)));
-		}
 	}
 
 	//Performs an operation on a file and the memory representation of that file
@@ -420,7 +405,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		else if(info.operation == WRITE)
 		{
 			info.data = self->allocateBuffer(info.length);
-			self->generateRandomData(info.data->buffer, info.length);
+			generateRandomData(reinterpret_cast<uint8_t*>(info.data->buffer), info.length);
 			memcpy(&self->memoryFile->buffer[info.offset], info.data->buffer, info.length);
 			memset(&self->fileValidityMask[info.offset], 0xFF, info.length);
 
@@ -443,7 +428,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		}
 		else if(info.operation == SYNC)
 		{
-			info.data = Reference<AsyncFileBuffer>(NULL);
+			info.data = Reference<AsyncFileBuffer>(nullptr);
 			wait(self->fileHandle->file->sync());
 		}
 		else if(info.operation == REOPEN)
@@ -491,13 +476,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		return info;
 	}
 
-	virtual Future<bool> check(Database const& cx)
-	{
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics(vector<PerfMetric>& m)
-	{
+	void getMetrics(vector<PerfMetric>& m) override {
 		if(enabled)
 		{
 			m.push_back(PerfMetric("Number of Operations Performed", numOperations.getValue(), false));

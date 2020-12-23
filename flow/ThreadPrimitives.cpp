@@ -36,7 +36,7 @@ extern std::string format( const char *form, ... );
 
 Event::Event() {
 #ifdef _WIN32
-	ev = CreateEvent(NULL, FALSE, FALSE, NULL);
+	ev = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 #elif defined(__linux__) || defined(__FreeBSD__)
 	int result = sem_init(&sem, 0, 0);
 	if (result)

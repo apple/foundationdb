@@ -69,7 +69,7 @@ struct DowngradeWorkload : TestWorkload {
 	};
 
 	ACTOR static Future<Void> writeOld(Database cx, int numObjects, Key key) {
-		BinaryWriter writer(IncludeVersion(currentProtocolVersion));
+		BinaryWriter writer(IncludeVersion(g_network->protocolVersion()));
 		std::vector<OldStruct> data(numObjects);
 		for (auto& oldObject : data) {
 			oldObject.setFields();
@@ -90,7 +90,7 @@ struct DowngradeWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> writeNew(Database cx, int numObjects, Key key) {
-		ProtocolVersion protocolVersion = currentProtocolVersion;
+		ProtocolVersion protocolVersion = g_network->protocolVersion();
 		protocolVersion.addObjectSerializerFlag();
 		ObjectWriter writer(IncludeVersion(protocolVersion));
 		std::vector<NewStruct> data(numObjects);
@@ -150,7 +150,7 @@ struct DowngradeWorkload : TestWorkload {
 		return Void();
 	}
 
-	std::string description() override { return NAME; }
+	std::string description() const override { return NAME; }
 
 	Future<Void> setup(Database const& cx) override {
 		return clientId ? Void() : (writeOld(cx, numObjects, oldKey) && writeNew(cx, numObjects, newKey));

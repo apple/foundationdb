@@ -221,7 +221,7 @@ struct MetricData {
 	BinaryWriter writer;
 
 	explicit MetricData(uint64_t appendStart = 0) :
-		writer(AssumeVersion(currentProtocolVersion)),
+		writer(AssumeVersion(g_network->protocolVersion())),
 		start(0),
 		rollTime(std::numeric_limits<uint64_t>::max()),
 		appendStart(appendStart) {
@@ -266,7 +266,7 @@ struct MetricUtil {
 		// If we don't have a valid metric reference yet and the create flag was set then create one and possibly put it in the map
 		if(!m && create) {
 			// Metric not found in collection but create is set then create it in the map
-			m = Reference<T>(new T(mname, initial));
+			m = makeReference<T>(mname, initial);
 			if(useMap) {
 				collection->metricMap[mname] = m.template castTo<BaseMetric>();
 				collection->metricAdded.trigger();
@@ -521,7 +521,7 @@ struct FieldLevel {
 
 	// Calculate header as of the end of a value block
 	static Header calculateHeader(StringRef block) {
-		BinaryReader r(block, AssumeVersion(currentProtocolVersion));
+		BinaryReader r(block, AssumeVersion(g_network->protocolVersion()));
 		Header h;
 		r >> h;
 		Encoder dec;
@@ -534,11 +534,11 @@ struct FieldLevel {
 
 	// Read header at position, update it with previousHeader, overwrite old header with new header.
 	static void updateSerializedHeader(StringRef buf, const Header &patch) {
-		BinaryReader r(buf, AssumeVersion(currentProtocolVersion));
+		BinaryReader r(buf, AssumeVersion(g_network->protocolVersion()));
 		Header h;
 		r >> h;
 		h.update(patch);
-		OverWriter w(mutateString(buf), buf.size(), AssumeVersion(currentProtocolVersion));
+		OverWriter w(mutateString(buf), buf.size(), AssumeVersion(g_network->protocolVersion()));
 		w << h;
 	}
 
@@ -962,7 +962,7 @@ struct DynamicFieldBase {
 			.detail("FieldName", fieldName().toString())
 			.detail("OldType", getDerivedTypeName().toString())
 			.detail("NewType", metricTypeName<T>().toString());
-		return NULL;
+		return nullptr;
 	}
 };
 
@@ -1007,7 +1007,7 @@ struct DynamicField : public DynamicFieldBase, EventField<T, DynamicDescriptor> 
 	// Set this field's value to the value of another field of exactly the same type.
 	void setValueFrom(DynamicFieldBase *src, StringRef eventType) {
 		DynamicField<T> *s = src->safe_downcast<T>(eventType);
-		if(s != NULL)
+		if(s != nullptr)
 			set(s->value);
 		else
 			clear();  // Not really necessary with proper use but just in case it is better to clear than use an old value.
@@ -1073,7 +1073,7 @@ public:
 	void setField(const char *fieldName, const ValueType &value) {
 		StringRef fname((uint8_t *)fieldName, strlen(fieldName));
 		DynamicFieldBase *&p = fields[fname];
-		if (p != NULL) {
+		if (p != nullptr) {
 			// FIXME:  This will break for DynamicEventMetric instances that are reused, such as use cases outside
 			// of TraceEvents.  Currently there are none in the code, and there may never any be but if you're here
 			// because you reused a DynamicEventMetric and got the error below then this issue must be fixed.  One
@@ -1087,12 +1087,12 @@ public:
 			p->init();
 		newFieldAdded(fname);
 
-		// This will return NULL if the datatype is wrong.
+		// This will return nullptr if the datatype is wrong.
 		DynamicField<ValueType> *f = p->safe_downcast<ValueType>(getTypeName());
 		// Only set the field value if the type is correct.
 		// Another option here is to redefine the field to the new type and flush (roll) the existing field but that would create many keys
 		// with small values in the db if two frequent events keep tug-of-war'ing the types back and forth.
-		if(f != NULL)
+		if(f != nullptr)
 			f->set(value);
 		else
 			p->clear();  // Not really necessary with proper use but just in case it is better to clear than use an old value.
@@ -1104,7 +1104,7 @@ public:
 		for(auto f : source->fields)
 		{
 			DynamicFieldBase *&p = fields[f.first];
-			if(p == NULL) {
+			if(p == nullptr) {
 				p = f.second->createNewWithValue(f.first.toString().c_str());
 				if(pCollection != nullptr)
 					p->init();
@@ -1257,7 +1257,7 @@ public:
 
 	Standalone<StringRef> getLatestAsValue() {
 		FieldValueBlockEncoding< TimeAndValue< T > > enc;
-		BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+		BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
 		// Write a header so the client can treat this value like a normal data value block.
 		// TOOD: If it is useful, this could be the current header value of the most recently logged level.
 		wr << FieldHeader<TimeAndValue<T>>();

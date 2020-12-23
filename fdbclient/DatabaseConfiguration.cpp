@@ -29,12 +29,12 @@ DatabaseConfiguration::DatabaseConfiguration()
 void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
-	proxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
+	commitProxyCount = grvProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor =
 	    storageTeamSize = desiredLogRouterCount = -1;
 	tLogVersion = TLogVersion::DEFAULT;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
 	tLogSpillType = TLogSpillType::DEFAULT;
-	autoProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
+	autoCommitProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES;
 	autoGrvProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
@@ -165,40 +165,39 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 
 bool DatabaseConfiguration::isValid() const {
 	if( !(initialized &&
-		tLogWriteAntiQuorum >= 0 &&
-		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
-		tLogReplicationFactor >= 1 &&
-		storageTeamSize >= 1 &&
-		getDesiredProxies() >= 1 &&
-		getDesiredGrvProxies() >= 1 &&
-		getDesiredLogs() >= 1 &&
-		getDesiredResolvers() >= 1 &&
-		tLogVersion != TLogVersion::UNSET &&
-		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
-		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
-		tLogDataStoreType != KeyValueStoreType::END &&
-		tLogSpillType != TLogSpillType::UNSET &&
-		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
-		storageServerStoreType != KeyValueStoreType::END &&
-		autoProxyCount >= 1 &&
-		autoGrvProxyCount >= 1 &&
-		autoResolverCount >= 1 &&
-		autoDesiredTLogCount >= 1 &&
-		storagePolicy &&
-		tLogPolicy &&
-		getDesiredRemoteLogs() >= 1 &&
-		remoteTLogReplicationFactor >= 0 &&
-		repopulateRegionAntiQuorum >= 0 &&
-		repopulateRegionAntiQuorum <= 1 &&
-		usableRegions >= 1 &&
-		usableRegions <= 2 &&
-		regions.size() <= 2 &&
-		( usableRegions == 1 || regions.size() == 2 ) &&
-		( regions.size() == 0 || regions[0].priority >= 0 ) &&
-		( regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") ) ) { //We cannot specify regions with three_datacenter replication
+ 		tLogWriteAntiQuorum >= 0 &&
+ 		tLogWriteAntiQuorum <= tLogReplicationFactor/2 &&
+ 		tLogReplicationFactor >= 1 &&
+ 		storageTeamSize >= 1 &&
+ 		getDesiredCommitProxies() >= 1 &&
+ 		getDesiredGrvProxies() >= 1 &&
+ 		getDesiredLogs() >= 1 &&
+ 		getDesiredResolvers() >= 1 &&
+ 		tLogVersion != TLogVersion::UNSET &&
+ 		tLogVersion >= TLogVersion::MIN_RECRUITABLE &&
+ 		tLogVersion <= TLogVersion::MAX_SUPPORTED &&
+ 		tLogDataStoreType != KeyValueStoreType::END &&
+ 		tLogSpillType != TLogSpillType::UNSET &&
+ 		!(tLogSpillType == TLogSpillType::REFERENCE && tLogVersion < TLogVersion::V3) &&
+ 		storageServerStoreType != KeyValueStoreType::END &&
+ 		autoCommitProxyCount >= 1 &&
+ 		autoGrvProxyCount >= 1 &&
+ 		autoResolverCount >= 1 &&
+ 		autoDesiredTLogCount >= 1 &&
+ 		storagePolicy &&
+ 		tLogPolicy &&
+ 		getDesiredRemoteLogs() >= 1 &&
+ 		remoteTLogReplicationFactor >= 0 &&
+ 		repopulateRegionAntiQuorum >= 0 &&
+ 		repopulateRegionAntiQuorum <= 1 &&
+ 		usableRegions >= 1 &&
+ 		usableRegions <= 2 &&
+ 		regions.size() <= 2 &&
+ 		( usableRegions == 1 || regions.size() == 2 ) &&
+ 		( regions.size() == 0 || regions[0].priority >= 0 ) &&
+ 		( regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1") ) ) { //We cannot specify regions with three_datacenter replication
 		return false;
 	}
-
 	std::set<Key> dcIds;
 	dcIds.insert(Key());
 	for(auto& r : regions) {
@@ -318,11 +317,11 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (desiredTLogCount != -1 || isOverridden("logs")) {
 		result["logs"] = desiredTLogCount;
 	}
-	if (proxyCount != -1 || isOverridden("proxies")) {
-		result["proxies"] = proxyCount;
+	if (commitProxyCount != -1 || isOverridden("commit_proxies")) {
+		result["commit_proxies"] = commitProxyCount;
 	}
 	if (grvProxyCount != -1 || isOverridden("grv_proxies")) {
-		result["grv_proxies"] = proxyCount;
+		result["grv_proxies"] = grvProxyCount;
 	}
 	if (resolverCount != -1 || isOverridden("resolvers")) {
 		result["resolvers"] = resolverCount;
@@ -336,8 +335,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (repopulateRegionAntiQuorum != 0 || isOverridden("repopulate_anti_quorum")) {
 		result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
 	}
-	if (autoProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES || isOverridden("auto_proxies")) {
-		result["auto_proxies"] = autoProxyCount;
+	if (autoCommitProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES || isOverridden("auto_commit_proxies")) {
+		result["auto_commit_proxies"] = autoCommitProxyCount;
 	}
 	if (autoGrvProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_GRV_PROXIES || isOverridden("auto_grv_proxies")) {
 		result["auto_grv_proxies"] = autoGrvProxyCount;
@@ -419,8 +418,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 
 	if (ck == LiteralStringRef("initialized")) {
 		initialized = true;
-	} else if (ck == LiteralStringRef("proxies")) {
-		parse(&proxyCount, value);
+	} else if (ck == LiteralStringRef("commit_proxies")) {
+		parse(&commitProxyCount, value);
 	} else if (ck == LiteralStringRef("grv_proxies")) {
 		parse(&grvProxyCount, value);
 	} else if (ck == LiteralStringRef("resolvers")) {
@@ -459,8 +458,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("storage_engine")) {
 		parse((&type), value);
 		storageServerStoreType = (KeyValueStoreType::StoreType)type;
-	} else if (ck == LiteralStringRef("auto_proxies")) {
-		parse(&autoProxyCount, value);
+	} else if (ck == LiteralStringRef("auto_commit_proxies")) {
+		parse(&autoCommitProxyCount, value);
 	} else if (ck == LiteralStringRef("auto_grv_proxies")) {
 		parse(&autoGrvProxyCount, value);
 	} else if (ck == LiteralStringRef("auto_resolvers")) {

@@ -53,13 +53,11 @@ struct StorefrontWorkload : TestWorkload {
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption( options, LiteralStringRef("expectedRate"), 0.9 );
 	}
 
-	virtual std::string description() { return "StorefrontWorkload"; }
+	std::string description() const override { return "StorefrontWorkload"; }
 
-	virtual Future<Void> setup( Database const& cx ) {
-		return bulkSetup( cx, this, itemCount, Promise<double>() );
-	}
+	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, itemCount, Promise<double>()); }
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		for(int c=0; c<actorCount; c++)
 			clients.push_back(
 				orderingClient( cx->clone(), this, actorCount / transactionsPerSecond ) );
@@ -70,7 +68,7 @@ struct StorefrontWorkload : TestWorkload {
 		return delay(testDuration);
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		int errors = 0;
 		for(int c=0; c<clients.size(); c++)
 			if( clients[c].isError() ) {
@@ -81,7 +79,7 @@ struct StorefrontWorkload : TestWorkload {
 		return inventoryCheck( cx->clone(), this, !errors );
 	}
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
 		m.push_back( PerfMetric( "Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true ) );
@@ -158,7 +156,7 @@ struct StorefrontWorkload : TestWorkload {
 						updaters.clear();
 
 						// set value for the order
-						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
+						BinaryWriter wr(AssumeVersion(g_network->protocolVersion())); wr << itemList;
 						tr.set(orderKey, wr.toValue());
 
 						wait( tr.commit() );
@@ -189,7 +187,7 @@ struct StorefrontWorkload : TestWorkload {
 			int orderIdx;
 			for(orderIdx=0; orderIdx<values.size(); orderIdx++) {
 				vector<int> saved;
-				BinaryReader br( values[orderIdx].value, AssumeVersion(currentProtocolVersion) );
+				BinaryReader br( values[orderIdx].value, AssumeVersion(g_network->protocolVersion()) );
 				br >> saved;
 				for(int c=0; c<saved.size(); c++)
 					result[saved[c]]++;
@@ -249,7 +247,7 @@ struct StorefrontWorkload : TestWorkload {
 						for( int i=0; i < it->second; i++ )
 							itemList.push_back( it->first );
 					}
-					BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
+					BinaryWriter wr(AssumeVersion(g_network->protocolVersion())); wr << itemList;
 					if( wr.toValue() != val.get().toString() ) {
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "OrderContentsMismatch")

@@ -99,6 +99,11 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	}
 }
 
+Key FileBackupAgent::getPauseKey() {
+	FileBackupAgent backupAgent;
+	return backupAgent.taskBucket->getPauseKey();
+}
+
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
@@ -623,8 +628,6 @@ namespace fileBackup {
 	// Very simple format compared to KeyRange files.
 	// Header, [Key, Value]... Key len
 	struct LogFileWriter {
-		static const std::string &FFs;
-
 		LogFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 		  : file(file), blockSize(blockSize), blockEnd(0) {}
 
@@ -748,9 +751,10 @@ namespace fileBackup {
 		state Subspace newConfigSpace = uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(fileBackupPrefixRange.begin), uid);
 
 		Optional<Value> statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
-		state EBackupState status = !statusStr.present() ? FileBackupAgent::STATE_NEVERRAN : BackupAgentBase::getState(statusStr.get().toString());
+	    state EBackupState status =
+	        !statusStr.present() ? EBackupState::STATE_NEVERRAN : BackupAgentBase::getState(statusStr.get().toString());
 
-		TraceEvent(SevInfo, "FileBackupAbortIncompatibleBackup")
+	    TraceEvent(SevInfo, "FileBackupAbortIncompatibleBackup")
 				.detail("TagName", tagName.c_str())
 				.detail("Status", BackupAgentBase::getStateText(status));
 
@@ -770,9 +774,9 @@ namespace fileBackup {
 
 		// Set old style state key to Aborted if it was Runnable
 		if(backupAgent->isRunnable(status))
-			tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
+		    tr->set(statusKey, StringRef(FileBackupAgent::getStateText(EBackupState::STATE_ABORTED)));
 
-		return Void();
+	    return Void();
 	}
 
 	struct AbortFiveZeroBackupTask : TaskFuncBase {
@@ -792,13 +796,13 @@ namespace fileBackup {
 			return Void();
 		}
 
-		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
+	    StringRef getName() const override {
+		    TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveZeroBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
-		}
+	    }
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveZeroBackupTask::name = LiteralStringRef("abort_legacy_backup");
@@ -822,11 +826,11 @@ namespace fileBackup {
 		state BackupConfig config(current.first);
 		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
-		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
-			throw backup_unneeded();
-		}
+	    if (!backupAgent->isRunnable(status)) {
+		    throw backup_unneeded();
+	    }
 
-		TraceEvent(SevInfo, "FBA_AbortFileOneBackup")
+	    TraceEvent(SevInfo, "FBA_AbortFileOneBackup")
 				.detail("TagName", tagName.c_str())
 				.detail("Status", BackupAgentBase::getStateText(status));
 
@@ -862,13 +866,13 @@ namespace fileBackup {
 			return Void();
 		}
 
-		virtual StringRef getName() const {
-			TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
+	    StringRef getName() const override {
+		    TraceEvent(SevError, "FileBackupError").detail("Cause", "AbortFiveOneBackupTaskFunc::name() should never be called");
 			ASSERT(false);
 			return StringRef();
-		}
+	    }
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+	    Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortFiveOneBackupTask::name = LiteralStringRef("abort_legacy_backup_5.2");
@@ -939,24 +943,18 @@ namespace fileBackup {
 	// Backup and Restore taskFunc definitions will inherit from one of the following classes which
 	// servers to catch and log to the appropriate config any error that execute/finish didn't catch and log.
 	struct RestoreTaskFuncBase : TaskFuncBase {
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
-		}
-		virtual std::string toString(Reference<Task> task)
-		{
-			return "";
-		}
-	};
+	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) final {
+		    return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
+	    }
+	    virtual std::string toString(Reference<Task> task) const { return ""; }
+    };
 
 	struct BackupTaskFuncBase : TaskFuncBase {
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
-		}
-		virtual std::string toString(Reference<Task> task)
-		{
-			return "";
-		}
-	};
+	    Future<Void> handleError(Database cx, Reference<Task> task, Error const& error) final {
+		    return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
+	    }
+	    virtual std::string toString(Reference<Task> task) const { return ""; }
+    };
 
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
 
@@ -975,9 +973,9 @@ namespace fileBackup {
 
 	struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<Key> beginKey() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -989,15 +987,15 @@ namespace fileBackup {
 			}
 		} Params;
 
-		std::string toString(Reference<Task> task) {
-			return format("beginKey '%s' endKey '%s' addTasks %d",
+	    std::string toString(Reference<Task> task) const override {
+		    return format("beginKey '%s' endKey '%s' addTasks %d",
 				Params.beginKey().get(task).printable().c_str(),
 				Params.endKey().get(task).printable().c_str(),
 				Params.addBackupRangeTasks().get(task)
 			);
-		}
+	    }
 
-		StringRef getName() const { return name; };
+	    StringRef getName() const { return name; };
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
@@ -1270,14 +1268,13 @@ namespace fileBackup {
 
 	};
 	StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_write_range_5.2");
-	const uint32_t BackupRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
 	struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			// Set by Execute, used by Finish
 			static TaskParam<int64_t> shardsBehind() {
 				return LiteralStringRef(__FUNCTION__);
@@ -1406,8 +1403,8 @@ namespace fileBackup {
 					else {
 						ASSERT(snapshotBatchSize.present());
 						// Batch future key exists in the config so create future from it
-						snapshotBatchFuture = Reference<TaskFuture>(new TaskFuture(futureBucket, snapshotBatchFutureKey.get()));
-					}
+					    snapshotBatchFuture = makeReference<TaskFuture>(futureBucket, snapshotBatchFutureKey.get());
+				    }
 
 					break;
 				} catch(Error &e) {
@@ -1791,14 +1788,13 @@ namespace fileBackup {
 
 	};
 	StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_dispatch_ranges_5.2");
-	const uint32_t BackupSnapshotDispatchTask::version = 1;
 	REGISTER_TASKFUNC(BackupSnapshotDispatchTask);
 
 	struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<bool> addBackupLogRangeTasks() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -1993,14 +1989,13 @@ namespace fileBackup {
 	};
 
 	StringRef BackupLogRangeTaskFunc::name = LiteralStringRef("file_backup_write_logs_5.2");
-	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
 	//This task stopped being used in 6.2, however the code remains here to handle upgrades.
 	struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
-		StringRef getName() const { return name; };
+	    static constexpr uint32_t version = 1;
+	    StringRef getName() const { return name; };
 
 		static struct {
 			static TaskParam<Version> beginVersion() {
@@ -2050,16 +2045,15 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs_5.2");
-	const uint32_t EraseLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
 
 
 
 	struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<Version> prevBeginVersion() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -2100,10 +2094,10 @@ namespace fileBackup {
 			}
 
 			// If the backup is restorable but the state is not differential then set state to differential
-			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
-				config.stateEnum().set(tr, BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
+		    if (restorableVersion.present() && backupState != EBackupState::STATE_RUNNING_DIFFERENTIAL)
+			    config.stateEnum().set(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL);
 
-			// If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
+		    // If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
 			if(stopWhenDone && restorableVersion.present()) {
 				wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
 
@@ -2178,14 +2172,13 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_dispatch_logs_5.2");
-	const uint32_t BackupLogsDispatchTask::version = 1;
 	REGISTER_TASKFUNC(BackupLogsDispatchTask);
 
 	struct FileBackupFinishedTask : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		StringRef getName() const { return name; };
+	    StringRef getName() const { return name; };
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			wait(checkTaskVersion(tr->getDatabase(), task, FileBackupFinishedTask::name, FileBackupFinishedTask::version));
@@ -2219,13 +2212,12 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef FileBackupFinishedTask::name = LiteralStringRef("file_backup_finished_5.2");
-	const uint32_t FileBackupFinishedTask::version = 1;
 	REGISTER_TASKFUNC(FileBackupFinishedTask);
 
 	struct BackupSnapshotManifest : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
-		static struct {
+	    static constexpr uint32_t version = 1;
+	    static struct {
 			static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
@@ -2350,10 +2342,10 @@ namespace fileBackup {
 			}
 
 			// If the backup is restorable and the state isn't differential the set state to differential
-			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
-				config.stateEnum().set(tr, BackupAgentBase::STATE_RUNNING_DIFFERENTIAL);
+		    if (restorableVersion.present() && backupState != EBackupState::STATE_RUNNING_DIFFERENTIAL)
+			    config.stateEnum().set(tr, EBackupState::STATE_RUNNING_DIFFERENTIAL);
 
-			// Unless we are to stop, start the next snapshot using the default interval
+		    // Unless we are to stop, start the next snapshot using the default interval
 			Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
 			if(!stopWhenDone) {
 				wait(config.initNewSnapshot(tr) && success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, 1, TaskCompletionKey::signal(snapshotDoneFuture))));
@@ -2380,7 +2372,6 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_write_snapshot_manifest_5.2");
-	const uint32_t BackupSnapshotManifest::version = 1;
 	REGISTER_TASKFUNC(BackupSnapshotManifest);
 
 	Future<Key> BackupSnapshotDispatchTask::addSnapshotManifestTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor) {
@@ -2389,9 +2380,9 @@ namespace fileBackup {
 
 	struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
@@ -2533,7 +2524,6 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_backup_start_5.2");
-	const uint32_t StartFullBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 
 	struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
@@ -2576,15 +2566,14 @@ namespace fileBackup {
 		}
 
 		static StringRef name;
-		static const uint32_t version;
-		StringRef getName() const { return name; };
+	    static constexpr uint32_t version = 1;
+	    StringRef getName() const { return name; };
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 
 	};
 	StringRef RestoreCompleteTaskFunc::name = LiteralStringRef("restore_complete");
-	const uint32_t RestoreCompleteTaskFunc::version = 1;
 	REGISTER_TASKFUNC(RestoreCompleteTaskFunc);
 
 	struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
@@ -2594,13 +2583,13 @@ namespace fileBackup {
 			static TaskParam<int64_t> readLen() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
-		std::string toString(Reference<Task> task) {
-			return format("fileName '%s' readLen %lld readOffset %lld",
+	    std::string toString(Reference<Task> task) const override {
+		    return format("fileName '%s' readLen %lld readOffset %lld",
 				Params.inputFile().get(task).fileName.c_str(),
 				Params.readLen().get(task),
 				Params.readOffset().get(task));
-		}
-	};
+	    }
+    };
 
 	struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		static struct : InputParams {
@@ -2621,14 +2610,14 @@ namespace fileBackup {
 			}
 		} Params;
 
-		std::string toString(Reference<Task> task) {
-			std::string returnStr = RestoreFileTaskFuncBase::toString(task);
+	    std::string toString(Reference<Task> task) const override {
+		    std::string returnStr = RestoreFileTaskFuncBase::toString(task);
 			for(auto &range : Params.getOriginalFileRanges(task))
 				returnStr += format("  originalFileRange '%s'", printable(range).c_str());
 			return returnStr;
-		}
+	    }
 
-		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+	    ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state RestoreConfig restore(task);
 
 			state RestoreFile rangeFile = Params.inputFile().get(task);
@@ -2840,20 +2829,19 @@ namespace fileBackup {
 		}
 
 		static StringRef name;
-		static const uint32_t version;
-		StringRef getName() const { return name; };
+	    static constexpr uint32_t version = 1;
+	    StringRef getName() const { return name; };
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef RestoreRangeTaskFunc::name = LiteralStringRef("restore_range_data");
-	const uint32_t RestoreRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(RestoreRangeTaskFunc);
 
 	struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
-		StringRef getName() const { return name; };
+	    static constexpr uint32_t version = 1;
+	    StringRef getName() const { return name; };
 
 		static struct : InputParams {
 		} Params;
@@ -2995,13 +2983,12 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef RestoreLogDataTaskFunc::name = LiteralStringRef("restore_log_data");
-	const uint32_t RestoreLogDataTaskFunc::version = 1;
 	REGISTER_TASKFUNC(RestoreLogDataTaskFunc);
 
 	struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
-		StringRef getName() const { return name; };
+	    static constexpr uint32_t version = 1;
+	    StringRef getName() const { return name; };
 
 		static struct {
 			static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
@@ -3308,7 +3295,6 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef RestoreDispatchTaskFunc::name = LiteralStringRef("restore_dispatch");
-	const uint32_t RestoreDispatchTaskFunc::version = 1;
 	REGISTER_TASKFUNC(RestoreDispatchTaskFunc);
 
 	ACTOR Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName) {
@@ -3402,9 +3388,9 @@ namespace fileBackup {
 
 	struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		static StringRef name;
-		static const uint32_t version;
+	    static constexpr uint32_t version = 1;
 
-		static struct {
+	    static struct {
 			static TaskParam<Version> firstVersion() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
@@ -3469,12 +3455,13 @@ namespace fileBackup {
 			if (beginVersion == invalidVersion) {
 				beginVersion = 0;
 			}
-			Optional<RestorableFileSet> restorable = wait(bc->getRestoreSet(restoreVersion, incremental, beginVersion));
-			if (!incremental) {
-				beginVersion = restorable.get().snapshot.beginVersion;
-			}
+		    Optional<RestorableFileSet> restorable =
+		        wait(bc->getRestoreSet(restoreVersion, VectorRef<KeyRangeRef>(), incremental, beginVersion));
+		    if (!incremental) {
+			    beginVersion = restorable.get().snapshot.beginVersion;
+		    }
 
-			if(!restorable.present())
+		    if(!restorable.present())
 				throw restore_missing_data();
 
 			// First version for which log data should be applied
@@ -3596,7 +3583,6 @@ namespace fileBackup {
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
 	StringRef StartFullRestoreTaskFunc::name = LiteralStringRef("restore_start");
-	const uint32_t StartFullRestoreTaskFunc::version = 1;
 	REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 }
 
@@ -3612,7 +3598,7 @@ struct LogInfo : public ReferenceCounted<LogInfo> {
 
 class FileBackupAgentImpl {
 public:
-	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
+	static constexpr int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// Parallel restore
 	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, bool unlockDB = true) {
@@ -3746,7 +3732,9 @@ public:
 
 	// This method will return the final status of the backup at tag, and return the URL that was used on the tag
 	// when that status value was read.
-	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer = nullptr, UID *pUID = nullptr) {
+	ACTOR static Future<EBackupState> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName,
+	                                             bool stopWhenDone, Reference<IBackupContainer>* pContainer = nullptr,
+	                                             UID* pUID = nullptr) {
 		state std::string backTrace;
 		state KeyBackedTag tag = makeBackupTag(tagName);
 
@@ -3767,7 +3755,8 @@ public:
 				// Break, if one of the following is true
 				//  - no longer runnable
 				//  - in differential mode (restorable) and stopWhenDone is not enabled
-				if( !FileBackupAgent::isRunnable(status) || ((!stopWhenDone) && (BackupAgentBase::STATE_RUNNING_DIFFERENTIAL == status) )) {
+				if (!FileBackupAgent::isRunnable(status) ||
+				    ((!stopWhenDone) && (EBackupState::STATE_RUNNING_DIFFERENTIAL == status))) {
 
 					if(pContainer != nullptr) {
 						Reference<IBackupContainer> c = wait(config.backupContainer().getOrThrow(tr, false, backup_invalid_info()));
@@ -4103,7 +4092,7 @@ public:
 		state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 		EBackupState status = wait(config.stateEnum().getD(tr, false, EBackupState::STATE_NEVERRAN));
 
-		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
+		if (!backupAgent->isRunnable(status)) {
 			throw backup_unneeded();
 		}
 
@@ -4206,13 +4195,13 @@ public:
 					JsonBuilderObject statusDoc;
 					statusDoc.setKey("Name", BackupAgentBase::getStateName(backupState));
 					statusDoc.setKey("Description", BackupAgentBase::getStateText(backupState));
-					statusDoc.setKey("Completed", backupState == BackupAgentBase::STATE_COMPLETED);
+					statusDoc.setKey("Completed", backupState == EBackupState::STATE_COMPLETED);
 					statusDoc.setKey("Running", BackupAgentBase::isRunnable(backupState));
 					doc.setKey("Status", statusDoc);
 
 					state Future<Void> done = Void();
 
-					if(backupState != BackupAgentBase::STATE_NEVERRAN) {
+					if (backupState != EBackupState::STATE_NEVERRAN) {
 						state Reference<IBackupContainer> bc;
 						state TimestampedVersion latestRestorable;
 
@@ -4224,7 +4213,7 @@ public:
 
 						if(latestRestorable.present()) {
 							JsonBuilderObject o = latestRestorable.toJSON();
-							if(backupState != BackupAgentBase::STATE_COMPLETED) {
+							if (backupState != EBackupState::STATE_COMPLETED) {
 								o.setKey("LagSeconds", (recentReadVersion - latestRestorable.version.get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 							}
 							doc.setKey("LatestRestorablePoint", o);
@@ -4232,7 +4221,8 @@ public:
 						doc.setKey("DestinationURL", bc->getURL());
 					}
 
-					if(backupState == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL || backupState == BackupAgentBase::STATE_RUNNING) {
+					if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL ||
+					    backupState == EBackupState::STATE_RUNNING) {
 						state int64_t snapshotInterval;
 						state int64_t logBytesWritten;
 						state int64_t rangeBytesWritten;
@@ -4355,23 +4345,28 @@ public:
 					bool snapshotProgress = false;
 
 					switch (backupState) {
-						case BackupAgentBase::STATE_SUBMITTED:
-							statusText += "The backup on tag `" + tagName + "' is in progress (just started) to " + bc->getURL() + ".\n";
-							break;
-						case BackupAgentBase::STATE_RUNNING:
-							statusText += "The backup on tag `" + tagName + "' is in progress to " + bc->getURL() + ".\n";
-							snapshotProgress = true;
-							break;
-						case BackupAgentBase::STATE_RUNNING_DIFFERENTIAL:
-							statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " + bc->getURL() + ".\n";
-							snapshotProgress = true;
-							break;
-						case BackupAgentBase::STATE_COMPLETED:
-							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed at version " + format("%lld", latestRestorableVersion.orDefault(-1)) + ".\n";
-							break;
-						default:
-							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " + backupStatus + ".\n";
-							break;
+					case EBackupState::STATE_SUBMITTED:
+						statusText += "The backup on tag `" + tagName + "' is in progress (just started) to " +
+						              bc->getURL() + ".\n";
+						break;
+					case EBackupState::STATE_RUNNING:
+						statusText += "The backup on tag `" + tagName + "' is in progress to " + bc->getURL() + ".\n";
+						snapshotProgress = true;
+						break;
+					case EBackupState::STATE_RUNNING_DIFFERENTIAL:
+						statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " +
+						              bc->getURL() + ".\n";
+						snapshotProgress = true;
+						break;
+					case EBackupState::STATE_COMPLETED:
+						statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() +
+						              " completed at version " + format("%lld", latestRestorableVersion.orDefault(-1)) +
+						              ".\n";
+						break;
+					default:
+						statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " +
+						              backupStatus + ".\n";
+						break;
 					}
 					statusText += format("BackupUID: %s\n", uidAndAbortedFlag.get().first.toString().c_str());
 					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
@@ -4407,7 +4402,7 @@ public:
 									);
 
 						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
-						if(backupState == BackupAgentBase::STATE_RUNNING_DIFFERENTIAL)
+						if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL)
 							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the snapshot is supposed to be done)\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
 						else
 							statusText += "The initial snapshot is still running.\n";
@@ -4495,7 +4490,7 @@ public:
 	                                     Version beginVersion, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
 
-		state BackupDescription desc = wait(bc->describeBackup());
+		state BackupDescription desc = wait(bc->describeBackup(true));
 		if(cxOrig.present()) {
 			wait(desc.resolveVersionTimes(cxOrig.get()));
 		}
@@ -4509,11 +4504,12 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, incrementalBackupOnly, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, VectorRef<KeyRangeRef>(), incrementalBackupOnly, beginVersion));
 
 		if(!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 				.detail("BackupContainer", bc->getURL())
+				.detail("BeginVersion", beginVersion)
 				.detail("TargetVersion", targetVersion);
 			fprintf(stderr, "ERROR: Restore version %" PRId64 " is not possible from %s\n", targetVersion, bc->getURL().c_str());
 			throw restore_invalid_version();
@@ -4565,7 +4561,7 @@ public:
 				backupConfig = BackupConfig(uidFlag.first);
 				state EBackupState status = wait(backupConfig.stateEnum().getOrThrow(ryw_tr));
 
-				if (status != BackupAgentBase::STATE_RUNNING_DIFFERENTIAL ) {
+				if (status != EBackupState::STATE_RUNNING_DIFFERENTIAL) {
 					throw backup_duplicate();
 				}
 
@@ -4766,7 +4762,8 @@ void FileBackupAgent::setLastRestorable(Reference<ReadYourWritesTransaction> tr,
 	tr->set(lastRestorable.pack(tagName), BinaryWriter::toValue<Version>(version, Unversioned()));
 }
 
-Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone, Reference<IBackupContainer> *pContainer, UID *pUID) {
+Future<EBackupState> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone,
+                                                 Reference<IBackupContainer>* pContainer, UID* pUID) {
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone, pContainer, pUID);
 }
 

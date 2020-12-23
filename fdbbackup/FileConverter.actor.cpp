@@ -175,7 +175,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					int msgSize = bigEndian32(reader.consume<int>());
 					const uint8_t* message = reader.consume(msgSize);
 
-					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
+					ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 					MutationRef m;
 					rd >> m;
 					count++;
@@ -298,7 +298,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 		// Attempt decode the first few blocks of log files until beginVersion is consumed
 		std::vector<Future<Void>> fileDecodes;
 		for (int i = 0; i < asyncFiles.size(); i++) {
-			Reference<FileProgress> fp(new FileProgress(asyncFiles[i].get(), i));
+			auto fp = makeReference<FileProgress>(asyncFiles[i].get(), i);
 			progress->fileProgress.push_back(fp);
 			fileDecodes.push_back(
 			    decodeToVersion(fp, progress->beginVersion, progress->endVersion, progress->getLogFile(i)));
@@ -433,7 +433,7 @@ ACTOR Future<Void> convert(ConvertParams params) {
 	state BackupDescription desc = wait(container->describeBackup());
 	std::cout << "\n" << desc.toString() << "\n";
 
-	// std::cout << "Using Protocol Version: 0x" << std::hex << currentProtocolVersion.version() << std::dec << "\n";
+	// std::cout << "Using Protocol Version: 0x" << std::hex << g_network->protocolVersion().version() << std::dec << "\n";
 
 	std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", logs);
@@ -460,7 +460,7 @@ ACTOR Future<Void> convert(ConvertParams params) {
 			arena = Arena();
 		}
 
-		ArenaReader rd(data.arena, data.message, AssumeVersion(currentProtocolVersion));
+		ArenaReader rd(data.arena, data.message, AssumeVersion(g_network->protocolVersion()));
 		MutationRef m;
 		rd >> m;
 		std::cout << data.version.toString() << " m = " << m.toString() << "\n";

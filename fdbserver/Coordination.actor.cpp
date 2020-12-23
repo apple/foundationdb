@@ -24,10 +24,13 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/Status.h"
 #include "flow/ActorCollection.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
+#include <cstdint>
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
@@ -41,17 +44,6 @@ struct GenerationRegVal {
 		serializer(ar, readGen, writeGen, val);
 	}
 };
-
-// The order of UIDs here must match the order in which makeWellKnownEndpoint is called.
-// UID WLTOKEN_CLIENTLEADERREG_GETLEADER( -1, 2 ); // from fdbclient/MonitorLeader.actor.cpp
-// UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE( -1, 3 ); // from fdbclient/MonitorLeader.actor.cpp
-UID WLTOKEN_LEADERELECTIONREG_CANDIDACY( -1, 4 );
-UID WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT( -1, 5 );
-UID WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT( -1, 6 );
-UID WLTOKEN_LEADERELECTIONREG_FORWARD( -1, 7 );
-UID WLTOKEN_GENERATIONREG_READ( -1, 8 );
-UID WLTOKEN_GENERATIONREG_WRITE( -1, 9 );
-
 
 GenerationRegInterface::GenerationRegInterface( NetworkAddress remote )
 	: read( Endpoint({remote}, WLTOKEN_GENERATIONREG_READ) ),
@@ -96,7 +88,7 @@ ServerCoordinators::ServerCoordinators( Reference<ClusterConnectionFile> cf )
 // The coordination server wants to create its key value store only if it is actually used
 struct OnDemandStore {
 public:
-	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(NULL), myID(myID) {}
+	OnDemandStore( std::string folder, UID myID ) : folder(folder), store(nullptr), myID(myID) {}
 	~OnDemandStore() { if (store) store->close(); }
 
 	IKeyValueStore* get() {
@@ -276,11 +268,12 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state Future<Void> notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
 	state ClientData clientData;
 	state int clientCount = 0;
-	state Reference<AsyncVar<bool>> hasConnectedClients = Reference<AsyncVar<bool>>( new AsyncVar<bool>(false) );
+	state Reference<AsyncVar<bool>> hasConnectedClients = makeReference<AsyncVar<bool>>(false);
 	state ActorCollection actors(false);
 	state Future<Void> leaderMon;
 	state AsyncVar<Value> leaderInterface;
-	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader = Reference<AsyncVar<Optional<LeaderInfo>>>( new AsyncVar<Optional<LeaderInfo>>() );
+	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
+	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
 
 	loop choose {
 		when ( OpenDatabaseCoordRequest req = waitNext( interf.openDatabase.getFuture() ) ) {

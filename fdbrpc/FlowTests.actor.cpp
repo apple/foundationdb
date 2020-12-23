@@ -20,6 +20,7 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
@@ -75,13 +76,25 @@ TEST_CASE("/flow/buggifiedDelay") {
 }
 
 template <class T, class Func, class ErrFunc, class CallbackType>
-class LambdaCallback : public CallbackType, public FastAllocated<LambdaCallback<T,Func,ErrFunc,CallbackType>> {
+class LambdaCallback final : public CallbackType, public FastAllocated<LambdaCallback<T, Func, ErrFunc, CallbackType>> {
 	Func func;
 	ErrFunc errFunc;
 
-	virtual void fire(T const& t) { CallbackType::remove(); func(t); delete this; }
-	virtual void fire(T && t) { CallbackType::remove(); func(std::move(t)); delete this; }
-	virtual void error(Error e) { CallbackType::remove(); errFunc(e); delete this; }
+	void fire(T const& t) override {
+		CallbackType::remove();
+		func(t);
+		delete this;
+	}
+	void fire(T&& t) {
+		CallbackType::remove();
+		func(std::move(t));
+		delete this;
+	}
+	void error(Error e) override {
+		CallbackType::remove();
+		errFunc(e);
+		delete this;
+	}
 
 public:
 	LambdaCallback(Func&& f, ErrFunc&& e) : func(std::move(f)), errFunc(std::move(e)) {}
@@ -192,14 +205,14 @@ ACTOR static Future<Void> testHygeine() {
 //bool expectActorCount(int x) { return actorCount == x; }
 bool expectActorCount(int) { return true; }
 
-struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
+struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	int ticks;
 	Promise<Void> nextTick;
 	int nextYield;
 	INetwork* baseNetwork;
 
-	virtual flowGlobalType global(int id) const override { return baseNetwork->global(id); }
-	virtual void setGlobal(size_t id, flowGlobalType v) override {
+	flowGlobalType global(int id) const override { return baseNetwork->global(id); }
+	void setGlobal(size_t id, flowGlobalType v) override {
 		baseNetwork->setGlobal(id, v);
 		return;
 	}
@@ -219,35 +232,36 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 		t.send(Void());
 	}
 
-	virtual Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
+	Future<class Void> delay(double seconds, TaskPriority taskID) override { return nextTick.getFuture(); }
 
-	virtual Future<class Void> yield(TaskPriority taskID) override {
+	Future<class Void> yield(TaskPriority taskID) override {
 		if (check_yield(taskID))
 			return delay(0,taskID);
 		return Void();
 	}
 
-	virtual bool check_yield(TaskPriority taskID) override {
+	bool check_yield(TaskPriority taskID) override {
 		if (nextYield > 0) --nextYield;
 		return nextYield == 0;
 	}
 
 	// Delegate everything else.  TODO: Make a base class NetworkWrapper for delegating everything in INetwork
-	virtual TaskPriority getCurrentTask() const override { return baseNetwork->getCurrentTask(); }
-	virtual void setCurrentTask(TaskPriority taskID) override { baseNetwork->setCurrentTask(taskID); }
-	virtual double now() const override { return baseNetwork->now(); }
-	virtual double timer() override { return baseNetwork->timer(); }
-	virtual void stop() override { return baseNetwork->stop(); }
-	virtual void addStopCallback(std::function<void()> fn) override {
+	TaskPriority getCurrentTask() const override { return baseNetwork->getCurrentTask(); }
+	void setCurrentTask(TaskPriority taskID) override { baseNetwork->setCurrentTask(taskID); }
+	double now() const override { return baseNetwork->now(); }
+	double timer() override { return baseNetwork->timer(); }
+	double timer_monotonic() override { return baseNetwork->timer_monotonic(); }
+	void stop() override { return baseNetwork->stop(); }
+	void addStopCallback(std::function<void()> fn) override {
 		ASSERT(false);
 		return;
 	}
-	virtual bool isSimulated() const override { return baseNetwork->isSimulated(); }
-	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) override {
+	bool isSimulated() const override { return baseNetwork->isSimulated(); }
+	void onMainThread(Promise<Void>&& signal, TaskPriority taskID) override {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg) override {
 		return baseNetwork->startThread(func, arg);
 	}
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
@@ -256,17 +270,20 @@ struct YieldMockNetwork : INetwork, ReferenceCounted<YieldMockNetwork> {
 	Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		return IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable);
 	}
-	virtual void run() override { return baseNetwork->run(); }
-	virtual bool checkRunnable() override { return baseNetwork->checkRunnable(); }
-	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
+	void run() override { return baseNetwork->run(); }
+	bool checkRunnable() override { return baseNetwork->checkRunnable(); }
+	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override {
 		return baseNetwork->getDiskBytes(directory, free, total);
 	}
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override {
+	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return baseNetwork->isAddressOnThisHost(addr);
 	}
-	virtual const TLSConfig& getTLSConfig() const override {
+	const TLSConfig& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
+	}
+	ProtocolVersion protocolVersion() override {
+		return baseNetwork->protocolVersion();
 	}
 };
 
@@ -670,7 +687,7 @@ TEST_CASE("/flow/flow/yieldedFuture/progress")
 	// Check that if check_yield always returns true, the yieldedFuture will do nothing immediately but will
 	// get one thing done per "tick" (per delay(0) returning).
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	yn->nextYield = 0;
 
@@ -705,7 +722,7 @@ TEST_CASE("/flow/flow/yieldedFuture/random")
 {
 	// Check expectations about exactly how yieldedFuture responds to check_yield results
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	for(int r=0; r<100; r++) {
 		Promise<Void> p;
@@ -753,7 +770,7 @@ TEST_CASE("/flow/perf/yieldedFuture")
 	double start;
 	int N = 1000000;
 
-	Reference<YieldMockNetwork> yn( new YieldMockNetwork );
+	auto yn = makeReference<YieldMockNetwork>();
 
 	yn->nextYield = 2*N + 100;
 

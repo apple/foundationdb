@@ -218,8 +218,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 
 ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf, int nodeIndex, Database cx,
                                      RestoreControllerInterface ci) {
-	state Reference<RestoreLoaderData> self =
-	    Reference<RestoreLoaderData>(new RestoreLoaderData(loaderInterf.id(), nodeIndex, ci));
+	state Reference<RestoreLoaderData> self = makeReference<RestoreLoaderData>(loaderInterf.id(), nodeIndex, ci);
 	state Future<Void> error = actorCollection(self->addActor.getFuture());
 	state ActorCollection actors(false); // actors whose errors can be ignored
 	state Future<Void> exitRole = Never();
@@ -398,7 +397,7 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			// only one clear mutation is generated (i.e., always inserted).
 			ASSERT(inserted);
 
-			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(currentProtocolVersion));
+			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 			MutationRef mutation;
 			rd >> mutation;
 

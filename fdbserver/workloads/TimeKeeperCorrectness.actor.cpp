@@ -32,16 +32,11 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 20.0 );
 	}
 
-	virtual std::string description() {
-		return "TimeKeeperCorrectness";
-	}
+	std::string description() const override { return "TimeKeeperCorrectness"; }
 
-	virtual Future<Void> setup(Database const& cx) {
-		return Void();
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload *self) {
 		TraceEvent(SevInfo, "TKCorrectness_Start");
@@ -69,13 +64,11 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
-		return _start(cx, this);
-	}
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR static Future<bool> _check(Database cx, TimeKeeperCorrectnessWorkload *self) {
 		state KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);
-		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		TraceEvent(SevInfo, "TKCorrectness_CheckStart")
 				.detail("TimeKeeperMaxEntries", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
@@ -126,9 +119,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) {
-		return _check(cx, this);
-	}
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 };
 
 WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory("TimeKeeperCorrectness");

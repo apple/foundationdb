@@ -39,16 +39,16 @@ typedef int64_t Generation;
 typedef UID SpanID;
 
 enum {
-	tagLocalitySpecial = -1,
+	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
-	tagLocalityRemoteLog = -3,
+	tagLocalityRemoteLog = -3, // tag created by log router for remote tLogs
 	tagLocalityUpgraded = -4,
 	tagLocalitySatellite = -5,
-	tagLocalityLogRouterMapped = -6,  // used by log router to pop from TLogs
+	tagLocalityLogRouterMapped = -6, // The pseudo tag used by log routers to pop the real LogRouter tag (i.e., -2)
 	tagLocalityTxs = -7,
 	tagLocalityBackup = -8,  // used by backup role to pop from TLogs
 	tagLocalityInvalid = -99
-}; //The TLog and LogRouter require these number to be as compact as possible
+}; // The TLog and LogRouter require these number to be as compact as possible
 
 inline bool isPseudoLocality(int8_t locality) {
 	return locality == tagLocalityLogRouterMapped || locality == tagLocalityBackup;
@@ -56,6 +56,11 @@ inline bool isPseudoLocality(int8_t locality) {
 
 #pragma pack(push, 1)
 struct Tag {
+	// if locality > 0,
+	//    locality decides which DC id the tLog is in;
+	//    id decides which SS owns the tag; id <-> SS mapping is in the system keyspace: serverTagKeys.
+	// if locality < 0, locality decides the type of tLog set: satellite, LR, or remote tLog, etc.
+	//    id decides which tLog in the tLog type will be used.
 	int8_t locality;
 	uint16_t id;
 
@@ -193,6 +198,10 @@ std::string describe( Reference<T> const& item ) {
 	return item->toString();
 }
 
+static std::string describe(UID const& item) {
+	return item.shortString();
+}
+
 template <class T>
 std::string describe( T const& item ) {
 	return item.toString();
@@ -257,6 +266,7 @@ struct Traceable<std::set<T>> : std::true_type {
 std::string printable( const StringRef& val );
 std::string printable( const std::string& val );
 std::string printable( const KeyRangeRef& range );
+std::string printable( const VectorRef<KeyRangeRef>& val);
 std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
@@ -289,6 +299,14 @@ struct KeyRangeRef {
 	bool contains( const KeyRef& key ) const { return begin <= key && key < end; }
 	bool contains( const KeyRangeRef& keys ) const { return begin <= keys.begin && keys.end <= end; }
 	bool intersects( const KeyRangeRef& keys ) const { return begin < keys.end && keys.begin < end; }
+	bool intersects(const VectorRef<KeyRangeRef>& keysVec) const {
+		for (const auto& keys : keysVec) {
+			if (intersects(keys)) {
+				return true;
+			}
+		}
+		return false;
+	}
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
@@ -745,14 +763,16 @@ struct TLogVersion {
 		// V3 was the introduction of spill by reference;
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
+		// V6 added span context to list of serialized mutations sent from proxy to tlogs
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
 		V5 = 5, // 6.3
+		V6 = 6, // 7.0
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V5,
-		MIN_RECRUITABLE = V4,
+		MAX_SUPPORTED = V6,
+		MIN_RECRUITABLE = V5,
 		DEFAULT = V5,
 	} version;
 
@@ -775,6 +795,7 @@ struct TLogVersion {
 		if (s == LiteralStringRef("3")) return V3;
 		if (s == LiteralStringRef("4")) return V4;
 		if (s == LiteralStringRef("5")) return V5;
+		if (s == LiteralStringRef("6")) return V6;
 		return default_error_or();
 	}
 };
@@ -985,7 +1006,9 @@ struct HealthMetrics {
 	};
 
 	int64_t worstStorageQueue;
+	int64_t limitingStorageQueue;
 	int64_t worstStorageDurabilityLag;
+	int64_t limitingStorageDurabilityLag;
 	int64_t worstTLogQueue;
 	double tpsLimit;
 	bool batchLimited;
@@ -993,17 +1016,15 @@ struct HealthMetrics {
 	std::map<UID, int64_t> tLogQueue;
 
 	HealthMetrics()
-		: worstStorageQueue(0)
-		, worstStorageDurabilityLag(0)
-		, worstTLogQueue(0)
-		, tpsLimit(0.0)
-		, batchLimited(false)
-	{}
+	  : worstStorageQueue(0), limitingStorageQueue(0), worstStorageDurabilityLag(0), limitingStorageDurabilityLag(0),
+	    worstTLogQueue(0), tpsLimit(0.0), batchLimited(false) {}
 
 	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput)
 	{
 		worstStorageQueue = hm.worstStorageQueue;
+		limitingStorageQueue = hm.limitingStorageQueue;
 		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
+		limitingStorageDurabilityLag = hm.limitingStorageDurabilityLag;
 		worstTLogQueue = hm.worstTLogQueue;
 		tpsLimit = hm.tpsLimit;
 		batchLimited = hm.batchLimited;
@@ -1018,19 +1039,16 @@ struct HealthMetrics {
 	}
 
 	bool operator==(HealthMetrics const& r) const {
-		return (
-			worstStorageQueue == r.worstStorageQueue &&
-			worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
-			worstTLogQueue == r.worstTLogQueue &&
-			storageStats == r.storageStats &&
-			tLogQueue == r.tLogQueue &&
-			batchLimited == r.batchLimited
-		);
+		return (worstStorageQueue == r.worstStorageQueue && limitingStorageQueue == r.limitingStorageQueue &&
+		        worstStorageDurabilityLag == r.worstStorageDurabilityLag &&
+		        limitingStorageDurabilityLag == r.limitingStorageDurabilityLag && worstTLogQueue == r.worstTLogQueue &&
+		        storageStats == r.storageStats && tLogQueue == r.tLogQueue && batchLimited == r.batchLimited);
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited, storageStats, tLogQueue);
+		serializer(ar, worstStorageQueue, worstStorageDurabilityLag, worstTLogQueue, tpsLimit, batchLimited,
+		           storageStats, tLogQueue, limitingStorageQueue, limitingStorageDurabilityLag);
 	}
 };
 

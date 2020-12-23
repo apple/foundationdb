@@ -34,6 +34,7 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
+#include "flow/network.h"
 
 //#define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
@@ -105,15 +106,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 		bytesReadInPreviousRound = 0;
 	}
 
-	virtual std::string description()
-	{
-		return "ConsistencyCheck";
-	}
+	std::string description() const override { return "ConsistencyCheck"; }
 
-	virtual Future<Void> setup(Database const& cx)
-	{
-		return _setup(cx, this);
-	}
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, ConsistencyCheckWorkload *self)
 	{
@@ -139,21 +134,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 		return Void();
 	}
 
-	virtual Future<Void> start(Database const& cx)
-	{
+	Future<Void> start(Database const& cx) override {
 		TraceEvent("ConsistencyCheck");
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx)
-	{
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
-	virtual void getMetrics( vector<PerfMetric>& m )
-	{
-
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	void testFailure(std::string message, bool isError = false)
 	{
@@ -365,9 +353,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 	}
 
-	//Get a list of storage servers from the master and compares them with the TLogs.
-	//If this is a quiescent check, then each master proxy needs to respond, otherwise only one needs to respond.
-	//Returns false if there is a failure (in this case, keyServersPromise will never be set)
+	// Get a list of storage servers from the master and compares them with the TLogs.
+	// If this is a quiescent check, then each commit proxy needs to respond, otherwise only one needs to respond.
+	// Returns false if there is a failure (in this case, keyServersPromise will never be set)
 	ACTOR Future<bool> getKeyServers(Database cx, ConsistencyCheckWorkload *self, Promise<std::vector<std::pair<KeyRange, vector<StorageServerInterface>>>> keyServersPromise)
 	{
 		state std::vector<std::pair<KeyRange, vector<StorageServerInterface>>> keyServers;
@@ -380,13 +368,14 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
-			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture(false));
+			state Reference<CommitProxyInfo> commitProxyInfo = wait(cx->getCommitProxiesFuture(false));
 			keyServerLocationFutures.clear();
-			for (int i = 0; i < proxyInfo->size(); i++)
+			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
-				    proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations)
+				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()), 2, 0));
+				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()), 2,
+				            0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -399,8 +388,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//If performing quiescent check, then all master proxies should be reachable.  Otherwise, only one needs to be reachable
 						if (self->performQuiescentChecks && !shards.present())
 						{
-							TraceEvent("ConsistencyCheck_MasterProxyUnavailable").detail("MasterProxyID", proxyInfo->getId(i));
-							self->testFailure("Master proxy unavailable");
+							TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
+							    .detail("CommitProxyID", commitProxyInfo->getId(i));
+							self->testFailure("Commit proxy unavailable");
 							return false;
 						}
 
@@ -1306,7 +1296,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for(int i = 0; i < all.size(); i++) {
-			if( all[i]->isReliable() && all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass ) {
+			if( all[i]->isReliable() && all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass && all[i]->protocolVersion == g_network->protocolVersion() ) {
 				if(!workerAddresses.count(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
 					return false;
@@ -1461,11 +1451,20 @@ struct ConsistencyCheckWorkload : TestWorkload
 			return false;
 		}
 
-		// Check proxy
-		ProcessClass::Fitness bestProxyFitness = getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Proxy);
-		for (const auto& masterProxy : db.client.masterProxies) {
-			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) != bestProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestProxyFitness", bestProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].processClass.machineClassFitness(ProcessClass::Proxy) : -1);
+		// Check commit proxy
+		ProcessClass::Fitness bestCommitProxyFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::CommitProxy);
+		for (const auto& commitProxy : db.client.commitProxies) {
+			if (!nonExcludedWorkerProcessMap.count(commitProxy.address()) ||
+			    nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
+			        ProcessClass::CommitProxy) != bestCommitProxyFitness) {
+				TraceEvent("ConsistencyCheck_CommitProxyNotBest")
+				    .detail("BestCommitProxyFitness", bestCommitProxyFitness)
+				    .detail("ExistingCommitProxyFitness",
+				            nonExcludedWorkerProcessMap.count(commitProxy.address())
+				                ? nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
+				                      ProcessClass::CommitProxy)
+				                : -1);
 				return false;
 			}
 		}

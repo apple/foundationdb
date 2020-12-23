@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'SimpleAtomicAdd'
+
+    [[test.workload]]
+    testName = 'SimpleAtomicAdd'
+    initialize = true
+    initialValue = 15
+    iterations = 200
+    addValue = 10

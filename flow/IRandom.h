@@ -66,7 +66,7 @@ class UID {
 public:
 	constexpr static FileIdentifier file_identifier = 15597147;
 	UID() { part[0] = part[1] = 0; }
-	UID( uint64_t a, uint64_t b ) { part[0]=a; part[1]=b; }
+	constexpr UID(uint64_t a, uint64_t b) : part{ a, b } {}
 	std::string toString() const;
 	std::string shortString() const;
 	bool isValid() const { return part[0] || part[1]; }
@@ -130,6 +130,7 @@ public:
 	virtual int randomInt(int min, int maxPlusOne) = 0;
 	virtual int64_t randomInt64(int64_t min, int64_t maxPlusOne) = 0;
 	virtual uint32_t randomUInt32() = 0;
+	virtual uint64_t randomUInt64() = 0;
 	virtual UID randomUniqueID() = 0;
 	virtual char randomAlphaNumeric()  = 0;
 	virtual std::string randomAlphaNumeric( int length ) = 0;
@@ -173,5 +174,8 @@ Reference<IRandom> deterministicRandom();
 // A random number generator that cannot be manually seeded and may be called in
 // non-deterministic contexts.
 Reference<IRandom> nondeterministicRandom();
+
+// Populates a buffer with a random sequence of bytes
+void generateRandomData(uint8_t* buffer, int length);
 
 #endif

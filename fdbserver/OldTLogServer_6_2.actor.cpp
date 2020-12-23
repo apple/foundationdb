@@ -76,7 +76,7 @@ struct AlternativeTLogQueueEntryRef {
 	Version knownCommittedVersion;
 	std::vector<TagsAndMessage>* alternativeMessages;
 
-	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(nullptr) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -680,8 +680,8 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 	state Version stopVersion = logData->version.get();
 
 	TEST(true); // TLog stopped by recovering master
-	TEST( logData->stopped );
-	TEST( !logData->stopped );
+	TEST( logData->stopped ); // logData already stopped
+	TEST( !logData->stopped ); // logData not yet stopped
 
 	TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("IsStopped", logData->stopped).detail("QueueCommitted", logData->queueCommittedVersion.get());
 
@@ -1371,7 +1371,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 ACTOR Future<std::vector<StringRef>> parseMessagesForTag( StringRef commitBlob, Tag tag, int logRouters ) {
 	// See the comment in LogSystem.cpp for the binary format of commitBlob.
 	state std::vector<StringRef> relevantMessages;
-	state BinaryReader rd(commitBlob, AssumeVersion(currentProtocolVersion));
+	state BinaryReader rd(commitBlob, AssumeVersion(g_network->protocolVersion()));
 	while (!rd.empty()) {
 		TagsAndMessage tagsAndMessage;
 		tagsAndMessage.loadFromArena(&rd, nullptr);
@@ -1689,7 +1689,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		if(sequenceData.isSet()) {
 			trackerData.duplicatePeeks++;
 			if(sequenceData.getFuture().get().first != reply.end) {
-				TEST(true); //tlog peek second attempt ended at a different version
+				TEST(true); //tlog peek second attempt ended at a different version (2)
 				req.reply.sendError(operation_obsolete());
 				return Void();
 			}
@@ -2753,7 +2753,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 	bool recovering = (req.recoverFrom.logSystemType == LogSystemType::tagPartitioned);
 
-	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, currentProtocolVersion, req.allTags, recovering ? "Recovered" : "Recruited") );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.txsTags, req.recruitmentID, g_network->protocolVersion(), req.allTags, recovering ? "Recovered" : "Recruited") );
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;

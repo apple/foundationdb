@@ -86,6 +86,7 @@ public:
 	}
 
 	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize);
 	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys);
 
 	void addReadConflictRange( KeyRangeRef const& keys );
@@ -142,6 +143,9 @@ public:
 	const TransactionInfo& getTransactionInfo() const {
 		return tr.info;
 	}
+
+	void setTransactionID(uint64_t id);
+	void setToken(uint64_t token);
 
 	// Read from the special key space readConflictRangeKeysRange
 	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);

@@ -59,7 +59,7 @@ ACTOR template <class T> Future<Void> buggifyDelayedAsyncVar( Reference<AsyncVar
 
 template <class T>
 Future<Void> buggifyDelayedAsyncVar( Reference<AsyncVar<T>> &var ) {
-	Reference<AsyncVar<T>> in( new AsyncVar<T> );
+	auto in = makeReference<AsyncVar<T>>();
 	auto f = buggifyDelayedAsyncVar(in, var);
 	var = in;
 	return f;

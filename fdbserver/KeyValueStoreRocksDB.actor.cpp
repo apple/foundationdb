@@ -27,6 +27,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = true;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
+		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
+	}
 	// Compact sstables when there's too much deleted stuff.
 	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
 	return options;
@@ -52,7 +55,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		explicit Writer(DB& db, UID id) : db(db), id(id) {}
 
-		~Writer() {
+		~Writer() override {
 			if (db) {
 				delete db;
 			}
@@ -72,9 +75,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			ThreadReturnPromise<Void> done;
 
-			double getTimeEstimate() {
-				return SERVER_KNOBS->COMMIT_TIME_ESTIMATE;
-			}
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(OpenAction& a) {
 			std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
@@ -85,24 +86,49 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 				a.done.sendError(statusToError(status));
 			} else {
+				TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Open");
 				a.done.send(Void());
 			}
 		}
 
+		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
+			VectorRef<KeyRangeRef>& deletes;
+			Arena& arena;
+
+			DeleteVisitor(VectorRef<KeyRangeRef>& deletes, Arena& arena) : deletes(deletes), arena(arena) {}
+
+			rocksdb::Status DeleteRangeCF(uint32_t /*column_family_id*/, const rocksdb::Slice& begin,
+			                              const rocksdb::Slice& end) override {
+				KeyRangeRef kr(toStringRef(begin), toStringRef(end));
+				deletes.push_back_deep(arena, kr);
+				return rocksdb::Status::OK();
+			}
+		};
+
 		struct CommitAction : TypedAction<Writer, CommitAction> {
 			std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 			ThreadReturnPromise<Void> done;
-			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CommitAction& a) {
+			Standalone<VectorRef<KeyRangeRef>> deletes;
+			DeleteVisitor dv(deletes, deletes.arena());
+			ASSERT(a.batchToCommit->Iterate(&dv).ok());
+			// If there are any range deletes, we should have added them to be deleted.
+			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
-			options.sync = true;
+			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 			auto s = db->Write(options, a.batchToCommit.get());
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
 				a.done.sendError(statusToError(s));
 			} else {
 				a.done.send(Void());
+				for (const auto& keyRange : deletes) {
+					auto begin = toSlice(keyRange.begin);
+					auto end = toSlice(keyRange.end);
+					ASSERT(db->SuggestCompactRange(db->DefaultColumnFamily(), &begin, &end).ok());
+				}
 			}
 		}
 
@@ -111,9 +137,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			bool deleteOnClose;
 			CloseAction(std::string path, bool deleteOnClose) : path(path), deleteOnClose(deleteOnClose) {}
-			double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 		void action(CloseAction& a) {
+			if (db == nullptr) {
+				a.done.send(Void());
+				return;
+			}
 			auto s = db->Close();
 			if (!s.ok()) {
 				TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Close");
@@ -121,8 +151,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.deleteOnClose) {
 				std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 					"default", getCFOptions() } };
-				rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				s = rocksdb::DestroyDB(a.path, getOptions(), defaultCF);
+				if (!s.ok()) {
+					TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Destroy");
+				} else {
+					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Destroy");
+				}
 			}
+			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
 	};
@@ -141,7 +177,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ReadValueAction(KeyRef key, Optional<UID> debugID)
 				: key(key), debugID(debugID)
 			{}
-			double getTimeEstimate() override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
 			Optional<TraceBatch> traceBatch;
@@ -171,7 +207,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID) : key(key), maxLength(maxLength), debugID(debugID) {};
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
 			rocksdb::PinnableSlice value;
@@ -201,7 +237,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			int rowLimit, byteLimit;
 			ThreadReturnPromise<Standalone<RangeResultRef>> result;
 			ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit) : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
-			virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
+			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
 			Standalone<RangeResultRef> result;
@@ -266,7 +302,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	unsigned nReaders = 16;
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -278,7 +313,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		writeThread = createGenericThreadPool();
 		readThreads = createGenericThreadPool();
 		writeThread->addThread(new Writer(db, id));
-		for (unsigned i = 0; i < nReaders; ++i) {
+		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(db));
 		}
 	}
@@ -370,16 +405,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() const override {
+		uint64_t live = 0;
+		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kEstimateLiveDataSize, &live));
+
 		int64_t free;
 		int64_t total;
-
-		uint64_t sstBytes = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kTotalSstFilesSize, &sstBytes));
-		uint64_t memtableBytes = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kSizeAllMemTables, &memtableBytes));
 		g_network->getDiskBytes(path, free, total);
 
-		return StorageBytes(free, total, sstBytes + memtableBytes, free);
+		return StorageBytes(free, total, live, free);
 	}
 };
 

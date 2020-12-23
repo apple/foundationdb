@@ -68,13 +68,13 @@ struct TestWorkload : NonCopyable, WorkloadContext {
 			phases |= TestWorkload::SETUP;
 	}
 	virtual ~TestWorkload() {};
-	virtual std::string description() = 0;
+	virtual std::string description() const = 0;
 	virtual Future<Void> setup( Database const& cx ) { return Void(); }
 	virtual Future<Void> start( Database const& cx ) = 0;
 	virtual Future<bool> check( Database const& cx ) = 0;
 	virtual void getMetrics( vector<PerfMetric>& m ) = 0;
 
-	virtual double getCheckTimeout() { return 3000; }
+	virtual double getCheckTimeout() const { return 3000; }
 
 	enum WorkloadPhase {
 		SETUP = 1,
@@ -103,17 +103,17 @@ struct KVWorkload : TestWorkload {
 
 		absentFrac = getOption( options, LiteralStringRef("absentFrac"), 0.0);
 	}
-	Key getRandomKey();
-	Key getRandomKey( double absentFrac );
-	Key getRandomKey( bool absent );
-	Key keyForIndex( uint64_t index );
-	Key keyForIndex( uint64_t index, bool absent );
+	Key getRandomKey() const;
+	Key getRandomKey(double absentFrac) const;
+	Key getRandomKey(bool absent) const;
+	Key keyForIndex(uint64_t index) const;
+	Key keyForIndex(uint64_t index, bool absent) const;
 };
 
 struct IWorkloadFactory {
 	static TestWorkload* create( std::string const& name, WorkloadContext const& wcx ) {
 		auto it = factories().find(name);
-		if (it == factories().end()) return NULL;  // or throw?
+		if (it == factories().end()) return nullptr;  // or throw?
 		return it->second->create(wcx);
 	}
 	static std::map<std::string, IWorkloadFactory*>& factories() {

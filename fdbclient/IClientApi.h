@@ -49,6 +49,8 @@ public:
 
 	virtual void addReadConflictRange(const KeyRangeRef& keys) = 0;
 	virtual ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
+	                                                                        int64_t chunkSize) = 0;
 
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
@@ -90,6 +92,7 @@ public:
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
+	virtual ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual void setupNetwork() = 0;

@@ -59,8 +59,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() { return "RemoveServersSafelyWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
+	std::string description() const override { return "RemoveServersSafelyWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		if( !enabled )
 			return Void();
 
@@ -128,19 +128,17 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if (!enabled)  return Void();
 		double delay = deterministicRandom()->random01() * (maxDelay-minDelay) + minDelay;
 		return workloadMain( this, cx, delay, toKill1, toKill2 );
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& ) {
-	}
+	void getMetrics(vector<PerfMetric>&) override {}
 
-	virtual std::set<AddressExclusion> getNetworks(std::vector<ISimulator::ProcessInfo*> const& processes)
-	{
+	std::set<AddressExclusion> getNetworks(std::vector<ISimulator::ProcessInfo*> const& processes) {
 		std::set<AddressExclusion>	processAddrs;
 
 		for (auto& processInfo : processes) {
@@ -151,8 +149,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// Get the list of processes whose ip:port or ip matches netAddrs.
 	// Note: item in netAddrs may be ip (representing a machine) or ip:port (representing a process)
-	virtual std::vector<ISimulator::ProcessInfo*> getProcesses(std::set<AddressExclusion> const& netAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> getProcesses(std::set<AddressExclusion> const& netAddrs) {
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
 		UID functionId = nondeterministicRandom()->randomUniqueID();
@@ -202,8 +199,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return processes;
 	}
 
-	virtual std::vector<ISimulator::ProcessInfo*> excludeAddresses(std::set<AddressExclusion> const& procAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> excludeAddresses(std::set<AddressExclusion> const& procAddrs) {
 		// Get the updated list of processes which may have changed due to reboots, deletes, etc
 		std::vector<ISimulator::ProcessInfo*>	procArray = getProcesses(procAddrs);
 
@@ -219,8 +215,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return procArray;
 	}
 
-	virtual std::vector<ISimulator::ProcessInfo*> includeAddresses(std::set<AddressExclusion> const& procAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> includeAddresses(std::set<AddressExclusion> const& procAddrs) {
 		// Get the updated list of processes which may have changed due to reboots, deletes, etc
 		std::vector<ISimulator::ProcessInfo*>	procArray = getProcesses(procAddrs);
 
@@ -240,8 +235,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// Return processes that are intersection of killAddrs and allServers and that are safe to kill together;
 	// killAddrs does not guarantee the addresses are safe to kill simultaneously.
-	virtual std::vector<ISimulator::ProcessInfo*> protectServers(std::set<AddressExclusion> const& killAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> protectServers(std::set<AddressExclusion> const& killAddrs) {
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
 		std::vector<AddressExclusion> killableAddrs;
@@ -277,7 +271,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			processesLeft.insert(processesLeft.end(), killProcArray.begin(), killProcArray.end());
 
 			// Check if we can kill the added process
-			bCanKillProcess = g_simulator.canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, NULL);
+			bCanKillProcess = g_simulator.canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, nullptr);
 
 			// Remove the added processes
 			processesLeft.resize(processesLeft.size() - killProcArray.size());
@@ -331,7 +325,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		self->excludeAddresses(toKill1);
 
-		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, NULL, false), self->kill1Timeout ) );
+		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, nullptr, false), self->kill1Timeout ) );
 
 		bClearedFirst = result.present();
 		TraceEvent("RemoveAndKill")
@@ -365,7 +359,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// so we expect to succeed after a finite amount of time
 		TraceEvent("RemoveAndKill").detail("Step", "exclude second list").detail("ToKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
 			.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL, true), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
+		wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : nullptr, true), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
 
 		TraceEvent("RemoveAndKill").detail("Step", "excluded second list").detail("KillTotal", toKill2.size()).detail("ToKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 
@@ -380,8 +374,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		return Void();
 	}
 
-	virtual std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs)
-	{
+	std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs) {
 		UID functionId = nondeterministicRandom()->randomUniqueID();
 		bool removeViaClear = !BUGGIFY;
 		std::vector<ISimulator::ProcessInfo*>	killProcArray;
@@ -455,6 +448,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			if (coordinators.size() > 2) {
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);
 				coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);
+				TraceEvent("RemoveAndKill", functionId)
+				    .detail("Step", "ChooseCoordinator")
+				    .detail("Coordinator", describe(coordExcl));
 			}
 		}
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
@@ -464,11 +460,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				state bool safe = false;
 				state std::set<AddressExclusion> failSet =
 				    random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));
-				if (coordExcl.isValid()) {
-					failSet.insert(coordExcl);
-				}
 				toKillMarkFailedArray.resize(failSet.size());
 				std::copy(failSet.begin(), failSet.end(), toKillMarkFailedArray.begin());
+				std::sort(toKillMarkFailedArray.begin(), toKillMarkFailedArray.end());
+				if (coordExcl.isValid()) {
+					toKillMarkFailedArray.push_back(coordExcl);
+				}
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "SafetyCheck")
 				    .detail("Exclusions", describe(toKillMarkFailedArray));
@@ -507,6 +504,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				toKillMarkFailedArray.erase(removeServer);
 			}
 			ASSERT(toKillMarkFailedArray.size() <= toKillArray.size());
+			std::sort(toKillArray.begin(), toKillArray.end());
 			auto removeServer = toKill.begin();
 			TraceEvent("RemoveAndKill", functionId)
 				.detail("Step", "ReplaceNonFailedKillSet")
@@ -549,7 +547,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			while (true) {
 				cycle ++;
 				nQuorum = ((g_simulator.desiredCoordinators+1)/2)*2-1;
-				CoordinatorsResult::Type result = wait( changeQuorum( cx, autoQuorumChange(nQuorum) ) );
+				CoordinatorsResult result = wait(changeQuorum(cx, autoQuorumChange(nQuorum)));
 				TraceEvent(result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES ? SevInfo : SevWarn, "RemoveAndKillQuorumChangeResult").detail("Step", "coordinators auto").detail("Result", (int)result).detail("Attempt", cycle).detail("Quorum", nQuorum).detail("DesiredCoordinators", g_simulator.desiredCoordinators);
 				if (result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES)
 					break;

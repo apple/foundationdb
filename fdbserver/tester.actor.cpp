@@ -78,11 +78,11 @@ Key doubleToTestKey(double p, const KeyRef& prefix) {
 	return doubleToTestKey(p).withPrefix(prefix);
 }
 
-Key KVWorkload::getRandomKey() {
+Key KVWorkload::getRandomKey() const {
 	return getRandomKey(absentFrac);
 }
 
-Key KVWorkload::getRandomKey(double absentFrac) {
+Key KVWorkload::getRandomKey(double absentFrac) const {
 	if ( absentFrac > 0.0000001 ) {
 		return getRandomKey(deterministicRandom()->random01() < absentFrac);
 	} else {
@@ -90,11 +90,11 @@ Key KVWorkload::getRandomKey(double absentFrac) {
 	}
 }
 
-Key KVWorkload::getRandomKey(bool absent) {
+Key KVWorkload::getRandomKey(bool absent) const {
 	return keyForIndex(deterministicRandom()->randomInt( 0, nodeCount ), absent);
 }
 
-Key KVWorkload::keyForIndex( uint64_t index ) {
+Key KVWorkload::keyForIndex(uint64_t index) const {
 	if ( absentFrac > 0.0000001 ) {
 		return keyForIndex(index, deterministicRandom()->random01() < absentFrac);
 	} else {
@@ -102,7 +102,7 @@ Key KVWorkload::keyForIndex( uint64_t index ) {
 	}
 }
 
-Key KVWorkload::keyForIndex( uint64_t index, bool absent ) {
+Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	int adjustedKeyBytes = (absent) ? (keyBytes + 1) : keyBytes;
 	Key result = makeString( adjustedKeyBytes );
 	uint8_t* data = mutateString( result );
@@ -254,32 +254,34 @@ struct CompoundWorkload : TestWorkload {
 	CompoundWorkload( WorkloadContext& wcx ) : TestWorkload( wcx ) {}
 	CompoundWorkload* add( TestWorkload* w ) { workloads.push_back(w); return this; }
 
-	virtual ~CompoundWorkload() { for(int w=0; w<workloads.size(); w++) delete workloads[w]; }
-	virtual std::string description() {
+	~CompoundWorkload() {
+		for (int w = 0; w < workloads.size(); w++) delete workloads[w];
+	}
+	std::string description() const override {
 		std::string d;
 		for(int w=0; w<workloads.size(); w++)
 			d += workloads[w]->description() + (w==workloads.size()-1?"":";");
 		return d;
 	}
-	virtual Future<Void> setup( Database const& cx ) {
+	Future<Void> setup(Database const& cx) override {
 		vector<Future<Void>> all;
 		for(int w=0; w<workloads.size(); w++)
 			all.push_back( workloads[w]->setup(cx) );
 		return waitForAll(all);
 	}
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		vector<Future<Void>> all;
 		for(int w=0; w<workloads.size(); w++)
 			all.push_back( workloads[w]->start(cx) );
 		return waitForAll(all);
 	}
-	virtual Future<bool> check( Database const& cx ) {
+	Future<bool> check(Database const& cx) override {
 		vector<Future<bool>> all;
 		for(int w=0; w<workloads.size(); w++)
 			all.push_back( workloads[w]->check(cx) );
 		return allTrue(all);
 	}
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		for(int w=0; w<workloads.size(); w++) {
 			vector<PerfMetric> p;
 			workloads[w]->getMetrics(p);
@@ -287,7 +289,7 @@ struct CompoundWorkload : TestWorkload {
 				m.push_back( p[i].withPrefix( workloads[w]->description()+"." ) );
 		}
 	}
-	virtual double getCheckTimeout() {
+	double getCheckTimeout() const override {
 		double m = 0;
 		for(int w=0; w<workloads.size(); w++)
 			m = std::max( workloads[w]->getCheckTimeout(), m );
@@ -462,6 +464,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 			checkReq = req;
 			if (!checkResult.present()) {
 				try {
+					TraceEvent("TestChecking", workIface.id()).detail("Workload", workload->description());
 					bool check = wait( timeoutError( workload->check(cx), workload->getCheckTimeout() ) );
 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
@@ -473,6 +476,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 						.detail("Workload", workload->description());
 					//ok = false;
 				}
+				TraceEvent("TestCheckComplete", workIface.id()).detail("Workload", workload->description());
 			}
 
 			sendResult( checkReq, checkResult );
@@ -887,6 +891,9 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{"minimumRegions", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedMinimumRegions", "");
 		}},
+	{"logAntiQuorum", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedLogAntiQuorum", "");
+		}},
 	{"buggify", [](const std::string& value) {
 			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		}},
@@ -901,6 +908,9 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 			// else { } It is enable by default for tester
 			TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
 		}},
+	{"startIncompatibleProcess", [](const std::string& value) {
+			TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value);
+		}}
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1313,8 +1323,8 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_type_t whatToRun, test_location_t at, 
 		int minTestersExpected, std::string fileName, StringRef startingConfiguration, LocalityData locality ) {
 	state vector<TestSpec> testSpecs;
-	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
-	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
+	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
+	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	vector<Future<Void>> actors;
 	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
 	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
@@ -1361,7 +1371,7 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 
 	Future<Void> tests;
 	if (at == TEST_HERE) {
-		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
+		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		vector<TesterInterface> iTesters(1);
 		actors.push_back( reportErrors(monitorServerDBInfo( cc, LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
 		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );

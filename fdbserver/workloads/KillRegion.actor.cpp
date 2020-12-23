@@ -40,22 +40,21 @@ struct KillRegionWorkload : TestWorkload {
 		g_simulator.usableRegions = 1;
 	}
 
-	virtual std::string description() { return "KillRegionWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) {
+	std::string description() const override { return "KillRegionWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		if(enabled) {
 			return _setup( this, cx );
 		}
 		return Void();
 	}
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		if(enabled) {
 			return killRegion( this, cx );
 		}
 		return Void();
 	}
-	virtual Future<bool> check( Database const& cx ) { return true; }
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-	}
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> _setup( KillRegionWorkload *self, Database cx ) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin");

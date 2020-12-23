@@ -28,7 +28,9 @@
 struct HealthMetricsApiWorkload : TestWorkload {
 	// Performance Metrics
 	int64_t worstStorageQueue = 0;
+	int64_t worstLimitingStorageQueue = 0;
 	int64_t worstStorageDurabilityLag = 0;
+	int64_t worstLimitingStorageDurabilityLag = 0;
 	int64_t worstTLogQueue = 0;
 	int64_t detailedWorstStorageQueue = 0;
 	int64_t detailedWorstStorageDurabilityLag = 0;
@@ -53,7 +55,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		maxAllowedStaleness = getOption(options, LiteralStringRef("maxAllowedStaleness"), 60.0);
 	}
 
-	virtual std::string description() { return HealthMetricsApiWorkload::NAME; }
+	std::string description() const override { return HealthMetricsApiWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
 		if (!self->sendDetailedHealthMetrics) {
@@ -64,14 +66,14 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		}
 		return Void();
 	}
-	virtual Future<Void> setup(Database const& cx) { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
 		wait(timeout(healthMetricsChecker(cx, self), self->testDuration, Void()));
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	virtual Future<bool> check(Database const& cx) {
+	Future<bool> check(Database const& cx) override {
 		if (healthMetricsStoppedUpdating) {
 			TraceEvent(SevError, "HealthMetricsStoppedUpdating");
 			return false;
@@ -91,7 +93,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		if (!correctHealthMetricsState) {
 			TraceEvent(SevError, "IncorrectHealthMetricsState")
 			    .detail("WorstStorageQueue", worstStorageQueue)
+			    .detail("WorstLimitingStorageQueue", worstLimitingStorageQueue)
 			    .detail("WorstStorageDurabilityLag", worstStorageDurabilityLag)
+			    .detail("WorstLimitingStorageDurabilityLag", worstLimitingStorageDurabilityLag)
 			    .detail("WorstTLogQueue", worstTLogQueue)
 			    .detail("DetailedWorstStorageQueue", detailedWorstStorageQueue)
 			    .detail("DetailedWorstStorageDurabilityLag", detailedWorstStorageDurabilityLag)
@@ -103,7 +107,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		return correctHealthMetricsState;
 	}
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back(PerfMetric("WorstStorageQueue", worstStorageQueue, true));
 		m.push_back(PerfMetric("DetailedWorstStorageQueue", detailedWorstStorageQueue, true));
 		m.push_back(PerfMetric("WorstStorageDurabilityLag", worstStorageDurabilityLag, true));
@@ -128,13 +132,19 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			healthMetrics = newHealthMetrics;
 
 			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
+			self->worstLimitingStorageQueue =
+			    std::max(self->worstLimitingStorageQueue, healthMetrics.limitingStorageQueue);
 			self->worstStorageDurabilityLag =
 			    std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
+			self->worstLimitingStorageDurabilityLag =
+			    std::max(self->worstLimitingStorageDurabilityLag, healthMetrics.limitingStorageDurabilityLag);
 			self->worstTLogQueue = std::max(self->worstTLogQueue, healthMetrics.worstTLogQueue);
 
 			TraceEvent("HealthMetrics")
 			    .detail("WorstStorageQueue", healthMetrics.worstStorageQueue)
+			    .detail("LimitingStorageQueue", healthMetrics.limitingStorageQueue)
 			    .detail("WorstStorageDurabilityLag", healthMetrics.worstStorageDurabilityLag)
+			    .detail("LimitingStorageDurabilityLag", healthMetrics.limitingStorageDurabilityLag)
 			    .detail("WorstTLogQueue", healthMetrics.worstTLogQueue)
 			    .detail("TpsLimit", healthMetrics.tpsLimit);
 

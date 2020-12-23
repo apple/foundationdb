@@ -1472,10 +1472,11 @@ public:
 
 		// If the page is still being read then it's not also being written because a write places
 		// the new content into readFuture when the write is launched, not when it is completed.
-		// Read/write ordering is being enforced waiting readers will not see the new write.  This
+		// Read/write ordering is being enforced so waiting readers will not see the new write.  This
 		// is necessary for remap erasure to work correctly since the oldest version of a page, located
-		// at the original page ID, could have a pending read when that version is expired and the write
-		// of the next newest version over top of the original page begins.
+		// at the original page ID, could have a pending read when that version is expired (after which 
+		// future reads of the version are not allowed) and the write of the next newest version over top
+		// of the original page begins.
 		if (!cacheEntry.initialized()) {
 			cacheEntry.writeFuture = writePhysicalPage(pageID, data);
 		} else if (cacheEntry.reading()) {
@@ -1718,7 +1719,7 @@ public:
 				secondType = RemappedPage::NONE;
 			} else {
 				secondType = RemappedPage::getTypeOf(nextEntry->second);
-				secondAfterOldestRetainedVersion = nextEntry->first >= oldestRetainedVersion;
+				secondAfterOldestRetainedVersion = nextEntry->first > oldestRetainedVersion;
 			}
 		} else {
 			ASSERT(iVersionPagePair->second == invalidLogicalPageID);
@@ -1767,6 +1768,10 @@ public:
 			self->filename.c_str(), p.toString().c_str(), secondType, ::toString(*iVersionPagePair).c_str(), oldestRetainedVersion);
 
 		if(copyNewToOriginal) {
+			if(g_network->isSimulated()) {
+				ASSERT(self->remapDestinationsSimOnly.count(p.originalPageID) == 0);
+				self->remapDestinationsSimOnly.insert(p.originalPageID);
+			}
 			debug_printf("DWALPager(%s) remapCleanup copy %s\n", self->filename.c_str(), p.toString().c_str());
 
 			// Read the data from the page that the original was mapped to
@@ -1829,7 +1834,8 @@ public:
 		state RemappedPage cutoff(oldestRetainedVersion - self->remapCleanupWindow);
 
 		// Minimum version we must pop to before obeying stop command.
-		state Version minStopVersion = cutoff.version - (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG);
+		state Version minStopVersion = cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10) : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
+		self->remapDestinationsSimOnly.clear();
 
 		loop {
 			state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
@@ -2142,6 +2148,7 @@ private:
 
 	RemapQueueT remapQueue;
 	Version remapCleanupWindow;
+	std::unordered_set<PhysicalPageID> remapDestinationsSimOnly;
 
 	struct SnapshotEntry {
 		Version version;
@@ -2217,10 +2224,10 @@ Reference<IPagerSnapshot> DWALPager::getReadSnapshot(Version v) {
 
 void DWALPager::addLatestSnapshot() {
 	Promise<Void> expired;
-	snapshots.push_back({ pLastCommittedHeader->committedVersion, expired,
-	                      Reference<DWALPagerSnapshot>(new DWALPagerSnapshot(this, pLastCommittedHeader->getMetaKey(),
-	                                                                         pLastCommittedHeader->committedVersion,
-	                                                                         expired.getFuture())) });
+	snapshots.push_back(
+	    { pLastCommittedHeader->committedVersion, expired,
+	      makeReference<DWALPagerSnapshot>(this, pLastCommittedHeader->getMetaKey(),
+	                                       pLastCommittedHeader->committedVersion, expired.getFuture()) });
 }
 
 // TODO: Move this to a flow header once it is mature.
@@ -2974,7 +2981,7 @@ struct InPlaceArray {
 };
 #pragma pack(pop)
 
-class VersionedBTree : public IVersionedStore {
+class VersionedBTree final : public IVersionedStore {
 public:
 	// The first possible internal record possible in the tree
 	static RedwoodRecordRef dbBegin;
@@ -3863,19 +3870,19 @@ private:
 
 		virtual ~SuperPage() { delete[] m_data; }
 
-		virtual Reference<IPage> clone() const {
+		Reference<IPage> clone() const override {
 			return Reference<IPage>(new SuperPage({ Reference<const IPage>::addRef(this) }));
 		}
 
-		void addref() const { ReferenceCounted<SuperPage>::addref(); }
+		void addref() const override { ReferenceCounted<SuperPage>::addref(); }
 
-		void delref() const { ReferenceCounted<SuperPage>::delref(); }
+		void delref() const override { ReferenceCounted<SuperPage>::delref(); }
 
-		int size() const { return m_size; }
+		int size() const override { return m_size; }
 
-		uint8_t const* begin() const { return m_data; }
+		uint8_t const* begin() const override { return m_data; }
 
-		uint8_t* mutate() { return m_data; }
+		uint8_t* mutate() override { return m_data; }
 
 	private:
 		uint8_t* m_data;
@@ -4989,7 +4996,7 @@ public:
 			  : parent(toCopy.parent), pageID(toCopy.pageID), page(toCopy.page), cursor(toCopy.cursor) {}
 
 			// Convenience method for copying a PageCursor
-			Reference<PageCursor> copy() const { return Reference<PageCursor>(new PageCursor(*this)); }
+			Reference<PageCursor> copy() const { return makeReference<PageCursor>(*this); }
 
 			const BTreePage* btPage() const { return (const BTreePage*)page->begin(); }
 
@@ -5019,7 +5026,7 @@ public:
 				}
 
 				return map(child, [=](Reference<const IPage> page) {
-					return Reference<PageCursor>(new PageCursor(id, page, Reference<PageCursor>::addRef(this)));
+					return makeReference<PageCursor>(id, page, Reference<PageCursor>::addRef(this));
 				});
 			}
 
@@ -5095,7 +5102,7 @@ public:
 			// Otherwise read the root page
 			Future<Reference<const IPage>> root = readPage(pager, rootPageID, &dbBegin, &dbEnd);
 			return map(root, [=](Reference<const IPage> p) {
-				pageCursor = Reference<PageCursor>(new PageCursor(rootPageID, p));
+				pageCursor = makeReference<PageCursor>(rootPageID, p);
 				return Void();
 			});
 		}
@@ -5683,12 +5690,13 @@ public:
 	  : m_filePrefix(filePrefix), m_concurrentReads(new FlowLock(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS)) {
 		// TODO: This constructor should really just take an IVersionedStore
 
+		int pageSize = BUGGIFY ? deterministicRandom()->randomInt(1000, 4096*4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
 		int64_t pageCacheBytes = g_network->isSimulated()
-			                     ? (BUGGIFY ? FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+			                     ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K) : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
 			                     : FLOW_KNOBS->PAGE_CACHE_4K;
 		Version remapCleanupWindow = BUGGIFY ? deterministicRandom()->randomInt64(0, 1000) : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW;
 
-		IPager2* pager = new DWALPager(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE, filePrefix, pageCacheBytes, remapCleanupWindow);
+		IPager2* pager = new DWALPager(pageSize, filePrefix, pageCacheBytes, remapCleanupWindow);
 		m_tree = new VersionedBTree(pager, filePrefix);
 		m_init = catchError(init_impl(this));
 	}
@@ -7235,7 +7243,7 @@ TEST_CASE("!/redwood/correctness/btree") {
 	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
 
 	state int64_t targetPageOps = shortTest ? 50000 : 1000000;
-	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .01);
+	state bool pagerMemoryOnly = shortTest && (deterministicRandom()->random01() < .001);
 	state int maxKeySize = deterministicRandom()->randomInt(1, pageSize * 2);
 	state int maxValueSize = randomSize(pageSize * 25);
 	state int maxCommitSize = shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6));
@@ -7244,10 +7252,9 @@ TEST_CASE("!/redwood/correctness/btree") {
 	state double clearPostSetProbability = deterministicRandom()->random01() * .1;
 	state double coldStartProbability = pagerMemoryOnly ? 0 : (deterministicRandom()->random01() * 0.3);
 	state double advanceOldVersionProbability = deterministicRandom()->random01();
-	state int64_t cacheSizeBytes =
-	    pagerMemoryOnly ? 2e9 : (BUGGIFY ? deterministicRandom()->randomInt(1, 10 * pageSize) : 0);
+	state int64_t cacheSizeBytes = pagerMemoryOnly ? 2e9 : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 2 : 10000) + 1));
 	state Version versionIncrement = deterministicRandom()->randomInt64(1, 1e8);
-	state Version remapCleanupWindow = deterministicRandom()->randomInt64(0, versionIncrement * 50);
+	state Version remapCleanupWindow = BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50);
 	state int maxVerificationMapEntries = 300e3;
 
 	printf("\n");

@@ -46,7 +46,7 @@ class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 public:
 	static void init() {
 		eio_set_max_parallel(FLOW_KNOBS->EIO_MAX_PARALLELISM);
-		if (eio_init( &eio_want_poll, NULL )) {
+		if (eio_init( &eio_want_poll, nullptr )) {
 			TraceEvent("EioInitError").detail("ErrorNo", errno);
 			throw platform_error(); 
 		}
@@ -112,8 +112,8 @@ public:
 		return statdata.st_mtime;
 	}
 
-	virtual void addref() { ReferenceCounted<AsyncFileEIO>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileEIO>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileEIO>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileEIO>::delref(); }
 
 	int64_t debugFD() const override { return fd; }
 
@@ -172,11 +172,11 @@ public:
 
 	static Future<Void> async_fdatasync( int fd ) {
 		// Used by AsyncFileKAIO, since kernel AIO doesn't really implement fdatasync yet
-		return sync_impl( fd, Reference<ErrorInfo>(new ErrorInfo) );
+		return sync_impl(fd, makeReference<ErrorInfo>());
 	}
 	static Future<Void> async_fsync( int fd ) {
 		// Used by AsyncFileKAIO, since kernel AIO doesn't really implement fsync yet
-		return sync_impl( fd, Reference<ErrorInfo>(new ErrorInfo), true );
+		return sync_impl(fd, makeReference<ErrorInfo>(), true);
 	}
 	ACTOR static Future<Void> waitAndAtomicRename( Future<Void> fsync, std::string part_filename, std::string final_filename ) {
 		// First wait for the data in the part file to be durable
@@ -423,8 +423,8 @@ private:
 
 	static void eio_want_poll() {
 		want_poll = 1;
-		// SOMEDAY: NULL for deferred error, no analysis of correctness (itp)
-		onMainThreadVoid([](){ poll_eio(); }, NULL, TaskPriority::PollEIO);
+		// SOMEDAY: nullptr for deferred error, no analysis of correctness (itp)
+		onMainThreadVoid([](){ poll_eio(); }, nullptr, TaskPriority::PollEIO);
 	}
 
 	static int eio_callback( eio_req* req ) {

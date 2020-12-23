@@ -70,13 +70,13 @@ struct PingWorkload : TestWorkload {
 		actorCount = getOption( options, LiteralStringRef("actorCount"), 1 );
 	}
 
-	virtual std::string description() { return "PingWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { 
+	std::string description() const override { return "PingWorkload"; }
+	Future<Void> setup(Database const& cx) override {
 		if (pingWorkers || !registerInterface)
 			return Void();
 		return persistInterface( this, cx );
 	}
-	virtual Future<Void> start( Database const& cx ) {
+	Future<Void> start(Database const& cx) override {
 		vector<Future<Void>> clients;
 		if (pingWorkers) {
 			clients.push_back( workerPinger( this ) );
@@ -92,9 +92,9 @@ struct PingWorkload : TestWorkload {
 		return timeout( waitForAll(clients), testDuration, Void() );//delay( testDuration );
 	}
 
-	virtual Future<bool> check( Database const& cx ) { return true; }
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
+	void getMetrics(vector<PerfMetric>& m) override {
 		m.push_back( messages.getMetric() );
 		m.push_back( PerfMetric( "Avg Latency (ms)", 1000 * totalMessageLatency.getValue() / messages.getValue(), true ) );
 		m.push_back( maxMessageLatency.getMetric() );

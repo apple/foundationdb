@@ -91,6 +91,10 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
 
 #pragma pack(push, 4)
+    typedef struct key {
+        const uint8_t* key;
+        int key_length;
+    } FDBKey;
 #if FDB_API_VERSION >= 700
     typedef struct keyvalue {
         const uint8_t* key;
@@ -133,6 +137,9 @@ extern "C" {
     fdb_future_get_int64( FDBFuture* f, int64_t* out );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_uint64( FDBFuture* f, uint64_t* out );
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
                         int* out_key_length );
 
@@ -146,6 +153,9 @@ extern "C" {
     fdb_future_get_keyvalue_array( FDBFuture* f, FDBKeyValue const** out_kv,
                                    int* out_count, fdb_bool_t* out_more );
 #endif
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
+    fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array,
+                                   int* out_count);
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* f,
                             const char*** out_strings, int* out_count);
@@ -241,6 +251,9 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_transaction_get_approximate_size(FDBTransaction* tr);
 
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_get_server_protocol(const char* clusterFilePath);
+
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
@@ -259,6 +272,10 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
         int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length);
+
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size);
 
     #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
     #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

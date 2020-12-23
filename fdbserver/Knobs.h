@@ -37,14 +37,14 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
+	                                  // often, so that versions always advance smoothly
 
 	// TLogs
-	double TLOG_TIMEOUT;  // tlog OR master proxy failure - master's reaction time
+	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
-	double UNFLUSHED_DATA_RATIO;
 	int DESIRED_TOTAL_BYTES;
 	int DESIRED_UPDATE_BYTES;
 	double UPDATE_DELAY;
@@ -99,6 +99,7 @@ public:
 	double PUSH_STATS_INTERVAL;
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
+	int TLOG_POP_BATCH_SIZE;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -191,6 +192,9 @@ public:
 	int64_t DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
 	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
 	double DD_SS_STUCK_TIME_LIMIT; // If a storage server is not getting new versions for this amount of time, then it becomes undesired.
+	int DD_TEAMS_INFO_PRINT_INTERVAL;
+	int DD_TEAMS_INFO_PRINT_YIELD_COUNT;
+	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 
 	// TeamRemover to remove redundant teams
 	bool TR_FLAG_DISABLE_MACHINE_TEAM_REMOVER; // disable the machineTeamRemover actor
@@ -250,7 +254,10 @@ public:
 
 	// KeyValueStoreRocksDB
 	int ROCKSDB_BACKGROUND_PARALLELISM;
+	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
+	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
+	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -262,7 +269,7 @@ public:
 	double POLLING_FREQUENCY;
 	double HEARTBEAT_FREQUENCY;
 
-	// Master Proxy
+	// Commit CommitProxy
 	double START_TRANSACTION_BATCH_INTERVAL_MIN;
 	double START_TRANSACTION_BATCH_INTERVAL_MAX;
 	double START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
@@ -299,12 +306,17 @@ public:
 	double REQUIRED_MIN_RECOVERY_DURATION;
 	bool ALWAYS_CAUSAL_READ_RISKY;
 	int MAX_COMMIT_UPDATES;
-	double MIN_PROXY_COMPUTE;
 	double MAX_PROXY_COMPUTE;
+	double MAX_COMPUTE_PER_OPERATION;
 	int PROXY_COMPUTE_BUCKETS;
 	double PROXY_COMPUTE_GROWTH_RATE;
 	int TXN_STATE_SEND_AMOUNT;
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
+
+	int RESET_MASTER_BATCHES;
+	int RESET_RESOLVER_BATCHES;
+	double RESET_MASTER_DELAY;
+	double RESET_RESOLVER_DELAY;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -368,7 +380,7 @@ public:
 	int EXPECTED_MASTER_FITNESS;
 	int EXPECTED_TLOG_FITNESS;
 	int EXPECTED_LOG_ROUTER_FITNESS;
-	int EXPECTED_PROXY_FITNESS;
+	int EXPECTED_COMMIT_PROXY_FITNESS;
 	int EXPECTED_GRV_PROXY_FITNESS;
 	int EXPECTED_RESOLVER_FITNESS;
 	double RECRUITMENT_TIMEOUT;
@@ -495,10 +507,14 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
-	int64_t MIN_TAG_PAGES_RATE;
+	int64_t MIN_TAG_READ_PAGES_RATE;
+	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
 	int64_t READ_COST_BYTE_FACTOR;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
+	bool REPORT_DD_METRICS;
+	double DD_METRICS_REPORT_INTERVAL;
+	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 
 	//Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -531,6 +547,7 @@ public:
 	double MAX_STATUS_REQUESTS_PER_SECOND;
 	int CONFIGURATION_ROWS_TO_FETCH;
 	bool DISABLE_DUPLICATE_LOG_WARNING;
+	double HISTOGRAM_REPORT_INTERVAL;
 
 	// IPager
 	int PAGER_RESERVED_PAGES;
@@ -545,6 +562,7 @@ public:
 	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 	// Fast Restore
+	// TODO: After 6.3, review FR knobs, remove unneeded ones and change default value
 	int64_t FASTRESTORE_FAILURE_TIMEOUT;
 	int64_t FASTRESTORE_HEARTBEAT_INTERVAL;
 	double FASTRESTORE_SAMPLING_PERCENT;
@@ -592,6 +610,8 @@ public:
 	int FASTRESTORE_SCHED_SEND_FUTURE_VB_REQS_BATCH; // number of future VB sendLoadingParam requests to process at once
 	int FASTRESTORE_NUM_TRACE_EVENTS;
 	bool FASTRESTORE_EXPENSIVE_VALIDATION; // when set true, performance will be heavily affected
+	double FASTRESTORE_WRITE_BW_MB; // target aggregated write bandwidth from all appliers
+	double FASTRESTORE_RATE_UPDATE_SECONDS; // how long to update appliers target write rate
 
 	int REDWOOD_DEFAULT_PAGE_SIZE;  // Page size for new Redwood files
 	int REDWOOD_KVSTORE_CONCURRENT_READS;  // Max number of simultaneous point or range reads in progress.
@@ -609,7 +629,7 @@ public:
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	ServerKnobs();
-	void initialize(bool randomize = false, ClientKnobs* clientKnobs = NULL, bool isSimulated = false);
+	void initialize(bool randomize = false, ClientKnobs* clientKnobs = nullptr, bool isSimulated = false);
 };
 
 extern ServerKnobs const* SERVER_KNOBS;

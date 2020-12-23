@@ -69,7 +69,7 @@ REGISTER_TASKFUNC(AddTaskFunc);
 
 struct IdleTaskFunc : TaskFuncBase {
 	static StringRef name;
-	static const uint32_t version = 1;
+	static constexpr uint32_t version = 1;
 
 	StringRef getName() const { return name; };
 	Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -513,7 +513,7 @@ public:
 	}
 
 	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
-		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+		state Reference<AsyncVar<bool>> paused = makeReference<AsyncVar<bool>>(true);
 		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 		taskBucket->metricLogger = traceCounters("TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY, &taskBucket->cc);
 		loop {
@@ -528,7 +528,7 @@ public:
 	static Future<Standalone<StringRef>> addIdle(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
-		Reference<Task> newTask(new Task(IdleTaskFunc::name, IdleTaskFunc::version));
+		auto newTask = makeReference<Task>(IdleTaskFunc::name, IdleTaskFunc::version);
 		return taskBucket->addTask(tr, newTask);
 	}
 
@@ -991,7 +991,7 @@ Future<Void> FutureBucket::clear(Reference<ReadYourWritesTransaction> tr){
 Reference<TaskFuture> FutureBucket::future(Reference<ReadYourWritesTransaction> tr){
 	setOptions(tr);
 
-	Reference<TaskFuture> taskFuture(new TaskFuture(Reference<FutureBucket>::addRef(this)));
+	auto taskFuture = makeReference<TaskFuture>(Reference<FutureBucket>::addRef(this));
 	taskFuture->addBlock(tr, StringRef());
 
 	return taskFuture;
@@ -1002,7 +1002,7 @@ Future<bool> FutureBucket::isEmpty(Reference<ReadYourWritesTransaction> tr) {
 }
 
 Reference<TaskFuture> FutureBucket::unpack(Key key) {
-	return Reference<TaskFuture>(new TaskFuture(Reference<FutureBucket>::addRef(this), key));
+	return makeReference<TaskFuture>(Reference<FutureBucket>::addRef(this), key);
 }
 
 class TaskFutureImpl {
@@ -1028,7 +1028,7 @@ public:
 		for (int i = 0; i < vectorFuture.size(); ++i) {
 			Key key = StringRef(deterministicRandom()->randomUniqueID().toString());
 			taskFuture->addBlock(tr, key);
-			Reference<Task> task(new Task());
+			auto task = makeReference<Task>();
 			task->params[Task::reservedTaskParamKeyType] = LiteralStringRef("UnblockFuture");
 			task->params[Task::reservedTaskParamKeyFuture] = taskFuture->key;
 			task->params[Task::reservedTaskParamKeyBlockID] = key;
@@ -1111,7 +1111,7 @@ public:
 				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make a new task
 				if(taskID.size() != 0 && taskID != lastTaskID) {
 					actions.push_back(performAction(tr, taskBucket, taskFuture, task));
-					task = Reference<Task>(new Task());
+					task = makeReference<Task>();
 				}
 				task->params[key] = s.value;
 				lastTaskID = taskID;
@@ -1242,6 +1242,6 @@ ACTOR Future<Key> getCompletionKey(TaskCompletionKey *self, Future<Reference<Tas
 }
 
 Future<Key> TaskCompletionKey::get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket) {
-	ASSERT(key.present() == (joinFuture.getPtr() == NULL));
+	ASSERT(key.present() == (joinFuture.getPtr() == nullptr));
 	return key.present() ? key.get() : getCompletionKey(this, joinFuture->joinedFuture(tr, taskBucket));
 }

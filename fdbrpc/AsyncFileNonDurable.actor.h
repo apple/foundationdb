@@ -74,18 +74,12 @@ public:
 			when( wait(success( g_simulator.getCurrentProcess()->shutdownSignal.getFuture() )) ) {
 				throw io_error().asInjectedFault();
 			}
-			when( Reference<IAsyncFile> f = wait( wrappedFile ) ) {
-				return Reference<AsyncFileDetachable>( new AsyncFileDetachable(f) );
-			}
+			when(Reference<IAsyncFile> f = wait(wrappedFile)) { return makeReference<AsyncFileDetachable>(f); }
 		}
 	}
 
-	virtual void addref() {
-		ReferenceCounted<AsyncFileDetachable>::addref();
-	}
-	virtual void delref() {
-		ReferenceCounted<AsyncFileDetachable>::delref();
-	}
+	void addref() override { ReferenceCounted<AsyncFileDetachable>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileDetachable>::delref(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override {
 		if( !file.getPtr() || g_simulator.getCurrentProcess()->shutdownSignal.getFuture().isReady() )
@@ -249,10 +243,8 @@ public:
 		//TraceEvent("AsyncFileNonDurable_Destroy", id).detail("Filename", filename);
 	}
 
-	virtual void addref() {
-		ReferenceCounted<AsyncFileNonDurable>::addref();
-	}
-	virtual void delref() { 
+	void addref() override { ReferenceCounted<AsyncFileNonDurable>::addref(); }
+	void delref() override {
 		if(delref_no_destroy()) {
 			ASSERT(filesBeingDeleted.count(filename) == 0);
 			//TraceEvent("AsyncFileNonDurable_StartDelete", id).detail("Filename", filename);

@@ -68,34 +68,29 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("DRU_Start");
 	}
 
-	virtual std::string description() {
-		return "BackupToDBUpgrade";
-	}
+	virtual std::string description() const override { return "BackupToDBUpgrade"; }
 
-	virtual Future<Void> setup(Database const& cx) {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _setup(cx, this);
 	}
 
-	virtual Future<Void> start(Database const& cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _start(cx, this);
 	}
 
-	virtual Future<bool> check(Database const& cx) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics(vector<PerfMetric>& m) {
-	}
+	void getMetrics(vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> doBackup(BackupToDBUpgradeWorkload* self, DatabaseBackupAgent* backupAgent, Database cx, Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {
@@ -148,6 +143,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status

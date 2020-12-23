@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <cstdint>
 #define FDB_API_VERSION 700
 #define FDB_INCLUDE_LEGACY_TYPES
 
@@ -123,9 +124,18 @@ fdb_error_t fdb_run_network() {
 	CATCH_AND_RETURN( API->runNetwork(); );
 }
 
+#ifdef ADDRESS_SANITIZER
+extern "C" void __lsan_do_leak_check();
+#endif
+
 extern "C" DLLEXPORT
 fdb_error_t fdb_stop_network() {
-	CATCH_AND_RETURN( API->stopNetwork(); );
+#ifdef ADDRESS_SANITIZER
+	// fdb_stop_network intentionally leaks a bunch of memory, so let's do the
+	// leak check before that so it's meaningful
+	__lsan_do_leak_check();
+#endif
+	CATCH_AND_RETURN(API->stopNetwork(););
 }
 
 extern "C" DLLEXPORT
@@ -153,7 +163,7 @@ void fdb_future_destroy( FDBFuture* f ) {
 
 extern "C" DLLEXPORT
 fdb_error_t fdb_future_block_until_ready( FDBFuture* f ) {
-	CATCH_AND_RETURN( TSAVB(f)->blockUntilReady(); );
+	CATCH_AND_RETURN(TSAVB(f)->blockUntilReadyCheckOnMainThread(););
 }
 
 fdb_bool_t fdb_future_is_error_v22( FDBFuture* f ) {
@@ -171,12 +181,12 @@ public:
 				 void* userdata)
 		: callbackf(callbackf), f(f), userdata(userdata) {}
 
-	virtual bool canFire(int notMadeActive) { return true; }
-	virtual void fire(const Void& unused, int& userParam) {
+	bool canFire(int notMadeActive) const override { return true; }
+	void fire(const Void& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	virtual void error(const Error&, int& userParam) {
+	void error(const Error&, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
@@ -215,6 +225,11 @@ fdb_error_t fdb_future_get_version_v619( FDBFuture* f, int64_t* out_version ) {
 extern "C" DLLEXPORT
 fdb_error_t fdb_future_get_int64( FDBFuture* f, int64_t* out_value ) {
 	CATCH_AND_RETURN( *out_value = TSAV(int64_t, f)->get(); );
+}
+
+extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_uint64(FDBFuture *f, uint64_t *out) {
+	CATCH_AND_RETURN( *out = TSAV(uint64_t, f)->get(); );
 }
 
 extern "C" DLLEXPORT
@@ -277,6 +292,17 @@ fdb_error_t fdb_future_get_string_array(
 	CATCH_AND_RETURN(
 		Standalone<VectorRef<const char*>> na = TSAV(Standalone<VectorRef<const char*>>, f)->get();
 		*out_strings = (const char **) na.begin();
+		*out_count = na.size();
+	);
+}
+
+extern "C" DLLEXPORT
+fdb_error_t fdb_future_get_key_array(
+	FDBFuture* f, FDBKey const** out_key_array, int* out_count)
+{
+	CATCH_AND_RETURN(
+		Standalone<VectorRef<KeyRef>> na = TSAV(Standalone<VectorRef<KeyRef>>, f)->get();
+		*out_key_array = (FDBKey*) na.begin();
 		*out_count = na.size();
 	);
 }
@@ -579,6 +605,11 @@ FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* tr) {
 }
 
 extern "C" DLLEXPORT
+FDBFuture* fdb_get_server_protocol(const char* clusterFilePath){
+	return (FDBFuture*)( API->getServerProtocol(clusterFilePath ? clusterFilePath : "").extractPtr() );
+}
+
+extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr )
 {
 	return (FDBFuture*)(TXN(tr)->getVersionstamp().extractPtr());
@@ -596,7 +627,7 @@ fdb_error_t fdb_transaction_set_option_impl( FDBTransaction* tr,
 void fdb_transaction_set_option_v13( FDBTransaction* tr,
 									 FDBTransactionOption option )
 {
-	fdb_transaction_set_option_impl( tr, option, NULL, 0 );
+	fdb_transaction_set_option_impl( tr, option, nullptr, 0 );
 }
 
 extern "C" DLLEXPORT
@@ -626,11 +657,18 @@ fdb_error_t fdb_transaction_add_conflict_range( FDBTransaction*tr, uint8_t const
 
 }
 
-extern "C" DLLEXPORT 
+extern "C" DLLEXPORT
 FDBFuture* fdb_transaction_get_estimated_range_size_bytes( FDBTransaction* tr, uint8_t const* begin_key_name,
         int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length ) {
 	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
+}
+
+extern "C" DLLEXPORT
+FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name,
+        int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size) {
+	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
 }
 
 #include "fdb_c_function_pointers.g.h"

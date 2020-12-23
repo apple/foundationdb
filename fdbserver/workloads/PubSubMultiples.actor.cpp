@@ -41,21 +41,15 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		inboxesPerActor = getOption( options, LiteralStringRef("inboxesPerActor"), 20 );
 	}
 
-	virtual std::string description() { return "PubSubMultiplesWorkload"; }
-	virtual Future<Void> setup( Database const& cx ) { 
-		return createNodes( this, cx );
-	}
-	virtual Future<Void> start( Database const& cx ) {
+	std::string description() const override { return "PubSubMultiplesWorkload"; }
+	Future<Void> setup(Database const& cx) override { return createNodes(this, cx); }
+	Future<Void> start(Database const& cx) override {
 		Future<Void> _ = startTests( this, cx );
 		return delay(testDuration);
 	}
-	virtual Future<bool> check( Database const& cx ) {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
-	virtual void getMetrics( vector<PerfMetric>& m ) {
-		m.push_back( messages.getMetric() );
-	}
+	void getMetrics(vector<PerfMetric>& m) override { m.push_back(messages.getMetric()); }
 
 	Key keyForFeed( int i ) { return StringRef( format( "/PSM/feeds/%d", i ) ); }
 	Key keyForInbox( int i ) { return StringRef( format( "/PSM/inbox/%d", i ) ); }

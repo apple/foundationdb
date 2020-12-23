@@ -126,19 +126,19 @@ struct Traceable<Counter> : std::true_type {
 };
 
 template <class F>
-struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
+struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable {
 	SpecialCounter(CounterCollection& collection, std::string const& name, F && f) : name(name), f(f) { collection.counters.push_back(this); collection.counters_to_remove.push_back(this); }
-	virtual void remove() { delete this; }
+	void remove() override { delete this; }
 
-	virtual std::string const& getName() const { return name; }
-	virtual int64_t getValue() const { return f(); }
+	std::string const& getName() const override { return name; }
+	int64_t getValue() const override { return f(); }
 
-	virtual void resetInterval() {}
+	void resetInterval() override {}
 
-	virtual bool hasRate() const { return false; }
-	virtual double getRate() const { throw internal_error(); }
-	virtual bool hasRoughness() const { return false; }
-	virtual double getRoughness() const { throw internal_error(); }
+	bool hasRate() const override { return false; }
+	double getRate() const override { throw internal_error(); }
+	bool hasRoughness() const override { return false; }
+	double getRoughness() const override { throw internal_error(); }
 
 	std::string name;
 	F f;
@@ -146,7 +146,9 @@ struct SpecialCounter : ICounter, FastAllocated<SpecialCounter<F>>, NonCopyable 
 template <class F>
 static void specialCounter(CounterCollection& collection, std::string const& name, F && f) { new SpecialCounter<F>(collection, name, std::move(f)); }
 
-Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval, CounterCollection* const& counters, std::string const& trackLatestName = std::string());
+Future<Void> traceCounters(std::string const& traceEventName, UID const& traceEventID, double const& interval,
+                           CounterCollection* const& counters, std::string const& trackLatestName = std::string(),
+                           std::function<void(TraceEvent&)> const& decorator = [](TraceEvent& te) {});
 
 class LatencyBands {
 public:

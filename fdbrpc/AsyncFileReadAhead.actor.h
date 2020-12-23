@@ -32,10 +32,10 @@
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Read-only file type that wraps another file instance, reads in large blocks, and reads ahead of the actual range requested
-class AsyncFileReadAheadCache : public IAsyncFile, public ReferenceCounted<AsyncFileReadAheadCache> {
+class AsyncFileReadAheadCache final : public IAsyncFile, public ReferenceCounted<AsyncFileReadAheadCache> {
 public:
-	virtual void addref() { ReferenceCounted<AsyncFileReadAheadCache>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileReadAheadCache>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileReadAheadCache>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileReadAheadCache>::delref(); }
 
 	struct CacheBlock : ReferenceCounted<CacheBlock> {
 		CacheBlock(int size = 0) : data(new uint8_t[size]), len(size) {}
@@ -177,7 +177,7 @@ public:
 
 	std::string getFilename() const override { return m_f->getFilename(); }
 
-	virtual ~AsyncFileReadAheadCache() {
+	~AsyncFileReadAheadCache() {
 		for(auto &it : m_blocks) {
 			it.second.cancel();
 		}
@@ -196,7 +196,6 @@ public:
 		: m_f(f), m_block_size(blockSize), m_read_ahead_blocks(readAheadBlocks), m_max_concurrent_reads(maxConcurrentReads),
 		  m_cache_block_limit(std::max<int>(1, cacheSizeBlocks)) {
 	}
-
 };
 
 #include "flow/unactorcompiler.h"

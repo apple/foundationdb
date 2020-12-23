@@ -96,6 +96,7 @@ int commit_transaction(FDBTransaction* transaction) {
 
 	f = fdb_transaction_commit(transaction);
 	fdb_wait_and_handle_error(commit_transaction, f, transaction);
+	fdb_future_destroy(f);
 
 	return FDB_SUCCESS;
 }
@@ -364,7 +365,7 @@ int run_op_get(FDBTransaction* transaction, char* keystr, char* valstr, int snap
 	return FDB_SUCCESS;
 }
 
-int run_op_getrange(FDBTransaction* transaction, char* keystr, char* keystr2, char* valstr, int snapshot, int reverse) {
+int run_op_getrange(FDBTransaction* transaction, char* keystr, char* keystr2, char* valstr, int snapshot, int reverse, FDBStreamingMode streaming_mode) {
 	FDBFuture* f;
 	fdb_error_t err;
 	FDBKeyValue const* out_kv;
@@ -373,7 +374,7 @@ int run_op_getrange(FDBTransaction* transaction, char* keystr, char* keystr2, ch
 
 	f = fdb_transaction_get_range(transaction, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)keystr, strlen(keystr)),
 	                              FDB_KEYSEL_LAST_LESS_OR_EQUAL((uint8_t*)keystr2, strlen(keystr2)) + 1, 0 /* limit */,
-	                              0 /* target_bytes */, FDB_STREAMING_MODE_WANT_ALL /* FDBStreamingMode */,
+	                              0 /* target_bytes */, streaming_mode /* FDBStreamingMode */,
 	                              0 /* iteration */, snapshot, reverse /* reverse */);
 	fdb_wait_and_handle_error(fdb_transaction_get_range, f, transaction);
 
@@ -487,13 +488,13 @@ retryTxn:
 					rc = run_op_get(transaction, keystr, valstr, 0);
 					break;
 				case OP_GETRANGE:
-					rc = run_op_getrange(transaction, keystr, keystr2, valstr, 0, args->txnspec.ops[i][OP_REVERSE]);
+					rc = run_op_getrange(transaction, keystr, keystr2, valstr, 0, args->txnspec.ops[i][OP_REVERSE], args->streaming_mode);
 					break;
 				case OP_SGET:
 					rc = run_op_get(transaction, keystr, valstr, 1);
 					break;
 				case OP_SGETRANGE:
-					rc = run_op_getrange(transaction, keystr, keystr2, valstr, 1, args->txnspec.ops[i][OP_REVERSE]);
+					rc = run_op_getrange(transaction, keystr, keystr2, valstr, 1, args->txnspec.ops[i][OP_REVERSE], args->streaming_mode);
 					break;
 				case OP_UPDATE:
 					randstr(valstr, args->value_length + 1);
@@ -1232,6 +1233,7 @@ int init_args(mako_args_t* args) {
 	args->trace = 0;
 	args->tracepath[0] = '\0';
 	args->traceformat = 0; /* default to client's default (XML) */
+	args->streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
 	args->txntrace = 0;
 	args->txntagging = 0;
 	memset(args->txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
@@ -1396,6 +1398,7 @@ void usage() {
 	printf("%-24s %s\n", "    --txntagging_prefix", "Specify the prefix of transaction tag - mako${txntagging_prefix} (Default: '')");
 	printf("%-24s %s\n", "    --knobs=KNOBS", "Set client knobs");
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
+	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 }
 
 /* parse benchmark paramters */
@@ -1427,6 +1430,7 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 			                                    { "knobs", required_argument, NULL, ARG_KNOBS },
 			                                    { "tracepath", required_argument, NULL, ARG_TRACEPATH },
 			                                    { "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
+							    { "streaming", required_argument, NULL, ARG_STREAMING_MODE },
 			                                    { "txntrace", required_argument, NULL, ARG_TXNTRACE },
 			                                    /* no args */
 			                                    { "help", no_argument, NULL, 'h' },
@@ -1546,7 +1550,25 @@ int parse_args(int argc, char* argv[], mako_args_t* args) {
 				args->traceformat = 0;
 			} else {
 				fprintf(stderr, "Error: Invalid trace_format %s\n", optarg);
-				exit(0);
+				return -1;
+			}
+			break;
+		case ARG_STREAMING_MODE:
+			if (strncmp(optarg, "all", 3) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
+			} else if (strncmp(optarg, "iterator", 8) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_ITERATOR;
+			} else if (strncmp(optarg, "small", 5) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_SMALL;
+			} else if (strncmp(optarg, "medium", 6) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_MEDIUM;
+			} else if (strncmp(optarg, "large", 5) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_LARGE;
+			} else if (strncmp(optarg, "serial", 6) == 0) {
+				args->streaming_mode = FDB_STREAMING_MODE_SERIAL;
+			} else {
+				fprintf(stderr, "Error: Invalid streaming mode %s\n", optarg);
+				return -1;
 			}
 			break;
 		case ARG_TXNTRACE:

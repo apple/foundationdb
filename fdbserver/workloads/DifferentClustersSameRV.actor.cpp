@@ -37,7 +37,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator.extraDB != nullptr);
-		Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+		auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
 		extraDB = Database::createDatabase(extraFile, -1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
 		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
@@ -45,7 +45,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		keyToWatch = getOption(options, LiteralStringRef("keyToWatch"), LiteralStringRef("anotherKey"));
 	}
 
-	std::string description() override { return "DifferentClustersSameRV"; }
+	std::string description() const override { return "DifferentClustersSameRV"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -139,8 +139,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		TraceEvent("DifferentClusters_CopiedDatabase");
 		wait(advanceVersion(self->extraDB, rv));
 		TraceEvent("DifferentClusters_AdvancedVersion");
-		wait(cx->switchConnectionFile(Reference<ClusterConnectionFile>(
-		    new ClusterConnectionFile(self->extraDB->getConnectionFile()->getConnectionString()))));
+		wait(cx->switchConnectionFile(
+		    makeReference<ClusterConnectionFile>(self->extraDB->getConnectionFile()->getConnectionString())));
 		TraceEvent("DifferentClusters_SwitchedConnectionFile");
 		state Transaction tr(cx);
 		tr.setVersion(rv);
@@ -212,7 +212,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				state Future<Optional<Value>> val2 = tr2.get(self->keyToRead);
 				wait(success(val1) && success(val2));
 				// We're reading from different db's with the same read version. We can get a different value.
-				TEST(val1.get() != val2.get());
+				TEST(val1.get() != val2.get()); // reading from different dbs with the same version
 			} catch (Error& e) {
 				wait(tr1.onError(e) && tr2.onError(e));
 			}

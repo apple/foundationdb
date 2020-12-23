@@ -1,4 +1,4 @@
-FROM foundationdb/foundationdb-build:0.1.15
+FROM foundationdb/foundationdb-build:0.1.19
 
 USER root
 
@@ -7,7 +7,7 @@ ADD artifacts /mnt/artifacts
 
 # Install build tools for building via make
 RUN \
-	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm cgdb
+	yum install -y distcc-server gperf rubygems python34 libmpc-devel npm cgdb jq
 
 # Download and install llvm-10.0.0
 RUN cd / &&\
@@ -50,8 +50,8 @@ RUN cp -iv /usr/local/bin/clang++ /usr/local/bin/clang++.deref &&\
 	ldconfig &&\
 	rm -rf /mnt/artifacts
 
-LABEL version=0.11.8
-ENV DOCKER_IMAGEVER=0.11.8
+LABEL version=0.11.10
+ENV DOCKER_IMAGEVER=0.11.10
 
 ENV CLANGCC=/usr/local/bin/clang.de8a65ef
 ENV CLANGCXX=/usr/local/bin/clang++.de8a65ef

@@ -166,7 +166,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 	}
 
-	std::string description() override { return NAME; }
+	std::string description() const override { return NAME; }
 
 	ACTOR Future<Void> assertTrue(StringRef stage, Future<bool> f) {
 		bool res = wait(f);
@@ -230,7 +230,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 	}
 
-	double getCheckTimeout() override {
+	double getCheckTimeout() const override {
 		if (!success) {
 			return 3000;
 		}

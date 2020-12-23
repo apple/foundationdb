@@ -1,0 +1,21 @@
+{
+    "name": "TestContainer",
+    "build": {
+	"dockerfile": "Dockerfile",
+    },
+
+    "settings": {
+	"terminal.integrated.shell.linux": "/bin/bash"
+    },
+
+    "extensions": [
+	"streetsidesoftware.code-spell-checker",
+	"golang.go",
+	"ms-azuretools.vscode-docker",
+	"ms-vscode.cpptools"
+    ],
+
+    "postCreateCommand": "touch created"
+
+    // "remoteUser": "fdb"
+}
