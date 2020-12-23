@@ -1,21 +1,23 @@
 {
     "name": "TestContainer",
     "build": {
-	"dockerfile": "../build/Dockerfile.c7.layered",
+        "dockerfile": "../build/Dockerfile.c7.layered",
     },
 
     "settings": {
-	"terminal.integrated.shell.linux": "/bin/bash"
+        "terminal.integrated.shell.linux": "/bin/bash"
     },
 
     "extensions": [
-	"streetsidesoftware.code-spell-checker",
-	"golang.go",
-	"ms-azuretools.vscode-docker",
-	"ms-vscode.cpptools"
+        "streetsidesoftware.code-spell-checker",
+        "golang.go",
+        "ms-azuretools.vscode-docker",
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools"
     ],
 
-    "postCreateCommand": "touch created"
+    "postCreateCommand": "sed -i '/env sh/ a . /etc/profile' /root/.vscode-server/bin/*/server.sh"
+    // "postCreateCommand": "touch created"
 
     // "remoteUser": "fdb"
 }

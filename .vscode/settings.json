@@ -1,3 +1,12 @@
 {
-    "docker.host":"ssh://fdb-devshare"
+    "docker.host": "ssh://fdb-devshare",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "git.ignoreLimitWarning": true,
+    "cmake.buildDirectory":"${workspaceFolder}/workspace",
+    "cmake.configureArgs": [
+        "-DUSE_GOLD_LINKER=ON",
+        "-DBOOST_ROOT=/opt/boost_1_72_0",
+        "-DBoost_NO_SYSTEM_PATHS=ON",
+        "-DRocksDB_ROOT=/opt/rocksdb-6.10.1"
+    ]
 }
