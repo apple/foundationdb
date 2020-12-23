@@ -174,7 +174,8 @@ struct DatabaseConfiguration {
 			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1),
 			                    storageTeamSize - 1);
 		} else if (worstSatellite > 0) {
-			return std::min(tLogReplicationFactor + worstSatellite - 2 - tLogWriteAntiQuorum, storageTeamSize - 1);
+			// Primary and Satellite tLogs are synchronously replicated, hence we can lose all but 1.
+			return std::min(tLogReplicationFactor + worstSatellite - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 		}
 		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 	}
