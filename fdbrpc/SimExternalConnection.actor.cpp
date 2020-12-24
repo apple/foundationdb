@@ -50,10 +50,7 @@ Future<Void> SimExternalConnection::onWritable() {
 }
 
 Future<Void> SimExternalConnection::onReadable() {
-	if (!readBuffer.empty()) {
-		return Void();
-	}
-	return onReadableTrigger.onTrigger();
+	return readBuffer.empty() ? onReadableTrigger.onTrigger() : Void();
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
@@ -147,20 +144,20 @@ SimExternalConnection::SimExternalConnection(ip::tcp::socket&& socket)
 static constexpr auto testEchoServerPort = 8000;
 
 static void testEchoServer() {
+	static constexpr auto readBufferSize = 1000;
 	io_service ios;
 	ip::tcp::acceptor acceptor(ios, ip::tcp::endpoint(ip::tcp::v4(), testEchoServerPort));
-
 	ip::tcp::socket socket(ios);
 	acceptor.accept(socket);
 	loop {
-		char data[10000];
+		char readBuffer[readBufferSize];
 		boost::system::error_code err;
-		auto length = socket.read_some(buffer(data), err);
+		auto length = socket.read_some(mutable_buffers_1(readBuffer, readBufferSize), err);
 		if (err == boost::asio::error::eof) {
 			return;
 		}
 		ASSERT(!err);
-		write(socket, buffer(data, length));
+		write(socket, buffer(readBuffer, length));
 	}
 }
 
@@ -169,16 +166,15 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	state std::thread serverThread([] { return testEchoServer(); });
 	state UnsentPacketQueue packetQueue;
 	state Reference<IConnection> externalConn;
-	state const IPAddress localhost = IPAddress::parse("127.0.0.1").get();
+	state const NetworkAddress serverAddress = NetworkAddress(IPAddress::parse("127.0.0.1").get(), testEchoServerPort);
 	loop {
-		// Wait until server is ready
-		Reference<IConnection> _externalConn =
-		    wait(INetworkConnections::net()->connectExternal(NetworkAddress(localhost, testEchoServerPort)));
+		Reference<IConnection> _externalConn = wait(INetworkConnections::net()->connectExternal(serverAddress));
 		if (_externalConn.isValid()) {
 			externalConn = std::move(_externalConn);
 			break;
 		}
-		std::this_thread::sleep_for(std::chrono::seconds(1));
+		// Wait until server is ready
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 	state Key data = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
