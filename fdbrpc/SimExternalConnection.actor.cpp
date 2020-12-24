@@ -84,8 +84,7 @@ Future<Void> SimExternalConnection::onReadable() {
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
-	size_t toRead = end - begin;
-	ASSERT(toRead <= readBuffer.size());
+	auto toRead = std::min<int>(end - begin, readBuffer.size());
 	// TODO: Improve performance
 	for (int i = 0; i < toRead; ++i) {
 		*(begin + i) = readBuffer.front();
