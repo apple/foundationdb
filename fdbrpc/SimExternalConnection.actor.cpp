@@ -101,7 +101,7 @@ int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	    boost::iterator_range<SendBufferIterator>(SendBufferIterator(buffer, limit), SendBufferIterator()), err);
 	ASSERT(!err);
 	ASSERT(bytesSent > 0);
-	std::this_thread::sleep_for(std::chrono::seconds(1));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	const auto bytesReadable = socket.available();
 	std::vector<uint8_t> tempReadBuffer(bytesReadable);
 	for (int index = 0; index < bytesReadable;) {
