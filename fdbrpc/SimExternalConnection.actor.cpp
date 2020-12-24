@@ -33,6 +33,36 @@ using namespace boost::asio;
 
 static io_service ios;
 
+class SimExternalConnectionImpl {
+public:
+	ACTOR static Future<Void> onReadable(SimExternalConnection* self) {
+		wait(delayJittered(0.1));
+		if (self->readBuffer.empty()) {
+			wait(self->onReadableTrigger.onTrigger());
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Reference<IConnection>> connect(NetworkAddress toAddr) {
+		wait(delayJittered(0.1));
+		ip::tcp::socket socket(ios);
+		auto ip = toAddr.ip;
+		ip::address address;
+		if (ip.isV6()) {
+			address = boost::asio::ip::address_v6(ip.toV6());
+		} else {
+			address = boost::asio::ip::address_v4(ip.toV4());
+		}
+		boost::system::error_code err;
+		socket.connect(ip::tcp::endpoint(address, toAddr.port), err);
+		if (err) {
+			return Reference<IConnection>();
+		} else {
+			return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
+		}
+	}
+};
+
 void SimExternalConnection::close() {
 	socket.close();
 }
@@ -50,7 +80,7 @@ Future<Void> SimExternalConnection::onWritable() {
 }
 
 Future<Void> SimExternalConnection::onReadable() {
-	return readBuffer.empty() ? onReadableTrigger.onTrigger() : Void();
+	return SimExternalConnectionImpl::onReadable(this);
 }
 
 int SimExternalConnection::read(uint8_t* begin, uint8_t* end) {
@@ -100,8 +130,8 @@ UID SimExternalConnection::getDebugID() const {
 	return dbgid;
 }
 
-Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
-                                                                              const std::string& service) {
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
+	wait(delayJittered(0.1));
 	ip::tcp::resolver resolver(ios);
 	ip::tcp::resolver::query query(host, service);
 	auto iter = resolver.resolve(query);
@@ -120,22 +150,13 @@ Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(co
 	return addrs;
 }
 
+Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
+                                                                              const std::string& service) {
+	return resolveTCPEndpointImpl(host, service);
+}
+
 Future<Reference<IConnection>> SimExternalConnection::connect(NetworkAddress toAddr) {
-	ip::tcp::socket socket(ios);
-	auto ip = toAddr.ip;
-	ip::address address;
-	if (ip.isV6()) {
-		address = boost::asio::ip::address_v6(ip.toV6());
-	} else {
-		address = boost::asio::ip::address_v4(ip.toV4());
-	}
-	boost::system::error_code err;
-	socket.connect(ip::tcp::endpoint(address, toAddr.port), err);
-	if (err) {
-		return Reference<IConnection>();
-	} else {
-		return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
-	}
+	return SimExternalConnectionImpl::connect(toAddr);
 }
 
 SimExternalConnection::SimExternalConnection(ip::tcp::socket&& socket)

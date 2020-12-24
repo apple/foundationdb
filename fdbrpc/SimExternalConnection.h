@@ -34,6 +34,7 @@ class SimExternalConnection final : public IConnection, public ReferenceCounted<
 	UID dbgid;
 	std::deque<uint8_t> readBuffer;
 	AsyncTrigger onReadableTrigger;
+	friend class SimExternalConnectionImpl;
 
 public:
 	void addref() override { return ReferenceCounted<SimExternalConnection>::addref(); }
