@@ -161,10 +161,10 @@ Future<Reference<IConnection>> INetworkConnections::connect( const std::string &
 
 	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
 	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
-	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const &)>, Reference<IConnection> >
-		(pickEndpoint, [=](NetworkAddress const &addr) -> Future<Reference<IConnection>> {
-		return connect(addr, host);
-	});
+	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
+	                Reference<IConnection>>(
+	    pickEndpoint,
+	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr, host); });
 }
 
 IUDPSocket::~IUDPSocket() {}

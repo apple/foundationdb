@@ -187,9 +187,9 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	state std::thread serverThread([] { return testEchoServer(); });
 	state UnsentPacketQueue packetQueue;
 	state Reference<IConnection> externalConn;
-	state const NetworkAddress serverAddress = NetworkAddress(IPAddress::parse("127.0.0.1").get(), testEchoServerPort);
 	loop {
-		Reference<IConnection> _externalConn = wait(INetworkConnections::net()->connectExternal(serverAddress));
+		Reference<IConnection> _externalConn =
+		    wait(INetworkConnections::net()->connect("localhost", std::to_string(testEchoServerPort)));
 		if (_externalConn.isValid()) {
 			externalConn = std::move(_externalConn);
 			break;
