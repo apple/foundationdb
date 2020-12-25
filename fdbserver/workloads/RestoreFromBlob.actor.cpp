@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/workloads/BlobStoreWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -38,23 +39,14 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
 		auto backupURLString =
 		    getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000")).toString();
-		auto accessKeyVar =
+		auto accessKeyEnvVar =
 		    getOption(options, LiteralStringRef("accessKeyVar"), LiteralStringRef("BLOB_ACCESS_KEY")).toString();
-		auto secretKeyVar =
+		auto secretKeyEnvVar =
 		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
 		bool provideKeys = getOption(options, LiteralStringRef("provideKeys"), false);
 		waitForComplete = getOption(options, LiteralStringRef("waitForComplete"), true);
 		if (provideKeys) {
-			std::string accessKey = std::getenv(accessKeyVar.c_str());
-			std::string secretKey = std::getenv(secretKeyVar.c_str());
-			{
-				auto pos = backupURLString.find("<access_key>");
-				backupURLString.replace(pos, 12, accessKey);
-			}
-			{
-				auto pos = backupURLString.find("<secret_key>");
-				backupURLString.replace(pos, 12, secretKey);
-			}
+			updateBackupURL(backupURLString, accessKeyEnvVar, "<access_key>", secretKeyEnvVar, "<secret_key>");
 		}
 		backupURL = backupURLString;
 	}
