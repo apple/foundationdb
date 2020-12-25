@@ -40,7 +40,8 @@ testTitle = 'Backup'
     backupAfter = 0.0
     backupTag = 'default'
     backupURL = 'blobstore://<access_key>:<secret_key>@127.0.0.1:9000/resource?bucket=bucketname'
-    
+    provideKeys = true
+
     [[test.workload]]
     testName = 'RandomClogging'
     testDuration = 10.0
@@ -73,6 +74,7 @@ clearAfterTest = 'false'
     restoreAfter = 0.0
     backupTag = 'default'
     backupURL = 'blobstore://<access_key>:<secret_key>@127.0.0.1:9000/resource?bucket=bucketname'
+    provideKeys = true
 
     [[test.workload]]
     testName = 'RandomClogging'

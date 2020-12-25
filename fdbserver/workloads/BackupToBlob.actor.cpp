@@ -41,15 +41,18 @@ struct BackupToBlobWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("accessKeyVar"), LiteralStringRef("BLOB_ACCESS_KEY")).toString();
 		auto secretKeyVar =
 		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
-		std::string accessKey = std::getenv(accessKeyVar.c_str());
-		std::string secretKey = std::getenv(secretKeyVar.c_str());
-		{
-			auto pos = backupURLString.find("<access_key>");
-			backupURLString.replace(pos, 12, accessKey);
-		}
-		{
-			auto pos = backupURLString.find("<secret_key>");
-			backupURLString.replace(pos, 12, secretKey);
+		bool provideKeys = getOption(options, LiteralStringRef("provideKeys"), false);
+		if (provideKeys) {
+			std::string accessKey = std::getenv(accessKeyVar.c_str());
+			std::string secretKey = std::getenv(secretKeyVar.c_str());
+			{
+				auto pos = backupURLString.find("<access_key>");
+				backupURLString.replace(pos, 12, accessKey);
+			}
+			{
+				auto pos = backupURLString.find("<secret_key>");
+				backupURLString.replace(pos, 12, secretKey);
+			}
 		}
 		backupURL = backupURLString;
 	}
