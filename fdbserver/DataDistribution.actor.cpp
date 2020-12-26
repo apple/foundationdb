@@ -139,7 +139,7 @@ public:
 		sort(machineIDs.begin(), machineIDs.end());
 	}
 
-	int size() {
+	int size() const {
 		ASSERT(machines.size() == machineIDs.size());
 		return machineIDs.size();
 	}
