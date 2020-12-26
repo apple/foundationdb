@@ -944,13 +944,14 @@ vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor( Team team ) {
 	return r;
 }
 
-bool ShardsAffectedByTeamFailure::hasShards(Team team) {
+bool ShardsAffectedByTeamFailure::hasShards(Team team) const {
 	auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
 	return it != team_shards.end() && it->first == team;
 }
 
-int ShardsAffectedByTeamFailure::getNumberOfShards( UID ssID ) {
-	return storageServerShards[ssID];
+int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
+	auto it = storageServerShards.find(ssID);
+	return it == storageServerShards.end() ? 0 : it->second;
 }
 
 std::pair<vector<ShardsAffectedByTeamFailure::Team>,vector<ShardsAffectedByTeamFailure::Team>> ShardsAffectedByTeamFailure::getTeamsFor( KeyRangeRef keys ) {

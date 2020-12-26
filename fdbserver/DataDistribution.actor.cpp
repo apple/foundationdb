@@ -108,15 +108,15 @@ struct TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
 		machineID = locality.zoneId().get();
 	}
 
-	std::string getServersIDStr() {
+	std::string getServersIDStr() const {
 		std::stringstream ss;
 		if (serversOnMachine.empty()) return "[unset]";
 
-		for (auto& server : serversOnMachine) {
+		for (const auto& server : serversOnMachine) {
 			ss << server->id.toString() << " ";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 };
 
@@ -144,16 +144,16 @@ public:
 		return machineIDs.size();
 	}
 
-	std::string getMachineIDsStr() {
+	std::string getMachineIDsStr() const {
 		std::stringstream ss;
 
 		if (machineIDs.empty()) return "[unset]";
 
-		for (auto& id : machineIDs) {
+		for (const auto& id : machineIDs) {
 			ss << id.contents().toString() << " ";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 
 	bool operator==(TCMachineTeamInfo& rhs) const { return this->machineIDs == rhs.machineIDs; }
@@ -199,18 +199,18 @@ public:
 		return servers.size();
 	}
 	vector<UID> const& getServerIDs() const override { return serverIDs; }
-	const vector<Reference<TCServerInfo>>& getServers() { return servers; }
+	const vector<Reference<TCServerInfo>>& getServers() const { return servers; }
 
 	std::string getServerIDsStr() const {
 		std::stringstream ss;
 
 		if (serverIDs.empty()) return "[unset]";
 
-		for (auto& id : serverIDs) {
+		for (const auto& id : serverIDs) {
 			ss << id.toString() << " ";
 		}
 
-		return ss.str();
+		return std::move(ss).str();
 	}
 
 	void addDataInFlightToTeam(int64_t delta) override {
