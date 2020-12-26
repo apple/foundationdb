@@ -43,6 +43,7 @@
 #include "flow/AsioReactor.h"
 #include "flow/Profiler.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
@@ -1875,6 +1876,22 @@ void ASIOReactor::wake() {
 
 } // namespace N2
 
+SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
+	ASSERT(limit > 0);
+}
+
+void SendBufferIterator::operator++() {
+	limit -= p->bytes_written - p->bytes_sent;
+	if (limit > 0)
+		p = p->next;
+	else
+		p = nullptr;
+}
+
+boost::asio::const_buffer SendBufferIterator::operator*() const {
+	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
+}
+
 INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {
 		N2::g_net2 = new N2::Net2(tlsConfig, useThreadPool, useMetrics);
@@ -2034,19 +2051,3 @@ void net2_test() {
 	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 	*/
 };
-
-SendBufferIterator::SendBufferIterator(SendBuffer const* p, int limit) : p(p), limit(limit) {
-	ASSERT(limit > 0);
-}
-
-void SendBufferIterator::operator++() {
-	limit -= p->bytes_written - p->bytes_sent;
-	if (limit > 0)
-		p = p->next;
-	else
-		p = nullptr;
-}
-
-boost::asio::const_buffer SendBufferIterator::operator*() const {
-	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
-}
