@@ -28,8 +28,9 @@
 inline void updateBackupURL(std::string& backupURL, const std::string& accessKeyEnvVar,
                             const std::string& accessKeyPlaceholder, const std::string& secretKeyEnvVar,
                             const std::string& secretKeyPlaceholder) {
-	std::string accessKey = std::getenv(accessKeyEnvVar.c_str());
-	std::string secretKey = std::getenv(secretKeyEnvVar.c_str());
+	std::string accessKey, secretKey;
+	ASSERT(platform::getEnvironmentVar(accessKeyEnvVar.c_str(), accessKey));
+	ASSERT(platform::getEnvironmentVar(secretKeyEnvVar.c_str(), secretKey));
 	{
 		auto pos = backupURL.find(accessKeyPlaceholder.c_str());
 		backupURL.replace(pos, accessKeyPlaceholder.size(), accessKey);
