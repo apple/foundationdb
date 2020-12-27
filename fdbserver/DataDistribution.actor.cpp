@@ -5401,7 +5401,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	return Void();
 }
 
-DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
+std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database =
 	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
 
@@ -5409,11 +5409,11 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	conf.storageTeamSize = teamSize;
 	conf.storagePolicy = policy;
 
-	DDTeamCollection* collection =
-	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
-	                         makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
-	                         makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
-	                         PromiseStream<GetMetricsRequest>());
+	auto collection =
+	    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
+															   makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
+															   makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
+															   PromiseStream<GetMetricsRequest>()));
 
 	for (int id = 1; id <= processCount; ++id) {
 		UID uid(id, 0);
@@ -5423,7 +5423,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
 		collection->server_info[uid] =
-		    makeReference<TCServerInfo>(interface, collection, ProcessClass(), true, collection->storageServerSet);
+		    makeReference<TCServerInfo>(interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 		collection->checkAndCreateMachine(collection->server_info[uid]);
 	}
@@ -5431,7 +5431,7 @@ DDTeamCollection* testTeamCollection(int teamSize, Reference<IReplicationPolicy>
 	return collection;
 }
 
-DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
+std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize, Reference<IReplicationPolicy> policy, int processCount) {
 	Database database =
 	    DatabaseContext::create(makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), false);
 
@@ -5439,11 +5439,11 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 	conf.storageTeamSize = teamSize;
 	conf.storagePolicy = policy;
 
-	DDTeamCollection* collection =
-	    new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
-	                         makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
-	                         makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
-	                         PromiseStream<GetMetricsRequest>());
+	auto collection =
+	    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database, UID(0, 0), MoveKeysLock(), PromiseStream<RelocateShard>(),
+															   makeReference<ShardsAffectedByTeamFailure>(), conf, {}, {}, Future<Void>(Void()),
+															   makeReference<AsyncVar<bool>>(true), true, makeReference<AsyncVar<bool>>(false),
+															   PromiseStream<GetMetricsRequest>()));
 
 	for (int id = 1; id <= processCount; id++) {
 		UID uid(id, 0);
@@ -5463,7 +5463,7 @@ DDTeamCollection* testMachineTeamCollection(int teamSize, Reference<IReplication
 		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
 		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
 		collection->server_info[uid] =
-		    makeReference<TCServerInfo>(interface, collection, ProcessClass(), true, collection->storageServerSet);
+		    makeReference<TCServerInfo>(interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 
 		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 	}
@@ -5483,13 +5483,11 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
 	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 
 	ASSERT(collection->sanityCheckTeams() == true);
-
-	delete (collection);
 
 	return Void();
 }
@@ -5503,7 +5501,7 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
 	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state DDTeamCollection* collection = testMachineTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 	if (collection == nullptr) {
 		fprintf(stderr, "collection is null\n");
@@ -5514,8 +5512,6 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
 
-	if (collection) delete (collection);
-
 	return Void();
 }
 
@@ -5524,11 +5520,9 @@ TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
 	state int processSize = 10;
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 	int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
-
-	delete(collection);
 
 	// The maximum number of available server teams without considering machine locality is 120
 	// The maximum number of available server teams with machine locality constraint is 120 - 40, because
@@ -5544,11 +5538,9 @@ TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-	state DDTeamCollection* collection = testTeamCollection(3, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
-
-	delete(collection);
 
 	ASSERT(result >= 10);
 
@@ -5563,7 +5555,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 	state int teamSize = 3;
 	//state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
-	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
@@ -5577,8 +5569,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 		ASSERT(teamCount >= 1);
 		//ASSERT(teamCount <= targetTeamsPerServer);
 	}
-
-	delete(collection);
 
 	return Void();
 }
@@ -5594,7 +5584,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
 	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 	state int teamSize = 3;
-	state DDTeamCollection* collection = testTeamCollection(teamSize, policy, processSize);
+	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
@@ -5616,8 +5606,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 		auto teamCount = process->second->teams.size();
 		ASSERT(teamCount >= 1);
 	}
-
-	delete(collection);
 
 	// If we find all available teams, result will be 8 because we prebuild 2 teams
 	ASSERT(result == 8);
