@@ -118,25 +118,22 @@ struct AddingShard : NonCopyable {
 	bool isTransferred() const { return phase == Waiting; }
 };
 
-struct ShardInfo : ReferenceCounted<ShardInfo>, NonCopyable {
-	AddingShard* adding;
+class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
+	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard> &&adding, StorageServer* readWrite)
+		: adding(std::move(adding)), readWrite(readWrite), keys(keys)
+	{
+	}
+
+public:
+	std::unique_ptr<AddingShard> adding;
 	struct StorageServer* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
 
-	ShardInfo(KeyRange keys, AddingShard* adding, StorageServer* readWrite)
-		: adding(adding), readWrite(readWrite), keys(keys)
-	{
-	}
-
-	~ShardInfo() {
-		delete adding;
-	}
-
 	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
 	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
-	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, new AddingShard(data, keys), nullptr); }
-	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, new AddingShard(oldShard, keys), nullptr); }
+	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) { return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr); }
+	static ShardInfo* addingSplitLeft( KeyRange keys, AddingShard* oldShard) { return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr); }
 
 	bool isReadable() const { return readWrite!=nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
@@ -2358,9 +2355,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 						// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own fetchKeys.
 						shard->server->addShard( ShardInfo::addingSplitLeft( KeyRangeRef(keys.begin, nfk), shard ) );
 						shard->server->addShard( ShardInfo::newAdding( data, KeyRangeRef(nfk, keys.end) ) );
-						shard = data->shards.rangeContaining( keys.begin ).value()->adding;
+						shard = data->shards.rangeContaining( keys.begin ).value()->adding.get();
 						warningLogger = logFetchKeysWarning(shard);
-						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding;
+						AddingShard* otherShard = data->shards.rangeContaining( nfk ).value()->adding.get();
 						keys = shard->keys;
 
 						// Split our prior updates.  The ones that apply to our new, restricted key range will go back into shard->updates,
