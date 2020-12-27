@@ -97,9 +97,7 @@ struct KeyWithWriter {
 	KeyWithWriter( KeyWithWriter&& r ) : key(std::move(r.key)), writer(std::move(r.writer)), writerOffset(r.writerOffset) {}
 	void operator=( KeyWithWriter&& r ) { key = std::move(r.key); writer = std::move(r.writer); writerOffset = r.writerOffset; }
 
-	StringRef value() {
-		return StringRef(writer.toValue().substr(writerOffset));
-	}
+	StringRef value() const { return StringRef(writer.toValue().substr(writerOffset)); }
 };
 
 // This is a very minimal interface for getting metric data from the DB which is needed
@@ -238,7 +236,7 @@ struct MetricData {
 		start = r.start; rollTime = r.rollTime; appendStart = r.appendStart; writer = std::move(r.writer);
 	}
 
-	std::string toString();
+	std::string toString() const;
 };
 
 // Some common methods to reduce code redundancy across different metric definitions
@@ -452,12 +450,12 @@ struct FieldValueBlockEncoding<Standalone<StringRef>> {
 
 // Field level for value type of T using header type of Header.  Default header type is the default FieldHeader implementation for type T.
 template <class T, class Header = FieldHeader<T>, class Encoder = FieldValueBlockEncoding<T>>
-struct FieldLevel {
-
-	Deque<MetricData> metrics;
+class FieldLevel {
 	int64_t appendUsed;
+	Deque<MetricData> metrics;
 	Header header;
 
+public:
 	// The previous header and the last timestamp at which an out going MetricData block requires header patching
 	Optional<Header> previousHeader;
 	uint64_t lastTimeRequiringHeaderPatch;
@@ -465,13 +463,8 @@ struct FieldLevel {
 	Encoder enc;
 
 	explicit FieldLevel() : appendUsed(0) {
-		metrics.emplace_back(MetricData());
+		metrics.emplace_back();
 		metrics.back().writer << header;
-	}
-
-	FieldLevel(FieldLevel &&f)
-	  : metrics(std::move(f.metrics)), appendUsed(f.appendUsed), enc(f.enc), header(f.header),
-	    previousHeader(f.previousHeader), lastTimeRequiringHeaderPatch(f.lastTimeRequiringHeaderPatch) {
 	}
 
 	// update Header, use Encoder to write T v
@@ -504,7 +497,7 @@ struct FieldLevel {
 		}
 
 		metrics.back().rollTime = t;
-		metrics.emplace_back(MetricData());
+		metrics.emplace_back();
 		metrics.back().writer << header;
 		enc = Encoder();
 		appendUsed = 0;
@@ -517,9 +510,9 @@ struct FieldLevel {
 			metrics.back().rollTime = t;
 			appendUsed += metrics.back().writer.getLength();
 			if(metrics.back().appendStart)
-				metrics.emplace_back(MetricData(metrics.back().appendStart));
+				metrics.emplace_back(metrics.back().appendStart);
 			else
-				metrics.emplace_back(MetricData(metrics.back().start));
+				metrics.emplace_back(metrics.back().start);
 		}
 	}
 

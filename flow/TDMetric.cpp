@@ -211,6 +211,6 @@ void DynamicEventMetric::registerFields(MetricKeyRef const &mk, std::vector<Stan
 	fieldsToRegister.clear();
 }
 
-std::string MetricData::toString() {
+std::string MetricData::toString() const {
 	return format("MetricData(addr=%p start=%llu appendStart=%llu rollTime=%llu writerLen=%d)", this, start, appendStart, rollTime, writer.getLength());
 }
