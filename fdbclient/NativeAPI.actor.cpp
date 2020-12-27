@@ -1104,7 +1104,7 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& keys, const vector<StorageServerInterface>& servers ) {
 	vector<Reference<ReferencedInterface<StorageServerInterface>>> serverRefs;
 	serverRefs.reserve(servers.size());
-	for(auto& interf : servers) {
+	for (const auto& interf : servers) {
 		serverRefs.push_back( StorageServerInfo::getInterface( this, interf, clientLocality ) );
 	}
 
@@ -1850,17 +1850,17 @@ Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations(
 	}
 
 	bool foundFailed = false;
-	for(auto& it : locations) {
+	for (const auto& [range, locInfo] : locations) {
 		bool onlyEndpointFailed = false;
-		for(int i = 0; i < it.second->size(); i++) {
-			if( IFailureMonitor::failureMonitor().onlyEndpointFailed(it.second->get(i, member).getEndpoint()) ) {
+		for (int i = 0; i < locInfo->size(); i++) {
+			if (IFailureMonitor::failureMonitor().onlyEndpointFailed(locInfo->get(i, member).getEndpoint())) {
 				onlyEndpointFailed = true;
 				break;
 			}
 		}
 
 		if( onlyEndpointFailed ) {
-			cx->invalidateCache( it.first.begin );
+			cx->invalidateCache(range.begin);
 			foundFailed = true;
 		}
 	}

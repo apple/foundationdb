@@ -701,15 +701,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// The following kills a reference cycle between the teamTracker actor and the TCTeamInfo that both holds and is
 		// held by the actor It also ensures that the trackers are done fiddling with healthyTeamCount before we free
 		// this
-		for(int i=0; i < teams.size(); i++) {
-			teams[i]->tracker.cancel();
+		for (auto& team : teams) {
+			team->tracker.cancel();
 		}
 		// The commented TraceEvent log is useful in detecting what is running during the destruction
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//     .detail("Primary", primary)
 		//     .detail("TeamTrackerDestroyed", teams.size());
-		for(int i=0; i < badTeams.size(); i++) {
-			badTeams[i]->tracker.cancel();
+		for (auto& badTeam : badTeams) {
+			badTeam->tracker.cancel();
 		}
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//     .detail("Primary", primary)
@@ -717,9 +717,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be
 		// stopped
 		//  before the server_status map to which it has a pointer, is destroyed.
-		for(auto it = server_info.begin(); it != server_info.end(); ++it) {
-			it->second->tracker.cancel();
-			it->second->collection = nullptr;
+		for (auto& [_, info] : server_info) {
+			info->tracker.cancel();
+			info->collection = nullptr;
 		}
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//     .detail("Primary", primary)
@@ -799,9 +799,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 				self->lastMedianAvailableSpaceUpdate = now();
 				std::vector<double> teamAvailableSpace;
 				teamAvailableSpace.reserve(self->teams.size());
-				for( int i = 0; i < self->teams.size(); i++ ) {
-					if (self->teams[i]->isHealthy()) {
-						teamAvailableSpace.push_back(self->teams[i]->getMinAvailableSpaceRatio());
+				for (const auto& team : self->teams) {
+					if (team->isHealthy()) {
+						teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
 					}
 				}
 
@@ -1135,14 +1135,14 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 		double varTeams = 0;
 
 		std::map<Optional<Standalone<StringRef>>, int> machineTeams;
-		for(auto s = server_info.begin(); s != server_info.end(); ++s) {
-			if(!server_status.get(s->first).isUnhealthy()) {
-				int stc = s->second->teams.size();
+		for (const auto& [id, info] : server_info) {
+			if (!server_status.get(id).isUnhealthy()) {
+				int stc = info->teams.size();
 				minTeams = std::min(minTeams, stc);
 				maxTeams = std::max(maxTeams, stc);
 				varTeams += (stc - teamsPerServer)*(stc - teamsPerServer);
 				// Use zoneId as server's machine id
-				machineTeams[s->second->lastKnownInterface.locality.zoneId()] += stc;
+				machineTeams[info->lastKnownInterface.locality.zoneId()] += stc;
 			}
 		}
 		varTeams /= teamsPerServer*teamsPerServer;
@@ -1167,14 +1167,15 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 			.detail("MachineMaxTeams", maxMachineTeams);
 	}
 
-	int overlappingMembers( vector<UID> &team ) {
+	int overlappingMembers(const vector<UID>& team) const {
 		if (team.empty()) {
 			return 0;
 		}
 
 		int maxMatchingServers = 0;
-		UID& serverID = team[0];
-		for (auto& usedTeam : server_info[serverID]->teams) {
+		const UID& serverID = team[0];
+		const auto& usedTeams = server_info.find(serverID)->second->teams;
+		for (const auto& usedTeam : usedTeams) {
 			auto used = usedTeam->getServerIDs();
 			int teamIdx = 0;
 			int usedIdx = 0;

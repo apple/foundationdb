@@ -233,7 +233,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	}
 }
 
-std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) {
+std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string params) const {
 	std::string hostPort = host;
 	if(!service.empty()) {
 		hostPort.append(":");
@@ -256,14 +256,14 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource, std::string 
 		params.append(knobParams);
 	}
 
-	for(auto &kv : extraHeaders) {
+	for (const auto& [k, v] : extraHeaders) {
 		if(!params.empty()) {
 			params.append("&");
 		}
 		params.append("header=");
-		params.append(HTTP::urlEncode(kv.first));
+		params.append(HTTP::urlEncode(k));
 		params.append(":");
-		params.append(HTTP::urlEncode(kv.second));
+		params.append(HTTP::urlEncode(v));
 	}
 
 	if(!params.empty())

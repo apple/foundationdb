@@ -601,7 +601,7 @@ struct ResolutionRequestBuilder {
 		ASSERT( transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768 );
 
 		bool isTXNStateTransaction = false;
-		for (auto & m : trIn.mutations) {
+		for (const auto& m : trIn.mutations) {
 			if (m.type == MutationRef::SetVersionstampedKey) {
 				transformVersionstampMutation( m, &MutationRef::param1, requests[0].version, transactionNumberInBatch );
 				trIn.write_conflict_ranges.push_back( requests[0].arena, singleKeyRange( m.param1, requests[0].arena ) );
@@ -767,16 +767,16 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
-                                      LogPushData* toCommit, Version commitVersion, double* computeDuration, double* computeStart) {
-	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
+ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef> const* logRangeMutations,
+                                      LogPushData* toCommit, Version commitVersion, double* computeDuration,
+                                      double* computeStart) {
+	state std::map<Key, MutationListRef>::const_iterator logRangeMutation = logRangeMutations->begin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
 
 	// Serialize the log range mutations within the map
-	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
-	{
+	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
 		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
 		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
 		valueWriter << logRangeMutation->second.totalSize();

@@ -1006,8 +1006,7 @@ static void printAgentUsage(bool devhelp) {
 void printBackupContainerInfo() {
 	printf("                 Backup URL forms:\n\n");
 	std::vector<std::string> formats = IBackupContainer::getURLFormats();
-	for(auto &f : formats)
-		printf("                     %s\n", f.c_str());
+	for (const auto& f : formats) printf("                     %s\n", f.c_str());
 	printf("\n");
 }
 

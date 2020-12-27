@@ -70,7 +70,7 @@ public:
 	void delref() { ReferenceCounted<BackupProgress>::delref(); }
 
 private:
-	std::set<Tag> enumerateLogRouterTags(int logRouterTags) {
+	std::set<Tag> enumerateLogRouterTags(int logRouterTags) const {
 		std::set<Tag> tags;
 		for (int i = 0; i < logRouterTags; i++) {
 			tags.insert(Tag(tagLocalityLogRouter, i));
