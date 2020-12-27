@@ -25,13 +25,13 @@ public: // ctor & dtor
 	explicit ExecCmdValueString(StringRef cmdValueString);
 
 public: // interfaces
-	StringRef getBinaryPath();
-	VectorRef<StringRef> getBinaryArgs();
+	StringRef getBinaryPath() const;
+	VectorRef<StringRef> getBinaryArgs() const;
 	void setCmdValueString(StringRef cmdValueString);
-	StringRef getCmdValueString(void);
+	StringRef getCmdValueString(void) const;
 
 public: // helper functions
-	void dbgPrint();
+	void dbgPrint() const;
 
 private: // functions
 	void parseCmdValue();
