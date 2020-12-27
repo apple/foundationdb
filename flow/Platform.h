@@ -22,6 +22,8 @@
 #define FLOW_PLATFORM_H
 #pragma once
 
+#include "flow/config.h"
+
 #if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define __unixish__ 1
 #endif

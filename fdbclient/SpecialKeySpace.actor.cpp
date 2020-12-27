@@ -148,27 +148,46 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks, ReadYourWrite
                                              KeyRangeRef boundary, int* actualOffset,
                                              Standalone<RangeResultRef>* result,
                                              Optional<Standalone<RangeResultRef>>* cache) {
+	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
+	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
+	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
+	// Otherwise, we only need to move right if offset > 1, iter points to the range containing the key
+	// Since boundary.end is always a key in the RangeMap, it is always safe to move right
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter =
 	    ks->offset < 1 ? sks->getReadImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getReadImpls().rangeContaining(ks->getKey());
-	while ((ks->offset < 1 && iter->begin() > boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
+	while ((ks->offset < 1 && iter->begin() >= boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
 		if (iter->value() != nullptr) {
 			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
 		}
-		ks->offset < 1 ? --iter : ++iter;
+		// Check if we can still move the iterator left
+		if (ks->offset < 1) {
+			if (iter == sks->getReadImpls().ranges().begin()) {
+				break;
+			} else {
+				--iter;
+			}
+		} else if (ks->offset > 1) {
+			// Always safe to move right
+			++iter;
+		}
 	}
 	*actualOffset = ks->offset;
-	if (iter->begin() == boundary.begin || iter->begin() == boundary.end) ks->setKey(iter->begin());
 
 	if (!ks->isFirstGreaterOrEqual()) {
-		// The Key Selector clamps up to the legal key space
 		TraceEvent(SevDebug, "ReadToBoundary")
 		    .detail("TerminateKey", ks->getKey())
 		    .detail("TerminateOffset", ks->offset);
-		if (ks->offset < 1)
+		// If still not normalized after moving to the boundary, 
+		// let key selector clamp up to the boundary
+		if (ks->offset < 1) {
 			result->readToBegin = true;
-		else
+			ks->setKey(boundary.begin);
+		}
+		else {
 			result->readThroughEnd = true;
+			ks->setKey(boundary.end);
+		}
 		ks->offset = 1;
 	}
 	return Void();

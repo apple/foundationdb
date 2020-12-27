@@ -948,12 +948,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
-		    // std::make_unique<TracingOptionsImpl>(
-		    //     SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
-		    // TODO: Temporary fix for an issue with special-key top level ranges.
 		    std::make_unique<TracingOptionsImpl>(
-		        KeyRangeRef(LiteralStringRef("a/"), LiteralStringRef("a0"))
-		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING).begin)));
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
@@ -4198,6 +4194,37 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 		return transaction_invalid_version();
 	}
 	return versionstampPromise.getFuture();
+}
+
+ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConnectionFile> f) {
+	state ClientCoordinators coord(f);
+
+	state vector<Future<ProtocolInfoReply>> coordProtocols;
+	coordProtocols.reserve(coord.clientLeaderServers.size());
+	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
+			{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+	}
+
+	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5));
+
+	std::unordered_map<uint64_t, int> protocolCount;
+	for(int i = 0; i<coordProtocols.size(); i++) {
+		if(coordProtocols[i].isReady()) {
+			protocolCount[coordProtocols[i].get().version.version()]++;
+		}
+	}
+
+	uint64_t majorityProtocol = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
+		return l.second < r.second;
+	})->first;
+	return ProtocolVersion(majorityProtocol);
+}
+
+ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
+	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
+	return protocolVersion.version();
 }
 
 uint32_t Transaction::getSize() {

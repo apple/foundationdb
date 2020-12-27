@@ -20,6 +20,7 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "flow/flow.h"
@@ -74,6 +75,8 @@ public:
 		double fault_injection_p1, fault_injection_p2;
 
 		UID uid;
+
+		ProtocolVersion protocolVersion;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddressList addresses,
 		            INetworkConnections* net, const char* dataFolder, const char* coordinationFolder)
@@ -166,7 +169,7 @@ public:
 
 	virtual ProcessInfo* newProcess(const char* name, IPAddress ip, uint16_t port, bool sslEnabled, uint16_t listenPerProcess,
 	                                LocalityData locality, ProcessClass startingClass, const char* dataFolder,
-	                                const char* coordinationFolder) = 0;
+	                                const char* coordinationFolder, ProtocolVersion protocol) = 0;
 	virtual void killProcess( ProcessInfo* machine, KillType ) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
@@ -179,7 +182,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-
+	virtual ProtocolVersion protocolVersion() = 0;
 	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
 		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
@@ -328,6 +331,9 @@ public:
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+
+	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
+	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };

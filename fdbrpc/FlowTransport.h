@@ -27,6 +27,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/ContinuousSample.h"
 
@@ -116,11 +117,21 @@ namespace std
 	};
 }
 
+enum class RequirePeer { Exactly, AtLeast };
+
+struct PeerCompatibilityPolicy {
+	RequirePeer requirement;
+	ProtocolVersion version;
+};
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
+	virtual PeerCompatibilityPolicy peerCompatibilityPolicy() const {
+		return { RequirePeer::Exactly, g_network->protocolVersion() };
+	}
 };
 
 struct TransportData;
