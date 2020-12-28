@@ -140,6 +140,7 @@ public:
 	struct MachineInfo {
 		ProcessInfo* machineProcess;
 		std::vector<ProcessInfo*> processes;
+		std::map<std::string, void*> nonFlowStores; // TODO: eliminate void*
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
 		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
