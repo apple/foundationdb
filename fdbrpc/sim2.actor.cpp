@@ -2027,8 +2027,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode ) {
 #endif
 
 // Opens a file for asynchronous I/O
-Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
-{
+Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 	ASSERT( (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) ||
 			!(flags & IAsyncFile::OPEN_CREATE) ||
 			StringRef(filename).endsWith(LiteralStringRef(".fdb-lock")) );  // We don't use "ordinary" non-atomic file creation right now except for folder locking, and we don't have code to simulate its unsafeness.
@@ -2065,12 +2064,11 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
-{
+Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
-Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
+Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
 	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {

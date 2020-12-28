@@ -239,7 +239,7 @@ public:
 	// However, we could have unfinished version in the buffer when EOF is true,
 	// which means we should look for data in the next file. The caller
 	// should call getUnfinishedBuffer() to get these left data.
-	bool finished() { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
+	bool finished() const { return (eof && keyValues.empty()) || (leftover && !keyValues.empty()); }
 
 	std::vector<VersionedKVPart>&& getUnfinishedBuffer() && { return std::move(keyValues); }
 

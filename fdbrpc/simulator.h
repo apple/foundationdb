@@ -383,12 +383,12 @@ extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
 	// Opens a file for asynchronous I/O
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode );
+	Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) override;
 
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable );
+	Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) override;
 
-	virtual Future< std::time_t > lastWriteTime( std::string filename );
+	Future<std::time_t> lastWriteTime(const std::string& filename) override;
 
 	Sim2FileSystem() {}
 

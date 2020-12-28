@@ -30,7 +30,7 @@ namespace {
 
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
-	BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath)
+	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
 	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath) {}
 
 	Future<Void> append(const void* data, int len) {
