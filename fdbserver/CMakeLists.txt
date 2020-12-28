@@ -24,6 +24,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   IDiskQueue.h
+  IKeyValueStore.actor.cpp
   IKeyValueStore.h
   IPager.h
   IVersionedStore.h
