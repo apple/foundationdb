@@ -5,7 +5,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define debug_printf(...)
+#define debug_printf
 
 namespace {
 
@@ -78,7 +78,9 @@ ACTOR Future<Void> randomReader(IKeyValueStore* kvStore) {
 
 			state KeyValue kv = randomKV(10, 0);
 			state int c = deterministicRandom()->randomInt(0, 100);
-			Standalone<RangeResultRef> ignored = wait(kvStore->readRangeAt({ kv.key, LiteralStringRef("\xff") }, v, c));
+			// TODO: This needs to synchronize with `kvStore` getting deleted/recreated in the main loop.
+			// Standalone<RangeResultRef> ignored = wait(kvStore->readRangeAt({ kv.key, LiteralStringRef("\xff") }, v,
+			// c));
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_transaction_too_old) {
@@ -115,11 +117,9 @@ ACTOR Future<int> verifyRange(IKeyValueStore* kvStore, Key start, Key end, Versi
 				if (it == itEnd) break;
 				++it;
 
-				// TODO: The `it == itEnd` check here is almost certainly wrong. Either that, or we shouldn't be
-				// unconditionally dereffing it in the printf.
 				if (itLast->first.second <= version && itLast->second.present() &&
 				    (it == itEnd || it->first.first != itLast->first.first || it->first.second > version)) {
-					debug_printf("VerifyRange(@%" PRId64 ", %s, %s) Found key in written map: %s\n", v,
+					debug_printf("VerifyRange(@%" PRId64 ", %s, %s) Found key in written map: %s\n", version,
 					             start.printable().c_str(), end.printable().c_str(), itLast->first.first.c_str());
 					break;
 				}
@@ -183,13 +183,15 @@ ACTOR Future<int> verifyRange(IKeyValueStore* kvStore, Key start, Key end, Versi
 	             end.printable().c_str());
 
 	// Now read the range from the tree in reverse order and compare to the saved results
-	Standalone<RangeResultRef> read = wait(kvStore->readRangeAt({ start, end }, version));
+	// TODO: This doesn't handle the start/end correctly.
+	Standalone<RangeResultRef> r = wait(kvStore->readRangeAt({ end, start }, version, -(1 << 30)));
+	read = r;
 
-	state std::vector<KeyValue>::const_reverse_iterator r = results.rbegin();
+	state std::vector<KeyValue>::const_reverse_iterator rit = results.rbegin();
 
 	while (1) {
 		for (const auto& kv : read) {
-			if (r == results.rend()) {
+			if (rit == results.rend()) {
 				++errors;
 				++*pErrorCount;
 				printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n",
@@ -197,25 +199,25 @@ ACTOR Future<int> verifyRange(IKeyValueStore* kvStore, Key start, Key end, Versi
 				break;
 			}
 
-			if (kv.key != r->key) {
+			if (kv.key != rit->key) {
 				++errors;
 				++*pErrorCount;
 				printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree key '%s' but expected '%s'\n", version,
 				       start.printable().c_str(), end.printable().c_str(), kv.key.toString().c_str(),
-				       r->key.toString().c_str());
+				       rit->key.toString().c_str());
 				break;
 			}
-			if (kv.value != r->value) {
+			if (kv.value != rit->value) {
 				++errors;
 				++*pErrorCount;
 				printf("VerifyRangeReverse(@%" PRId64
 				       ", %s, %s) ERROR: Tree key '%s' has tree value '%s' but expected '%s'\n",
 				       version, start.printable().c_str(), end.printable().c_str(), kv.value.toString().c_str(),
-				       kv.value.toString().c_str(), r->value.toString().c_str());
+				       kv.value.toString().c_str(), rit->value.toString().c_str());
 				break;
 			}
 
-			++r;
+			++rit;
 		}
 		if (read.more) {
 			Standalone<RangeResultRef> r = wait(kvStore->readRangeAt({ read.readThrough.get(), end }, version));
@@ -225,11 +227,11 @@ ACTOR Future<int> verifyRange(IKeyValueStore* kvStore, Key start, Key end, Versi
 		}
 	}
 
-	if (r != results.rend()) {
+	if (rit != results.rend()) {
 		++errors;
 		++*pErrorCount;
 		printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR: Tree range ended but written has '%s'\n", version,
-		       start.printable().c_str(), end.printable().c_str(), r->key.toString().c_str());
+		       start.printable().c_str(), end.printable().c_str(), rit->key.toString().c_str());
 	}
 
 	return errors;
@@ -245,13 +247,13 @@ ACTOR Future<int> seekAll(IKeyValueStore* kvStore, Version version,
 	while (it != itEnd) {
 		state std::string key = it->first.first;
 		if (it->first.second == version) {
-			debug_printf("Verifying @%" PRId64 " '%s'\n", ver, key.c_str());
+			debug_printf("Verifying @%" PRId64 " '%s'\n", version, key.c_str());
 			state Arena arena;
 			Optional<Value> value = wait(kvStore->readValueAt(KeyRef(arena, key), version));
 
 			const auto& expected = it->second;
 			if (expected.present()) {
-				if (value.castTo<StringRef>() != expected.castTo<StringRef>()) {
+				if (!value.present() || value.get() != expected.get()) {
 					++errors;
 					++*pErrorCount;
 					if (value.present()) {
@@ -317,8 +319,8 @@ ACTOR Future<Void> verify(IKeyValueStore* kvStore, FutureStream<Version> vStream
 
 			Key begin = randomKV().key;
 			Key end = randomKV().key;
-			debug_printf("Verifying range (%s, %s) at version %" PRId64 "\n", toString(begin).c_str(),
-			             toString(end).c_str(), v);
+			debug_printf("Verifying range (%s, %s) at version %" PRId64 "\n", begin.toString().c_str(),
+			             end.toString().c_str(), v);
 			fRangeRandom = verifyRange(kvStore, begin, end, v, written, pErrorCount);
 			if (serial) {
 				wait(success(fRangeRandom));
@@ -414,7 +416,9 @@ TEST_CASE("!/IKeyValueStore/correctness/") {
 	state PromiseStream<Version> committedVersions;
 	state Future<Void> verifyTask = verify(kvStore, committedVersions.getFuture(), &written, &errorCount, serialTest);
 	state Future<Void> randomTask = serialTest ? Void() : (randomReader(kvStore) || kvStore->getError());
-	committedVersions.send(lastVer);
+	if (lastVer > invalidVersion) {
+		committedVersions.send(lastVer);
+	}
 
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
@@ -422,8 +426,6 @@ TEST_CASE("!/IKeyValueStore/correctness/") {
 	while (totalPageOps < targetPageOps && written.size() < maxVerificationMapEntries) {
 		// Sometimes increment the version
 		if (deterministicRandom()->random01() < 0.10) {
-			++version;
-			kvStore->setWriteVersion(version);
 		}
 
 		// Sometimes do a clear range
@@ -517,6 +519,7 @@ TEST_CASE("!/IKeyValueStore/correctness/") {
 		// Commit after any limits for this commit or the total test are reached
 		if (totalPageOps >= targetPageOps || written.size() >= maxVerificationMapEntries ||
 		    mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
+
 			// Wait for previous commit to finish
 			wait(commit);
 			printf("Committed.  Next commit %d bytes, %" PRId64 " bytes.", mutationBytesThisCommit,
@@ -527,6 +530,19 @@ TEST_CASE("!/IKeyValueStore/correctness/") {
 
 			Version v = version; // Avoid capture of version as a member of *this
 
+			commit = map(kvStore->commit(), [=, &ops = totalPageOps](Void) {
+				// Notify the background verifier that version is committed and therefore readable
+				committedVersions.send(v);
+				return Void();
+			});
+
+			// Increment the version.
+			// TODO: We're only putting one version per commit because that's all the RocksDB engine
+			// can make readable. We should either change the test logic to only read from committed
+			// versions or change RocksDB to be able to read from any version.
+			++version;
+			kvStore->setWriteVersion(version);
+
 			// Sometimes advance the oldest version to close the gap between the oldest and latest versions by a random
 			// amount.
 			if (deterministicRandom()->random01() < advanceOldVersionProbability) {
@@ -534,12 +550,6 @@ TEST_CASE("!/IKeyValueStore/correctness/") {
 				                          deterministicRandom()->randomInt64(0, kvStore->getLastCommittedVersion() -
 				                                                                    kvStore->getOldestVersion() + 1));
 			}
-
-			commit = map(kvStore->commit(), [=, &ops = totalPageOps](Void) {
-				// Notify the background verifier that version is committed and therefore readable
-				committedVersions.send(v);
-				return Void();
-			});
 
 			if (serialTest) {
 				// Wait for commit, wait for verification, then start new verification

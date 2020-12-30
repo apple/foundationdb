@@ -1,10 +1,16 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#include <map>
+#include <memory>
+
 #include <rocksdb/db.h>
 #include <rocksdb/options.h>
+#include <rocksdb/snapshot.h>
 #include <rocksdb/utilities/table_properties_collectors.h>
 #include "flow/flow.h"
+#include "flow/serialize.h"
 #include "flow/IThreadPool.h"
+#include "flow/ThreadHelper.actor.h"
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -15,6 +21,10 @@
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
+
+// TODO: This is copied from 'storageserver.actor.cpp'. It should probably be put somewhere
+// shared.
+const KeyRef persistVersion = LiteralStringRef("\xff\xffVersion");
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -48,8 +58,6 @@ rocksdb::Options getOptions() {
 
 struct RocksDBKeyValueStore : IKeyValueStore {
 	using CF = rocksdb::ColumnFamilyHandle*;
-
-	rocksdb::ReadOptions readOptions;
 
 	template<typename T>
 	void post(Reference<IThreadPool> const & threadPool, T & future) {
@@ -119,9 +127,38 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (!status.ok()) {
 			TraceEvent(SevError, "RocksDBError").detail("Error", status.ToString()).detail("Method", "Open");
 			a.done.sendError(statusToError(status));
-		} else {
-			a.done.send(Void());
+			return;
 		}
+		// Set up the initial snapshot.
+		auto snapshot = std::make_shared<rocksdb::ManagedSnapshot>(db.get());
+		rocksdb::PinnableSlice value;
+		rocksdb::ReadOptions options;
+		options.snapshot = snapshot->snapshot();
+		// Read if there is already a committed version.
+		auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(persistVersion), &value);
+		if (!s.ok() && !s.IsNotFound()) {
+			TraceEvent(SevError, "RocksDBError")
+			    .detail("Error", status.ToString())
+			    .detail("Method", "Open")
+			    .detail("Read", "persistVersion");
+			a.done.sendError(statusToError(status));
+			return;
+		}
+		if (s.IsNotFound()) {
+			onMainThreadVoid(
+			    [this, snapshot = std::move(snapshot)]() {
+				    snapshots.insert({ invalidVersion, std::move(snapshot) });
+			    },
+			    nullptr);
+		} else {
+			auto version = BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+			onMainThreadVoid(
+			    [this, snapshot = std::move(snapshot), version]() {
+				    snapshots.insert({ version, std::move(snapshot) });
+			    },
+			    nullptr);
+		}
+		a.done.send(Void());
 	}
 
   struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
@@ -141,6 +178,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	struct CommitAction : TypedAction<Writer, CommitAction> {
 		std::unique_ptr<rocksdb::WriteBatch> batchToCommit;
 		ThreadReturnPromise<Void> done;
+		Version version;
 		double getTimeEstimate() override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 	};
 	void action(CommitAction& a) {
@@ -156,6 +194,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			TraceEvent(SevError, "RocksDBError").detail("Error", s.ToString()).detail("Method", "Commit");
 			a.done.sendError(statusToError(s));
 		} else {
+			auto snapshot = std::make_shared<rocksdb::ManagedSnapshot>(db.get());
+			onMainThreadVoid(
+			    [this, snapshot = std::move(snapshot), version = a.version]() {
+				    snapshots.insert({ version, std::move(snapshot) });
+			    },
+			    nullptr);
 			a.done.send(Void());
 			for (const auto& keyRange : deletes) {
 				auto begin = toSlice(keyRange.begin);
@@ -196,6 +240,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Key key;
 		Optional<UID> debugID;
 		ThreadReturnPromise<Optional<Value>> result;
+		std::shared_ptr<rocksdb::ManagedSnapshot> snapshot = nullptr;
 		ReadValueAction(KeyRef key, Optional<UID> debugID)
 			: key(key), debugID(debugID)
 		{}
@@ -208,7 +253,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 		}
 		rocksdb::PinnableSlice value;
-		auto s = db->Get(readOptions, db->DefaultColumnFamily(), toSlice(a.key), &value);
+		rocksdb::ReadOptions options;
+		options.snapshot = a.snapshot ? nullptr : a.snapshot->snapshot();
+		auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 		if (a.debugID.present()) {
 			traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
 			traceBatch.get().dump();
@@ -228,6 +275,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int maxLength;
 		Optional<UID> debugID;
 		ThreadReturnPromise<Optional<Value>> result;
+		std::shared_ptr<rocksdb::ManagedSnapshot> snapshot = nullptr;
 		ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
 		  : key(key), maxLength(maxLength), debugID(debugID){};
 		virtual double getTimeEstimate() { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
@@ -240,7 +288,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 			                          "Reader.Before");
 		}
-		auto s = db->Get({}, db->DefaultColumnFamily(), toSlice(a.key), &value);
+		rocksdb::ReadOptions options;
+		options.snapshot = a.snapshot ? nullptr : a.snapshot->snapshot();
+		auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 		if (a.debugID.present()) {
 			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
 			                          "Reader.After");
@@ -264,6 +314,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		KeyRange keys;
 		int rowLimit, byteLimit;
 		ThreadReturnPromise<Standalone<RangeResultRef>> result;
+		std::shared_ptr<rocksdb::ManagedSnapshot> snapshot = nullptr;
 		ReadRangeAction(KeyRange keys, int rowLimit, int byteLimit)
 		  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit) {}
 		virtual double getTimeEstimate() { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
@@ -282,6 +333,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		rocksdb::Status s;
 		if (a.rowLimit > 0) {
 			rocksdb::ReadOptions options;
+			options.snapshot = a.snapshot ? nullptr : a.snapshot->snapshot();
 			auto endSlice = toSlice(a.keys.end);
 			options.iterate_upper_bound = &endSlice;
 			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
@@ -340,6 +392,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Promise<Void> errorPromise;
 	Promise<Void> closePromise;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
+	Version currentWriteVersion;
+
+	// TODO: This should probably be a std::deque.
+	std::map<Version, std::shared_ptr<rocksdb::ManagedSnapshot>> snapshots;
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 		: path(path)
@@ -379,7 +435,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	void preSimulatedCrashHookForNonFlowStorageEngines() override {
 		close();
 	}
-
 
 	Future<Void> onClosed() override {
 		return closePromise.getFuture();
@@ -427,6 +482,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		auto a = new CommitAction();
 		a->batchToCommit = std::move(writeBatch);
+		a->version = currentWriteVersion;
 		auto res = a->done.getFuture();
 		post(writeThread, a);
 		return res;
@@ -462,6 +518,62 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		g_network->getDiskBytes(path, free, total);
 
 		return StorageBytes(free, total, live, free);
+	}
+
+	// Versioned interface.
+	// TODO: Backport regular logic onto the versioned equivalent.
+	bool supportsVersions() override { return true; }
+
+	void setWriteVersion(Version version) override { currentWriteVersion = version; }
+	Version getLastCommittedVersion() override {
+		ASSERT(!snapshots.empty());
+		return snapshots.rbegin()->first;
+	}
+	Version getOldestVersion() override {
+		ASSERT(!snapshots.empty());
+		return snapshots.begin()->first;
+	}
+	void setOldestVersion(Version version) override {
+		ASSERT(!snapshots.empty());
+		ASSERT(version <= getLastCommittedVersion());
+		auto it = snapshots.begin();
+		while (it->first < version) {
+			snapshots.erase(it++);
+		}
+	}
+
+	Future<Optional<Value>> readValueAt(KeyRef key, Version version, Optional<UID> debugID = Optional<UID>()) override {
+		auto it = snapshots.find(version);
+		ASSERT(it != snapshots.end());
+		auto a = new ReadValueAction(key, debugID);
+		a->snapshot = it->second;
+		auto res = a->result.getFuture();
+		post(readThreads, a);
+		return res;
+
+		return readValue(key, debugID);
+	}
+
+	Future<Optional<Value>> readValuePrefixAt(KeyRef key, int maxLength, Version version,
+	                                          Optional<UID> debugID) override {
+		auto it = snapshots.find(version);
+		ASSERT(it != snapshots.end());
+		auto a = new ReadValuePrefixAction(key, maxLength, debugID);
+		a->snapshot = it->second;
+		auto res = a->result.getFuture();
+		post(readThreads, a);
+		return res;
+	}
+
+	Future<Standalone<RangeResultRef>> readRangeAt(KeyRangeRef keys, Version version, int rowLimit,
+	                                               int byteLimit) override {
+		auto it = snapshots.find(version);
+		ASSERT(it != snapshots.end());
+		auto a = new ReadRangeAction(keys, rowLimit, byteLimit);
+		a->snapshot = it->second;
+		auto res = a->result.getFuture();
+		post(readThreads, a);
+		return res;
 	}
 };
 
