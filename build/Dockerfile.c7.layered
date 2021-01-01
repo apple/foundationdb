@@ -4,7 +4,8 @@ RUN yum install -y centos-release-scl scl-utils
 RUN rpmkeys --import "http://pool.sks-keyservers.net/pks/lookup?op=get&search=0x3fa7e0328081bff6a14da29aa6a19b38d3d831ef"
 RUN	curl https://download.mono-project.com/repo/centos7-stable.repo | tee /etc/yum.repos.d/mono-centos7-stable.repo
 RUN yum install -y curl rpm-build wget git unzip devtoolset-8 devtoolset-8-libubsan-devel devtoolset-8-valgrind-devel \
-	rh-ruby26 go-toolset-7 rh-git218 rh-python36-devel java-11-openjdk-devel.x86_64 mono-devel dos2unix dpkg rh-python36
+	rh-ruby26 go-toolset-7 rh-git218 rh-python36-devel java-11-openjdk-devel.x86_64 mono-devel dos2unix dpkg rh-python36 \ 
+	lz4 lz4-devel lz4-static
 
 # install Ninja
 RUN cd /tmp && curl -L https://github.com/ninja-build/ninja/archive/v1.9.0.zip -o ninja.zip &&\

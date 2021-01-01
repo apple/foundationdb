@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include <numeric>
 #include <limits>
+#include <numeric>
+#include <vector>
 
 #include "flow/ActorCollection.h"
 #include "flow/Util.h"
@@ -83,8 +84,8 @@ struct RelocateData {
 };
 
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
-	vector<Reference<IDataDistributionTeam>> teams;
-	vector<UID> tempServerIDs;
+	std::vector<Reference<IDataDistributionTeam>> teams;
+	std::vector<UID> tempServerIDs;
 
 	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
 		int64_t result = 0;
@@ -95,11 +96,11 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 	}
 
 	template <class T>
-	vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
-		vector<T> result;
+	std::vector<T> collect(std::function<vector<T>(IDataDistributionTeam const&)> func) const {
+		std::vector<T> result;
 
 		for (const auto& team : teams) {
-			vector<T> newItems = func(*team);
+			std::vector<T> newItems = func(*team);
 			result.insert(result.end(), newItems.begin(), newItems.end());
 		}
 		return result;
@@ -125,7 +126,7 @@ public:
 		return !any([func](IDataDistributionTeam const& team) { return !func(team); });
 	}
 
-	vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
+	std::vector<StorageServerInterface> getLastKnownServerInterfaces() const override {
 		return collect<StorageServerInterface>(
 		    [](IDataDistributionTeam const& team) { return team.getLastKnownServerInterfaces(); });
 	}
@@ -138,11 +139,11 @@ public:
 		return totalSize;
 	}
 
-	vector<UID> const& getServerIDs() const override {
+	std::vector<UID> const& getServerIDs() const override {
 		static vector<UID> tempServerIDs;
 		tempServerIDs.clear();
 		for (const auto& team : teams) {
-			vector<UID> const &childIDs = team->getServerIDs();
+			std::vector<UID> const& childIDs = team->getServerIDs();
 			tempServerIDs.insert(tempServerIDs.end(), childIDs.begin(), childIDs.end());
 		}
 		return tempServerIDs;
@@ -185,7 +186,7 @@ public:
 	}
 
 	Future<Void> updateStorageMetrics() override {
-		vector<Future<Void>> futures;
+		std::vector<Future<Void>> futures;
 
 		for (auto& team : teams) {
 			futures.push_back(team->updateStorageMetrics());
@@ -248,7 +249,7 @@ public:
 };
 
 struct Busyness {
-	vector<int> ledger;
+	std::vector<int> ledger;
 
 	Busyness() : ledger( 10, 0 ) {}
 
@@ -554,8 +555,8 @@ struct DDQueueData {
 
 				if(keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for( int shard = 0; shard < keyServersEntries.size(); shard++ ) {
-						vector<UID> src, dest;
-						decodeKeyServersValue( UIDtoTagMap, keyServersEntries[shard].value, src, dest );
+						std::vector<UID> src, dest;
+						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
 						ASSERT( src.size() );
 						for( int i = 0; i < src.size(); i++ ) {
 							servers.insert( src[i] );
@@ -859,7 +860,7 @@ struct DDQueueData {
 			startedHere++;
 
 			// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
-			vector<KeyRange> ranges;
+			std::vector<KeyRange> ranges;
 			inFlightActors.getRangesAffectedByInsertion( rd.keys, ranges );
 			inFlightActors.cancel( KeyRangeRef( ranges.front().begin, ranges.back().end ) );
 			inFlight.insert( rd.keys, rd );
@@ -1440,7 +1441,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx, PromiseStream<RelocateShar
 	state RelocateData launchData;
 	state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
 
-	state vector<Future<Void>> balancingFutures;
+	state std::vector<Future<Void>> balancingFutures;
 
 	state ActorCollectionNoErrors actors;
 	state PromiseStream<KeyRange> rangesComplete;

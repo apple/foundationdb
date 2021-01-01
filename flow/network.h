@@ -20,6 +20,7 @@
 
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include <array>
@@ -531,6 +532,8 @@ public:
 
 	// If the network has not been run and this function has not been previously called, returns true. Otherwise, returns false.
 	virtual bool checkRunnable() = 0;
+
+	virtual ProtocolVersion protocolVersion() = 0;
 
 	// Shorthand for transport().getLocalAddress()
 	static NetworkAddress getLocalAddress()

@@ -3433,8 +3433,7 @@ int main(int argc, char* argv[]) {
 					usePartitionedLog = true;
 					break;
 				case OPT_INCREMENTALONLY:
-					// TODO: Enable this command-line argument once atomics are supported
-					// incrementalBackupOnly = true;
+					incrementalBackupOnly = true;
 					break;
 				case OPT_RESTORECONTAINER:
 					restoreContainer = args->OptionArg();

@@ -44,6 +44,7 @@ public:
 	int randomInt(int min, int maxPlusOne) override;
 	int64_t randomInt64(int64_t min, int64_t maxPlusOne) override;
 	uint32_t randomUInt32() override;
+	uint64_t randomUInt64() override;
 	uint32_t randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) override;
 	UID randomUniqueID() override;
 	char randomAlphaNumeric() override;

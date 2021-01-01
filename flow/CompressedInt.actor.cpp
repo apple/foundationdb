@@ -59,7 +59,7 @@ void printBitsBig(size_t const size, void const * const ptr)
 
 template<typename IntType>
 void testCompressedInt(IntType n, StringRef rep = StringRef()) {
-	BinaryWriter w(AssumeVersion(currentProtocolVersion));
+	BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
 	CompressedInt<IntType> cn(n);
 
 	w << cn;
@@ -74,7 +74,7 @@ void testCompressedInt(IntType n, StringRef rep = StringRef()) {
 		rep = w.toValue();
 
 	cn.value = 0;
-	BinaryReader r(rep, AssumeVersion(currentProtocolVersion));
+	BinaryReader r(rep, AssumeVersion(g_network->protocolVersion()));
 	r >> cn;
 
 	if(cn.value != n) {
