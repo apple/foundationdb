@@ -29,6 +29,7 @@
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <cstdint>
 
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
@@ -285,15 +286,15 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
 
-ThreadFuture<bool> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	if(!api->databaseRebootWorker) {
 		return unsupported_operation();
 	}
 
 	FdbCApi::FDBFuture *f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
-	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-		bool res;
-		FdbCApi::fdb_error_t error = api->futureGetBool(f, &res);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t res;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
 		ASSERT(!error);
 		return res;
 	});
@@ -360,7 +361,6 @@ void DLApi::init() {
 	loadClientFunction(&api->transactionGetRangeSplitPoints, lib, fdbCPath, "fdb_transaction_get_range_split_points",
 	                   headerVersion >= 700);
 
-	loadClientFunction(&api->futureGetBool, lib, fdbCPath, "fdb_future_get_bool", headerVersion >= 700);
 	loadClientFunction(&api->futureGetInt64, lib, fdbCPath, headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version");
 	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64");
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error");
@@ -797,7 +797,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	}
 }
 
-ThreadFuture<bool> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	if (dbState->db) {
 		return dbState->db->rebootWorker(address, check, duration);
 	}

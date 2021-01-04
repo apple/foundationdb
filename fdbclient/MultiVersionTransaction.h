@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include <cstdint>
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -196,7 +197,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
-	ThreadFuture<bool> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -329,7 +330,7 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
-	ThreadFuture<bool> rebootWorker(const StringRef& address, bool check, int duration);
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration);
 
 private:
 	struct DatabaseState;

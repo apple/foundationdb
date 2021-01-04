@@ -23,6 +23,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include <cstdint>
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
@@ -68,10 +69,10 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	}, &db->deferredError );
 }
 
-ThreadFuture<bool> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
 	DatabaseContext *db = this->db;
 	Key addressKey = address;
-	return onMainThread( [db, addressKey, check, duration]() -> Future<bool> {
+	return onMainThread( [db, addressKey, check, duration]() -> Future<int64_t> {
 		return db->rebootWorker(addressKey, check, duration);
 	} );
 }

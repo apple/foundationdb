@@ -141,9 +141,6 @@ extern "C" {
     fdb_future_get_uint64( FDBFuture* f, uint64_t* out );
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
-    fdb_future_get_bool( FDBFuture* f, bool* out );
-
-    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t
     fdb_future_get_key( FDBFuture* f, uint8_t const** out_key,
                         int* out_key_length );
 

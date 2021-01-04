@@ -55,12 +55,6 @@ void Future::cancel() {
   fdb_future_cancel(future_);
 }
 
-// BoolFuture
-
-[[nodiscard]] fdb_error_t BoolFuture::get(bool* out) {
-	return fdb_future_get_bool(future_, out);
-}
-
 // Int64Future
 
 [[nodiscard]] fdb_error_t Int64Future::get(int64_t* out) {
@@ -99,9 +93,9 @@ void Future::cancel() {
 }
 
 // Database
-BoolFuture Database::reboot_worker(FDBDatabase* db, const uint8_t* address, int address_length, fdb_bool_t check,
+Int64Future Database::reboot_worker(FDBDatabase* db, const uint8_t* address, int address_length, fdb_bool_t check,
                                    int duration) {
-	return BoolFuture(fdb_database_reboot_worker(db, address, address_length, check, duration));
+	return Int64Future(fdb_database_reboot_worker(db, address, address_length, check, duration));
 }
 
 // Transaction

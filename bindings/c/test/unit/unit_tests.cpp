@@ -20,6 +20,7 @@
 
 // Unit tests for the FoundationDB C API.
 
+#include <cstdint>
 #define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
@@ -2011,10 +2012,10 @@ TEST_CASE("fdb_database_reboot_worker") {
   CHECK(processPtr->value.HasMember("address"));
   std::string network_address = processPtr->value["address"].GetString();
   while (1) {
-	  fdb::BoolFuture f =
+	  fdb::Int64Future f =
 		  fdb::Database::reboot_worker(db, (const uint8_t*)network_address.c_str(), network_address.size(), false, 0);
 	  fdb_check(wait_future(f));
-	  bool successful;
+	  int64_t successful;
 	  fdb_check(f.get(&successful));
 	  if (successful) break; // retry rebooting until success
   }

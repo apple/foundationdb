@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <regex>
 #include <unordered_set>
@@ -4802,12 +4803,12 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 			}
 		}
-		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {} // TODO : change timeout time here
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {} // NOTE : change timeout time here if necessary
 	}
 	return Void();
 }
 
-ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0) duration = 0;
 	// fetch the addresses of all workers
@@ -4830,6 +4831,6 @@ ACTOR Future<bool> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool ch
 	return 1;
 }
 
-Future<bool> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
+Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	return rebootWorkerActor(this, addr, check, duration);
 }

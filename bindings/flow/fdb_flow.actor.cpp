@@ -20,6 +20,7 @@
 
 #include "fdb_flow.h"
 
+#include <cstdint>
 #include <stdio.h>
 #include <cinttypes>
 
@@ -101,7 +102,7 @@ namespace FDB {
 
 		Reference<Transaction> createTransaction() override;
 		void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
-		Future<bool> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
+		Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
 
 	private:
 		FDBDatabase* db;
@@ -285,11 +286,11 @@ namespace FDB {
 			throw_on_error(fdb_database_set_option(db, option, nullptr, 0));
 	}
 
-	Future<bool> DatabaseImpl::rebootWorker(const StringRef &address, bool check, int duration) {
-		return backToFuture<bool>( fdb_database_reboot_worker(db, address.begin(), address.size(), check, duration), [](Reference<CFuture> f) {
-				bool res;
+	Future<int64_t> DatabaseImpl::rebootWorker(const StringRef &address, bool check, int duration) {
+		return backToFuture<int64_t>( fdb_database_reboot_worker(db, address.begin(), address.size(), check, duration), [](Reference<CFuture> f) {
+				int64_t res;
 
-				throw_on_error(fdb_future_get_bool( f->f, &res ) );
+				throw_on_error(fdb_future_get_int64( f->f, &res ) );
 
 				return res;
 			} );
