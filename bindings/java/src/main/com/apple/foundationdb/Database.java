@@ -63,15 +63,6 @@ public interface Database extends AutoCloseable, TransactionContext {
 	Transaction createTransaction(Executor e);
 
 	/**
-	 * Reboot the specificed process in the {@code Database}
-	 * @param address network address of the process
-	 * @param check whether to make sure the data is durable
-	 * @param duration duration(seconds) for the process to be suspended before reboot
-	 * @return whether the reboot is successful or not
-	 */
-	CompletableFuture<Boolean> rebootWorker(byte[] address, boolean check, int duration);
-
-	/**
 	 * Returns a set of options that can be set on a {@code Database}
 	 *
 	 * @return a set of database-specific options affecting this {@code Database}

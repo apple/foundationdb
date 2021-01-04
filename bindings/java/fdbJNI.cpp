@@ -267,23 +267,6 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get
 	return (jlong)value;
 }
 
-JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FutureBoolean_FutureBoolean_1get(JNIEnv *jenv, jobject, jlong future) {
-	if (!future) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBFuture *f = (FDBFuture *)future;
-
-	bool value = false;
-	fdb_error_t err = fdb_future_get_bool(f, &value);
-	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return 0;
-	}
-
-	return (jboolean)value;
-}
-
 JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
@@ -539,23 +522,6 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1create
 		return 0;
 	}
 	return (jlong)tr;
-}
-
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1rebootWorker(JNIEnv *jenv, jobject, jlong dbPtr, jbyteArray addressBytes, jboolean check, jint duration) {
-	if( !dbPtr ) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBDatabase *database = (FDBDatabase *)dbPtr;
-	uint8_t *buffer = (uint8_t *)jenv->GetByteArrayElements( addressBytes, JNI_NULL );
-	if (!buffer) {
-		if( !jenv->ExceptionOccurred() )
-			throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return 0;
-	}
-	FDBFuture *f = fdb_database_reboot_worker( database, buffer, jenv->GetArrayLength( addressBytes ), check, duration);
-	jenv->ReleaseByteArrayElements( addressBytes, (jbyte*)buffer, JNI_ABORT );
-	return (jlong)f;
 }
 
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1dispose(JNIEnv *jenv, jobject, jlong dPtr) {
