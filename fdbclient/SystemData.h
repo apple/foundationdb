@@ -446,8 +446,16 @@ std::pair<Key,Version> decodeHealthyZoneValue( ValueRef const& );
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 // Snapshot + Incremental Restore
+
+//	"\xff/writeRecovery" = "[[writeRecoveryKeyTrue]]"
+//	Flag used for the snapshot-restore pipeline in order to avoid
+//	anomalous behaviour with multiple recoveries.
 extern const KeyRef writeRecoveryKey;
 extern const ValueRef writeRecoveryKeyTrue;
+
+//	"\xff/snapshotEndVersion" = "[[Version]]"
+//	Written by master server during recovery if recovering from a snapshot.
+//	Allows incremental restore to read and set starting version for consistency. 
 extern const KeyRef snapshotEndVersionKey;
 
 #pragma clang diagnostic pop
