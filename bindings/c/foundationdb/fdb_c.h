@@ -53,7 +53,6 @@
 #define FDB_REMOVED_FUNCTION This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION(0)
 
 #include <stdint.h>
-#include <stdbool.h>
 
 #include "fdb_c_options.g.h"
 
