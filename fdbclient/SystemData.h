@@ -202,8 +202,8 @@ extern const KeyRef configKeysPrefix;
 //   These are inside configKeysPrefix since they represent a form of configuration and they are convenient
 //   to track in the same way by the tlog and recovery process, but they are ignored by the DatabaseConfiguration
 //   class.
-//	The existence of an empty string as a value signifies that the provided IP has been excluded.
-//	(as opposed to having no value at all)
+//	 The existence of an empty string as a value signifies that the provided IP has been excluded.
+//	 (as opposed to having no value at all)
 extern const KeyRef excludedServersPrefix;
 extern const KeyRangeRef excludedServersKeys;
 extern const KeyRef excludedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the excluded servers list
@@ -215,17 +215,17 @@ std::string encodeExcludedServersKey( AddressExclusion const& );
 //   These are inside configKeysPrefix since they represent a form of configuration and they are convenient
 //   to track in the same way by the tlog and recovery process, but they are ignored by the DatabaseConfiguration
 //   class.
-//	The existence of an empty string as a value signifies that the provided IP has been marked as failed.
-//	(as opposed to having no value at all)
+//	 The existence of an empty string as a value signifies that the provided IP has been marked as failed.
+//	 (as opposed to having no value at all)
 extern const KeyRef failedServersPrefix;
 extern const KeyRangeRef failedServersKeys;
 extern const KeyRef failedServersVersionKey;  // The value of this key shall be changed by any transaction that modifies the failed servers list
 const AddressExclusion decodeFailedServersKey( KeyRef const& key ); // where key.startsWith(failedServersPrefix)
 std::string encodeFailedServersKey( AddressExclusion const& );
 
-//    "\xff/workers/[[processID]]" := ""
-//    Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
-//    and are currently (recently) available
+//	"\xff/workers/[[processID]]" := ""
+//	Asynchronously updated by the cluster controller, this is a list of fdbserver processes that have joined the cluster
+//	and are currently (recently) available
 extern const KeyRangeRef workerListKeys;
 extern const KeyRef workerListPrefix;
 const Key workerListKeyFor(StringRef processID );
@@ -233,7 +233,7 @@ const Value workerListValue( ProcessData const& );
 Key decodeWorkerListKey( KeyRef const& );
 ProcessData decodeWorkerListValue( ValueRef const& );
 
-//    "\xff\x02/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
+//	"\xff\x02/backupProgress/[[workerID]]" := "[[WorkerBackupStatus]]"
 //	Provides the progress for the given backup worker.
 //	See "FDBTypes.h" struct WorkerBackupStatus for more details on the return type value.
 extern const KeyRangeRef backupProgressKeys;
@@ -255,18 +255,25 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
 
-//		"\xff/coordinators = [[ClusterConnectionString]]"
+//	"\xff/coordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's current set of coordinators.
 //	Changed when performing quorumChange.
 //	See "CoordinationInterface.h" struct ClusterConnectionString for more details
 extern const KeyRef coordinatorsKey;
+
+//	"\xff/logs" = "[[LogsValue]]"
+//	Used during master recovery in order to communicate
+//	and store info about the logs system.
 extern const KeyRef logsKey;
+
+//	"\xff/minRequiredCommitVersion" = "[[Version]]"
+//	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
 
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs );
 std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAddress>>> decodeLogsValue( const ValueRef& value );
 
-// The "global keys" are send to each storage server any time they are changed
+// The "global keys" are sent to each storage server any time they are changed
 extern const KeyRef globalKeysPrefix;
 extern const KeyRef lastEpochEndKey;
 extern const KeyRef lastEpochEndPrivateKey;
@@ -294,6 +301,7 @@ extern const KeyRef tagThrottleLimitKey;
 extern const KeyRef tagThrottleCountKey;
 
 // Log Range constant variables
+// Used in the backup pipeline to track mutations
 // \xff/logRanges/[16-byte UID][begin key] := serialize( make_pair([end key], [destination key prefix]), IncludeVersion() )
 extern const KeyRangeRef logRangesRange;
 
