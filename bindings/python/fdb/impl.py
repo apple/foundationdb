@@ -740,12 +740,6 @@ class FutureUInt64(Future):
         self.capi.fdb_future_get_uint64(self.fpointer, ctypes.byref(value))
         return value.value
 
-class FutureBool(Future):
-    def wait(self):
-        self.block_until_ready()
-        value = ctypes.c_bool()
-        self.capi.fdb_future_get_bool(self.fpointer, ctypes.byref(value))
-
 class FutureKeyValueArray(Future):
     def wait(self):
         self.block_until_ready()
@@ -1007,11 +1001,6 @@ class Database(_FDBBase):
         pointer = ctypes.c_void_p()
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
-    
-    def reboot_worker(self, address, check, duration):
-        """Reboot the specified process"""
-        addr = paramToBytes(address)
-        return FutureBool(self.capi.fdb_database_reboot_worker(self.dpointer, addr, len(addr), check, duration))
 
     def _set_option(self, option, param, length):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
@@ -1438,10 +1427,6 @@ def init_c_api():
     _capi.fdb_future_get_uint64.restype = ctypes.c_uint
     _capi.fdb_future_get_uint64.errcheck = check_error_code
 
-    _capi.fdb_future_get_bool.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_bool)]
-    _capi.fdb_future_get_bool.restype = ctypes.c_bool
-    _capi.fdb_future_get_bool.errcheck = check_error_code
-
     _capi.fdb_future_get_key.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_byte)),
                                          ctypes.POINTER(ctypes.c_int)]
     _capi.fdb_future_get_key.restype = ctypes.c_int
@@ -1480,9 +1465,6 @@ def init_c_api():
     _capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     _capi.fdb_database_set_option.restype = ctypes.c_int
     _capi.fdb_database_set_option.errcheck = check_error_code
-
-    _capi.fdb_database_reboot_worker.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-    _capi.fdb_database_reboot_worker.restype = ctypes.c_void_p
 
     _capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_destroy.restype = None
