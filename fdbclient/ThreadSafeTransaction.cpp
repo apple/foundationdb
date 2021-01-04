@@ -23,7 +23,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include <cstdint>
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.

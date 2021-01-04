@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
-#include <cstdint>
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"

@@ -21,7 +21,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <iterator>
 #include <regex>
 #include <unordered_set>
