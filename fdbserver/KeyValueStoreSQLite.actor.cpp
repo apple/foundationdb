@@ -128,7 +128,10 @@ struct PageChecksumCodec {
 			auto xxHash3 = XXH3_64bits(data, dataLen);
 			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
 			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
-			if (xxHash3Sum == *pSumInPage) return true;
+			if (xxHash3Sum == *pSumInPage) {
+				TEST(true); // Read xxHash3 checksum
+				return true;
+			}
 		}
 
 		// Try hashlittle2

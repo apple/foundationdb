@@ -60,6 +60,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
@@ -314,6 +315,14 @@ ACTOR void failAfter( Future<Void> trigger, ISimulator::ProcessInfo* m = g_simul
 void failAfter( Future<Void> trigger, Endpoint e ) {
 	if (g_network == &g_simulator)
 		failAfter( trigger, g_simulator.getProcess( e ) );
+}
+
+ACTOR Future<Void> histogramReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+
+		GetHistogramRegistry().logReport();
+	}
 }
 
 void testSerializationSpeed() {
@@ -1739,6 +1748,8 @@ int main(int argc, char* argv[]) {
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", opts.testFile);
 
+			auto histogramReportActor = histogramReport();
+
 			clientKnobs->trace();
 			flowKnobs->trace();
 			serverKnobs->trace();
@@ -1896,6 +1907,7 @@ int main(int argc, char* argv[]) {
 				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
 				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
 				                      opts.whitelistBinPaths));
+				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 				f = stopAfter(waitForAll(actors));

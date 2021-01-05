@@ -216,7 +216,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 struct ShardMetrics {
 	StorageMetrics metrics;
 	double lastLowBandwidthStartTime;
-	int shardCount;
+	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
 
 	bool operator==(ShardMetrics const& rhs) const {
 		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
@@ -233,18 +233,15 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-ACTOR Future<Void> dataDistributionTracker(
-	Reference<InitialDataDistribution> initData,
-	Database cx,
-	PromiseStream<RelocateShard> output,
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-	PromiseStream<GetMetricsRequest> getShardMetrics,
-	PromiseStream<GetMetricsListRequest> getShardMetricsList,
-	FutureStream<Promise<int64_t>> getAverageShardBytes,
-	Promise<Void> readyToStart,
-	Reference<AsyncVar<bool>> zeroHealthyTeams,
-	UID distributorId,
-	KeyRangeMap<ShardTrackedData>* shards);
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData, Database cx,
+                                           PromiseStream<RelocateShard> output,
+                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           Promise<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           UID distributorId, KeyRangeMap<ShardTrackedData>* shards,
+                                           bool const* trackerCancelled);
 
 ACTOR Future<Void> dataDistributionQueue(
 	Database cx,

@@ -20,7 +20,7 @@
 
 // Unit tests for the FoundationDB C API.
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -55,6 +55,7 @@ FDBDatabase *fdb_open_database(const char *clusterFile) {
 
 static FDBDatabase *db = nullptr;
 static std::string prefix;
+static std::string clusterFilePath = "";
 
 std::string key(const std::string& key) {
   return prefix + key;
@@ -1537,6 +1538,15 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
   }
 }
 
+TEST_CASE("fdb_get_server_protocol") {
+  FDBFuture* protocolFuture = fdb_get_server_protocol(clusterFilePath.c_str());
+  uint64_t out;
+
+  fdb_check(fdb_future_block_until_ready(protocolFuture));
+  fdb_check(fdb_future_get_uint64(protocolFuture, &out));
+  fdb_future_destroy(protocolFuture);
+}
+
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
   // Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
   // should return a watches_disabled error.
@@ -1743,6 +1753,220 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
   CHECK(success);
 }
 
+TEST_CASE("special-key-space valid transaction ID") {
+  auto value = get_value("\xff\xff/tracing/transaction_id", /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  uint64_t transaction_id = std::stoul(value.value());
+  CHECK(transaction_id > 0);
+}
+
+TEST_CASE("special-key-space custom transaction ID") {
+  fdb::Transaction tr(db);
+  fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
+                          nullptr, 0));
+  while (1) {
+    tr.set("\xff\xff/tracing/transaction_id", std::to_string(ULONG_MAX));
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
+                                 /* snapshot */ false);
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    REQUIRE(out_present);
+    uint64_t transaction_id = std::stoul(std::string(val, vallen));
+    CHECK(transaction_id == ULONG_MAX);
+    break;
+  }
+}
+
+TEST_CASE("special-key-space set transaction ID after write") {
+  fdb::Transaction tr(db);
+  fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
+                          nullptr, 0));
+  while (1) {
+    tr.set(key("foo"), "bar");
+    tr.set("\xff\xff/tracing/transaction_id", "0");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
+                                 /* snapshot */ false);
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    REQUIRE(out_present);
+    uint64_t transaction_id = std::stoul(std::string(val, vallen));
+    CHECK(transaction_id != 0);
+    break;
+  }
+}
+
+TEST_CASE("special-key-space set token after write") {
+  fdb::Transaction tr(db);
+  fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
+                          nullptr, 0));
+  while (1) {
+    tr.set(key("foo"), "bar");
+    tr.set("\xff\xff/tracing/token", "false");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
+                                 /* snapshot */ false);
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    REQUIRE(out_present);
+    uint64_t token = std::stoul(std::string(val, vallen));
+    CHECK(token != 0);
+    break;
+  }
+}
+
+TEST_CASE("special-key-space valid token") {
+  auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  uint64_t token = std::stoul(value.value());
+  CHECK(token > 0);
+}
+
+TEST_CASE("special-key-space disable tracing") {
+  fdb::Transaction tr(db);
+  fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
+                          nullptr, 0));
+  while (1) {
+    tr.set("\xff\xff/tracing/token", "false");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
+                                 /* snapshot */ false);
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    REQUIRE(out_present);
+    uint64_t token = std::stoul(std::string(val, vallen));
+    CHECK(token == 0);
+    break;
+  }
+}
+
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
+
+  auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
+  REQUIRE(value.has_value());
+  uint64_t token = std::stoul(value.value());
+  CHECK(token == 0);
+
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
+}
+
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_DISABLE, nullptr, 0));
+
+  fdb::Transaction tr(db);
+  fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
+                          nullptr, 0));
+  while (1) {
+    tr.set("\xff\xff/tracing/token", "true");
+    fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
+                                 /* snapshot */ false);
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+
+    REQUIRE(out_present);
+    uint64_t token = std::stoul(std::string(val, vallen));
+    CHECK(token > 0);
+    break;
+  }
+
+  fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TRACE_ENABLE, nullptr, 0));
+}
+
+TEST_CASE("special-key-space tracing get range") {
+  std::string tracingBegin = "\xff\xff/tracing/";
+  std::string tracingEnd = "\xff\xff/tracing0";
+
+  fdb::Transaction tr(db);
+  fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES,
+                          nullptr, 0));
+  while (1) {
+    fdb::KeyValueArrayFuture f1 = tr.get_range(
+        FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(
+          (const uint8_t *)tracingBegin.c_str(),
+          tracingBegin.size()
+        ),
+        FDB_KEYSEL_LAST_LESS_THAN(
+          (const uint8_t *)tracingEnd.c_str(),
+          tracingEnd.size()
+        ) + 1, /* limit */ 0, /* target_bytes */ 0,
+        /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL, /* iteration */ 0,
+        /* snapshot */ false, /* reverse */ 0);
+
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    FDBKeyValue const *out_kv;
+    int out_count;
+    int out_more;
+    fdb_check(f1.get(&out_kv, &out_count, &out_more));
+
+    CHECK(!out_more);
+    CHECK(out_count == 2);
+
+    CHECK(std::string((char *)out_kv[0].key, out_kv[0].key_length) == tracingBegin + "token");
+    CHECK(std::stoul(std::string((char *)out_kv[0].value, out_kv[0].value_length)) > 0);
+    CHECK(std::string((char *)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
+    CHECK(std::stoul(std::string((char *)out_kv[1].value, out_kv[1].value_length)) > 0);
+    break;
+  }
+}
+
 TEST_CASE("fdb_error_predicate") {
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed
@@ -1785,10 +2009,7 @@ TEST_CASE("fdb_error_predicate") {
   CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1040)); // proxy_memory_limit_exceeded
 }
 
-// Feature not live yet, re-enable when checking if a blocking call is made
-// from the network thread is live.
-TEST_CASE("block_from_callback"
-		  * doctest::skip(true)) {
+TEST_CASE("block_from_callback") {
   fdb::Transaction tr(db);
   fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
   struct Context {
@@ -1803,7 +2024,7 @@ TEST_CASE("block_from_callback"
         fdb::ValueFuture f2 = context->tr->get("bar", /*snapshot*/ true);
         fdb_error_t error = f2.block_until_ready();
         if (error) {
-          CHECK(error == /*blocked_from_network_thread*/ 2025);
+          CHECK(error == /*blocked_from_network_thread*/ 2026);
         }
         context->event.set();
       },
@@ -1821,11 +2042,12 @@ int main(int argc, char **argv) {
 
   doctest::Context context;
 
-  fdb_check(fdb_select_api_version(620));
+  fdb_check(fdb_select_api_version(700));
   fdb_check(fdb_setup_network());
   std::thread network_thread{ &fdb_run_network };
 
   db = fdb_open_database(argv[1]);
+  clusterFilePath = std::string(argv[1]);
   prefix = argv[2];
   int res = context.run();
   fdb_database_destroy(db);

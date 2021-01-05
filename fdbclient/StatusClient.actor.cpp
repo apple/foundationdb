@@ -28,6 +28,7 @@
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include <cstdint>
 
 json_spirit::mValue readJSONStrictly(const std::string &s) {
 	json_spirit::mValue val;
@@ -292,7 +293,17 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++)
 			leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader, GetLeaderRequest(coord.clusterKey, UID()), TaskPriority::CoordinationReply));
 
-		wait( smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) || delay(2.0) );
+		state vector<Future<ProtocolInfoReply>> coordProtocols;
+		coordProtocols.reserve(coord.clientLeaderServers.size());
+		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+			RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
+				{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+		}
+
+		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
+		         smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
+		     delay(2.0));
 
 		statusObj["quorum_reachable"] = *quorum_reachable = quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
 
@@ -309,12 +320,17 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<C
 				coordinatorsUnavailable++;
 				coordStatus["reachable"] = false;
 			}
+			if (coordProtocols[i].isReady()) {
+				uint64_t protocolVersionInt = coordProtocols[i].get().version.version();
+				std::stringstream hexSs;
+				hexSs << std::hex << std::setw(2*sizeof(protocolVersionInt)) << std::setfill('0') << protocolVersionInt;
+				coordStatus["protocol"] = hexSs.str();
+			}
 			coordsStatus.push_back(coordStatus);
 		}
 		statusObj["coordinators"] = coordsStatus;
 		
 		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
-
 		return statusObj;
 	}
 	catch (Error &e){

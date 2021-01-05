@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -88,7 +88,6 @@ class Int64Future : public Future {
   friend class Transaction;
   Int64Future(FDBFuture* f) : Future(f) {}
 };
-
 
 class KeyFuture : public Future {
  public:
@@ -147,7 +146,6 @@ class EmptyFuture : public Future {
   friend class Transaction;
   EmptyFuture(FDBFuture* f) : Future(f) {}
 };
-
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
 // Handles cleanup of memory, removing the need to call
