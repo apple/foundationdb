@@ -13,7 +13,8 @@
         "golang.go",
         "ms-azuretools.vscode-docker",
         "ms-vscode.cpptools",
-        "ms-vscode.cmake-tools"
+        "ms-vscode.cmake-tools",
+        "ms-python.python"
     ],
 
     // workaround bug in vscode remote-container: It doesn't ever run a login shell.
