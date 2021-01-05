@@ -5,7 +5,6 @@
             "C": "/opt/rh/devtoolset-8/root/usr/bin/gcc",
             "CXX": "/opt/rh/devtoolset-8/root/usr/bin/g++"
         },
-        "environmentSetupScript": "/etc/profile",
         "preferredGenerator": { "name": "Ninja"}
     }
 ]

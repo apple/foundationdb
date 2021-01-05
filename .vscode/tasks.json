@@ -16,7 +16,7 @@
         {
             "label": "test",
             "type": "shell",
-            "command": "cd workspace; scl enable rh-python36 rh-ruby26 -- /bin/bash -c 'ctest -T Test -L fast -j50 --output-on-failure' ;"
+            "command": "cd workspace; ctest -T Test -L fast -j50 --output-on-failure ;"
         }
     ]
 }

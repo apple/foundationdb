@@ -79,10 +79,3 @@ RUN cd /tmp && curl -L https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz
 
 # do some cleanup
 RUN rm -rf /tmp/* && yum clean all && rm -rf /var/cache/yum
-
-# force scl to always be enabled.
-RUN echo '. scl_source enable rh-git218 rh-python36 rh-ruby26 go-toolset-7' > /etc/profile.d/scl.sh
-# workaround bug in vscode remote-container: It doesn't ever run a login shell.
-# https://github.com/microsoft/vscode-remote-release/issues/1671
-RUN echo '. scl_source enable rh-git218 rh-python36 rh-ruby26 go-toolset-7' >> /etc/bashrc
-ENTRYPOINT [ "/usr/bin/entrypoint.sh" ]

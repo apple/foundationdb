@@ -16,8 +16,9 @@
         "ms-vscode.cmake-tools"
     ],
 
-    "postCreateCommand": "sed -i '/env sh/ a . /etc/profile' /root/.vscode-server/bin/*/server.sh"
-    // "postCreateCommand": "touch created"
+    // workaround bug in vscode remote-container: It doesn't ever run a login shell.
+    // https://github.com/microsoft/vscode-remote-release/issues/1671
+    "postCreateCommand": "sed -i '/env sh/ a . scl_source enable rh-git218 rh-python36 rh-ruby26 go-toolset-7' /root/.vscode-server/bin/*/server.sh"
 
     // "remoteUser": "fdb"
 }
