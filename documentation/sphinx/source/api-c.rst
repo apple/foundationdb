@@ -439,7 +439,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
         |length-of| ``address``.
    
    ``check``
-        whether to make sure the data is durable on disk.
+        whether to perform a storage engine integrity check. In particular, the check-on-reboot is implemented by writing a check/validation file on disk as breadcrumb for the process to find after reboot, at which point it will eat the breadcrumb file and pass true to the integrityCheck parameter of the openKVStore() factory method.
    
    ``duration``
         If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
