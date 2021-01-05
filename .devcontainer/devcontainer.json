@@ -18,7 +18,7 @@
 
     // workaround bug in vscode remote-container: It doesn't ever run a login shell.
     // https://github.com/microsoft/vscode-remote-release/issues/1671
-    "postCreateCommand": "sed -i '/env sh/ a . scl_source enable rh-git218 rh-python36 rh-ruby26 go-toolset-7' /root/.vscode-server/bin/*/server.sh"
+    "postCreateCommand": "sed -i '/env sh/ a . scl_source enable rh-git218 rh-python36 rh-ruby26 go-toolset-7\nexport CC=/opt/rh/devtoolset-8/root/usr/bin/gcc\nexport CXX=/opt/rh/devtoolset-8/root/usr/bin/g++' /root/.vscode-server/bin/*/server.sh"
 
     // "remoteUser": "fdb"
 }
