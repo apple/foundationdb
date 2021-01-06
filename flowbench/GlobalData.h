@@ -1,5 +1,5 @@
 /*
- * fdbbench.cpp
+ * GlobalData.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,14 @@
  * limitations under the License.
  */
 
-#include "benchmark/benchmark.h"
+#ifndef __FDBBENCH_GLOBALDATA_H__
+#define __FDBBENCH_GLOBALDATA_H__
 
-BENCHMARK_MAIN();
+#pragma once
+
+#include "fdbclient/FDBTypes.h"
+
+KeyValueRef getKV(size_t keySize, size_t valueSize);
+KeyRef getKey(size_t keySize);
+
+#endif

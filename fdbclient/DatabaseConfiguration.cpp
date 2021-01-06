@@ -224,110 +224,122 @@ bool DatabaseConfiguration::isValid() const {
 StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	StatusObject result;
 
-	if( initialized ) {
-		std::string tlogInfo = tLogPolicy->info();
-		std::string storageInfo = storagePolicy->info();
-		bool customRedundancy = false;
-		if( tLogWriteAntiQuorum == 0 ) {
-			if( tLogReplicationFactor == 1 && storageTeamSize == 1 ) {
-				result["redundancy_mode"] = "single";
-			} else if( tLogReplicationFactor == 2 && storageTeamSize == 2 ) {
-				result["redundancy_mode"] = "double";
-			} else if( tLogReplicationFactor == 4 && storageTeamSize == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^3 x zoneid^2 x 1" ) {
-				result["redundancy_mode"] = "three_datacenter";
-			} else if( tLogReplicationFactor == 4 && storageTeamSize == 4 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^2 x zoneid^2 x 1" ) {
-				result["redundancy_mode"] = "three_datacenter_fallback";
-			} else if( tLogReplicationFactor == 3 && storageTeamSize == 3 ) {
-				result["redundancy_mode"] = "triple";
-			} else if( tLogReplicationFactor == 4 && storageTeamSize == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^3 x 1" ) {
-				result["redundancy_mode"] = "three_data_hall";
-			} else if( tLogReplicationFactor == 4 && storageTeamSize == 2 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^2 x 1" ) {
-				result["redundancy_mode"] = "three_data_hall_fallback";
-			} else {
-				customRedundancy = true;
-			}
+	if (!initialized) {
+		return result;
+	}
+
+	std::string tlogInfo = tLogPolicy->info();
+	std::string storageInfo = storagePolicy->info();
+	bool customRedundancy = false;
+	if (tLogWriteAntiQuorum == 0) {
+		if (tLogReplicationFactor == 1 && storageTeamSize == 1) {
+			result["redundancy_mode"] = "single";
+		} else if (tLogReplicationFactor == 2 && storageTeamSize == 2) {
+			result["redundancy_mode"] = "double";
+		} else if (tLogReplicationFactor == 4 && storageTeamSize == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" &&
+		           storageInfo == "dcid^3 x zoneid^2 x 1") {
+			result["redundancy_mode"] = "three_datacenter";
+		} else if (tLogReplicationFactor == 4 && storageTeamSize == 4 && tlogInfo == "dcid^2 x zoneid^2 x 1" &&
+		           storageInfo == "dcid^2 x zoneid^2 x 1") {
+			result["redundancy_mode"] = "three_datacenter_fallback";
+		} else if (tLogReplicationFactor == 3 && storageTeamSize == 3) {
+			result["redundancy_mode"] = "triple";
+		} else if (tLogReplicationFactor == 4 && storageTeamSize == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" &&
+		           storageInfo == "data_hall^3 x 1") {
+			result["redundancy_mode"] = "three_data_hall";
+		} else if (tLogReplicationFactor == 4 && storageTeamSize == 2 && tlogInfo == "data_hall^2 x zoneid^2 x 1" &&
+		           storageInfo == "data_hall^2 x 1") {
+			result["redundancy_mode"] = "three_data_hall_fallback";
 		} else {
 			customRedundancy = true;
 		}
-
-		if(customRedundancy) {
-			result["storage_replicas"] = storageTeamSize;
-			result["log_replicas"] = tLogReplicationFactor;
-			result["log_anti_quorum"] = tLogWriteAntiQuorum;
-			if(!noPolicies) result["storage_replication_policy"] = storagePolicy->info();
-			if(!noPolicies)  result["log_replication_policy"] = tLogPolicy->info();
-		}
-
-		if ( tLogVersion > TLogVersion::DEFAULT ) {
-			result["log_version"] = (int)tLogVersion;
-		}
-
-		if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V1 && storageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
-			result["storage_engine"] = "ssd-1";
-		} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
-			result["storage_engine"] = "ssd-2";
-		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1 ) {
-			result["storage_engine"] = "ssd-redwood-experimental";
-		} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
-			result["storage_engine"] = "ssd-rocksdb-experimental";
-		} else if( tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY ) {
-			result["storage_engine"] = "memory-1";
-		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE ) {
-			result["storage_engine"] = "memory-radixtree-beta";
-		} else if( tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 && storageServerStoreType == KeyValueStoreType::MEMORY ) {
-			result["storage_engine"] = "memory-2";
-		} else {
-			result["storage_engine"] = "custom";
-		}
-
-		result["log_spill"] = (int)tLogSpillType;
-
-		if( remoteTLogReplicationFactor == 1 ) {
-			result["remote_redundancy_mode"] = "remote_single";
-		} else if( remoteTLogReplicationFactor == 2 ) {
-			result["remote_redundancy_mode"] = "remote_double";
-		} else if( remoteTLogReplicationFactor == 3 ) {
-			result["remote_redundancy_mode"] = "remote_triple";
-		} else if( remoteTLogReplicationFactor > 3 ) {
-			result["remote_log_replicas"] = remoteTLogReplicationFactor;
-			if(noPolicies && remoteTLogPolicy) result["remote_log_policy"] = remoteTLogPolicy->info();
-		}
-		result["usable_regions"] = usableRegions;
-
-		if(regions.size()) {
-			result["regions"] = getRegionJSON();
-		}
-
-		if( desiredTLogCount != -1 ) {
-			result["logs"] = desiredTLogCount;
-		}
-		if( masterProxyCount != -1 ) {
-			result["proxies"] = masterProxyCount;
-		}
-		if( resolverCount != -1 ) {
-			result["resolvers"] = resolverCount;
-		}
-		if( desiredLogRouterCount != -1 ) {
-			result["log_routers"] = desiredLogRouterCount;
-		}
-		if( remoteDesiredTLogCount != -1 ) {
-			result["remote_logs"] = remoteDesiredTLogCount;
-		}
-		if( repopulateRegionAntiQuorum != 0 ) {
-			result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
-		}
-		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
-			result["auto_proxies"] = autoMasterProxyCount;
-		}
-		if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS) {
-			result["auto_resolvers"] = autoResolverCount;
-		}
-		if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS) {
-			result["auto_logs"] = autoDesiredTLogCount;
-		}
-
-		result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
+	} else {
+		customRedundancy = true;
 	}
+
+	if (customRedundancy) {
+		result["storage_replicas"] = storageTeamSize;
+		result["log_replicas"] = tLogReplicationFactor;
+		result["log_anti_quorum"] = tLogWriteAntiQuorum;
+		if (!noPolicies) result["storage_replication_policy"] = storagePolicy->info();
+		if (!noPolicies) result["log_replication_policy"] = tLogPolicy->info();
+	}
+
+	if (tLogVersion > TLogVersion::DEFAULT || isOverridden("log_version")) {
+		result["log_version"] = (int)tLogVersion;
+	}
+
+	if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V1 &&
+	    storageServerStoreType == KeyValueStoreType::SSD_BTREE_V1) {
+		result["storage_engine"] = "ssd-1";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
+	           storageServerStoreType == KeyValueStoreType::SSD_BTREE_V2) {
+		result["storage_engine"] = "ssd-2";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
+	           storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
+		result["storage_engine"] = "ssd-redwood-experimental";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
+	           storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+		result["storage_engine"] = "ssd-rocksdb-experimental";
+	} else if (tLogDataStoreType == KeyValueStoreType::MEMORY && storageServerStoreType == KeyValueStoreType::MEMORY) {
+		result["storage_engine"] = "memory-1";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
+	           storageServerStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
+		result["storage_engine"] = "memory-radixtree-beta";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
+	           storageServerStoreType == KeyValueStoreType::MEMORY) {
+		result["storage_engine"] = "memory-2";
+	} else {
+		result["storage_engine"] = "custom";
+	}
+
+	result["log_spill"] = (int)tLogSpillType;
+
+	if (remoteTLogReplicationFactor == 1) {
+		result["remote_redundancy_mode"] = "remote_single";
+	} else if (remoteTLogReplicationFactor == 2) {
+		result["remote_redundancy_mode"] = "remote_double";
+	} else if (remoteTLogReplicationFactor == 3) {
+		result["remote_redundancy_mode"] = "remote_triple";
+	} else if (remoteTLogReplicationFactor > 3) {
+		result["remote_log_replicas"] = remoteTLogReplicationFactor;
+		if (noPolicies && remoteTLogPolicy) result["remote_log_policy"] = remoteTLogPolicy->info();
+	}
+	result["usable_regions"] = usableRegions;
+
+	if (regions.size()) {
+		result["regions"] = getRegionJSON();
+	}
+
+	if (desiredTLogCount != -1 || isOverridden("logs")) {
+		result["logs"] = desiredTLogCount;
+	}
+	if (masterProxyCount != -1 || isOverridden("proxies")) {
+		result["proxies"] = masterProxyCount;
+	}
+	if (resolverCount != -1 || isOverridden("resolvers")) {
+		result["resolvers"] = resolverCount;
+	}
+	if (desiredLogRouterCount != -1 || isOverridden("log_routers")) {
+		result["log_routers"] = desiredLogRouterCount;
+	}
+	if (remoteDesiredTLogCount != -1 || isOverridden("remote_logs")) {
+		result["remote_logs"] = remoteDesiredTLogCount;
+	}
+	if (repopulateRegionAntiQuorum != 0 || isOverridden("repopulate_anti_quorum")) {
+		result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
+	}
+	if (autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES || isOverridden("auto_proxies")) {
+		result["auto_proxies"] = autoMasterProxyCount;
+	}
+	if (autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS || isOverridden("auto_resolvers")) {
+		result["auto_resolvers"] = autoResolverCount;
+	}
+	if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS || isOverridden("auto_logs")) {
+		result["auto_logs"] = autoDesiredTLogCount;
+	}
+
+	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
 
 	return result;
 }
@@ -539,4 +551,32 @@ void DatabaseConfiguration::makeConfigurationImmutable() {
 	for(auto r = mc.begin(); r != mc.end(); ++r)
 		rawConfiguration[i++] = KeyValueRef( rawConfiguration.arena(), KeyValueRef( r->first, r->second ) );
 	mutableConfiguration = Optional<std::map<std::string,std::string>>();
+}
+
+void DatabaseConfiguration::fromKeyValues(Standalone<VectorRef<KeyValueRef>> rawConfig) {
+	resetInternal();
+	this->rawConfiguration = rawConfig;
+	for (auto c = rawConfiguration.begin(); c != rawConfiguration.end(); ++c) {
+		setInternal(c->key, c->value);
+	}
+	setDefaultReplicationPolicy();
+}
+
+bool DatabaseConfiguration::isOverridden(std::string key) const {
+	key = configKeysPrefix.toString() + key;
+
+	if (mutableConfiguration.present()) {
+		return mutableConfiguration.get().find(key) != mutableConfiguration.get().end();
+	}
+
+	const int keyLen = key.size();
+	for (auto iter = rawConfiguration.begin(); iter != rawConfiguration.end(); ++iter) {
+		const auto& rawConfKey = iter->key;
+		if (keyLen == rawConfKey.size() &&
+		    strncmp(key.c_str(), reinterpret_cast<const char*>(rawConfKey.begin()), keyLen) == 0) {
+			return true;
+		}
+	}
+
+	return false;
 }

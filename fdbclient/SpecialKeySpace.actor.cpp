@@ -46,7 +46,7 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	                .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
-std::unordered_set<std::string> SpecialKeySpace::options = { "exclude/force", "failed/force" };
+std::set<std::string> SpecialKeySpace::options = { "excluded/force", "failed/force" };
 
 // This function will move the given KeySelector as far as possible to the standard form:
 // orEqual == false && offset == 1 (Standard form)
@@ -539,8 +539,10 @@ Future<Standalone<RangeResultRef>> ManagementCommandsOptionsImpl::getRange(ReadY
 		auto key = getKeyRange().begin.withSuffix(option);
 		// ignore all invalid keys
 		auto r = ryw->getSpecialKeySpaceWriteMap()[key];
-		if (kr.contains(key) && r.first && r.second.present())
+		if (kr.contains(key) && r.first && r.second.present()) {
 			result.push_back(result.arena(), KeyValueRef(key, ValueRef()));
+			result.arena().dependsOn(key.arena());
+		}
 	}
 	return result;
 }
@@ -852,7 +854,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 	if (!parseNetWorkAddrFromKeys(ryw, failed, addresses, exclusions, result)) return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-	    failed ? "failed" : "exclude", "force")];
+	    failed ? "failed" : "excluded", "force")];
 	// only do safety check when we have servers to be excluded and the force option key is not set
 	if (addresses.size() && !(force.first && force.second.present())) {
 		bool safe = wait(checkExclusion(ryw->getDatabase(), &addresses, &exclusions, failed, &result));

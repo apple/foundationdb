@@ -1,5 +1,5 @@
 /*
- * ThreadSafeTransaction.actor.cpp
+ * ThreadSafeTransaction.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

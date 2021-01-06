@@ -581,6 +581,11 @@ void initHelp() {
 		"view and control throttled tags",
 		"Use `on' and `off' to manually throttle or unthrottle tags. Use `enable auto' or `disable auto' to enable or disable automatic tag throttling. Use `list' to print the list of throttled tags.\n"
 	);
+	helpMap["cache_range"] = CommandHelp(
+		"cache_range <set|clear> <BEGINKEY> <ENDKEY>",
+		"Mark a key range to add to or remove from storage caches.",
+		"Use the storage caches to assist in balancing hot read shards. Set the appropriate ranges when experiencing heavy load, and clear them when they are no longer necessary."
+	);
 	helpMap["lock"] = CommandHelp(
 		"lock",
 		"lock the database with a randomly generated lockUID",
@@ -4316,6 +4321,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					}
 					continue;
 				}
+				if (tokencmp(tokens[0], "cache_range")) {
+					if (tokens.size() != 4) {
+						printUsage(tokens[0]);
+						is_error = true;
+						continue;
+					}
+					KeyRangeRef cacheRange(tokens[2], tokens[3]);
+					if (tokencmp(tokens[1], "set")) {
+						wait(makeInterruptable(addCachedRange(db, cacheRange)));
+					} else if (tokencmp(tokens[1], "clear")) {
+						wait(makeInterruptable(removeCachedRange(db, cacheRange)));
+					} else {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					continue;
+				}
+
 
 				printf("ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 				is_error = true;

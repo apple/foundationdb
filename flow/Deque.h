@@ -181,10 +181,18 @@ private:
 		if (newSize > max_size()) throw std::bad_alloc();
 		//printf("Growing to %lld (%u-%u mask %u)\n", (long long)newSize, begin, end, mask);
 		T* newArr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)),
-		                              newSize * sizeof(T)); // SOMEDAY: FastAllocator, exception safety
+		                              newSize * sizeof(T)); // SOMEDAY: FastAllocator
 		ASSERT(newArr != nullptr);
 		for (int i = begin; i != end; i++) {
-			new (&newArr[i - begin]) T(std::move(arr[i&mask]));
+			try {
+				new (&newArr[i - begin]) T(std::move_if_noexcept(arr[i & mask]));
+			} catch (...) {
+				cleanup(newArr, i-begin);
+				throw;
+			}
+		}
+		for (int i = begin; i != end; i++) {
+			static_assert(std::is_nothrow_destructible_v<T>);
 			arr[i&mask].~T();
 		}
 		aligned_free(arr);
@@ -194,7 +202,14 @@ private:
 		mask = uint32_t(newSize - 1);
 	}
 
-	void cleanup() {
+	static void cleanup(T *data, size_t size) noexcept {
+		for (int i = 0; i < size; ++i) {
+			data[i].~T();
+		}
+		aligned_free(data);
+	}
+
+	void cleanup() noexcept {
 		for (int i = begin; i != end; i++)
 			arr[i&mask].~T();
 		if(arr)
