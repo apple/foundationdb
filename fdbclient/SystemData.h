@@ -82,7 +82,7 @@ const Key storageCacheKey( const KeyRef& k );
 const Value storageCacheValue( const std::vector<uint16_t>& serverIndices );
 void decodeStorageCacheValue( const ValueRef& value, std::vector<uint16_t>& serverIndices );
 
-//    "\xff/serverKeys/[[serverID]]/[[begin]]" := "" | "1" | "2"
+//    "\xff/serverKeys/[[serverID]]/[[begin]]" := "[[serverKeysTrue]]" |" [[serverKeysFalse]]"
 //	An internal mapping of what shards any given server currently has ownership of
 //	Using the serverID as a prefix, then followed by the beginning of the shard range
 //	as the key, the value indicates whether the shard does or does not exist on the server.
