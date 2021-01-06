@@ -469,6 +469,11 @@ Prints a list of currently active transaction tag throttles.
 
 ``LIMIT`` - The number of throttles to print. Defaults to 100.
 
+triggerddteaminfolog
+--------------------
+
+The ``triggerddteaminfolog`` command would trigger the data distributor to log very detailed teams information into trace event logs.
+
 unlock
 ------
 

@@ -1607,6 +1607,7 @@ ACTOR static Future<vector<std::pair<MasterProxyInterface, EventMap>>> getProxie
 	return results;
 }
 
+// Returns the number of zones eligble for recruiting new tLogs after failures, to maintain the current replication factor.
 static int getExtraTLogEligibleZones(const vector<WorkerDetails>& workers, const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
 	std::map<Key,std::set<StringRef>> dcId_zone;
@@ -1944,7 +1945,14 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 			if(currentFaultTolerance >= 0) {
 				localSetsWithNonNegativeFaultTolerance++;
 			}
-			minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+
+			if (tLogs[i].locality == tagLocalitySatellite) {
+				// FIXME: This hack to bump satellite fault tolerance, is to make it consistent
+				//  with 6.2.
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance + 1);
+			} else {
+				minFaultTolerance = std::min(minFaultTolerance, currentFaultTolerance);
+			}
 		}
 
 		if (tLogs[i].isLocal && tLogs[i].locality == tagLocalitySatellite) {

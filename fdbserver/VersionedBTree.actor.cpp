@@ -1836,6 +1836,7 @@ public:
 		state Version minStopVersion = cutoff.version - (BUGGIFY ? deterministicRandom()->randomInt(0, 10) : (self->remapCleanupWindow * SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
 		self->remapDestinationsSimOnly.clear();
 
+		state int sinceYield = 0;
 		loop {
 			state Optional<RemappedPage> p = wait(self->remapQueue.pop(cutoff));
 			debug_printf("DWALPager(%s) remapCleanup popped %s\n", self->filename.c_str(), ::toString(p).c_str());
@@ -1853,6 +1854,11 @@ public:
 			// If the stop flag is set and we've reached the minimum stop version according the the allowed lag then stop.
 			if (self->remapCleanupStop && p.get().version >= minStopVersion) {
 				break;
+			}
+
+			if(++sinceYield >= 100) {
+				sinceYield = 0;
+				wait(yield());
 			}
 		}
 
