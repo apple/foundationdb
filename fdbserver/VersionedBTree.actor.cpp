@@ -1649,11 +1649,10 @@ public:
 
 		if (!cacheEntry.initialized()) {
 			debug_printf("DWALPager(%s) issuing actual read of %s\n", filename.c_str(), toString(pageID).c_str());
-			cacheEntry.readFuture = readPhysicalPage(this, (PhysicalPageID)pageID);
+			cacheEntry.readFuture = forwardError(readPhysicalPage(this, (PhysicalPageID)pageID), errorPromise);
 			cacheEntry.writeFuture = Void();
 		}
 
-		cacheEntry.readFuture = forwardError(cacheEntry.readFuture, errorPromise);
 		return cacheEntry.readFuture;
 	}
 
