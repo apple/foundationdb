@@ -2106,52 +2106,62 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 
 // FIXME: Factor address parsing from coordinators, include, exclude
 
-ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
+ACTOR Future<bool> coordinators(Database db, std::vector<StringRef> tokens) {
 	state StringRef setName;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
-	for(auto tok = tokens.begin()+1; tok != tokens.end(); ++tok)
+	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok) {
 		if (tok->startsWith(nameTokenBegin)) {
 			setName = tok->substr(nameTokenBegin.size());
 			std::copy( tok+1, tokens.end(), tok );
 			tokens.resize( tokens.size()-1 );
 			break;
 		}
-
-	bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
-
+	}
 	state Reference<IQuorumChange> change;
+	state bool force = false;
 	if (tokens.size()==1 && setName.size()) {
 		change = noQuorumChange();
-	} else if (automatic) {
-		// Automatic quorum change
-		change = autoQuorumChange();
 	} else {
 		state std::set<NetworkAddress> addresses;
 		state std::vector<StringRef>::iterator t;
-		for(t = tokens.begin()+1; t != tokens.end(); ++t) {
-			try {
-				// SOMEDAY: Check for keywords
-				auto const& addr = NetworkAddress::parse( t->toString() );
-				if (addresses.count(addr)){
-					printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
-					return true;
+		state bool automatic = false;
+		for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
+			if (*t == LiteralStringRef("auto")) {
+				// If auto, the other arguments are not relevant
+				// FORCE will not matter because auto will not choose
+				// unavailable processes as coordinators
+				automatic = true;
+				break;
+			} else if (*t == LiteralStringRef("FORCE")) {
+				force = true;
+			} else {
+				try {
+					// SOMEDAY: Check for keywords
+					auto const& addr = NetworkAddress::parse(t->toString());
+					if (addresses.count(addr)) {
+						printf("ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
+						return true;
+					}
+					addresses.insert(addr);
+				} catch (Error& e) {
+					if (e.code() == error_code_connection_string_invalid) {
+						printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+						return true;
+					}
+					throw;
 				}
-				addresses.insert(addr);
-			} catch (Error& e) {
-				if (e.code() == error_code_connection_string_invalid) {
-					printf("ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
-					return true;
-				}
-				throw;
 			}
 		}
-
-		std::vector<NetworkAddress> addressesVec(addresses.begin(), addresses.end());
-		change = specifiedQuorumChange( addressesVec );
+		if (automatic) {
+			change = autoQuorumChange();
+		} else {
+			std::vector<NetworkAddress> addressesVec(addresses.begin(), addresses.end());
+			change = specifiedQuorumChange(addressesVec);
+		}
 	}
-	if(setName.size()) change = nameQuorumChange( setName.toString(), change );
+	if (setName.size()) change = nameQuorumChange(setName.toString(), change);
 
-	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change)));
+	CoordinatorsResult r = wait(makeInterruptable(changeQuorum(db, change, force)));
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
@@ -3264,7 +3274,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("Cluster coordinators (%zu): %s\n", cs.coordinators().size(), describe(cs.coordinators()).c_str());
 						printf("Type `help coordinators' to learn how to change this information.\n");
 					} else {
-						bool err = wait( coordinators( db, tokens, cs.coordinators()[0].isTLS() ) );
+						bool err = wait(coordinators(db, tokens));
 						if (err) is_error = true;
 					}
 					continue;

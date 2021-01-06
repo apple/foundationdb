@@ -1009,7 +1009,7 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 	}
 }
 
-ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change) {
+ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change, bool force) {
 	state Transaction tr(cx);
 	state int retries = 0;
 	state std::vector<NetworkAddress> desiredCoordinators;
@@ -1080,7 +1080,10 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			choose {
 				when( wait( waitForAll( leaderServers ) ) ) {}
 				when( wait( delay(5.0) ) ) {
-					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+					// If forced, go through with coordination changes even if some may be unreachable
+					if (!force) {
+						return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+					}
 				}
 			}
 
