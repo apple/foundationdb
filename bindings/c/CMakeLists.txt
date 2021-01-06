@@ -73,7 +73,6 @@ if(NOT WIN32)
     test/mako/utils.h)
   add_subdirectory(test/unit/third_party)
   find_package(Threads REQUIRED)
-  include(Compilerapidjson)
   set(UNIT_TEST_SRCS
     test/unit/unit_tests.cpp
     test/unit/fdb_api.cpp
