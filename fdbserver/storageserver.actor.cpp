@@ -923,7 +923,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait( delay(0, TaskPriority::DefaultEndpoint) );
+		wait( delay(0, data->version.get() - data->durableVersion.get() > SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH ? TaskPriority::Low : TaskPriority::DefaultEndpoint) );
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1489,7 +1489,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	// 	// Placeholder for up-prioritizing fetches for important requests
 	// 	taskType = TaskPriority::DefaultDelay;
 	} else {
-		wait( delay(0, TaskPriority::DefaultEndpoint) );
+		wait( delay(0, data->version.get() - data->durableVersion.get() > SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH ? TaskPriority::Low : TaskPriority::DefaultEndpoint) );
 	}
 	
 	try {
@@ -1622,7 +1622,7 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( delay(0, TaskPriority::DefaultEndpoint) );
+	wait( delay(0, data->version.get() - data->durableVersion.get() > SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH ? TaskPriority::Low : TaskPriority::DefaultEndpoint) );
 
 	try {
 		state Version version = wait( waitForVersion( data, req.version ) );
