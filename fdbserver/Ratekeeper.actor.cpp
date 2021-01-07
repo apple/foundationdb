@@ -94,12 +94,15 @@ struct StorageQueueInfo {
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
+	double storageQueuePenalty;
+	double storageQueuePenaltyBatch;
 	StorageQueueInfo(UID id, LocalityData locality)
 	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    verySmoothDurableVersion(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
+	    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited),
+		storageQueuePenalty(1), storageQueuePenaltyBatch(1) {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
@@ -404,11 +407,19 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			}
 		}
 
-		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
-		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
-
 		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.verySmoothDurableVersion.smoothTotal();
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
+
+		auto& storageQueuePenalty = limits->storageTargetBytes == SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER ? ss.storageQueuePenalty : ss.storageQueuePenaltyBatch;
+
+		if(storageDurabilityLag > limits->durabilityLagTargetVersions - (2*SERVER_KNOBS->DURABILITY_LAG_UNLIMITED_THRESHOLD)) {
+			storageQueuePenalty = std::max<double>(storageQueuePenalty, (targetBytes - springBytes)/(ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal()));
+		} else if(storageDurabilityLag < limits->durabilityLagTargetVersions - (4*SERVER_KNOBS->DURABILITY_LAG_UNLIMITED_THRESHOLD)) {
+			storageQueuePenalty = 1;
+		}
+
+		int64_t storageQueue = (ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal())*storageQueuePenalty;
+		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1*storageDurabilityLag, &ss));
 
