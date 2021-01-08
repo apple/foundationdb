@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'CoordForce'
+
+    [[test.workload]]
+    testName = 'CoordinatorsForce'
+    additionalAddress = '127.0.0.1:4500'
