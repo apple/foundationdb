@@ -54,7 +54,6 @@ struct CoordinatorsForceWorkload : TestWorkload {
 				return Void();
 			}
 		}
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx, this); }
