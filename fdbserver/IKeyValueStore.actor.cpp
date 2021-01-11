@@ -184,7 +184,7 @@ ACTOR Future<int> verifyRange(IKeyValueStore* kvStore, Key start, Key end, Versi
 
 	// Now read the range from the tree in reverse order and compare to the saved results
 	// TODO: This doesn't handle the start/end correctly.
-	Standalone<RangeResultRef> r = wait(kvStore->readRangeAt({ end, start }, version, -(1 << 30)));
+	Standalone<RangeResultRef> r = wait(kvStore->readRangeAt({ start, end }, version, -(1 << 30)));
 	read = r;
 
 	state std::vector<KeyValue>::const_reverse_iterator rit = results.rbegin();
