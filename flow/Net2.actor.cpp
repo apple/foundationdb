@@ -609,17 +609,6 @@ public:
 		    res);
 	}
 
-	int sendSynchronous(uint8_t const* begin, uint8_t const* end) override {
-		try {
-			return socket.send(boost::asio::const_buffer(begin, end - begin));
-		} catch (boost::system::system_error& e) {
-			TraceEvent(SevError, "SynchronousSendError").detail("Message", e.what());
-		} catch (...) {
-			TraceEvent(SevError, "SychronousSendUnknownError");
-		}
-		return -1;
-	}
-
 	Future<int> send(uint8_t const* begin, uint8_t const* end) override {
 		++g_net2->countUDPWrites;
 		ReadPromise p("N2_UDPWriteError", id);

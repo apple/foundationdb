@@ -55,6 +55,9 @@ struct LogfileTracer : ITracer {
 				TraceEvent(SevInfo, "TracingSpanAddParent", span.context).detail("AddParent", parent);
 			}
 		}
+		for (const auto& [key, value] : span.tags) {
+			TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
+		}
 	}
 };
 
@@ -172,7 +175,7 @@ protected:
 		// fluentd filter to be able to correctly parse the updated format! See
 		// the msgpack specification for more info on the bit patterns used
 		// here.
-		uint8_t size = 7;
+		uint8_t size = 8;
 		if (span.parents.size() == 0) --size;
 		request.write_byte(size | 0b10010000);  // write as array
 
@@ -185,6 +188,8 @@ protected:
 		serialize_value(span.end - span.begin, request, 0xcb);  // duration
 
 		serialize_string(span.location.name.toString(), request);
+
+		serialize_map(span.tags, request);
 
 		serialize_vector(span.parents, request);
 	}
@@ -246,10 +251,28 @@ private:
 			serialize_value(parentContext.second(), request, 0xcf);
 		}
 	}
+
+	inline void serialize_map(const std::unordered_map<std::string, std::string>& map, TraceRequest& request) {
+		int size = map.size();
+
+		if (size <= 15) {
+			request.write_byte(static_cast<uint8_t>(size) | 0b10000000);
+		} else {
+			// TODO: Add support for longer maps if necessary.
+			ASSERT(false);
+		}
+
+		for (const auto& [key, value] : map) {
+			serialize_string(key, request);
+			serialize_string(value, request);
+		}
+	}
 };
 
 struct AsyncUDPTracer : public UDPTracer {
 public:
+	AsyncUDPTracer() : pending_messages_(0), send_error_(false) {}
+
 	~AsyncUDPTracer() override {
 		while (!buffers_.empty()) {
 			auto& request = buffers_.front();
@@ -313,7 +336,10 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 	state bool sendErrorReset = false;
 
 	loop {
-		TraceEvent("TracingSpanStats").detail("UnreadyMessages", *unreadyMessages).detail("FailedMessages", *failedMessages).detail("TotalMessages", *totalMessages);
+		TraceEvent("TracingSpanStats").detail("UnreadyMessages", *unreadyMessages)
+                                      .detail("FailedMessages", *failedMessages)
+                                      .detail("TotalMessages", *totalMessages)
+                                      .detail("SendError", *sendError);
 
 		if (sendErrorReset) {
 			sendErrorReset = false;
@@ -327,7 +353,7 @@ ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, in
 }
 
 struct FastUDPTracer : public UDPTracer {
-	FastUDPTracer() : socket_fd_(-1) {
+	FastUDPTracer() : socket_fd_(-1), unready_socket_messages_(0), failed_messages_(0), total_messages_(0), send_error_(false) {
 		request_ = TraceRequest{
 			.buffer = new uint8_t[kTraceBufferSize],
 			.data_size = 0,
@@ -375,6 +401,7 @@ struct FastUDPTracer : public UDPTracer {
 		if (bytesSent == -1) {
 			// Will forgo checking errno here, and assume all error messages
 			// should be treated the same.
+			++failed_messages_;
 			send_error_ = true;
 		}
 		request_.reset();
@@ -383,7 +410,6 @@ struct FastUDPTracer : public UDPTracer {
 private:
 	TraceRequest request_;
 
-	// Temporary debugging messages. TODO: Remove
 	int unready_socket_messages_;
 	int failed_messages_;
 	int total_messages_;
@@ -437,6 +463,7 @@ Span& Span::operator=(Span&& o) {
 	end = o.end;
 	location = o.location;
 	parents = std::move(o.parents);
+	o.begin = 0;
 	return *this;
 }
 

@@ -68,13 +68,28 @@ struct Span {
 		std::swap(parents, other.parents);
 	}
 
-	void addParent(SpanID span) { parents.push_back(arena, span); }
+	void addParent(SpanID span) {
+		if (parents.size() == 0) {
+			// Use first parent to set trace ID. This is non-ideal for spans
+			// with multiple parents, because the trace ID will associate the
+			// span with only one trace. A workaround is to look at the parent
+			// relationships instead of the trace ID. Another option in the
+			// future is to keep a list of trace IDs.
+			context = SpanID(span.first(), context.second());
+		}
+		parents.push_back(arena, span);
+	}
+
+	void addTag(const std::string& key, const std::string value) {
+		tags[key] = value;
+	}
 
 	Arena arena;
 	UID context = UID();
 	double begin = 0.0, end = 0.0;
 	Location location;
 	SmallVectorRef<SpanID> parents;
+	std::unordered_map<std::string, std::string> tags;
 };
 
 enum class TracerType {

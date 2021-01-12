@@ -566,7 +566,6 @@ public:
 	virtual void delref() = 0;
 
 	virtual void close() = 0;
-	virtual int sendSynchronous(uint8_t const* begin, uint8_t const* end) = 0;
 	virtual Future<int> send(uint8_t const* begin, uint8_t const* end) = 0;
 	virtual Future<int> sendTo(uint8_t const* begin, uint8_t const* end, NetworkAddress const& peer) = 0;
 	virtual Future<int> receive(uint8_t* begin, uint8_t* end) = 0;
