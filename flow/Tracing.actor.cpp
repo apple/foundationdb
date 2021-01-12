@@ -269,6 +269,7 @@ private:
 	}
 };
 
+#ifndef WIN32
 struct AsyncUDPTracer : public UDPTracer {
 public:
 	AsyncUDPTracer() : pending_messages_(0), send_error_(false) {}
@@ -421,6 +422,7 @@ private:
 	Future<Void> log_actor_;
 	Future<Void> udp_server_actor_;
 };
+#endif
 
 ITracer* g_tracer = new NoopTracer();
 
