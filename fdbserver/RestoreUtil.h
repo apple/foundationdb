@@ -80,7 +80,6 @@ using VersionedMutationsVec = Standalone<VectorRef<VersionedMutation>>;
 using SampledMutationsVec = Standalone<VectorRef<SampledMutation>>;
 
 enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
-BINARY_SERIALIZABLE(RestoreRole);
 std::string getRoleStr(RestoreRole role);
 extern const std::vector<std::string> RestoreRoleStr;
 extern int numRoles;
