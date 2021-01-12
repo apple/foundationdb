@@ -441,10 +441,14 @@ void openTracer(TracerType type) {
 		g_tracer = new LogfileTracer{};
 		break;
 	case TracerType::NETWORK_ASYNC:
+#ifndef WIN32
 		g_tracer = new AsyncUDPTracer{};
+#endif
 		break;
 	case TracerType::NETWORK_LOSSY:
+#ifndef WIN32
 		g_tracer = new FastUDPTracer{};
+#endif
 		break;
 	case TracerType::END:
 		ASSERT(false);
