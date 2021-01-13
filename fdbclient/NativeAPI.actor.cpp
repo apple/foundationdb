@@ -4819,7 +4819,7 @@ ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool
 	// Note: reuse this knob from fdbcli, change it if necessary
 	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
 	std::vector<Future<Void>> addInterfs;
-	for( auto it : kvs ) {
+	for( const auto& it : kvs ) {
 		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
 	}
 	wait(waitForAll(addInterfs));

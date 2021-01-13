@@ -430,7 +430,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Reboot the specified process in the database.
 
-   |future-return0| a :type:`int64_t` represents whether the reboot request is successful or not. In particular, 1 means success and 0 means failure. |future-return1| call :func:`fdb_future_get_int64()` to extract the result, |future-return2|
+   |future-return0| a :type:`int64_t` which represents whether the reboot request is sent or not. In particular, 1 means request sent and 0 means failure (e.g. the process with the specified address does not exist). |future-return1| call :func:`fdb_future_get_int64()` to extract the result, |future-return2|
 
    ``address``
         A pointer to the network address of the process.
