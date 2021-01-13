@@ -22,8 +22,8 @@
 #include "fdbrpc/Locality.h"
 #include <cmath>
 
-std::unique_ptr<ServerKnobs> globalServerKnobs{};
-ServerKnobs const* SERVER_KNOBS = nullptr;
+std::unique_ptr<ServerKnobs> globalServerKnobs = std::make_unique<ServerKnobs>();
+ServerKnobs const* SERVER_KNOBS = globalServerKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
@@ -696,9 +696,4 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 		    (5.0 * VERSIONS_PER_SECOND);
 		clientKnobs->INIT_MID_SHARD_BYTES = MIN_SHARD_BYTES;
 	}
-}
-
-void createGlobalServerKnobs() {
-	globalServerKnobs = std::make_unique<ServerKnobs>();
-	SERVER_KNOBS = globalServerKnobs.get();
 }

@@ -627,6 +627,4 @@ public:
 extern std::unique_ptr<ServerKnobs> globalServerKnobs;
 extern ServerKnobs const* SERVER_KNOBS;
 
-void createGlobalServerKnobs();
-
 #endif

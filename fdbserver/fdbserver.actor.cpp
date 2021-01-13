@@ -1561,10 +1561,6 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		createGlobalFlowKnobs();
-		createGlobalClientKnobs();
-		createGlobalServerKnobs();
-
 		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
 		if (role != Simulation) {
 			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))

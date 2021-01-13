@@ -2833,9 +2833,6 @@ struct CLIOptions {
 			return;
 		}
 
-		createGlobalFlowKnobs();
-		createGlobalClientKnobs();
-
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!globalFlowKnobs->setKnob(k->first, k->second) &&

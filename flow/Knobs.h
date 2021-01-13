@@ -256,6 +256,4 @@ public:
 extern std::unique_ptr<FlowKnobs> globalFlowKnobs;
 extern FlowKnobs const* FLOW_KNOBS;
 
-void createGlobalFlowKnobs();
-
 #endif

@@ -346,8 +346,3 @@ void Knobs::trace() const {
 	for(auto &k : bool_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }
-
-void createGlobalFlowKnobs() {
-	globalFlowKnobs = std::make_unique<FlowKnobs>();
-	FLOW_KNOBS = globalFlowKnobs.get();
-}

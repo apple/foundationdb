@@ -234,6 +234,4 @@ public:
 extern std::unique_ptr<ClientKnobs> globalClientKnobs;
 extern ClientKnobs const* CLIENT_KNOBS;
 
-void createGlobalClientKnobs();
-
 #endif
