@@ -142,7 +142,7 @@ set(FDBSERVER_SRCS
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
   workloads/ConsistencyCheck.actor.cpp
-  workloads/CoordinatorForce.actor.cpp
+  workloads/CoordinatorsForce.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp

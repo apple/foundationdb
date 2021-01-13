@@ -1,5 +1,5 @@
 /*
- * CoordinatorForce.actor.cpp
+ * CoordinatorsForce.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,30 +30,49 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CoordinatorsForceWorkload : TestWorkload {
-	// Address to add to the set of existing coordinators.
-	// A dummy address should fail unless "FORCE" is used
-	std::string additionalAddress;
+	
+	int numFailed;
 	CoordinatorsForceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		additionalAddress =
-		    getOption(options, LiteralStringRef("additionalAddress"), StringRef("127.1.1.1")).toString();
+		numFailed = getOption(options, LiteralStringRef("numFailed"), 1);
 	}
 
 	std::string description() const override { return "CoordinatorsForce"; }
 
 	ACTOR static Future<Void> _start(Database cx, CoordinatorsForceWorkload* self) {
-		state std::vector<NetworkAddress> curCoordinators = wait(getCoordinators(cx));
-		curCoordinators.push_back(NetworkAddress::parse(self->additionalAddress));
-		state Reference<IQuorumChange> change = specifiedQuorumChange(curCoordinators);
-		state bool force = false;
-		loop {
-			// Attempt to change without FORCE should fail if using dummy address
-			CoordinatorsResult result = wait(changeQuorum(cx, change, force));
-			if (result == CoordinatorsResult::COORDINATOR_UNREACHABLE) {
-				force = true;
-			} else if (result == CoordinatorsResult::SUCCESS) {
-				return Void();
+		state std::vector<NetworkAddress> newCoordinators;
+		state int aliveAdded = 0;
+		state int failedAdded = 0;
+		for (auto processInfo : g_simulator.getAllProcesses()) {
+			TraceEvent("Checkpoint1")
+				.detail("Process", processInfo->address)
+				.detail("Available", processInfo->isAvailable());
+			if (aliveAdded == g_simulator.desiredCoordinators &&
+				failedAdded == self->numFailed) {
+				break;
 			}
+			if (failedAdded != self->numFailed) {
+				newCoordinators.push_back(processInfo->address);
+				g_simulator.killProcess(processInfo, ISimulator::RebootProcess);
+				TraceEvent("Checkpoint1")
+					.detail("Process", processInfo->address)
+					.detail("Available", processInfo->isAvailable());
+				++failedAdded;
+				continue;
+			}
+			if (processInfo->isAvailable()) {
+				if (aliveAdded != g_simulator.desiredCoordinators) {
+					newCoordinators.push_back(processInfo->address);
+					++aliveAdded;
+				}
+			} 
+
 		}
+		TraceEvent("CoordinatorsForceSet").detail("NewCoordinators", describe(newCoordinators));
+		state Reference<IQuorumChange> change = specifiedQuorumChange(newCoordinators);
+
+		CoordinatorsResult result = wait(changeQuorum(cx, change, true));
+		TraceEvent("CoordinatorsForceResult").detail("Result", result);
+		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx, this); }
