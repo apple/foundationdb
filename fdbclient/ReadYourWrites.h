@@ -144,6 +144,9 @@ public:
 		return tr.info;
 	}
 
+	void setTransactionID(uint64_t id);
+	void setToken(uint64_t token);
+
 	// Read from the special key space readConflictRangeKeysRange
 	Standalone<RangeResultRef> getReadConflictRangeIntersecting(KeyRangeRef kr);
 	// Read from the special key space writeConflictRangeKeysRange

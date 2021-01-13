@@ -60,6 +60,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
@@ -314,6 +315,14 @@ ACTOR void failAfter( Future<Void> trigger, ISimulator::ProcessInfo* m = g_simul
 void failAfter( Future<Void> trigger, Endpoint e ) {
 	if (g_network == &g_simulator)
 		failAfter( trigger, g_simulator.getProcess( e ) );
+}
+
+ACTOR Future<Void> histogramReport() {
+	loop {
+		wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+
+		GetHistogramRegistry().logReport();
+	}
 }
 
 void testSerializationSpeed() {
@@ -879,7 +888,7 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 }
 
 namespace {
-enum Role {
+enum class ServerRole {
 	ConsistencyCheck,
 	CreateTemplateDatabase,
 	DSLTest,
@@ -907,7 +916,7 @@ struct CLIOptions {
 	int maxLogs = 0;
 	bool maxLogsSet = false;
 
-	Role role = FDBD;
+	ServerRole role = ServerRole::FDBD;
 	uint32_t randomSeed = platform::getRandomSeed();
 
 	const char* testFile = "tests/default.txt";
@@ -1042,35 +1051,35 @@ private:
 			case OPT_ROLE:
 				sRole = args.OptionArg();
 				if (!strcmp(sRole, "fdbd"))
-					role = FDBD;
+					role = ServerRole::FDBD;
 				else if (!strcmp(sRole, "simulation"))
-					role = Simulation;
+					role = ServerRole::Simulation;
 				else if (!strcmp(sRole, "test"))
-					role = Test;
+					role = ServerRole::Test;
 				else if (!strcmp(sRole, "multitest"))
-					role = MultiTester;
+					role = ServerRole::MultiTester;
 				else if (!strcmp(sRole, "skiplisttest"))
-					role = SkipListTest;
+					role = ServerRole::SkipListTest;
 				else if (!strcmp(sRole, "search"))
-					role = SearchMutations;
+					role = ServerRole::SearchMutations;
 				else if (!strcmp(sRole, "dsltest"))
-					role = DSLTest;
+					role = ServerRole::DSLTest;
 				else if (!strcmp(sRole, "versionedmaptest"))
-					role = VersionedMapTest;
+					role = ServerRole::VersionedMapTest;
 				else if (!strcmp(sRole, "createtemplatedb"))
-					role = CreateTemplateDatabase;
+					role = ServerRole::CreateTemplateDatabase;
 				else if (!strcmp(sRole, "networktestclient"))
-					role = NetworkTestClient;
+					role = ServerRole::NetworkTestClient;
 				else if (!strcmp(sRole, "networktestserver"))
-					role = NetworkTestServer;
+					role = ServerRole::NetworkTestServer;
 				else if (!strcmp(sRole, "restore"))
-					role = Restore;
+					role = ServerRole::Restore;
 				else if (!strcmp(sRole, "kvfileintegritycheck"))
-					role = KVFileIntegrityCheck;
+					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
-					role = KVFileGenerateIOLogChecksums;
+					role = ServerRole::KVFileGenerateIOLogChecksums;
 				else if (!strcmp(sRole, "consistencycheck"))
-					role = ConsistencyCheck;
+					role = ServerRole::ConsistencyCheck;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1423,8 +1432,8 @@ private:
 		bool autoPublicAddress =
 		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(),
 		                [](const std::string& addr) { return StringRef(addr).startsWith(LiteralStringRef("auto:")); });
-		if ((role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck &&
-		     role != KVFileGenerateIOLogChecksums) ||
+		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
+		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -1471,7 +1480,7 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == ConsistencyCheck) {
+		if (role == ServerRole::ConsistencyCheck) {
 			if (!publicAddressStrs.empty()) {
 				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
 				printHelpTeaser(argv[0]);
@@ -1481,18 +1490,18 @@ private:
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 
-		if (role == Simulation) {
+		if (role == ServerRole::Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
 			if (buggifyOverride.present()) buggifyEnabled = buggifyOverride.get();
 		}
 
-		if (role == SearchMutations && !targetKey) {
+		if (role == ServerRole::SearchMutations && !targetKey) {
 			fprintf(stderr, "ERROR: please specify a target key\n");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == NetworkTestClient && !testServersStr.size()) {
+		if (role == ServerRole::NetworkTestClient && !testServersStr.size()) {
 			fprintf(stderr, "ERROR: please specify --testservers\n");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
@@ -1552,7 +1561,7 @@ int main(int argc, char* argv[]) {
 		const auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
-		if (role == Simulation) printf("Random seed is %u...\n", opts.randomSeed);
+		if (role == ServerRole::Simulation) printf("Random seed is %u...\n", opts.randomSeed);
 
 		if (opts.zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
@@ -1562,7 +1571,7 @@ int main(int argc, char* argv[]) {
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
 		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
-		if (role != Simulation) {
+		if (role != ServerRole::Simulation) {
 			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
 				ASSERT(false);
 		}
@@ -1588,9 +1597,9 @@ int main(int argc, char* argv[]) {
 		if (!globalServerKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		globalFlowKnobs->initialize(true, role == Simulation);
+		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
 		globalClientKnobs->initialize(true);
-		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == Simulation);
+		globalServerKnobs->initialize(true, globalClientKnobs, role == ServerRole::Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
@@ -1600,17 +1609,17 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		if (role == SkipListTest) {
+		if (role == ServerRole::SkipListTest) {
 			skipListTest();
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 
-		if (role == DSLTest) {
+		if (role == ServerRole::DSLTest) {
 			dsltest();
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 
-		if (role == VersionedMapTest) {
+		if (role == ServerRole::VersionedMapTest) {
 			versionedMapTest();
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
@@ -1622,7 +1631,7 @@ int main(int argc, char* argv[]) {
 
 		std::vector<Future<Void>> listenErrors;
 
-		if (role == Simulation || role == CreateTemplateDatabase) {
+		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			//startOldSimulator();
 			startNewSimulator();
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
@@ -1632,7 +1641,8 @@ int main(int argc, char* argv[]) {
 			g_network->addStopCallback( Net2FileSystem::stop );
 			FlowTransport::createInstance(false, 1);
 
-			const bool expectsPublicAddress = (role == FDBD || role == NetworkTestServer || role == Restore);
+			const bool expectsPublicAddress =
+			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public_address option is required\n");
@@ -1725,8 +1735,10 @@ int main(int argc, char* argv[]) {
 
 		Future<Optional<Void>> f;
 
-		if (role == Simulation) {
+		if (role == ServerRole::Simulation) {
 			TraceEvent("Simulation").detail("TestFile", opts.testFile);
+
+			auto histogramReportActor = histogramReport();
 
 			CLIENT_KNOBS->trace();
 			FLOW_KNOBS->trace();
@@ -1847,7 +1859,7 @@ int main(int argc, char* argv[]) {
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
-		} else if (role == FDBD) {
+		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
 			std::vector<std::string>* pFiles =
@@ -1885,45 +1897,46 @@ int main(int argc, char* argv[]) {
 				actors.push_back(fdbd(opts.connectionFile, opts.localities, opts.processClass, dataFolder, dataFolder,
 				                      opts.storageMemLimit, opts.metricsConnFile, opts.metricsPrefix, opts.rsssize,
 				                      opts.whitelistBinPaths));
+				actors.push_back(histogramReport());
 				// actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
 
 				f = stopAfter(waitForAll(actors));
 				g_network->run();
 			}
-		} else if (role == MultiTester) {
+		} else if (role == ServerRole::MultiTester) {
 			setupRunLoopProfiler();
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE,
 			                       opts.testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, opts.minTesterCount,
 			                       opts.testFile, StringRef(), opts.localities));
 			g_network->run();
-		} else if (role == Test) {
+		} else if (role == ServerRole::Test) {
 			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, opts.testFile, StringRef(),
 			                       opts.localities));
 			g_network->run();
-		} else if (role == ConsistencyCheck) {
+		} else if (role == ServerRole::ConsistencyCheck) {
 			setupRunLoopProfiler();
 
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(opts.connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, opts.testFile,
 			                       StringRef(), opts.localities));
 			g_network->run();
-		} else if (role == CreateTemplateDatabase) {
+		} else if (role == ServerRole::CreateTemplateDatabase) {
 			createTemplateDatabase();
-		} else if (role == NetworkTestClient) {
+		} else if (role == ServerRole::NetworkTestClient) {
 			f = stopAfter(networkTestClient(opts.testServersStr));
 			g_network->run();
-		} else if (role == NetworkTestServer) {
+		} else if (role == ServerRole::NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
 			g_network->run();
-		} else if (role == Restore) {
+		} else if (role == ServerRole::Restore) {
 			f = stopAfter(restoreWorker(opts.connectionFile, opts.localities, opts.dataFolder));
 			g_network->run();
-		} else if (role == KVFileIntegrityCheck) {
+		} else if (role == ServerRole::KVFileIntegrityCheck) {
 			f = stopAfter(KVFileCheck(opts.kvFile, true));
 			g_network->run();
-		} else if (role == KVFileGenerateIOLogChecksums) {
+		} else if (role == ServerRole::KVFileGenerateIOLogChecksums) {
 			Optional<Void> result;
 			try {
 				GenerateIOLogChecksumFile(opts.kvFile);
@@ -1945,7 +1958,7 @@ int main(int argc, char* argv[]) {
 		TraceEvent("ElapsedTime").detail("SimTime", now()-startNow).detail("RealTime", timer()-start)
 			.detail("RandomUnseed", unseed);
 
-		if (role==Simulation){
+		if (role == ServerRole::Simulation) {
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now()-startNow, timer()-start);
 		}
@@ -1982,7 +1995,7 @@ int main(int argc, char* argv[]) {
 			cout << "  " << i->second << " " << i->first << endl;*/
 		//	cout << "  " << Actor::allActors[i]->getName() << endl;
 
-		if (role == Simulation) {
+		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {
 				printf("%lu SevError events logged\n", sevErrorEventsLogged);

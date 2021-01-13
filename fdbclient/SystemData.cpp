@@ -203,10 +203,6 @@ const KeyRangeRef writeConflictRangeKeysRange =
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
-// This will be added by the cache server on initialization and removed by DD
-// TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
-//                versions. For now caches simply cache everything so the ids
-//                are not yet meaningful.
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"),
                                          LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;

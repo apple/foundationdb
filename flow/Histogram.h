@@ -26,6 +26,7 @@
 
 #include <string>
 #include <map>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -57,11 +58,16 @@ HistogramRegistry& GetHistogramRegistry();
  */
 class Histogram sealed : public ReferenceCounted<Histogram> {
 public:
-	enum class Unit { microseconds, bytes };
+	enum class Unit { microseconds, bytes, bytes_per_second };
 
 private:
+	static const std::unordered_map<Unit, std::string> UnitToStringMapper;
+
 	Histogram(std::string group, std::string op, Unit unit, HistogramRegistry& registry)
 	  : group(group), op(op), unit(unit), registry(registry), ReferenceCounted<Histogram>() {
+
+		ASSERT(UnitToStringMapper.find(unit) != UnitToStringMapper.end());
+
 		clear();
 	}
 

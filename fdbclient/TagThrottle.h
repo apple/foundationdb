@@ -169,7 +169,7 @@ struct TagThrottleValue {
 	template<class Ar>
 	void serialize(Ar& ar) {
 		if(ar.protocolVersion().hasTagThrottleValueReason()) {
-			serializer(ar, tpsRate, expirationTime, initialDuration, reinterpret_cast<uint8_t&>(reason));
+			serializer(ar, tpsRate, expirationTime, initialDuration, reason);
 		}
 		else if(ar.protocolVersion().hasTagThrottleValue()) {
 			serializer(ar, tpsRate, expirationTime, initialDuration);
@@ -215,8 +215,6 @@ namespace ThrottleApi {
 
 	Future<Void> enableAuto(Database const& db, bool const& enabled);
 };
-
-BINARY_SERIALIZABLE(TransactionPriority);
 
 template<class Value>
 using TransactionTagMap = std::unordered_map<TransactionTag, Value, std::hash<TransactionTagRef>>;

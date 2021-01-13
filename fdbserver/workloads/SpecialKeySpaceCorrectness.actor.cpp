@@ -432,6 +432,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(e.code() == error_code_key_outside_legal_range);
 			tx->reset();
 		}
+		// test case when registered range is the same as the underlying module
+		try {
+			state Standalone<RangeResultRef> result = wait(tx->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
+			                         LiteralStringRef("\xff\xff/worker_interfaces0")),
+			             CLIENT_KNOBS->TOO_MANY));
+			// We should have at least 1 process in the cluster
+			ASSERT(result.size());
+			state KeyValueRef entry = deterministicRandom()->randomChoice(result);
+			Optional<Value> singleRes = wait(tx->get(entry.key));
+			ASSERT(singleRes.present() && singleRes.get() == entry.value);
+			tx->reset();
+		} catch (Error& e) {
+			wait(tx->onError(e));
+		}
 
 		return Void();
 	}

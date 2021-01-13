@@ -36,15 +36,14 @@ namespace ClientLogEventsParser {
 		FdbClientLogEvents::EventGetVersion_V2 gv;
 		reader >> gv;
 		ASSERT(gv.latency < 10000);
-		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END);
 	}
 
 	void parseEventGetVersion_V3(BinaryReader &reader) {
 		FdbClientLogEvents::EventGetVersion_V3 gv;
 		reader >> gv;
 		ASSERT(gv.latency < 10000);
-		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END && gv.readVersion > 0);
-	}
+	    ASSERT(gv.readVersion > 0);
+    }
 
 	void parseEventGet(BinaryReader &reader) {
 		FdbClientLogEvents::EventGet g;
@@ -142,25 +141,25 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		reader >> event;
 		switch (event.type)
 		{
-		case FdbClientLogEvents::GET_VERSION_LATENCY:
+		case FdbClientLogEvents::EventType::GET_VERSION_LATENCY:
 			parser->parseGetVersion(reader);
 			break;
-		case FdbClientLogEvents::GET_LATENCY:
+		case FdbClientLogEvents::EventType::GET_LATENCY:
 			parser->parseGet(reader);
 			break;
-		case FdbClientLogEvents::GET_RANGE_LATENCY:
+		case FdbClientLogEvents::EventType::GET_RANGE_LATENCY:
 			parser->parseGetRange(reader);
 			break;
-		case FdbClientLogEvents::COMMIT_LATENCY:
+		case FdbClientLogEvents::EventType::COMMIT_LATENCY:
 			parser->parseCommit(reader);
 			break;
-		case FdbClientLogEvents::ERROR_GET:
+		case FdbClientLogEvents::EventType::ERROR_GET:
 			parser->parseErrorGet(reader);
 			break;
-		case FdbClientLogEvents::ERROR_GET_RANGE:
+		case FdbClientLogEvents::EventType::ERROR_GET_RANGE:
 			parser->parseErrorGetRange(reader);
 			break;
-		case FdbClientLogEvents::ERROR_COMMIT:
+		case FdbClientLogEvents::EventType::ERROR_COMMIT:
 			parser->parseErrorCommit(reader);
 			break;
 		default:

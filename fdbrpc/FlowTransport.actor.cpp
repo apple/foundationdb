@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbrpc/FlowTransport.h"
+#include "flow/network.h"
 
+#include <cstdint>
 #include <unordered_map>
 #if VALGRIND
 #include <memcheck.h>
@@ -38,19 +41,21 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
 
-const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
-const UID WLTOKEN_PING_PACKET(-1, 1);
-const UID TOKEN_IGNORE_PACKET(0, 2);
+constexpr UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
+constexpr UID WLTOKEN_PING_PACKET(-1, 1);
+constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
-
 
 class EndpointMap : NonCopyable {
 public:
-	EndpointMap();
+	// Reserve space for this many wellKnownEndpoints
+	explicit EndpointMap(int wellKnownEndpointCount);
+	void insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority);
 	void insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority );
 	const Endpoint& insert( NetworkAddressList localAddresses, std::vector<std::pair<FlowReceiver*, TaskPriority>> const& streams );
 	NetworkMessageReceiver* get( Endpoint::Token const& token );
@@ -65,17 +70,16 @@ private:
 			uint64_t uid[2];  // priority packed into lower 32 bits; actual lower 32 bits of token are the index in data[]
 			uint32_t nextFree;
 		};
-		NetworkMessageReceiver* receiver;
+		NetworkMessageReceiver* receiver = nullptr;
 		Endpoint::Token& token() { return *(Endpoint::Token*)uid; }
 	};
+	int wellKnownEndpointCount;
 	std::vector<Entry> data;
 	uint32_t firstFree;
 };
 
-EndpointMap::EndpointMap()
- : firstFree(-1)
-{
-}
+EndpointMap::EndpointMap(int wellKnownEndpointCount)
+  : wellKnownEndpointCount(wellKnownEndpointCount), data(wellKnownEndpointCount), firstFree(-1) {}
 
 void EndpointMap::realloc() {
 	int oldSize = data.size();
@@ -86,6 +90,14 @@ void EndpointMap::realloc() {
 	}
 	data[data.size()-1].nextFree = firstFree;
 	firstFree = oldSize;
+}
+
+void EndpointMap::insertWellKnown(NetworkMessageReceiver* r, const Endpoint::Token& token, TaskPriority priority) {
+	int index = token.second();
+	ASSERT(data[index].receiver == nullptr);
+	data[index].receiver = r;
+	data[index].token() =
+	    Endpoint::Token(token.first(), (token.second() & 0xffffffff00000000LL) | static_cast<uint32_t>(priority));
 }
 
 void EndpointMap::insert( NetworkMessageReceiver* r, Endpoint::Token& token, TaskPriority priority ) {
@@ -135,6 +147,9 @@ const Endpoint& EndpointMap::insert( NetworkAddressList localAddresses, std::vec
 
 NetworkMessageReceiver* EndpointMap::get( Endpoint::Token const& token ) {
 	uint32_t index = token.second();
+	if (index < wellKnownEndpointCount && data[index].receiver == nullptr) {
+		TraceEvent(SevWarnAlways, "WellKnownEndpointNotAdded").detail("Token", token);
+	}
 	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() )
 		return data[index].receiver;
 	return 0;
@@ -147,9 +162,13 @@ TaskPriority EndpointMap::getPriority( Endpoint::Token const& token ) {
 	return TaskPriority::UnknownEndpoint;
 }
 
-void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* r ) {
+void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r) {
 	uint32_t index = token.second();
-	if ( index < data.size() && data[index].token().first() == token.first() && ((data[index].token().second()&0xffffffff00000000LL)|index)==token.second() && data[index].receiver == r ) {
+	if (index < wellKnownEndpointCount) {
+		data[index].receiver = nullptr;
+	} else if (index < data.size() && data[index].token().first() == token.first() &&
+	           ((data[index].token().second() & 0xffffffff00000000LL) | index) == token.second() &&
+	           data[index].receiver == r) {
 		data[index].receiver = 0;
 		data[index].nextFree = firstFree;
 		firstFree = index;
@@ -158,11 +177,9 @@ void EndpointMap::remove( Endpoint::Token const& token, NetworkMessageReceiver* 
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 	EndpointNotFoundReceiver(EndpointMap& endpoints) {
-		//endpoints[WLTOKEN_ENDPOINT_NOT_FOUND] = this;
-		Endpoint::Token e = WLTOKEN_ENDPOINT_NOT_FOUND;
-		endpoints.insert(this, e, TaskPriority::DefaultEndpoint);
-		ASSERT( e == WLTOKEN_ENDPOINT_NOT_FOUND );
+		endpoints.insertWellKnown(this, WLTOKEN_ENDPOINT_NOT_FOUND, TaskPriority::DefaultEndpoint);
 	}
+
 	void receive(ArenaObjectReader& reader) override {
 		// Remote machine tells us it doesn't have endpoint e
 		Endpoint e;
@@ -173,9 +190,7 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 
 struct PingReceiver final : NetworkMessageReceiver {
 	PingReceiver(EndpointMap& endpoints) {
-		Endpoint::Token e = WLTOKEN_PING_PACKET;
-		endpoints.insert(this, e, TaskPriority::ReadSocket);
-		ASSERT( e == WLTOKEN_PING_PACKET );
+		endpoints.insertWellKnown(this, WLTOKEN_PING_PACKET, TaskPriority::ReadSocket);
 	}
 	void receive(ArenaObjectReader& reader) override {
 		ReplyPromise<Void> reply;
@@ -214,11 +229,9 @@ public:
 	Reference<AsyncVar<bool>> degraded;
 	bool warnAlwaysForLargePacket;
 
-	// These declarations must be in exactly this order
 	EndpointMap endpoints;
-	EndpointNotFoundReceiver endpointNotFoundReceiver;
-	PingReceiver pingReceiver;
-	// End ordered declarations
+	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
+	PingReceiver pingReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
 	Int64MetricHandle countPacketsReceived;
@@ -294,7 +307,8 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 }
 
 TransportData::TransportData(uint64_t transportId)
-	  : endpointNotFoundReceiver(endpoints),
+	  : endpoints(/*wellKnownTokenCount*/ 11),
+	  	endpointNotFoundReceiver(endpoints),
 		pingReceiver(endpoints),
 		warnAlwaysForLargePacket(true),
 		lastIncompatibleMessage(0),
@@ -770,7 +784,7 @@ void Peer::prependConnectPacket() {
 	}
 
 	pkt.connectPacketLength = sizeof(pkt) - sizeof(pkt.connectPacketLength);
-	pkt.protocolVersion = currentProtocolVersion;
+	pkt.protocolVersion = g_network->protocolVersion();
 	pkt.protocolVersion.addObjectSerializerFlag();
 	pkt.connectionId = transport->transportId;
 
@@ -835,6 +849,15 @@ TransportData::~TransportData() {
 	}
 }
 
+static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersion version) {
+	switch (policy.requirement) {
+	case RequirePeer::Exactly:
+		return version.version() == policy.version.version();
+	case RequirePeer::AtLeast:
+		return version.version() >= policy.version.version();
+	}
+}
+
 ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket) {
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
@@ -845,6 +868,9 @@ ACTOR static void deliver(TransportData* self, Endpoint destination, ArenaReader
 
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
+		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
+			return;
+		}
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
 			StringRef data = reader.arenaReadAll();
@@ -890,11 +916,11 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 		//Retrieve packet length and checksum
 		if (checksumEnabled) {
 			if (e-p < sizeof(uint32_t) * 2) break;
-			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+			packetLen = *(uint32_t*)p; p += PACKET_LEN_WIDTH;
 			packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
 		} else {
 			if (e-p < sizeof(uint32_t)) break;
-			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+			packetLen = *(uint32_t*)p; p += PACKET_LEN_WIDTH;
 		}
 
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
@@ -945,7 +971,9 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 #if VALGRIND
 		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
 #endif
-		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(currentProtocolVersion));
+		// remove object serializer flag to account for flat buffer
+		peerProtocolVersion.removeObjectSerializerFlag();
+		ArenaReader reader(arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion));
 		UID token;
 		reader >> token;
 
@@ -972,9 +1000,9 @@ static void scanPackets(TransportData* transport, uint8_t*& unprocessed_begin, c
 // Given unprocessed buffer [begin, end), check if next packet size is known and return
 // enough size for the next packet, whose format is: {size, optional_checksum, data} +
 // next_packet_size.
-static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress) {
+static int getNewBufferSize(const uint8_t* begin, const uint8_t* end, const NetworkAddress& peerAddress, ProtocolVersion peerProtocolVersion) {
 	const int len = end - begin;
-	if (len < sizeof(uint32_t)) {
+	if (len < PACKET_LEN_WIDTH) {
 		return FLOW_KNOBS->MIN_PACKET_BUFFER_BYTES;
 	}
 	const uint32_t packetLen = *(uint32_t*)begin;
@@ -1017,7 +1045,7 @@ ACTOR static Future<Void> connectionReader(
 				if (readAllBytes < FLOW_KNOBS->MIN_PACKET_BUFFER_FREE_BYTES) {
 					Arena newArena;
 					const int unproc_len = unprocessed_end - unprocessed_begin;
-					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress);
+					const int len = getNewBufferSize(unprocessed_begin, unprocessed_end, peerAddress, peerProtocolVersion);
 					uint8_t* const newBuffer = new (newArena) uint8_t[ len ];
 					if (unproc_len > 0) {
 						memcpy(newBuffer, unprocessed_begin, unproc_len);
@@ -1056,8 +1084,8 @@ ACTOR static Future<Void> connectionReader(
 
 						uint64_t connectionId = pkt.connectionId;
 						if (!pkt.protocolVersion.hasObjectSerializerFlag() ||
-						    !pkt.protocolVersion.isCompatible(currentProtocolVersion)) {
-							incompatibleProtocolVersionNewer = pkt.protocolVersion > currentProtocolVersion;
+							!pkt.protocolVersion.isCompatible(g_network->protocolVersion())) {
+							incompatibleProtocolVersionNewer = pkt.protocolVersion > g_network->protocolVersion();
 							NetworkAddress addr = pkt.canonicalRemotePort
 							                          ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 							                          : conn->getPeerAddress();
@@ -1067,9 +1095,8 @@ ACTOR static Future<Void> connectionReader(
 								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
 									    .detail("Reason", "IncompatibleProtocolVersion")
-									    .detail("LocalVersion", currentProtocolVersion.version())
+									    .detail("LocalVersion", g_network->protocolVersion().version())
 									    .detail("RejectedVersion", pkt.protocolVersion.version())
-									    .detail("VersionMask", ProtocolVersion::compatibleProtocolVersionMask)
 									    .detail("Peer", pkt.canonicalRemotePort ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
 									                                            : conn->getPeerAddress())
 									    .detail("ConnectionId", connectionId);
@@ -1081,7 +1108,6 @@ ACTOR static Future<Void> connectionReader(
 							} else if(connectionId > 1) {
 								transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
-
 							compatible = false;
 							if(!protocolVersion.hasMultiVersionClient()) {
 								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
@@ -1133,7 +1159,7 @@ ACTOR static Future<Void> connectionReader(
 						}
 					}
 				}
-				if (compatible) {
+				if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 				}
 				else if(!expectConnectPacket) {
@@ -1364,10 +1390,8 @@ void FlowTransport::removeEndpoint( const Endpoint& endpoint, NetworkMessageRece
 
 void FlowTransport::addWellKnownEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, TaskPriority taskID ) {
 	endpoint.addresses = self->localAddresses;
-	ASSERT( ((endpoint.token.first() & TOKEN_STREAM_FLAG)!=0) == receiver->isStream() );
-	Endpoint::Token otoken = endpoint.token;
-	self->endpoints.insert( receiver, endpoint.token, taskID );
-	ASSERT( endpoint.token == otoken );
+	ASSERT(receiver->isStream());
+	self->endpoints.insertWellKnown(receiver, endpoint.token, taskID);
 }
 
 static void sendLocal( TransportData* self, ISerializeSource const& what, const Endpoint& destination ) {
@@ -1375,7 +1399,7 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
-	ObjectWriter wr(AssumeVersion(currentProtocolVersion));
+	ObjectWriter wr(AssumeVersion(g_network->protocolVersion()));
 	what.serializeObjectWriter(wr);
 	copy = wr.toStringRef();
 #if VALGRIND
@@ -1383,7 +1407,7 @@ static void sendLocal( TransportData* self, ISerializeSource const& what, const 
 #endif
 
 	ASSERT(copy.size() > 0);
-	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
+	deliver(self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(g_network->protocolVersion())), false);
 }
 
 static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISerializeSource const& what,
@@ -1405,12 +1429,12 @@ static ReliablePacket* sendPacket(TransportData* self, Reference<Peer> peer, ISe
 	int prevBytesWritten = pb->bytes_written;
 	PacketBuffer* checksumPb = pb;
 
-	PacketWriter wr(pb,rp,AssumeVersion(currentProtocolVersion));  // SOMEDAY: Can we downgrade to talk to older peers?
+	PacketWriter wr(pb,rp,AssumeVersion(g_network->protocolVersion()));  // SOMEDAY: Can we downgrade to talk to older peers?
 
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
 	uint32_t len, checksum = 0;
-	int packetInfoSize = sizeof(len);
+	int packetInfoSize = PACKET_LEN_WIDTH;
 	if (checksumEnabled) {
 		packetInfoSize += sizeof(checksum);
 	}

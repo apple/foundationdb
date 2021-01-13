@@ -30,6 +30,11 @@
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
+constexpr UID WLTOKEN_CLIENTLEADERREG_GETLEADER(-1, 2);
+constexpr UID WLTOKEN_CLIENTLEADERREG_OPENDATABASE(-1, 3);
+
+constexpr UID WLTOKEN_PROTOCOL_INFO(-1, 10);
+
 struct ClientLeaderRegInterface {
 	RequestStream< struct GetLeaderRequest > getLeader;
 	RequestStream< struct OpenDatabaseCoordRequest > openDatabase;
@@ -184,6 +189,32 @@ public:
 	explicit ClientCoordinators( Reference<ClusterConnectionFile> ccf );
 	explicit ClientCoordinators( Key clusterKey, std::vector<NetworkAddress> coordinators );
 	ClientCoordinators() {}
+};
+
+struct ProtocolInfoReply {
+	constexpr static FileIdentifier file_identifier = 7784298;
+	ProtocolVersion version;
+	template <class Ar>
+	void serialize(Ar& ar) {
+		uint64_t version_ = 0;
+		if (Ar::isSerializing) {
+			version_ = version.versionWithFlags();
+		}
+		serializer(ar, version_);
+		if (Ar::isDeserializing) {
+			version = ProtocolVersion(version_);
+		}
+	}
+};
+
+struct ProtocolInfoRequest {
+	constexpr static FileIdentifier file_identifier = 13261233;
+	ReplyPromise<ProtocolInfoReply> reply{ PeerCompatibilityPolicy{ RequirePeer::AtLeast,
+		                                                            ProtocolVersion::withStableInterfaces() } };
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
 };
 
 #endif

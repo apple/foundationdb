@@ -19,14 +19,16 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/IRandom.h"
 
-static constexpr size_t globalDataSize = 1 << 16;
-static const uint8_t* globalData = nullptr;
+static constexpr size_t globalDataSize = 1 << 20;
+static uint8_t* globalData = nullptr;
 
 static inline void initGlobalData() {
 	if (!globalData) {
-		globalData = static_cast<const uint8_t*>(allocateFast(globalDataSize));
+		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
 	}
+	generateRandomData(globalData, globalDataSize);
 }
 
 KeyValueRef getKV(size_t keySize, size_t valueSize) {

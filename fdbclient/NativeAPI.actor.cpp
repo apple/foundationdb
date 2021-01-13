@@ -873,7 +873,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
     transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), transactionTracingEnabled(true),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
@@ -946,6 +946,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		    std::make_unique<ConsistencyCheckImpl>(
 		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TracingOptionsImpl>(
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1044,7 +1048,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
     GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), transactionTracingEnabled(true) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -1206,6 +1210,14 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 			case FDBDatabaseOptions::SNAPSHOT_RYW_DISABLE:
 				validateOptionValue(value, false);
 				snapshotRywEnabled--;
+				break;
+			case FDBDatabaseOptions::TRANSACTION_TRACE_ENABLE:
+				validateOptionValue(value, false);
+				transactionTracingEnabled++;
+				break;
+			case FDBDatabaseOptions::TRANSACTION_TRACE_DISABLE:
+				validateOptionValue(value, false);
+				transactionTracingEnabled--;
 				break;
 			default:
 				break;
@@ -1817,7 +1829,12 @@ ACTOR Future<vector<pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocatio
 	}
 }
 
-// Returns a vector of <ShardRange, storage server location info> pairs.
+// Get the SS locations for each shard in the 'keys' key-range;
+// Returned vector size is the number of shards in the input keys key-range.
+// Returned vector element is <ShardRange, storage server location info> pairs, where
+// ShardRange is the whole shard key-range, not a part of the given key range.
+// Example: If query the function with  key range (b, d), the returned list of pairs could be something like:
+// [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
 template <class F>
 Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database const& cx, KeyRange const& keys, int limit, bool reverse, F StorageServerInterface::*member, TransactionInfo const& info ) {
 	ASSERT (!keys.empty());
@@ -2687,8 +2704,21 @@ void debugAddTags(Transaction *tr) {
 
 }
 
+SpanID generateSpanID(int transactionTracingEnabled) {
+	uint64_t tid = deterministicRandom()->randomUInt64();
+	if (transactionTracingEnabled > 0) {
+		return SpanID(tid, deterministicRandom()->randomUInt64());
+	} else {
+		return SpanID(tid, 0);
+	}
+}
+
+Transaction::Transaction()
+  : info(TaskPriority::DefaultEndpoint, generateSpanID(true)),
+    span(info.spanID, "Transaction"_loc) {}
+
 Transaction::Transaction(Database const& cx)
-  : cx(cx), info(cx->taskID, deterministicRandom()->randomUniqueID()), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
+  : cx(cx), info(cx->taskID, generateSpanID(cx->transactionTracingEnabled)), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
     committedVersion(invalidVersion), versionstampPromise(Promise<Standalone<StringRef>>()), options(cx), numErrors(0),
     trLogInfo(createTrLogInfoProbabilistically(cx)), tr(info.spanID), span(info.spanID, "Transaction"_loc) {
 	if (DatabaseContext::debugUseTags) {
@@ -4161,6 +4191,37 @@ Future<Standalone<StringRef>> Transaction::getVersionstamp() {
 	return versionstampPromise.getFuture();
 }
 
+ACTOR Future<ProtocolVersion> coordinatorProtocolsFetcher(Reference<ClusterConnectionFile> f) {
+	state ClientCoordinators coord(f);
+
+	state vector<Future<ProtocolInfoReply>> coordProtocols;
+	coordProtocols.reserve(coord.clientLeaderServers.size());
+	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
+		RequestStream<ProtocolInfoRequest> requestStream{ Endpoint{
+			{ coord.clientLeaderServers[i].getLeader.getEndpoint().addresses }, WLTOKEN_PROTOCOL_INFO } };
+		coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
+	}
+
+	wait(smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5));
+
+	std::unordered_map<uint64_t, int> protocolCount;
+	for(int i = 0; i<coordProtocols.size(); i++) {
+		if(coordProtocols[i].isReady()) {
+			protocolCount[coordProtocols[i].get().version.version()]++;
+		}
+	}
+
+	uint64_t majorityProtocol = std::max_element(protocolCount.begin(), protocolCount.end(), [](const std::pair<uint64_t, int>& l, const std::pair<uint64_t, int>& r){
+		return l.second < r.second;
+	})->first;
+	return ProtocolVersion(majorityProtocol);
+}
+
+ACTOR Future<uint64_t> getCoordinatorProtocols(Reference<ClusterConnectionFile> f) {
+	ProtocolVersion protocolVersion = wait(coordinatorProtocolsFetcher(f));
+	return protocolVersion.version();
+}
+
 uint32_t Transaction::getSize() {
 	auto s = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() +
 	       tr.transaction.write_conflict_ranges.expectedSize();
@@ -4598,6 +4659,16 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	}
 
 	return Reference<TransactionLogInfo>();
+}
+
+void Transaction::setTransactionID(uint64_t id) {
+	ASSERT(getSize() == 0);
+	info.spanID = SpanID(id, info.spanID.second());
+}
+
+void Transaction::setToken(uint64_t token) {
+	ASSERT(getSize() == 0);
+	info.spanID = SpanID(info.spanID.first(), token);
 }
 
 void enableClientInfoLogging() {
