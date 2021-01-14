@@ -220,6 +220,9 @@ private:
 		} else if (size <= 255) {
 			request.write_byte(0xd9);
 			request.write_byte(static_cast<uint8_t>(size));
+		} else if (size <= 65535) {
+			request.write_byte(0xda);
+			request.write_byte(static_cast<uint16_t>(size));
 		} else {
 			// TODO: Add support for longer strings if necessary.
 			ASSERT(false);
