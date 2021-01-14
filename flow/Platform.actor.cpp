@@ -2406,7 +2406,7 @@ ACTOR Future<vector<std::string>> findFiles( std::string directory, std::string 
 	return result;
 }
 
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define FILE_ATTRIBUTE_DATA mode_t
 
 bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension ) {

@@ -93,7 +93,5 @@ struct ProfilerRequest {
 		serializer(ar, reply, type, action, duration, outputFile);
 	}
 };
-BINARY_SERIALIZABLE( ProfilerRequest::Type );
-BINARY_SERIALIZABLE( ProfilerRequest::Action );
 
 #endif
