@@ -1716,21 +1716,49 @@ public:
 
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 	public:
-		BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath) : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath) {}
+		BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath)
+			: IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0)
+		{
+			m_buffer.reserve(m_buffer.arena(), CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+		}
 
 		Future<Void> append(const void *data, int len) {
-			Future<Void> r = m_file->write(data, len, m_offset);
-			m_offset += len;
+			m_buffer.append(m_buffer.arena(), (const uint8_t *)data, len);
+
+			if(m_buffer.size() >= CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
+				return flush(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+			}
+
+			return Void();
+		}
+
+		Future<Void> flush(int size) {
+			ASSERT(size <= m_buffer.size());
+
+			// Keep a reference to the old buffer
+			Standalone<VectorRef<uint8_t>> old = m_buffer;
+			// Make a new buffer, initialized with the excess bytes over the block size from the old buffer
+			m_buffer = Standalone<VectorRef<uint8_t>>(old.slice(size, old.size()));
+
+			// Write the old buffer to the underlying file and update the write offset
+			Future<Void> r = holdWhile(old, m_file->write(old.begin(), size, m_writeOffset));
+			m_writeOffset += size;
+
 			return r;
 		}
 
 		ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
+			wait(f->flush(f->m_buffer.size()));
 			wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
 			wait(f->m_file->sync());
 			std::string name = f->m_file->getFilename();
 			f->m_file.clear();
 			renameFile(name, f->m_finalFullPath);
 			return Void();
+		}
+
+		int64_t size() const {
+			return m_buffer.size() + m_writeOffset;
 		}
 
 		Future<Void> finish() {
@@ -1742,6 +1770,8 @@ public:
 
 	private:
 		Reference<IAsyncFile> m_file;
+		Standalone<VectorRef<uint8_t>> m_buffer;
+		int64_t m_writeOffset;
 		std::string m_finalFullPath;
 	};
 
@@ -1874,7 +1904,7 @@ public:
 
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 	public:
-		BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
+		BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file), m_offset(0) {}
 
 		Future<Void> append(const void *data, int len) {
 			Future<Void> r = m_file->write(data, len, m_offset);
@@ -1887,11 +1917,21 @@ public:
 			return map(m_file->sync(), [=](Void _) { self->m_file.clear(); return Void(); });
 		}
 
+<<<<<<< HEAD
 		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
 		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
 
+=======
+		int64_t size() const {
+			return m_offset;
+		}
+
+		void addref() { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() { return ReferenceCounted<BackupFile>::delref(); }
+>>>>>>> upstream/release-6.2
 	private:
 		Reference<IAsyncFile> m_file;
+		int64_t m_offset;
 	};
 
 	Future<Reference<IBackupFile>> writeFile(std::string path) final {
