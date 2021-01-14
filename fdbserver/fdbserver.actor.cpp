@@ -1599,7 +1599,7 @@ int main(int argc, char* argv[]) {
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
 		globalClientKnobs->initialize(true);
-		globalServerKnobs->initialize(true, globalClientKnobs, role == ServerRole::Simulation);
+		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == ServerRole::Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
