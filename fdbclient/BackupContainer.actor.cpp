@@ -1917,18 +1917,13 @@ public:
 			return map(m_file->sync(), [=](Void _) { self->m_file.clear(); return Void(); });
 		}
 
-<<<<<<< HEAD
-		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
-		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
-
-=======
 		int64_t size() const {
 			return m_offset;
 		}
 
-		void addref() { return ReferenceCounted<BackupFile>::addref(); }
-		void delref() { return ReferenceCounted<BackupFile>::delref(); }
->>>>>>> upstream/release-6.2
+		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
+
 	private:
 		Reference<IAsyncFile> m_file;
 		int64_t m_offset;

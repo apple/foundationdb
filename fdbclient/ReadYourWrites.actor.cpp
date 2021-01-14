@@ -1225,26 +1225,16 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 
 Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool snapshot ) {
 	TEST(true);
-<<<<<<< HEAD
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(key)) {
 			TEST(true); // Special keys get
 			return getDatabase()->specialKeySpace->get(this, key);
-=======
-	
-	if (key == LiteralStringRef("\xff\xff/status/json")){
-		if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
-			++tr.getDatabase()->transactionStatusRequests;
-			return getJSON(tr.getDatabase());
-		}
-		else {
-			return Optional<Value>();
->>>>>>> upstream/release-6.2
 		}
 	} else {
 		if (key == LiteralStringRef("\xff\xff/status/json")) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
 				return Optional<Value>();
