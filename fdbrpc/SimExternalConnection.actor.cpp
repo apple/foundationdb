@@ -20,12 +20,12 @@
 
 #include <boost/asio.hpp>
 #include <boost/range.hpp>
-#include <chrono>
 #include <thread>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/Net2Packet.h"
+#include "flow/Platform.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -101,7 +101,7 @@ int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	    boost::iterator_range<SendBufferIterator>(SendBufferIterator(buffer, limit), SendBufferIterator()), err);
 	ASSERT(!err);
 	ASSERT(bytesSent > 0);
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	threadSleep(0.1);
 	const auto bytesReadable = socket.available();
 	std::vector<uint8_t> tempReadBuffer(bytesReadable);
 	for (int index = 0; index < bytesReadable;) {
@@ -195,7 +195,7 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 			break;
 		}
 		// Wait until server is ready
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		threadSleep(0.01);
 	}
 	state Key data = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
