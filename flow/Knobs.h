@@ -35,6 +35,7 @@ public:
 	void trace() const;
 
 protected:
+	Knobs()=default;
 	void initKnob( double& knob, double value, std::string const& name );
 	void initKnob( int64_t& knob, int64_t value, std::string const& name );
 	void initKnob( int& knob, int value, std::string const& name );
