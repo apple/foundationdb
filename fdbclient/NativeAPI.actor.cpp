@@ -1541,6 +1541,23 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, false);
 			networkOptions.runLoopProfilingEnabled = true;
 			break;
+		case FDBNetworkOptions::CLIENT_TRACER: {
+			validateOptionValue(value, true);
+			std::string tracer = value.get().toString();
+			if (tracer == "none" || tracer == "disabled") {
+				openTracer(TracerType::DISABLED);
+			} else if (tracer == "logfile" || tracer == "file" || tracer == "log_file") {
+				openTracer(TracerType::LOG_FILE);
+			} else if (tracer == "network_async") {
+				openTracer(TracerType::NETWORK_ASYNC);
+			} else if (tracer == "network_lossy") {
+				openTracer(TracerType::NETWORK_LOSSY);
+			} else {
+				fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", tracer.c_str());
+				throw invalid_option_value();
+			}
+			break;
+		}
 		default:
 			break;
 	}
