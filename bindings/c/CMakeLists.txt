@@ -111,11 +111,11 @@ if(NOT WIN32)
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
   target_link_libraries(mako PRIVATE fdb_c)
 
-  # Make sure that fdb_c.h is compatible with c89
-  add_executable(fdb_c89_test test/fdb_c89_test.c)
-  set_property(TARGET fdb_c89_test PROPERTY C_STANDARD 90)
-  target_compile_options(fdb_c89_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  target_link_libraries(fdb_c89_test PRIVATE fdb_c)
+  # Make sure that fdb_c.h is compatible with c90
+  add_executable(fdb_c90_test test/fdb_c90_test.c)
+  set_property(TARGET fdb_c90_test PROPERTY C_STANDARD 90)
+  target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_libraries(fdb_c90_test PRIVATE fdb_c)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
