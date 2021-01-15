@@ -20,7 +20,6 @@
 
 // Unit tests for the FoundationDB C API.
 
-#include <cstdint>
 #define FDB_API_VERSION 700
 #include <foundationdb/fdb_c.h>
 #include <assert.h>

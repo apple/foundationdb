@@ -389,11 +389,10 @@ fdb_error_t fdb_database_create_transaction( FDBDatabase* d,
 		*out_transaction = (FDBTransaction*)tr.extractPtr(); );
 }
 
-extern "C" DLLEXPORT
-FDBFuture* fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* address, int address_length, fdb_bool_t check, int duration) {
-	return (FDBFuture*) (DB(db)->rebootWorker(StringRef(address, address_length), check, duration).extractPtr());
+extern "C" DLLEXPORT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db, uint8_t const* address, int address_length,
+                                                           fdb_bool_t check, int duration) {
+	return (FDBFuture*)(DB(db)->rebootWorker(StringRef(address, address_length), check, duration).extractPtr());
 }
-
 
 extern "C" DLLEXPORT
 void fdb_transaction_destroy( FDBTransaction* tr ) {
