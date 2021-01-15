@@ -948,12 +948,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::TRACING, SpecialKeySpace::IMPLTYPE::READWRITE,
-		    // std::make_unique<TracingOptionsImpl>(
-		    //     SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
-		    // TODO: Temporary fix for an issue with special-key top level ranges.
 		    std::make_unique<TracingOptionsImpl>(
-		        KeyRangeRef(LiteralStringRef("a/"), LiteralStringRef("a0"))
-		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING).begin)));
+		        SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::TRACING)));
 	}
 	if (apiVersionAtLeast(630)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::TRANSACTION, SpecialKeySpace::IMPLTYPE::READONLY,
