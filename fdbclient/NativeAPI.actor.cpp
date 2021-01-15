@@ -846,11 +846,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
                                  bool switchable)
   : connectionFile(connectionFile), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), taskID(taskID),
     clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
-<<<<<<< HEAD
     apiVersion(apiVersion), switchable(switchable), proxyProvisional(false), cc("TransactionMetrics"),
-=======
-    apiVersion(apiVersion), switchable(switchable), provisional(false), cc("TransactionMetrics"),
->>>>>>> release-6.3
     transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -872,24 +868,14 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-<<<<<<< HEAD
-    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
-    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), transactionTracingEnabled(true),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
-=======
     transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
     bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
-    internal(internal),
->>>>>>> release-6.3
+    internal(internal), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
 	connected = (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size())
@@ -1057,22 +1043,14 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-<<<<<<< HEAD
-    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
-    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), transactionTracingEnabled(true) {}
-=======
     transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
     transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
     transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
     transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
     readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
-    internal(false) {}
->>>>>>> release-6.3
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
+    transactionTracingEnabled(true) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );

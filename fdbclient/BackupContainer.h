@@ -40,11 +40,7 @@ Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Datab
 // TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
 class IBackupFile {
 public:
-<<<<<<< HEAD
-	IBackupFile(const std::string& fileName) : m_fileName(fileName), m_offset(0) {}
-=======
-	IBackupFile(std::string fileName) : m_fileName(fileName) {}
->>>>>>> release-6.3
+	IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
 	virtual Future<Void> append(const void *data, int len) = 0;

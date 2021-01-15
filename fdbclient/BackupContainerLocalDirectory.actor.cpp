@@ -50,12 +50,15 @@ public:
 
 	Future<Void> finish() { return finish_impl(Reference<BackupFile>::addRef(this)); }
 
+	int64_t size() const override { return m_offset; }
+
 	void addref() override { return ReferenceCounted<BackupFile>::addref(); }
 	void delref() override { return ReferenceCounted<BackupFile>::delref(); }
 
 private:
 	Reference<IAsyncFile> m_file;
 	std::string m_finalFullPath;
+	int64_t m_offset;
 };
 
 ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {

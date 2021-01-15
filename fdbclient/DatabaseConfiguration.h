@@ -223,7 +223,6 @@ struct DatabaseConfiguration {
 	bool isExcludedServer(NetworkAddressList) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 
-<<<<<<< HEAD
 	int32_t getDesiredCommitProxies() const {
 		if (commitProxyCount == -1) return autoCommitProxyCount;
 		return commitProxyCount;
@@ -231,15 +230,6 @@ struct DatabaseConfiguration {
 	int32_t getDesiredGrvProxies() const {
 		if (grvProxyCount == -1) return autoGrvProxyCount;
 		return grvProxyCount;
-	}
-	int32_t getDesiredResolvers() const { if(resolverCount == -1) return autoResolverCount; return resolverCount; }
-	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
-	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return getDesiredLogs(); return remoteDesiredTLogCount;  }
-	int32_t getDesiredSatelliteLogs( Optional<Key> dcId ) const {
-=======
-	int32_t getDesiredProxies() const {
-		if (masterProxyCount == -1) return autoMasterProxyCount;
-		return masterProxyCount;
 	}
 	int32_t getDesiredResolvers() const {
 		if (resolverCount == -1) return autoResolverCount;
@@ -254,8 +244,6 @@ struct DatabaseConfiguration {
 		return remoteDesiredTLogCount;
 	}
 	int32_t getDesiredSatelliteLogs(Optional<Key> dcId) const {
-
->>>>>>> release-6.3
 		auto desired = getRegion(dcId).satelliteDesiredTLogCount;
 		if (desired == -1) return autoDesiredTLogCount;
 		return desired;

@@ -194,13 +194,11 @@ UID decodeProcessClassKeyOld( KeyRef const& key );
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
-<<<<<<< HEAD
-//	The differences between excluded and failed can be found in "command-line-interface.rst"
-//	and in the help message of the fdbcli command "exclude".
-=======
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
->>>>>>> release-6.3
+
+//	The differences between excluded and failed can be found in "command-line-interface.rst"
+//	and in the help message of the fdbcli command "exclude".
 
 //   "\xff/conf/excluded/1.2.3.4" := ""
 //   "\xff/conf/excluded/1.2.3.4:4000" := ""

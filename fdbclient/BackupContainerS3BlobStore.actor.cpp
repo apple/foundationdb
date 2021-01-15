@@ -61,11 +61,14 @@ public:
 			});
 		}
 
+		int64_t size() const override { return m_offset; }
+
 		void addref() final { return ReferenceCounted<BackupFile>::addref(); }
 		void delref() final { return ReferenceCounted<BackupFile>::delref(); }
 
 	private:
 		Reference<IAsyncFile> m_file;
+		int64_t m_offset;
 	};
 
 	ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles(
