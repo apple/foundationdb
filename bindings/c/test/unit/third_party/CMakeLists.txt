@@ -16,19 +16,3 @@ ExternalProject_Add(
 
 ExternalProject_Get_Property(doctest source_dir)
 set(DOCTEST_INCLUDE_DIR ${source_dir}/doctest CACHE INTERNAL "Path to include folder for doctest")
-
-# Download rapidjson repo.
-ExternalProject_Add(
-    rapidjson
-    PREFIX ${CMAKE_BINARY_DIR}/rapidjson
-    GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-    GIT_TAG f54b0e47a08782a6131cc3d60f94d038fa6e0a51 # v1.1.0
-    TIMEOUT 10
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-    INSTALL_COMMAND ""
-    LOG_DOWNLOAD ON
-)
-
-ExternalProject_Get_Property(rapidjson source_dir)
-set(RAPIDJSON_INCLUDE_DIR ${source_dir}/include CACHE INTERNAL "Path to include folder for rapidjson")

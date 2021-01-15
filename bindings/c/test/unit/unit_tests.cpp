@@ -38,7 +38,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
-#include "rapidjson/document.h"
+#include "fdbclient/rapidjson/document.h"
 
 #include "fdb_api.hpp"
 
