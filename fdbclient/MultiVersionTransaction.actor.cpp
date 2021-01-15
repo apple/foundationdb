@@ -284,6 +284,20 @@ Reference<ITransaction> DLDatabase::createTransaction() {
 void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	throwIfError(api->databaseSetOption(db, option, value.present() ? value.get().begin() : nullptr, value.present() ? value.get().size() : 0));
 }
+
+ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	if(!api->databaseRebootWorker) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->databaseRebootWorker(db, address.begin(), address.size(), check, duration);
+	return toThreadFuture<int64_t>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		int64_t res;
+		FdbCApi::fdb_error_t error = api->futureGetInt64(f, &res);
+		ASSERT(!error);
+		return res;
+	});
+}
 	
 // DLApi
 template<class T>
@@ -319,6 +333,7 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction");
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option");
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
+	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
@@ -779,6 +794,13 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	if(dbState->db) {
 		dbState->db->setOption(option, value);
 	}
+}
+
+ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+	if (dbState->db) {
+		return dbState->db->rebootWorker(address, check, duration);
+	}
+	return false;
 }
 
 void MultiVersionDatabase::Connector::connect() {

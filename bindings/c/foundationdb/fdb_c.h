@@ -173,6 +173,10 @@ extern "C" {
     fdb_database_create_transaction( FDBDatabase* d,
                                      FDBTransaction** out_transaction );
 
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
+    fdb_database_reboot_worker( FDBDatabase* db, uint8_t const* address,
+                                int address_length, fdb_bool_t check, int duration);
+
     DLLEXPORT void fdb_transaction_destroy( FDBTransaction* tr);
 
     DLLEXPORT void fdb_transaction_cancel( FDBTransaction* tr);
