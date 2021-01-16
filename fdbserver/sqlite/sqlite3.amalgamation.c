@@ -93792,11 +93792,13 @@ SQLITE_API int sqlite3_open_v2(
 }
 
 SQLITE_API void * sqlite3_get_vfs_db(sqlite3 *pDb) {
-  return pDb->aDb[0].pBt->pBt->pPager->pWal->pDbFd;
+  Pager *pPager = sqlite3BtreePager(pDb->aDb[0].pBt);
+  return (pPager != NULL) ? pPager->fd : NULL;
 }
 
 SQLITE_API void * sqlite3_get_vfs_wal(sqlite3 *pDb) {
-  return pDb->aDb[0].pBt->pBt->pPager->pWal->pWalFd;
+  Pager *pPager = sqlite3BtreePager(pDb->aDb[0].pBt);
+  return ((pPager != NULL) && (pPager->pWal != NULL)) ? pPager->pWal->pWalFd : NULL;
 }
 
 #ifndef SQLITE_OMIT_UTF16

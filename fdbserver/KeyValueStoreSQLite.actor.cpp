@@ -1367,8 +1367,6 @@ void SQLiteDB::open(bool writable) {
 
 	vfsDB = (VFSAsyncFile *)sqlite3_get_vfs_db(db);
 	ASSERT(vfsDB != nullptr);
-	vfsWAL = (VFSAsyncFile *)sqlite3_get_vfs_wal(db);
-	ASSERT(vfsWAL != nullptr);
 
 	int chunkSize;
 	if( !g_network->isSimulated() ) {
@@ -1395,6 +1393,9 @@ void SQLiteDB::open(bool writable) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm.column(0));
 		ASSERT( false );
 	}
+
+	vfsWAL = (VFSAsyncFile *)sqlite3_get_vfs_wal(db);
+	ASSERT(vfsWAL != nullptr);
 
 	if (writable) {
 		Statement(*this, "PRAGMA synchronous = NORMAL").execute(); // OFF, NORMAL, FULL
