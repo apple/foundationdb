@@ -210,25 +210,27 @@ private:
 	// Writes the given string to the request as a sequence of bytes. Inserts a
 	// format byte at the beginning of the string according to the its length,
 	// as specified by the msgpack specification.
-	inline void serialize_string(const std::string& str, TraceRequest& request) {
-		int size = str.size();
-
-		if (size <= 31) {
+	inline void serialize_string(const uint8_t* c, int length, TraceRequest& request) {
+		if (length <= 31) {
 			// A size 0 string is ok. We still need to write a byte
 			// identifiying the item as a string, but can set the size to 0.
-			request.write_byte(static_cast<uint8_t>(size) | 0b10100000);
-		} else if (size <= 255) {
+			request.write_byte(static_cast<uint8_t>(length) | 0b10100000);
+		} else if (length <= 255) {
 			request.write_byte(0xd9);
-			request.write_byte(static_cast<uint8_t>(size));
-		} else if (size <= 65535) {
+			request.write_byte(static_cast<uint8_t>(length));
+		} else if (length <= 65535) {
 			request.write_byte(0xda);
-			request.write_byte(static_cast<uint16_t>(size));
+			request.write_byte(static_cast<uint16_t>(length));
 		} else {
 			// TODO: Add support for longer strings if necessary.
 			ASSERT(false);
 		}
 
-		request.write_bytes(reinterpret_cast<const uint8_t*>(str.data()), size);
+		request.write_bytes(c, length);
+	}
+
+	inline void serialize_string(const std::string& str, TraceRequest& request) {
+		serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), request);
 	}
 
 	// Writes the given vector of SpanIDs to the request. If the vector is
@@ -255,7 +257,7 @@ private:
 		}
 	}
 
-	inline void serialize_map(const std::unordered_map<std::string, std::string>& map, TraceRequest& request) {
+	inline void serialize_map(const std::unordered_map<StringRef, StringRef>& map, TraceRequest& request) {
 		int size = map.size();
 
 		if (size <= 15) {
@@ -266,8 +268,8 @@ private:
 		}
 
 		for (const auto& [key, value] : map) {
-			serialize_string(key, request);
-			serialize_string(value, request);
+			serialize_string(key.begin(), key.size(), request);
+			serialize_string(value.begin(), value.size(), request);
 		}
 	}
 };

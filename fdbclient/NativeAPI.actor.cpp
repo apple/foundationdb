@@ -1913,7 +1913,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 {
 	state Version ver = wait( version );
 	state Span span("NAPI:getValue"_loc, info.spanID);
-	span.addTag("key", key.toString());
+	span.addTag(LiteralStringRef("key"), key);
 	cx->validateVersion(ver);
 
 	loop {
@@ -4107,7 +4107,7 @@ ACTOR Future<Version> extractReadVersion(Location location, SpanID spanContext, 
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	span.addTag("read_version", std::to_string(rep.version));
+	span.addTag(LiteralStringRef("read_version"), std::to_string(rep.version));
 	return rep.version;
 }
 

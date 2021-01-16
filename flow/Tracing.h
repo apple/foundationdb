@@ -80,7 +80,7 @@ struct Span {
 		parents.push_back(arena, span);
 	}
 
-	void addTag(const std::string& key, const std::string value) {
+	void addTag(const StringRef& key, const StringRef& value) {
 		tags[key] = value;
 	}
 
@@ -89,7 +89,7 @@ struct Span {
 	double begin = 0.0, end = 0.0;
 	Location location;
 	SmallVectorRef<SpanID> parents;
-	std::unordered_map<std::string, std::string> tags;
+	std::unordered_map<StringRef, StringRef> tags;
 };
 
 enum class TracerType {
