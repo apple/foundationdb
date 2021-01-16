@@ -2411,6 +2411,9 @@ SQLITE_API int sqlite3_open_v2(
   const char *zVfs        /* Name of VFS module to use */
 );
 
+SQLITE_API void * sqlite3_get_vfs_db(sqlite3 *pDb);
+SQLITE_API void * sqlite3_get_vfs_wal(sqlite3 *pDb);
+
 /*
 ** CAPI3REF: Error Codes And Messages
 **

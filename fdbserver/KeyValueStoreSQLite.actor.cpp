@@ -31,6 +31,7 @@ extern "C" {
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
+#include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -197,6 +198,7 @@ struct SQLiteDB : NonCopyable {
 	bool page_checksums;
 	bool fragment_values;
 	PageChecksumCodec *pPagerCodec;  // we do NOT own this pointer, db does.
+	VFSAsyncFile *vfsDB, *vfsWAL;
 
 	void beginTransaction(bool write) {
 		checkError("BtreeBeginTrans", sqlite3BtreeBeginTrans(btree, write));
@@ -211,7 +213,7 @@ struct SQLiteDB : NonCopyable {
 	void open(bool writable);
 	void createFromScratch();
 
-	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values) {}
+	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values), vfsDB(nullptr), vfsWAL(nullptr) {}
 
 	~SQLiteDB() {
 		if (db) {
@@ -235,14 +237,24 @@ struct SQLiteDB : NonCopyable {
 		}
 	}
 
+	bool consumeInjectedErrors() {
+		// Both of these consumeInjectedError() calls must be made,  If this was written as one expression
+		// then if the first one returned true the second call would be skipped.
+		bool dbErr = (vfsDB != nullptr && vfsDB->consumeInjectedError());
+		bool walErr = (vfsWAL != nullptr && vfsWAL->consumeInjectedError());
+		return dbErr || walErr;
+	}
+
 	void checkError( const char* context, int rc ) {
 		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
 			Error err = io_error();
-			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
+
+	 		if (g_network->isSimulated() && (consumeInjectedErrors())) {
 				err = err.asInjectedFault();
+			}
 
 			if (db)
 				db->errCode = rc;
@@ -1352,6 +1364,11 @@ void SQLiteDB::open(bool writable) {
 	// Note that VFSAsync will also call g_network->open (including for the WAL), so its flags are important, too
 	int result = sqlite3_open_v2(apath.c_str(), &db, (writable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY), NULL);
 	checkError("open", result);
+
+	vfsDB = (VFSAsyncFile *)sqlite3_get_vfs_db(db);
+	ASSERT(vfsDB != nullptr);
+	vfsWAL = (VFSAsyncFile *)sqlite3_get_vfs_wal(db);
+	ASSERT(vfsWAL != nullptr);
 
 	int chunkSize;
 	if( !g_network->isSimulated() ) {
