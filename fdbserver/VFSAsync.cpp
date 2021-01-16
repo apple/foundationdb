@@ -46,6 +46,8 @@
 #include <fcntl.h>
 #endif
 
+#include "fdbserver/VFSAsync.h"
+
 /*
 ** The maximum pathname length supported by this VFS.
 */
@@ -58,35 +60,11 @@
 #define EXCLUSIVE_LOCK  4
 const uint32_t RESERVED_COUNT = 1U<<29;
 
-/*
-** When using this VFS, the sqlite3_file* handles that SQLite uses are
-** actually pointers to instances of type VFSAsyncFile.
-*/
-typedef struct VFSAsyncFile VFSAsyncFile;
-struct VFSAsyncFile {
-	sqlite3_file base;              /* Base class. Must be first. */
-	int flags;
-	std::string filename;
-	Reference<IAsyncFile> file;
+VFSAsyncFile::VFSAsyncFile(std::string const& filename, int flags)
+: filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0), chunkSize(0), errorInjected(false) {
+	filename_lockCount_openCount[filename].second++;
+}
 
-	uint32_t * const pLockCount;  // +1 for each SHARED_LOCK, or 1+X_COUNT for lock level X
-	int lockLevel;    // NO_LOCK, SHARED_LOCK, RESERVED_LOCK, PENDING_LOCK, or EXCLUSIVE_LOCK
-
-	struct SharedMemoryInfo *sharedMemory;
-	int sharedMemorySharedLocks;
-	int sharedMemoryExclusiveLocks;
-
-	int debug_zcrefs, debug_zcreads, debug_reads;
-
-	int chunkSize;
-
-	VFSAsyncFile(std::string const& filename, int flags) : filename(filename), flags(flags), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0), debug_zcreads(0), debug_reads(0), chunkSize(0) {
-		filename_lockCount_openCount[filename].second++;
-	}
-	~VFSAsyncFile();
-
-	static std::map<std::string, std::pair<uint32_t,int>> filename_lockCount_openCount;
-};
 std::map<std::string, std::pair<uint32_t,int>> VFSAsyncFile::filename_lockCount_openCount;
 
 static int asyncClose(sqlite3_file *pFile){
@@ -112,7 +90,10 @@ static int asyncRead(sqlite3_file *pFile, void *zBuf, int iAmt, sqlite_int64 iOf
 			return SQLITE_IOERR_SHORT_READ;
 		}
 		return SQLITE_OK;
-	} catch (Error& ) {
+	} catch (Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR_READ;
 	}
 }
@@ -123,7 +104,10 @@ static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlit
 	try{
 		--p->debug_zcrefs;
 		p->file->releaseZeroCopy( data, iAmt, iOfst );
-	} catch (Error& ) {
+	} catch (Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR;
 	}
 	return SQLITE_OK;
@@ -145,7 +129,10 @@ static int asyncReadZeroCopy(sqlite3_file *pFile, void **data, int iAmt, sqlite_
 		}
 		++p->debug_zcreads;
 		return SQLITE_OK;
-	} catch (Error& ) {
+	} catch (Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR_READ;
 	}
 }
@@ -162,7 +149,10 @@ static int asyncReadZeroCopy(sqlite3_file *pFile, void **data, int iAmt, sqlite_
 			return SQLITE_IOERR_SHORT_READ;
 		}
 		return SQLITE_OK;
-	} catch (Error& ) {
+	} catch (Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR_READ;
 	}
 }
@@ -178,7 +168,10 @@ static int asyncWrite(sqlite3_file *pFile, const void *zBuf, int iAmt, sqlite_in
 	try {
 		waitFor( p->file->write( zBuf, iAmt, iOfst ) );
 		return SQLITE_OK;
-	} catch(Error& ) {
+	} catch(Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR_WRITE;
 	}
 }
@@ -194,7 +187,10 @@ static int asyncTruncate(sqlite3_file *pFile, sqlite_int64 size){
 	try {
 		waitFor( p->file->truncate( size ) );
 		return SQLITE_OK;
-	} catch(Error& ) {
+	} catch(Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR_TRUNCATE;
 	}
 }
@@ -204,7 +200,11 @@ static int asyncSync(sqlite3_file *pFile, int flags){
 	try {
 		waitFor( p->file->sync() );
 		return SQLITE_OK;
-	} catch (Error& e) {
+	} catch (Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
+
 		TraceEvent("VFSSyncError")
 			.error(e)
 			.detail("Filename", p->filename)
@@ -223,7 +223,10 @@ static int VFSAsyncFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 	try {
 		*pSize = waitForAndGet( p->file->size() );
 		return SQLITE_OK;
-	} catch (Error& ) {
+	} catch (Error &e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pFile)->errorInjected = true;
+		}
 		return SQLITE_IOERR_FSTAT;
 	}
 }
@@ -648,6 +651,9 @@ static int asyncFullPathname(
 		memcpy(zPathOut, s.c_str(), s.size()+1);
 		return SQLITE_OK;
 	} catch (Error& e) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pVfs)->errorInjected = true;
+		}
 		TraceEvent(SevError,"VFSAsyncFullPathnameError").error(e).detail("PathIn", (std::string)zPath);
 		return SQLITE_IOERR;
 	} catch(...) {
@@ -716,6 +722,9 @@ static int asyncSleep(sqlite3_vfs *pVfs, int microseconds){
 		waitFor( g_network->delay( microseconds*1e-6, TaskPriority::DefaultDelay ) || simCancel );
 		return microseconds;
 	} catch( Error &e ) {
+		if(e.isInjectedFault()) {
+			((VFSAsyncFile *)pVfs)->errorInjected = true;
+		}
 		TraceEvent(SevError, "AsyncSleepError").error(e,true);
 		return 0;
 	}

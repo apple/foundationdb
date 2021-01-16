@@ -93791,6 +93791,14 @@ SQLITE_API int sqlite3_open_v2(
   return openDatabase(filename, ppDb, flags, zVfs);
 }
 
+SQLITE_API void * sqlite3_get_vfs_db(sqlite3 *pDb) {
+  return pDb->aDb[0].pBt->pBt->pPager->pWal->pDbFd;
+}
+
+SQLITE_API void * sqlite3_get_vfs_wal(sqlite3 *pDb) {
+  return pDb->aDb[0].pBt->pBt->pPager->pWal->pWalFd;
+}
+
 #ifndef SQLITE_OMIT_UTF16
 /*
 ** Open a new database handle.
