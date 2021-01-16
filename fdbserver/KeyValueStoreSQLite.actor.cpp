@@ -223,7 +223,6 @@ struct SQLiteDB : NonCopyable {
 	bool page_checksums;
 	bool fragment_values;
 	PageChecksumCodec *pPagerCodec;  // we do NOT own this pointer, db does.
-	VFSAsyncFile *vfsDB, *vfsWAL;
 
 	void beginTransaction(bool write) {
 		checkError("BtreeBeginTrans", sqlite3BtreeBeginTrans(btree, write));
@@ -238,7 +237,7 @@ struct SQLiteDB : NonCopyable {
 	void open(bool writable);
 	void createFromScratch();
 
-	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values), vfsDB(nullptr), vfsWAL(nullptr) {}
+	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values) {}
 
 	~SQLiteDB() {
 		if (db) {
@@ -262,12 +261,20 @@ struct SQLiteDB : NonCopyable {
 		}
 	}
 
-	bool consumeInjectedErrors() {
-		// Both of these consumeInjectedError() calls must be made,  If this was written as one expression
-		// then if the first one returned true the second call would be skipped.
-		bool dbErr = (vfsDB != nullptr && vfsDB->consumeInjectedError());
-		bool walErr = (vfsWAL != nullptr && vfsWAL->consumeInjectedError());
-		return dbErr || walErr;
+	// Consume and return the first of any injected errors detected by the VFSAsyncFile class.
+	bool consumeInjectedErrors(bool isOpen) {
+		// Get pointers to the VFSAsyncFile instances that SQLite is using to access its DB and WAL files
+		// in order to check if either of them have encountered an injected fault.
+		//
+		// These could be made into members, but this code is only run when an error occurs and only in simulation.
+		VFSAsyncFile *vfsDB = (VFSAsyncFile *)sqlite3_get_vfs_db(db);
+		VFSAsyncFile *vfsWAL = (VFSAsyncFile *)sqlite3_get_vfs_wal(db);
+
+		// Return the first error found, leave the others unconsumed.
+		// Consume the open error last to prevent an injected open error from hiding a non-injected IO op error.
+		return (vfsDB != nullptr && vfsDB->consumeInjectedError())
+			|| (vfsWAL != nullptr && vfsWAL->consumeInjectedError())
+			|| (isOpen && VFSAsyncFile::consumeInjectedOpenError());
 	}
 
 	void checkError( const char* context, int rc ) {
@@ -277,7 +284,7 @@ struct SQLiteDB : NonCopyable {
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
 			Error err = io_error();
 
-	 		if (g_network->isSimulated() && (consumeInjectedErrors())) {
+	 		if (g_network->isSimulated() && consumeInjectedErrors(strcmp(context, "open") == 0)) {
 				err = err.asInjectedFault();
 			}
 
@@ -1390,9 +1397,6 @@ void SQLiteDB::open(bool writable) {
 	int result = sqlite3_open_v2(apath.c_str(), &db, (writable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY), NULL);
 	checkError("open", result);
 
-	vfsDB = (VFSAsyncFile *)sqlite3_get_vfs_db(db);
-	ASSERT(vfsDB != nullptr);
-
 	int chunkSize;
 	if( !g_network->isSimulated() ) {
 		chunkSize = 4096 * SERVER_KNOBS->SQLITE_CHUNK_SIZE_PAGES;
@@ -1418,9 +1422,6 @@ void SQLiteDB::open(bool writable) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm.column(0));
 		ASSERT( false );
 	}
-
-	vfsWAL = (VFSAsyncFile *)sqlite3_get_vfs_wal(db);
-	ASSERT(vfsWAL != nullptr);
 
 	if (writable) {
 		Statement(*this, "PRAGMA synchronous = NORMAL").execute(); // OFF, NORMAL, FULL

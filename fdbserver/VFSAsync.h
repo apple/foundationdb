@@ -52,11 +52,39 @@ struct VFSAsyncFile {
 	int flags;
 	std::string filename;
 	Reference<IAsyncFile> file;
-	bool errorInjected;
+	bool injectedError;
+
+    // Method to set the injectedError flag to indicate that an injected error has been caught.
+    // Mostly useful for debugging injected fault handling.
+    void setInjectedError() {
+        //TraceEvent(SevInfo, "VFSSetInjectedFault").backtrace().detail("This", (void *)this);
+        injectedError = true;
+    }
 
     bool consumeInjectedError() {
-        bool e = errorInjected;
-        errorInjected = false;
+        bool e = injectedError;
+        injectedError = false;
+        return e;
+    }
+
+    // Static methods for capturing an injected open error and consuming it to convert SQLite
+    // errors into Error instances with isInjectedFault() set.
+    //
+    // Uses a g_network global so that injected errors on one simulated process do not mask
+    // non-injected errors on another.
+    static void setOpenError() {
+       g_network->setGlobal(INetwork::enSQLiteOpenError, (flowGlobalType)true);
+    }
+
+    static void clearOpenError() {
+       g_network->setGlobal(INetwork::enSQLiteOpenError, (flowGlobalType)false);
+    }
+
+    static bool consumeInjectedOpenError() {
+        bool e = (bool)g_network->global(INetwork::enSQLiteOpenError);
+        if(e) {
+            clearOpenError();
+        }
         return e;
     }
 
