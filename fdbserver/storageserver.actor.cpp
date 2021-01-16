@@ -316,7 +316,7 @@ public:
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
-		std::unordered_map<UID, KeyRangeRef> keyRangeMap;
+		std::unordered_map<UID, KeyRange> keyRangeMap;
 
 		static const StringRef emptyString;
 		static const KeyRangeRef emptyKeyRange;
@@ -331,7 +331,7 @@ public:
 			keyRangeMap.erase(id);
 		}
 
-		std::pair<double, KeyRangeRef> longestTime() const {
+		std::pair<double, KeyRange> longestTime() const {
 			if (numRunning() == 0) {
 				return {-1, emptyKeyRange};
 			}
