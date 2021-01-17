@@ -437,7 +437,7 @@ public:
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
 		enClientFailureMonitor = 12,
-		enSQLiteOpenError = 13
+		enSQLiteInjectedError = 13
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
