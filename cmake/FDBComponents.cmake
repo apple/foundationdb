@@ -124,7 +124,7 @@ endif()
 find_package(toml11 QUIET)
 if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
-  add_dependencies(toml11_target INTERFACE toml11::toml11)
+  target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
   include(ExternalProject)
 
@@ -139,6 +139,12 @@ else()
   add_dependencies(toml11_target toml11Project)
   target_include_directories(toml11_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/toml11/include)
 endif()
+
+################################################################################
+# mimalloc
+################################################################################
+
+include(CompileMimalloc)
 
 ################################################################################
 
