@@ -37,9 +37,8 @@ public:
 // An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds seconds
 class SpeedLimit : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
-	SpeedLimit(int windowLimit, int windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
-		m_budget_max = m_limit * m_seconds;
-		m_last_update = timer();
+	SpeedLimit(int windowLimit, double windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
+		m_last_update = now();
 	}
 	virtual ~SpeedLimit() {}
 
@@ -48,7 +47,7 @@ public:
 
 	virtual Future<Void> getAllowance(unsigned int n) {
 		// Replenish budget based on time since last update
-		double ts = timer();
+		double ts = now();
 		// returnUnused happens to do exactly what we want here
 		returnUnused((ts - m_last_update) / m_seconds * m_limit);
 		m_last_update = ts;
@@ -63,7 +62,7 @@ public:
 	virtual void returnUnused(int n) {
 		if(n < 0)
 			return;
-		m_budget = std::min<int64_t>(m_budget + n, m_budget_max);
+		m_budget = std::min<int64_t>(m_budget + n, m_limit);
 	}
 
 private:
@@ -71,7 +70,6 @@ private:
 	double m_seconds;
 	double m_last_update;
 	int64_t m_budget;
-	int64_t m_budget_max;
 };
 
 // An IRateControl implemenation that enforces no limit
