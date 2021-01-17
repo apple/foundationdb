@@ -231,6 +231,12 @@ public:
 		return filename;
 	}
 
+	std::vector<AFCPage*> const& getFlushable() { return flushable; }
+
+	void setRateControl(Reference<IRateControl> const& rc) override { rateControl = rc; }
+
+	Reference<IRateControl> const& getRateControl() { return rateControl; }
+
 	virtual void addref() { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
 		//TraceEvent("AsyncFileCachedAddRef").detail("Filename", filename).detail("Refcount", debugGetReferenceCount()).backtrace();
@@ -263,6 +269,7 @@ private:
 	Reference<EvictablePageCache> pageCache;
 	Future<Void> currentTruncate;
 	int64_t currentTruncateSize;
+	Reference<IRateControl> rateControl;
 
 	// Map of pointers which hold page buffers for pages which have been overwritten
 	// but at the time of write there were still readZeroCopy holders.
@@ -288,8 +295,10 @@ private:
 	Int64MetricHandle countCachePageReadsMerged;
 	Int64MetricHandle countCacheReadBytes;
 
-	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache )
-		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
+	AsyncFileCached(Reference<IAsyncFile> uncached, const std::string& filename, int64_t length,
+	                Reference<EvictablePageCache> pageCache)
+	  : uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache),
+	    currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
@@ -507,6 +516,10 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			wait( self->notReading && self->notFlushing );
 
 			if (dirty) {
+				// Wait for rate control if it is set
+				if (self->owner->getRateControl())
+					wait(self->owner->getRateControl()->getAllowance(1));
+
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
 					ASSERT(self->pageOffset < self->owner->length);
 					memset( static_cast<uint8_t *>(self->data) + self->owner->length - self->pageOffset, 0, self->pageCache->pageSize - (self->owner->length - self->pageOffset) );

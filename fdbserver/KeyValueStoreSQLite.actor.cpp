@@ -1373,6 +1373,14 @@ void SQLiteDB::open(bool writable) {
 	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
 	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
 
+	// Set Rate control if FLOW_KNOBS are positive
+	if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT > 0 && FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS > 0) {
+		Reference<SpeedLimit> rc(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
+		                                        FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS));
+		dbFile.get()->setRateControl(rc);
+		walFile.get()->setRateControl(rc);
+	}
+
 	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("Filename", filename).detail("Writable", writable);
 
 	// Now that the file itself is open and locked, let sqlite open the database
@@ -1977,7 +1985,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	//The DB file should not already be open
 	ASSERT(!vfsAsyncIsOpen(filename));
 
-	readCursors.resize(64); //< number of read threads
+	readCursors.resize(SERVER_KNOBS->SQLITE_READER_THREADS); //< number of read threads
 
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
