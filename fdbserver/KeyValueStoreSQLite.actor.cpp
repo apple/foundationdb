@@ -261,30 +261,13 @@ struct SQLiteDB : NonCopyable {
 		}
 	}
 
-	// Consume and return the first of any injected errors detected by the VFSAsyncFile class.
-	bool consumeInjectedErrors(bool isOpen) {
-		// Get pointers to the VFSAsyncFile instances that SQLite is using to access its DB and WAL files
-		// in order to check if either of them have encountered an injected fault.
-		//
-		// These could be made into members, but this code is only run when an error occurs and only in simulation.
-		VFSAsyncFile *vfsDB = (VFSAsyncFile *)sqlite3_get_vfs_db(db);
-		VFSAsyncFile *vfsWAL = (VFSAsyncFile *)sqlite3_get_vfs_wal(db);
-
-		// Return the first error found, leave the others unconsumed.
-		// Consume the open error last to prevent an injected open error from hiding a non-injected IO op error.
-		return (vfsDB != nullptr && vfsDB->consumeInjectedError())
-			|| (vfsWAL != nullptr && vfsWAL->consumeInjectedError())
-			|| (isOpen && VFSAsyncFile::consumeInjectedOpenError());
-	}
-
 	void checkError( const char* context, int rc ) {
 		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
 			Error err = io_error();
-
-	 		if (g_network->isSimulated() && consumeInjectedErrors(strcmp(context, "open") == 0)) {
+			if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 				err = err.asInjectedFault();
 			}
 

@@ -22,25 +22,6 @@
 #include <string>
 #include <map>
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbserver/CoroFlow.h"
-
-//#include <assert.h>
-//#include <string.h>
-
-//#ifdef WIN32
-//#include <Windows.h>
-//#endif
-
-#ifdef __unixish__
-//#include <sys/types.h>
-//#include <sys/stat.h>
-//#include <sys/file.h>
-//#include <sys/param.h>
-//#include <sys/time.h>
-//#include <unistd.h>
-//#include <errno.h>
-//#include <fcntl.h>
-#endif
 
 /*
 ** When using this VFS, the sqlite3_file* handles that SQLite uses are
@@ -52,39 +33,44 @@ struct VFSAsyncFile {
 	int flags;
 	std::string filename;
 	Reference<IAsyncFile> file;
-	bool injectedError;
 
-    // Method to set the injectedError flag to indicate that an injected error has been caught.
-    // Mostly useful for debugging injected fault handling.
-    void setInjectedError() {
-        //TraceEvent(SevInfo, "VFSSetInjectedFault").backtrace().detail("This", (void *)this);
-        injectedError = true;
-    }
-
-    bool consumeInjectedError() {
-        bool e = injectedError;
-        injectedError = false;
-        return e;
-    }
-
-    // Static methods for capturing an injected open error and consuming it to convert SQLite
-    // errors into Error instances with isInjectedFault() set.
+    // The functions setInjectedError() and checkInjectedError() use an INetwork global to store the last
+    // return code from VFSAsyncFile method resulting from catching an injected Error exception.  This allows
+    // callers of the SQLite API to determine if an error code returned appears to be due to an injected
+    // error in simulation.
     //
-    // Uses a g_network global so that injected errors on one simulated process do not mask
-    // non-injected errors on another.
-    static void setOpenError() {
-       g_network->setGlobal(INetwork::enSQLiteOpenError, (flowGlobalType)true);
+    // This scheme is not perfect, as it is possible for non-injected errors to occur after injected errors
+    // and be incorrectly recognized as injected.  This problem already existed, however, as the previous scheme
+    // assumed that any SQLite error that occurred after any injected error in the simulated process was
+    // itself injected.
+    //
+    // Unfortunately, there is no easy or reliable way to plumb the injectedness of an error though the return
+    // path of VFSAsyncFile -> SQLite -> SQLite API calls made by KeyValueStoreSQLite.
+    //
+    // An attempt was made to store injected errors in VFSAsyncFile instances and expose a SQLiteDB's file
+    // instances via the SQLite API.  This failed, however, because sometimes files are opened, encounter an
+    // error, and are closed within the lifetime of one SQLite API call so the caller never has an opportunity
+    // to access the VFSAsyncFile object or its injected error state.
+    //
+    // An attempt was also made to match SQLite API return codes to VFSAsyncFile injected error return codes on 
+    // a 1:1 basis, only flagging a code as rejected if it matches the last injected error code and only once.
+    // This would have been more accurate (though coincidences could occur).  This scheme also failed, however,
+    // because sometimes errors from SQLite APIs are temporarily ignored, relying on a subsequent API call to error,
+    // however this error could be different and would not have been produced directly by VFSAsyncFile.
+    //
+    static void setInjectedError(int64_t rc) {
+        g_network->setGlobal(INetwork::enSQLiteInjectedError, (flowGlobalType)rc);
+        TraceEvent("VFSSetInjectedError").detail("ErrorCode", rc).detail("NetworkPtr", (void *)g_network).backtrace();
     }
 
-    static void clearOpenError() {
-       g_network->setGlobal(INetwork::enSQLiteOpenError, (flowGlobalType)false);
-    }
-
-    static bool consumeInjectedOpenError() {
-        bool e = (bool)g_network->global(INetwork::enSQLiteOpenError);
-        if(e) {
-            clearOpenError();
-        }
+    static bool checkInjectedError() {
+        // Error code is only checked for non-zero because the SQLite API error code after an injected error
+        // may not match the error code returned by VFSAsyncFile when the inject error occurred.
+        bool e = g_network->global(INetwork::enSQLiteInjectedError) != (flowGlobalType)0;
+        TraceEvent("VFSCheckInjectedError")
+            .detail("Found", e)
+            .detail("ErrorCode", (int64_t)g_network->global(INetwork::enSQLiteInjectedError))
+            .backtrace();
         return e;
     }
 
