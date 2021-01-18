@@ -30,42 +30,33 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CoordinatorsForceWorkload : TestWorkload {
-	
-	int numFailed;
+
+	int numExtra;
 	CoordinatorsForceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numFailed = getOption(options, LiteralStringRef("numFailed"), 1);
+		numExtra = getOption(options, LiteralStringRef("numExtra"), 1);
 	}
 
 	std::string description() const override { return "CoordinatorsForce"; }
 
 	ACTOR static Future<Void> _start(Database cx, CoordinatorsForceWorkload* self) {
 		state std::vector<NetworkAddress> newCoordinators;
-		state int aliveAdded = 0;
-		state int failedAdded = 0;
+		state int protectedAdded = 0;
+		state int normalAdded = 0;
+
+		for (auto pAddress : g_simulator.protectedAddresses) {
+			if (protectedAdded == g_simulator.desiredCoordinators) break;
+			newCoordinators.push_back(pAddress);
+			++protectedAdded;
+		}
+
 		for (auto processInfo : g_simulator.getAllProcesses()) {
-			TraceEvent("Checkpoint1")
-				.detail("Process", processInfo->address)
-				.detail("Available", processInfo->isAvailable());
-			if (aliveAdded == g_simulator.desiredCoordinators &&
-				failedAdded == self->numFailed) {
-				break;
-			}
-			if (failedAdded != self->numFailed) {
-				newCoordinators.push_back(processInfo->address);
-				g_simulator.killProcess(processInfo, ISimulator::RebootProcess);
-				TraceEvent("Checkpoint1")
-					.detail("Process", processInfo->address)
-					.detail("Available", processInfo->isAvailable());
-				++failedAdded;
+			if (normalAdded == self->numExtra) break;
+			if (g_simulator.protectedAddresses.count(processInfo->address)) {
+				// Don't add a protected address in this phase
 				continue;
 			}
-			if (processInfo->isAvailable()) {
-				if (aliveAdded != g_simulator.desiredCoordinators) {
-					newCoordinators.push_back(processInfo->address);
-					++aliveAdded;
-				}
-			} 
-
+			newCoordinators.push_back(processInfo->address);
+			++normalAdded;
 		}
 		TraceEvent("CoordinatorsForceSet").detail("NewCoordinators", describe(newCoordinators));
 		state Reference<IQuorumChange> change = specifiedQuorumChange(newCoordinators);
