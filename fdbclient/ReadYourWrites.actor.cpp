@@ -1238,6 +1238,7 @@ Future< Optional<Value> > ReadYourWritesTransaction::get( const Key& key, bool s
 	} else {
 		if (key == LiteralStringRef("\xff\xff/status/json")) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionFile()) {
+				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
 				return Optional<Value>();

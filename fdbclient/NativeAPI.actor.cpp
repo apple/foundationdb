@@ -868,13 +868,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
-    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), transactionTracingEnabled(true),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
+    transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
+    transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
+    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    internal(internal), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -974,6 +974,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                                           if (ryw->getDatabase().getPtr() &&
 			                                               ryw->getDatabase()->getConnectionFile()) {
+				                                           ++ryw->getDatabase()->transactionStatusRequests;
 				                                           return getJSON(ryw->getDatabase());
 			                                           } else {
 				                                           return Optional<Value>();
@@ -1042,13 +1043,14 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
-    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
+    transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
+    transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
+    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
+    readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), transactionTracingEnabled(true) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
+    transactionTracingEnabled(true) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -2535,7 +2537,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
-				++cx->transactionGetRangeRequests;
 				state GetKeyValuesReply rep;
 				try {
 					if (CLIENT_BUGGIFY) {
