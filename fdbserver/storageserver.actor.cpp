@@ -321,7 +321,7 @@ public:
 		static const StringRef emptyString;
 		static const KeyRangeRef emptyKeyRange;
 	public:
-		void recordStart(const UID id, const KeyRange keyRange) {
+		void recordStart(const UID id, const KeyRange& keyRange) {
 			startTimeMap[id] =  now();
 			keyRangeMap[id] = keyRange;
 		}
