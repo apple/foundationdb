@@ -84,6 +84,9 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	// Management API, Attempt to kill or suspend a process, return 1 for success, 0 for failure
+	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
 };
 
 class IClientApi {

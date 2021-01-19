@@ -4779,3 +4779,53 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 
 	return (ddCheck && coordinatorCheck);
 }
+
+ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
+	wait(connectLock->take());
+	state FlowLock::Releaser releaser(*connectLock);
+	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
+	choose {
+		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
+			StringRef ip_port =
+				kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
+			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls")) ? full_ip_port2.removeSuffix(LiteralStringRef(":tls")) : full_ip_port2;
+				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+			}
+		}
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {} // NOTE : change timeout time here if necessary
+	}
+	return Void();
+}
+
+ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+	// ignore negative value
+	if (duration < 0) duration = 0;
+	// fetch the addresses of all workers
+	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
+	if (!cx->getConnectionFile())
+		return 0;
+	Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	ASSERT(!kvs.more);
+	// Note: reuse this knob from fdbcli, change it if necessary
+	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	std::vector<Future<Void>> addInterfs;
+	for( const auto& it : kvs ) {
+		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	}
+	wait(waitForAll(addInterfs));
+	if (!address_interface.count(addr)) return 0;
+
+	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
+	    .reboot.send(RebootRequest(false, check, duration));
+	return 1;
+}
+
+Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
+	return rebootWorkerActor(this, addr, check, duration);
+}

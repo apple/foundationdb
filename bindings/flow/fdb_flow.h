@@ -124,6 +124,7 @@ namespace FDB {
 		virtual ~Database(){};
 		virtual Reference<Transaction> createTransaction() = 0;
 		virtual void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) = 0;
+		virtual Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) = 0;
 	};
 
 	class API {
