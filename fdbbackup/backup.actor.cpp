@@ -245,6 +245,9 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
@@ -267,6 +270,9 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -303,6 +309,9 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_JSON,            "--json",           SO_NONE},
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -329,6 +338,9 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -352,6 +364,9 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DELETE_DATA,     "--delete_data",    SO_NONE },
@@ -381,6 +396,9 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -408,6 +426,9 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -431,6 +452,9 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -456,6 +480,9 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -488,6 +515,9 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -514,6 +544,9 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -542,6 +575,9 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -568,6 +604,9 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
@@ -708,6 +747,9 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -737,6 +779,9 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -765,6 +810,9 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -794,6 +842,9 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -819,6 +870,9 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
+	{ OPT_HELP,            "-?",               SO_NONE },
+	{ OPT_HELP,            "-h",               SO_NONE },
+	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 #ifndef TLS_DISABLED
@@ -1002,6 +1056,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
 		   "                 Do not stop backup when restorable.\n");
+	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
 #ifdef _WIN32
@@ -1167,6 +1222,7 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  --trace_format FORMAT\n"
 		   "                 Select the format of the trace files. xml (the default) and json are supported.\n"
 		   "                 Has no effect unless --log is specified.\n");
+	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
 		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 
@@ -3000,7 +3056,7 @@ int main(int argc, char* argv[]) {
 			}
 			// Get the restore operation type
 			restoreType = getRestoreType(argv[1]);
-			if(restoreType == RESTORE_UNKNOWN) {
+			if(restoreType == RestoreType::UNKNOWN) {
 				args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
 			} else {
 				args = new CSimpleOpt(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
@@ -3013,7 +3069,7 @@ int main(int argc, char* argv[]) {
 			}
 			// Get the restore operation type
 			restoreType = getRestoreType(argv[1]);
-			if (restoreType == RESTORE_UNKNOWN) {
+			if (restoreType == RestoreType::UNKNOWN) {
 				args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
 			} else {
 				args = new CSimpleOpt(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
