@@ -2360,6 +2360,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
 						// TODO: Add SevWarnAlways to say it was disabled.
+						TraceEvent(SevWarnAlways, "FKDisableLB");
 					}
 
 					debug_getRangeRetries++;
