@@ -451,7 +451,8 @@ public:
 		enASIOTimedOut = 9,
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
-		enClientFailureMonitor = 12
+		enClientFailureMonitor = 12,
+		enSQLiteInjectedError = 13
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
