@@ -22,7 +22,6 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbrpc/Locality.h"
-#include "fdbrpc/RoleLineage.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -33,6 +32,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MetricLogger.h"
 #include "fdbserver/BackupInterface.h"
+#include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
@@ -1024,6 +1024,8 @@ ACTOR Future<Void> workerServer(
 			DiskStore s = stores[f];
 			// FIXME: Error handling
 			if( s.storedComponent == DiskStore::Storage ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, false, validateDataFiles);
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add( kvClosed );
@@ -1058,6 +1060,8 @@ ACTOR Future<Void> workerServer(
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit, kv);
 				errorForwarders.add( forwardError( errors, Role::STORAGE_SERVER, recruited.id(), f ) );
 			} else if( s.storedComponent == DiskStore::TLogData ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
 				std::string logQueueBasename;
 				const std::string filename = basename(s.filename);
 				if (StringRef(filename).startsWith(fileLogDataPrefix)) {
@@ -1218,6 +1222,8 @@ ACTOR Future<Void> workerServer(
 				}
 			}
 			when( RecruitMasterRequest req = waitNext(interf.master.getFuture()) ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Master;
 				MasterInterface recruited;
 				recruited.locality = locality;
 				recruited.initEndpoints();
@@ -1238,6 +1244,8 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when ( InitializeDataDistributorRequest req = waitNext(interf.dataDistributor.getFuture()) ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::DataDistributor;
 				DataDistributorInterface recruited(locality);
 				recruited.initEndpoints();
 
@@ -1256,6 +1264,8 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when ( InitializeRatekeeperRequest req = waitNext(interf.ratekeeper.getFuture()) ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Ratekeeper;
 				RatekeeperInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
@@ -1280,6 +1290,8 @@ ACTOR Future<Void> workerServer(
 			}
 			when (InitializeBackupRequest req = waitNext(interf.backup.getFuture())) {
 				if (!backupWorkerCache.exists(req.reqId)) {
+					LocalLineage _;
+					currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Backup;
 					BackupInterface recruited(locality);
 					recruited.initEndpoints();
 
@@ -1309,6 +1321,8 @@ ACTOR Future<Void> workerServer(
 						.detail("MinRecruitable", TLogVersion::MIN_RECRUITABLE);
 					req.reply.sendError(internal_error());
 				}
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
@@ -1341,6 +1355,8 @@ ACTOR Future<Void> workerServer(
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
 				if( !storageCache.exists( req.reqId ) ) {
+					LocalLineage _;
+					currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 					StorageServerInterface recruited(req.interfaceId);
 					recruited.locality = locality;
 					recruited.initEndpoints();
@@ -1379,6 +1395,8 @@ ACTOR Future<Void> workerServer(
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
 			}
 			when(InitializeCommitProxyRequest req = waitNext(interf.commitProxy.getFuture())) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::CommitProxy;
 				CommitProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
@@ -1402,6 +1420,8 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when( InitializeGrvProxyRequest req = waitNext(interf.grvProxy.getFuture()) ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::GrvProxy;
 				GrvProxyInterface recruited;
 				recruited.processId = locality.processId();
 				recruited.provisional = false;
@@ -1421,6 +1441,8 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when( InitializeResolverRequest req = waitNext(interf.resolver.getFuture()) ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Resolver;
 				ResolverInterface recruited;
 				recruited.locality = locality;
 				recruited.initEndpoints();
@@ -1438,6 +1460,8 @@ ACTOR Future<Void> workerServer(
 				req.reply.send(recruited);
 			}
 			when( InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture()) ) {
+				LocalLineage _;
+				currentLineage->modify(&RoleLineage::role) = ProcessClass::ClusterRole::LogRouter;
 				TLogInterface recruited(locality);
 				recruited.initEndpoints();
 

@@ -1,5 +1,5 @@
 /*
- * RoleLineage.h
+ * RoleLineage.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,15 @@
  */
 
 #pragma once
+#include "flow/flow.h"
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ROLE_LINEAGE_ACTOR_G_H)
+#  define FDBSERVER_ROLE_LINEAGE_ACTOR_G_H
+#  include "fdbserver/RoleLineage.actor.g.h"
+#elif !defined(FDBSERVER_ROLE_LINEAGE_ACTOR_H)
+#  define FDBSERVER_ROLE_LINEAGE_ACTOR_H
+
 #include "fdbrpc/Locality.h"
+#include "flow/actorcompiler.h" // This must be the last include
 
 struct RoleLineage : LineageProperties<RoleLineage> {
     static StringRef name;
@@ -29,3 +37,14 @@ struct RoleLineage : LineageProperties<RoleLineage> {
         return this->*member != ProcessClass::NoRole;
     }
 };
+
+// creates a new root and sets the role lineage
+ACTOR template<class Fun>
+Future<decltype(std::declval<Fun>()())> runInRole(Fun fun, ProcessClass::ClusterRole role) {
+    currentLineage->makeRoot();
+    currentLineage->modify(&RoleLineage::role) = role;
+    decltype(std::declval<Fun>()()) res = wait(fun());
+    return res;
+}
+
+#endif

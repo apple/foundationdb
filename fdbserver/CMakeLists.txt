@@ -86,6 +86,8 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.cpp
   Resolver.actor.cpp
   ResolverInterface.h
+  RoleLineage.actor.h
+  RoleLineage.actor.cpp
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp

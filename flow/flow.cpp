@@ -28,8 +28,9 @@
 
 thread_local Reference<ActorLineage> currentLineage;
 
-ActorLineage::ActorLineage() : parent(currentLineage) {
-}
+LineagePropertiesBase::~LineagePropertiesBase() {}
+
+ActorLineage::ActorLineage() : parent(currentLineage) {}
 
 ActorLineage::~ActorLineage() {
 	for (auto ptr : properties) {

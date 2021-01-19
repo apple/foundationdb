@@ -412,6 +412,7 @@ struct SingleCallback {
 };
 
 struct LineagePropertiesBase {
+	virtual ~LineagePropertiesBase();
 };
 
 // helper class to make implementation of LineageProperties easier
@@ -433,6 +434,7 @@ struct LineageProperties : LineagePropertiesBase {
 };
 
 struct ActorLineage : ReferenceCounted<ActorLineage> {
+	friend class LocalLineage;
 private:
 	std::unordered_map<StringRef, LineagePropertiesBase*> properties;
 	Reference<ActorLineage> parent;
@@ -488,6 +490,20 @@ public:
 };
 
 extern thread_local Reference<ActorLineage> currentLineage;
+
+// This class can be used in order to modify all lineage properties
+// of actors created within a (non-actor) scope
+struct LocalLineage {
+	Reference<ActorLineage> lineage = Reference<ActorLineage>{new ActorLineage() };
+	Reference<ActorLineage> oldLineage;
+	LocalLineage() {
+		oldLineage = currentLineage;
+		currentLineage = lineage;
+	}
+	~LocalLineage() {
+		currentLineage = oldLineage;
+	}
+};
 
 struct restore_lineage {
 	Reference<ActorLineage> prev;

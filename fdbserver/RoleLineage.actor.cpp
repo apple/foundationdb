@@ -18,6 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/RoleLineage.h"
+#include "fdbserver/RoleLineage.actor.h"
 
 StringRef RoleLineage::name = "RoleLineage"_sr;

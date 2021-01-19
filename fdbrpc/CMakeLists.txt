@@ -22,8 +22,6 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
-  RoleLineage.h
-  RoleLineage.cpp
   Stats.actor.cpp
   Stats.h
   sim2.actor.cpp
