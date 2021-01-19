@@ -2360,7 +2360,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
 						// TODO: Add SevWarnAlways to say it was disabled.
-						TraceEvent(SevWarnAlways, "FKDisableLB");
+						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
 
 					debug_getRangeRetries++;
@@ -2379,6 +2379,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		//FIXME: remove when we no longer support upgrades from 5.X
 		data->cx->enableLocalityLoadBalance = true;
+		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
