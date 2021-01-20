@@ -491,6 +491,10 @@ void ServerKnobs::initialize(bool randomize, ClientKnobs* clientKnobs, bool isSi
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     200e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
+	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES_START,              775e6 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES_START = 1750e3;
+	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES_END,                755e6 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES_END = 1500e3;
+	init( LOW_PRIORITY_DURABILITY_LAG_START,                   275e6 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG_START = 15e6;
+	init( LOW_PRIORITY_DURABILITY_LAG_END,                     255e6 ); if( smallStorageTarget ) LOW_PRIORITY_DURABILITY_LAG_END = 10e6;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2400e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;

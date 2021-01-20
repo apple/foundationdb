@@ -77,6 +77,16 @@ inline bool canReplyWith(Error e) {
 	};
 }
 
+ACTOR Future<Void> increasingPriorityDelay(Future<Void> change) {
+	choose {
+		when(wait(delay(0, TaskPriority::Low))){}
+		when(wait(change)) {
+			wait(delay(0, TaskPriority::DefaultEndpoint));
+		}
+	}
+	return Void();
+}
+
 struct AddingShard : NonCopyable {
 	KeyRange keys;
 	Future<Void> fetchClient;			// holds FetchKeys() actor
@@ -454,6 +464,8 @@ public:
 		return val;
 	}
 
+	AsyncVar<bool> durabilityBehind;
+
 	struct TransactionTagCounter {
 		struct TagInfo {
 			TransactionTag tag;
@@ -615,7 +627,8 @@ public:
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
 			behind(false), versionBehind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
-			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0)
+			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
+			durabilityBehind(false)
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
@@ -696,6 +709,26 @@ public:
 													  2.0 * SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER)) /
 								 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER),
 						(currentRate() < 1e-6 ? 1e6 : 1.0 / currentRate()));
+	}
+
+	bool checkDurabilityBehind() {
+		if(durabilityBehind.get()) {
+			durabilityBehind.set(
+				version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_END || 
+				queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES_END);
+		} else {
+			durabilityBehind.set(
+				version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_START || 
+				queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES_START );
+		}
+		return durabilityBehind.get();
+	}
+
+	Future<Void> getQueryDelay() {
+		if(checkDurabilityBehind()) {
+			return increasingPriorityDelay(durabilityBehind.onChange());
+		}
+		return delay(0, TaskPriority::DefaultEndpoint);
 	}
 
 	template<class Reply>
@@ -923,7 +956,7 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
-		wait( delay(0, data->version.get() - data->durableVersion.get() > SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH ? TaskPriority::Low : TaskPriority::DefaultEndpoint) );
+		wait( data->getQueryDelay() );
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("GetValueDebug", req.debugID.get().first(), "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
@@ -1489,7 +1522,7 @@ ACTOR Future<Void> getKeyValuesQ( StorageServer* data, GetKeyValuesRequest req )
 	// 	// Placeholder for up-prioritizing fetches for important requests
 	// 	taskType = TaskPriority::DefaultDelay;
 	} else {
-		wait( delay(0, data->version.get() - data->durableVersion.get() > SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH ? TaskPriority::Low : TaskPriority::DefaultEndpoint) );
+		wait( data->getQueryDelay() );
 	}
 	
 	try {
@@ -1622,7 +1655,7 @@ ACTOR Future<Void> getKeyQ( StorageServer* data, GetKeyRequest req ) {
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	wait( delay(0, data->version.get() - data->durableVersion.get() > SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH ? TaskPriority::Low : TaskPriority::DefaultEndpoint) );
+	wait( data->getQueryDelay() );
 
 	try {
 		state Version version = wait( waitForVersion( data, req.version ) );
