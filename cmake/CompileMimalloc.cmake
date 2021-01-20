@@ -3,7 +3,7 @@ find_package(mimalloc 1.6.7 QUIET)
 if(mimalloc_FOUND)
   add_library(Mimalloc INTERFACE)
   target_link_libraries(Mimalloc INTERFACE mimalloc-static)
-else()
+elseif(NOT WIN32)
   include(ExternalProject)
   ExternalProject_add(mimallocProject
     URL "https://github.com/microsoft/mimalloc/archive/v1.6.7.tar.gz"
@@ -16,4 +16,8 @@ else()
   add_library(Mimalloc STATIC IMPORTED)
   add_dependencies(Mimalloc mimallocProject)
   set_target_properties(Mimalloc PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/mimalloc/lib/mimalloc-1.6/libmimalloc.a")
+else()
+  # On Windows we currently don't use mimalloc as it doesn't compile
+  # unless we find it installed
+  add_library(Mimalloc INTERFACE)
 endif()
