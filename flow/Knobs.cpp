@@ -122,6 +122,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( SLOW_LOOP_SAMPLING_RATE,                             0.1 );
 	init( TSC_YIELD_TIME,                                  1000000 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
+	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );

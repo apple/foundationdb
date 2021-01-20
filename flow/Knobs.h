@@ -143,6 +143,7 @@ public:
 	int64_t TSC_YIELD_TIME;
 	int64_t REACTOR_FLAGS;
 	int CERT_FILE_MAX_SIZE;
+	int READY_QUEUE_RESERVED_SIZE;
 
 	//Network
 	int64_t PACKET_LIMIT;
