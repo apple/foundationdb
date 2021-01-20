@@ -191,11 +191,15 @@ template <class Object>
 class FastAllocated {
 public:
 	[[nodiscard]] static void* operator new(size_t s) {
-		return ::malloc(s);
+		if (s != sizeof(Object)) abort();
+		INSTRUMENT_ALLOCATE(typeid(Object).name());
+		void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
+		return p;
 	}
 
 	static void operator delete(void* s) {
-		return ::free(s);
+		INSTRUMENT_RELEASE(typeid(Object).name());
+		FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
 	}
 	// Redefine placement new so you can still use it
 	static void* operator new( size_t, void* p ) { return p; }
@@ -203,11 +207,35 @@ public:
 };
 
 [[nodiscard]] inline void* allocateFast(int size) {
-	return ::malloc(size);
+	if (size <= 16) return FastAllocator<16>::allocate();
+	if (size <= 32) return FastAllocator<32>::allocate();
+	if (size <= 64) return FastAllocator<64>::allocate();
+	if (size <= 96) return FastAllocator<96>::allocate();
+	if (size <= 128) return FastAllocator<128>::allocate();
+	if (size <= 256) return FastAllocator<256>::allocate();
+	if (size <= 512) return FastAllocator<512>::allocate();
+	if (size <= 1024) return FastAllocator<1024>::allocate();
+	if (size <= 2048) return FastAllocator<2048>::allocate();
+	if (size <= 4096) return FastAllocator<4096>::allocate();
+	if (size <= 8192) return FastAllocator<8192>::allocate();
+	if (size <= 16384) return FastAllocator<16384>::allocate();
+	return new uint8_t[size];
 }
 
 inline void freeFast(int size, void* ptr) {
-	::free(ptr);
+	if (size <= 16) return FastAllocator<16>::release(ptr);
+	if (size <= 32) return FastAllocator<32>::release(ptr);
+	if (size <= 64) return FastAllocator<64>::release(ptr);
+	if (size <= 96) return FastAllocator<96>::release(ptr);
+	if (size <= 128) return FastAllocator<128>::release(ptr);
+	if (size <= 256) return FastAllocator<256>::release(ptr);
+	if (size <= 512) return FastAllocator<512>::release(ptr);
+	if (size <= 1024) return FastAllocator<1024>::release(ptr);
+	if (size <= 2048) return FastAllocator<2048>::release(ptr);
+	if (size <= 4096) return FastAllocator<4096>::release(ptr);
+	if (size <= 8192) return FastAllocator<8192>::release(ptr);
+	if (size <= 16384) return FastAllocator<16384>::release(ptr);
+	delete[](uint8_t*)ptr;
 }
 
 #endif
