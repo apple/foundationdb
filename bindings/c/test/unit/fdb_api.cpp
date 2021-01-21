@@ -98,8 +98,8 @@ Int64Future Database::reboot_worker(FDBDatabase* db, const uint8_t* address, int
 	return Int64Future(fdb_database_reboot_worker(db, address, address_length, check, duration));
 }
 
-EmptyFuture Database::force_recovery_with_data_loss(FDBDatabase *db, const uint8_t *dcId, int dcId_length) {
-  return EmptyFuture(fdb_database_force_recovery_with_data_loss(db, dcId, dcId_length));
+EmptyFuture Database::force_recovery_with_data_loss(FDBDatabase *db, const uint8_t *dcid, int dcid_length) {
+  return EmptyFuture(fdb_database_force_recovery_with_data_loss(db, dcid, dcid_length));
 }
 
 // Transaction

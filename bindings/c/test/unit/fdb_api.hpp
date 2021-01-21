@@ -153,7 +153,7 @@ class Database final {
 public:
 	static Int64Future reboot_worker(FDBDatabase* db, const uint8_t* address, int address_length, fdb_bool_t check,
 	                                int duration);
-  static EmptyFuture force_recovery_with_data_loss(FDBDatabase* db, const uint8_t* dcId, int dcId_length);
+  static EmptyFuture force_recovery_with_data_loss(FDBDatabase* db, const uint8_t* dcid, int dcid_length);
 };
 
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.

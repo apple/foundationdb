@@ -89,7 +89,7 @@ public:
 	// Management API, attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
-	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcId) = 0;
+	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 };
 
 class IClientApi {

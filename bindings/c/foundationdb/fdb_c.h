@@ -183,7 +183,7 @@ extern "C" {
                                 int address_length, fdb_bool_t check, int duration);
     
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
-    fdb_database_force_recovery_with_data_loss( FDBDatabase* db, uint8_t const* dcid, int dcit_length);
+    fdb_database_force_recovery_with_data_loss( FDBDatabase* db, uint8_t const* dcid, int dcid_length);
 
     DLLEXPORT void fdb_transaction_destroy( FDBTransaction* tr);
 

@@ -77,11 +77,11 @@ ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address,
 	} );
 }
 
-ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef &dcId) {
+ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
 	DatabaseContext *db = this->db;
-	Key dcIdKey = dcId;
-	return onMainThread( [db, dcIdKey]() -> Future<Void> {
-		return db->forceRecoveryWithDataLoss(dcIdKey);
+	Key dcidKey = dcid;
+	return onMainThread( [db, dcidKey]() -> Future<Void> {
+		return db->forceRecoveryWithDataLoss(dcidKey);
 	} );
 }
 

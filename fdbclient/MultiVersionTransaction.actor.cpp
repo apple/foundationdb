@@ -299,12 +299,12 @@ ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool ch
 	});
 }
 
-ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcId) {
+ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
 	if(!api->databaseForceRecoveryWithDataLoss) {
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture *f = api->databaseForceRecoveryWithDataLoss(db, dcId.begin(), dcId.size());
+	FdbCApi::FDBFuture *f = api->databaseForceRecoveryWithDataLoss(db, dcid.begin(), dcid.size());
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
 		return Void();
 	});
@@ -815,9 +815,9 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 	return false;
 }
 
-ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef &dcId) {
+ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
 	if (dbState->db) {
-		return dbState->db->forceRecoveryWithDataLoss(dcId);
+		return dbState->db->forceRecoveryWithDataLoss(dcid);
 	}
 	return Void();
 }
