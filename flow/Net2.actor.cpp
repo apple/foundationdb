@@ -111,6 +111,16 @@ struct OrderedTask {
 	bool operator < (OrderedTask const& rhs) const { return priority < rhs.priority; }
 };
 
+template <class T>
+class ReadyQueue : public std::priority_queue<T, std::vector<T>>
+{
+public:
+	typedef typename std::priority_queue<T, std::vector<T>>::size_type size_type;
+	ReadyQueue(size_type capacity = 0) { reserve(capacity); };
+	void reserve(size_type capacity) { this->c.reserve(capacity); } 
+};
+
+
 thread_local INetwork* thread_network = 0;
 
 class Net2 sealed : public INetwork, public INetworkConnections {
@@ -190,7 +200,7 @@ public:
 
 	TaskPriority lastMinTaskID;
 
-	std::priority_queue<OrderedTask, std::vector<OrderedTask>> ready;
+	ReadyQueue<OrderedTask> ready;
 	ThreadSafeQueue<OrderedTask> threadReady;
 
 	struct DelayedTask : OrderedTask {
@@ -843,6 +853,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	  reactor(this),
 	  stopped(false),
 	  tasksIssued(0),
+	  ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE),
 	  // Until run() is called, yield() will always yield
 	  tsc_begin(0), tsc_end(0), taskBegin(0), currentTaskID(TaskPriority::DefaultYield),
 	  lastMinTaskID(TaskPriority::Zero),
