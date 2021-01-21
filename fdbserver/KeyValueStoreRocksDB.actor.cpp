@@ -254,7 +254,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		rocksdb::PinnableSlice value;
 		rocksdb::ReadOptions options;
-		options.snapshot = a.snapshot ? nullptr : a.snapshot->snapshot();
+		options.snapshot = a.snapshot ? a.snapshot->snapshot() : nullptr;
 		auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 		if (a.debugID.present()) {
 			traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
@@ -289,7 +289,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			                          "Reader.Before");
 		}
 		rocksdb::ReadOptions options;
-		options.snapshot = a.snapshot ? nullptr : a.snapshot->snapshot();
+		options.snapshot = a.snapshot ? a.snapshot->snapshot() : nullptr;
 		auto s = db->Get(options, db->DefaultColumnFamily(), toSlice(a.key), &value);
 		if (a.debugID.present()) {
 			traceBatch.get().addEvent("GetValuePrefixDebug", a.debugID.get().first(),
@@ -331,9 +331,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return;
 		}
 		rocksdb::Status s;
+		rocksdb::ReadOptions options;
+		options.snapshot = a.snapshot ? a.snapshot->snapshot() : nullptr;
 		if (a.rowLimit > 0) {
-			rocksdb::ReadOptions options;
-			options.snapshot = a.snapshot ? nullptr : a.snapshot->snapshot();
 			auto endSlice = toSlice(a.keys.end);
 			options.iterate_upper_bound = &endSlice;
 			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
@@ -350,7 +350,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			s = cursor->status();
 		} else {
-			rocksdb::ReadOptions options;
 			auto beginSlice = toSlice(a.keys.begin);
 			options.iterate_lower_bound = &beginSlice;
 			auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options));
@@ -422,6 +421,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		wait(self->readThreads->stop());
+		self->snapshots.clear();
 		auto a = new CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->post(self->writeThread, a);
@@ -550,8 +550,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto res = a->result.getFuture();
 		post(readThreads, a);
 		return res;
-
-		return readValue(key, debugID);
 	}
 
 	Future<Optional<Value>> readValuePrefixAt(KeyRef key, int maxLength, Version version,
