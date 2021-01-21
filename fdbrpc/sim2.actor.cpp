@@ -1900,6 +1900,10 @@ public:
 		return _localAddress;
 	}
 
+	boost::asio::ip::udp::socket::native_handle_type native_handle() override {
+		return 0;
+	}
+
 };
 
 Future<Reference<IUDPSocket>> Sim2::createUDPSocket(NetworkAddress toAddr) {
