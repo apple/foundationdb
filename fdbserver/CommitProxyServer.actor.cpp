@@ -391,6 +391,7 @@ struct CommitBatchContext {
 	Optional<UID> debugID;
 
 	bool forceRecovery = false;
+	bool rejected = false; // If rejected due to long queue length
 
 	int64_t localBatchNumber;
 	LogPushData toCommit;
@@ -587,6 +588,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		++pProxyCommitData->stats.commitBatchOut;
 		pProxyCommitData->stats.txnCommitOut += trs.size();
 		pProxyCommitData->stats.txnConflicts += trs.size();
+		self->rejected = true;
 		return Void();
 	}
 
@@ -1329,6 +1331,7 @@ ACTOR Future<Void> commitBatch(
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
+	if (context.rejected) return Void();
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	wait(CommitBatch::getResolution(&context));
