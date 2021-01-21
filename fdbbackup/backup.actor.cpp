@@ -3005,7 +3005,7 @@ int main(int argc, char* argv[]) {
 					break;
 				case BackupType::UNDEFINED:
 				default:
-					args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 					break;
 				}
 			}
@@ -3043,7 +3043,7 @@ int main(int argc, char* argv[]) {
 					break;
 				case DBType::UNDEFINED:
 				default:
-					args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 					break;
 				}
 			}
