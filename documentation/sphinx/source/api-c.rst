@@ -444,6 +444,21 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``duration``
         If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
 
+.. function:: FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* database, uint8_t const* dcId, int dcId_length)
+
+   Force the database to recover into the given datacenter.
+
+   A forced recovery will cause the database to lose the most recently committed mutations.
+   
+   The amount of mutations that will be lost depends on how far behind the remote datacenter is.
+   
+   The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
+   
+   The function will set usable_regions to 1.
+   
+   If the database has already recovered, the function does nothing.
+
+   |future-returnvoid|
 
 Transaction
 ===========
