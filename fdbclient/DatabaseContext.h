@@ -205,6 +205,9 @@ public:
 	Future<Void> switchConnectionFile(Reference<ClusterConnectionFile> standby);
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
+ 
+	// Management API, Attempt to kill or suspend a process, return 1 for success, 0 for failure
+	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -303,6 +306,7 @@ public:
 	Counter transactionsCommitCompleted;
 	Counter transactionKeyServerLocationRequests;
 	Counter transactionKeyServerLocationRequestsCompleted;
+	Counter transactionStatusRequests;
 	Counter transactionsTooOld;
 	Counter transactionsFutureVersions;
 	Counter transactionsNotCommitted;

@@ -194,6 +194,9 @@ UID decodeProcessClassKeyOld( KeyRef const& key );
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
 
+// Change the value of this key to anything and that will trigger detailed data distribution team info log.
+extern const KeyRef triggerDDTeamInfoPrintKey;
+
 //	The differences between excluded and failed can be found in "command-line-interface.rst"
 //	and in the help message of the fdbcli command "exclude".
 

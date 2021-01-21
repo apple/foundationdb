@@ -610,6 +610,9 @@ void initHelp() {
 	    CommandHelp("unlock <UID>", "unlock the database with the provided lockUID",
 	                "Unlocks the database with the provided lockUID. This is a potentially dangerous operation, so the "
 	                "user will be asked to enter a passphrase to confirm their intent.");
+	helpMap["triggerddteaminfolog"] =
+	    CommandHelp("triggerddteaminfolog", "trigger the data distributor teams logging",
+	                "Trigger the data distributor to log detailed information about its teams.");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -1766,6 +1769,23 @@ int printStatusFromJSON( std::string const& jsonFileName ) {
 	} catch (...) {
 		printf("Unknown exception printing status.\n");
 		return 3;
+	}
+}
+
+ACTOR Future<Void> triggerDDTeamInfoLog(Database db) {
+	state ReadYourWritesTransaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			std::string v = deterministicRandom()->randomUniqueID().toString();
+			tr.set(triggerDDTeamInfoPrintKey, v);
+			wait(tr.commit());
+			printf("Triggered team info logging in data distribution.\n");
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
 	}
 }
 
@@ -3236,6 +3256,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					if (!opt.exec.present()) printf("\n");
 					printStatus(s, level);
 					if (!opt.exec.present()) printf("\n");
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
+					wait(triggerDDTeamInfoLog(db));
 					continue;
 				}
 
