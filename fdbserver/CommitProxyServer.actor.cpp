@@ -570,23 +570,23 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
 		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
 		TEST(true); // Reject transactions in the batch
-		TraceEvent(SevWarnAlways, "ProxyReject", self->dbgid)
+		TraceEvent(SevWarnAlways, "ProxyReject", pProxyCommitData->dbgid)
 		    .suppressFor(0.1)
 		    .detail("QDelay", queuingDelay)
 		    .detail("Transactions", trs.size())
 		    .detail("BatchNumber", localBatchNumber);
-		ASSERT(self->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
-		self->latestLocalCommitBatchResolving.set(localBatchNumber);
+		ASSERT(pProxyCommitData->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
+		pProxyCommitData->latestLocalCommitBatchResolving.set(localBatchNumber);
 
-		wait(self->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
-		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
-		self->latestLocalCommitBatchLogging.set(localBatchNumber);
+		wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
+		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
+		pProxyCommitData->latestLocalCommitBatchLogging.set(localBatchNumber);
 		for (const auto& tr : trs) {
 			tr.reply.sendError(transaction_too_old());
 		}
-		++self->stats.commitBatchOut;
-		self->stats.txnCommitOut += trs.size();
-		self->stats.txnConflicts += trs.size();
+		++pProxyCommitData->stats.commitBatchOut;
+		pProxyCommitData->stats.txnCommitOut += trs.size();
+		pProxyCommitData->stats.txnConflicts += trs.size();
 		return Void();
 	}
 
