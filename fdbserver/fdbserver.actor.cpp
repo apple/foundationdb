@@ -20,6 +20,7 @@
 
 // There's something in one of the files below that defines a macros
 // a macro that makes boost interprocess break on Windows.
+#include <cstdio>
 #define BOOST_DATE_TIME_NO_LIB
 
 #include <algorithm>
@@ -192,6 +193,7 @@ extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& c
 extern const char* getSourceVersion();
 
 extern void flushTraceFileVoid();
+extern void allocBench(uint32_t seed);
 
 extern bool noUnseed;
 extern const int MAX_CLUSTER_FILE_BYTES;
@@ -904,6 +906,7 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
+	AllocBench,
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -1080,6 +1083,8 @@ private:
 					role = ServerRole::KVFileGenerateIOLogChecksums;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
+				else if (!strcmp(sRole, "allocBench"))
+					role = ServerRole::AllocBench;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1504,6 +1509,12 @@ private:
 		if (role == ServerRole::NetworkTestClient && !testServersStr.size()) {
 			fprintf(stderr, "ERROR: please specify --testservers\n");
 			printHelpTeaser(argv[0]);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (role == ServerRole::AllocBench) {
+			fprintf(stdout, "Run alloc benchmark with random seed %d\n", randomSeed);
+			allocBench(randomSeed);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 

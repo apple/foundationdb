@@ -20,6 +20,9 @@
 
 #include "flow/FastAlloc.h"
 
+#include "flow/DeterministicRandom.h"
+#include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/ThreadPrimitives.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -30,6 +33,7 @@
 #include <atomic>
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 #ifdef WIN32
 #include <windows.h>
@@ -603,3 +607,89 @@ template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
 template class FastAllocator<16384>;
+
+namespace {
+
+struct AllocObject {
+	int size = 0;
+	void* data = nullptr;
+};
+struct AllocOp {
+	enum class Op {
+		Alloc, Free
+	};
+	Op op;
+	int size;
+};
+
+enum class AllocatorImpl {
+	FastAlloc, Malloc
+};
+
+template<AllocatorImpl A>
+double allocBenchImpl(uint32_t seed) {
+	DeterministicRandom gen(seed);
+	auto rndSize = [&gen]() { return gen.randomSkewedUInt32(1, 32768); };
+	std::vector<AllocObject> objects;
+	objects.reserve(1500000); // try to avoid allocations
+	std::vector<AllocOp> operations;
+	for (int i = 0; i < 500000; ++i) {
+		operations.emplace_back(AllocOp{ AllocOp::Op::Alloc, int(rndSize()) });
+	}
+	int vecSize = 500000;
+	for (int i = 0; i < 1000000; ++i) {
+		if (vecSize > 0 && gen.coinflip()) {
+			operations.emplace_back(AllocOp{ AllocOp::Op::Alloc, int(rndSize()) });
+			++vecSize;
+		} else {
+			if (gen.random01() < 0.3) {
+				// short lived object 30% of the time
+				operations.emplace_back(AllocOp{ AllocOp::Op::Free, vecSize - 1 });
+			} else {
+				operations.emplace_back(AllocOp{ AllocOp::Op::Free, gen.randomInt(0, vecSize - 1) });
+			}
+			--vecSize;
+		}
+	}
+	int allocs = 0;
+	int frees = 0;
+	double begin = timer_monotonic();
+	for (const auto& op : operations) {
+		switch (op.op) {
+			case AllocOp::Op::Alloc:
+				if constexpr (A == AllocatorImpl::Malloc) {
+					objects.emplace_back(AllocObject{ op.size, malloc(op.size) });
+				} else {
+					objects.emplace_back(AllocObject{ op.size, allocateFast(op.size) });
+				}
+				++allocs;
+				break;
+			case AllocOp::Op::Free:
+			{
+				if (op.size >= objects.size()) {
+					printf("Trying to access object %d - but only %d exist\n", op.size, objects.size());
+					printf("executed %d mallocs and %d frees\n", allocs, frees);
+					throw internal_error();
+				}
+				AllocObject o = objects[op.size];
+				objects[op.size] = objects.back();
+				objects.pop_back();
+				if constexpr (A == AllocatorImpl::Malloc) {
+					free(o.data);
+				} else {
+					freeFast(o.size, o.data);
+				}
+				++frees;
+			}
+		}
+	}
+	double end = timer_monotonic();
+	return end - begin;
+}
+
+}
+
+void allocBench(uint32_t seed) {
+	printf("malloc: %fs\n", allocBenchImpl<AllocatorImpl::Malloc>(seed));
+	printf("FastAlloc: %fs\n", allocBenchImpl<AllocatorImpl::FastAlloc>(seed));
+}
