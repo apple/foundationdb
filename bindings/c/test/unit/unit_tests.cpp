@@ -2027,6 +2027,17 @@ TEST_CASE("fdb_database_reboot_worker") {
   CHECK(new_generation > old_generation);
 }
 
+TEST_CASE("fdb_database_force_recovery_with_data_loss") {
+  // This command cannot be tested in current unit-test config
+  // Here we just call the function to make sure it
+  std::string dcId = "test_id";
+  while (1) {
+    fdb::EmptyFuture f = fdb::Database::force_recovery_with_data_loss(db, (const uint8_t*)dcId.c_str(), dcId.size());
+    fdb_check(wait_future(f));
+    break;
+  }
+}
+
 TEST_CASE("fdb_error_predicate") {
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed

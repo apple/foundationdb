@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/Platform.h"
 #include <cstdint>
 #define FDB_API_VERSION 700
 #define FDB_INCLUDE_LEGACY_TYPES
@@ -392,6 +393,10 @@ fdb_error_t fdb_database_create_transaction( FDBDatabase* d,
 extern "C" DLLEXPORT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db, uint8_t const* address, int address_length,
                                                            fdb_bool_t check, int duration) {
 	return (FDBFuture*)(DB(db)->rebootWorker(StringRef(address, address_length), check, duration).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* db, uint8_t const* dcid, int dcit_length) {
+	return (FDBFuture*)(DB(db)->forceRecoveryWithDataLoss(StringRef(dcid, dcit_length)).extractPtr());
 }
 
 extern "C" DLLEXPORT
