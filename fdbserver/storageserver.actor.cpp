@@ -974,8 +974,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
-	span.addTag(LiteralStringRef("key"), req.key);
-	span.addTag(LiteralStringRef("tag"), data->tag.toString());
+	span.addTag("key"_sr, req.key);
 
 	try {
 		++data->counters.getValueQueries;
@@ -3060,8 +3059,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 				rd >> msg;
 
 				Span span("SS:update"_loc, { spanContext });
-				span.addTag(LiteralStringRef("key"), msg.param1);
-				span.addTag(LiteralStringRef("tag"), data->tag.toString());
+				span.addTag("key"_sr, msg.param1);
 
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);

@@ -1006,7 +1006,6 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 
 		rep.version = self->version;
 		rep.requestNum = req.requestNum;
-		span.addTag(LiteralStringRef("version"), std::to_string(rep.version));
 
 		proxyItr->second.replies.erase(proxyItr->second.replies.begin(), proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
 		proxyItr->second.replies[req.requestNum] = rep;
