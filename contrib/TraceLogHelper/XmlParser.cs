@@ -53,11 +53,7 @@ namespace Magnesium
 					}
 					catch (Exception e)
 					{
-<<<<<<< HEAD
-						throw new Exception(string.Format("Failed to parse {0}", xev), e);
-=======
 						throw new Exception(string.Format("Failed to parse XML {0}", xev), e);
->>>>>>> upstream/release-6.2
 					}
 					if (ev != null) yield return ev;
 				}

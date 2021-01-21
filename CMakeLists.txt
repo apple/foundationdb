@@ -167,12 +167,6 @@ add_subdirectory(tests)
 if(WITH_PYTHON)
   add_subdirectory(bindings)
 endif()
-<<<<<<< HEAD
-=======
-add_subdirectory(fdbbackup)
-add_subdirectory(contrib)
-add_subdirectory(tests)
->>>>>>> upstream/release-6.2
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
