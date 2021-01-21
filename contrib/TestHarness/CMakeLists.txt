@@ -3,7 +3,11 @@ set(SRCS
   Properties/AssemblyInfo.cs)
 
 set(TEST_HARNESS_REFERENCES
+<<<<<<< HEAD
   "-r:System,System.Core,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml,${TraceLogHelperDll}")
+=======
+  "-r:System,System.Core,System.Xml.Linq,System.Data.DataSetExtensions,Microsoft.CSharp,System.Data,System.Xml,System.Runtime.Serialization,${TraceLogHelperDll}")
+>>>>>>> upstream/release-6.2
 
 set(out_file ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe)
 

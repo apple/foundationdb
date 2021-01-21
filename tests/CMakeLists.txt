@@ -255,4 +255,9 @@ if(WITH_PYTHON)
       create_valgrind_correctness_package()
     endif()
   endif()
+<<<<<<< HEAD
+=======
+else()
+  message(WARNING "Python not found, won't configure ctest")
+>>>>>>> upstream/release-6.2
 endif()
