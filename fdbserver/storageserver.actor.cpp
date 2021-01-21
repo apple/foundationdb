@@ -710,7 +710,7 @@ public:
 
 	Future<Void> getQueryDelay() {
 		if(checkDurabilityBehind()) {
-			counters.lowPriorityQueries++;
+			++counters.lowPriorityQueries;
 			return increasingPriorityDelay(durabilityBehind.onChange());
 		}
 		return delay(0, TaskPriority::DefaultEndpoint);
