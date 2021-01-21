@@ -629,15 +629,21 @@ enum class AllocatorImpl {
 template<AllocatorImpl A>
 double allocBenchImpl(uint32_t seed) {
 	DeterministicRandom gen(seed);
-	auto rndSize = [&gen]() { return gen.randomSkewedUInt32(1, 32768); };
+	auto rndSize = [&gen]() {
+					   if (gen.random01() < 0.9) {
+						   return gen.randomInt(1, 16384);
+					   } else {
+						   return gen.randomInt(16384, 32768);
+					   }
+				   };
 	std::vector<AllocObject> objects;
-	objects.reserve(1500000); // try to avoid allocations
+	objects.reserve(15000000); // try to avoid allocations
 	std::vector<AllocOp> operations;
-	for (int i = 0; i < 500000; ++i) {
+	for (int i = 0; i < 5000000; ++i) {
 		operations.emplace_back(AllocOp{ AllocOp::Op::Alloc, int(rndSize()) });
 	}
-	int vecSize = 500000;
-	for (int i = 0; i < 1000000; ++i) {
+	int vecSize = 5000000;
+	for (int i = 0; i < 10000000; ++i) {
 		if (vecSize > 0 && gen.coinflip()) {
 			operations.emplace_back(AllocOp{ AllocOp::Op::Alloc, int(rndSize()) });
 			++vecSize;
