@@ -971,6 +971,7 @@ ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version versi
 ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
+	span.addTag("key"_sr, req.key);
 
 	try {
 		++data->counters.getValueQueries;
@@ -2876,7 +2877,6 @@ private:
 ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 {
 	state double start;
-	state Span span("SS:update"_loc);
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
@@ -3019,6 +3019,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
+		state SpanID spanContext = SpanID();
 		for (;cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
 			if(mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
@@ -3048,11 +3049,14 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
-				span.addParent(scm.spanContext);
+				spanContext = scm.spanContext;
 			}
 			else {
 				MutationRef msg;
 				rd >> msg;
+
+				Span span("SS:update"_loc, { spanContext });
+				span.addTag("key"_sr, msg.param1);
 
 				if (ver != invalidVersion) {  // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg).detail("ServerID", data->thisServerID);

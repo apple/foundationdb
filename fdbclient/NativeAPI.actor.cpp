@@ -1913,6 +1913,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 {
 	state Version ver = wait( version );
 	state Span span("NAPI:getValue"_loc, info.spanID);
+	span.addTag("key"_sr, key);
 	cx->validateVersion(ver);
 
 	loop {

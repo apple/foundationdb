@@ -574,6 +574,7 @@ public:
 
 	virtual UID getDebugID() const = 0;
 	virtual NetworkAddress localAddress() const = 0;
+	virtual boost::asio::ip::udp::socket::native_handle_type native_handle() = 0;
 };
 
 class INetworkConnections {
