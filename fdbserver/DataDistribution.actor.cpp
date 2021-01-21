@@ -1174,7 +1174,9 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 
 		int maxMatchingServers = 0;
 		const UID& serverID = team[0];
-		const auto& usedTeams = server_info.find(serverID)->second->teams;
+		const auto it = server_info.find(serverID);
+		ASSERT(it != server_info.end());
+		const auto& usedTeams = it->second->teams;
 		for (const auto& usedTeam : usedTeams) {
 			auto used = usedTeam->getServerIDs();
 			int teamIdx = 0;
