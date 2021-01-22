@@ -391,6 +391,7 @@ struct CommitBatchContext {
 	Optional<UID> debugID;
 
 	bool forceRecovery = false;
+	bool rejected = false; // If rejected due to long queue length
 
 	int64_t localBatchNumber;
 	LogPushData toCommit;
@@ -527,6 +528,20 @@ void CommitBatchContext::evaluateBatchSize() {
 	}
 }
 
+// Try to identify recovery transaction and backup's apply mutations (blind writes).
+// Both cannot be rejected and are approximated by looking at first mutation
+// starting with 0xff.
+bool canReject(const std::vector<CommitTransactionRequest>& trs) {
+	for (const auto& tr : trs) {
+		if (tr.transaction.mutations.empty()) continue;
+		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
+		    tr.transaction.read_conflict_ranges.empty()) {
+			return false;
+		}
+	}
+	return true;
+}
+
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
@@ -535,6 +550,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	state const int latencyBucket = self->latencyBucket;
 	state const Optional<UID>& debugID = self->debugID;
 	state Span span("MP:preresolutionProcessing"_loc, self->span.context);
+	state double timeStart = now();
 
 	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchResolving.get() >
 	        SERVER_KNOBS->RESET_MASTER_BATCHES &&
@@ -549,6 +565,33 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1); // Wait for local batch
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
+	double queuingDelay = g_network->now() - timeStart;
+	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
+	     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01))) &&
+	    SERVER_KNOBS->PROXY_REJECT_BATCH_QUEUED_TOO_LONG && canReject(trs)) {
+		// Disabled for the recovery transaction. otherwise, recovery can't finish and keeps doing more recoveries.
+		TEST(true); // Reject transactions in the batch
+		TraceEvent(SevWarnAlways, "ProxyReject", pProxyCommitData->dbgid)
+		    .suppressFor(0.1)
+		    .detail("QDelay", queuingDelay)
+		    .detail("Transactions", trs.size())
+		    .detail("BatchNumber", localBatchNumber);
+		ASSERT(pProxyCommitData->latestLocalCommitBatchResolving.get() == localBatchNumber - 1);
+		pProxyCommitData->latestLocalCommitBatchResolving.set(localBatchNumber);
+
+		wait(pProxyCommitData->latestLocalCommitBatchLogging.whenAtLeast(localBatchNumber - 1));
+		ASSERT(pProxyCommitData->latestLocalCommitBatchLogging.get() == localBatchNumber - 1);
+		pProxyCommitData->latestLocalCommitBatchLogging.set(localBatchNumber);
+		for (const auto& tr : trs) {
+			tr.reply.sendError(transaction_too_old());
+		}
+		++pProxyCommitData->stats.commitBatchOut;
+		pProxyCommitData->stats.txnCommitOut += trs.size();
+		pProxyCommitData->stats.txnConflicts += trs.size();
+		self->rejected = true;
+		return Void();
+	}
+
 	self->releaseDelay = delay(
 		std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE,
 			self->batchOperations * pProxyCommitData->commitComputePerOperation[latencyBucket]),
@@ -1288,6 +1331,7 @@ ACTOR Future<Void> commitBatch(
 
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
+	if (context.rejected) return Void();
 
 	/////// Phase 2: Resolution (waiting on the network; pipelined)
 	wait(CommitBatch::getResolution(&context));
