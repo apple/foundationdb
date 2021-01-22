@@ -1,0 +1,22 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "compile",
+            "type": "shell",
+            // "command": "mkdir -p workspace; cd workspace; CC=/opt/rh/devtoolset-8/root/usr/bin/gcc CXX=/opt/rh/devtoolset-8/root/usr/bin/g++ scl enable rh-python36 rh-ruby26 -- /bin/bash -c 'cmake -G Ninja -DUSE_GOLD_LINKER=ON  -DBOOST_ROOT=/opt/boost_1_72_0 -DBoost_NO_SYSTEM_PATHS=ON -DRocksDB_ROOT=/opt/rocksdb-6.10.1 -DCMAKE_BUILD_TYPE=Release .. && ninja -j50 all'",
+            "command": "mkdir -p workspace; cd workspace; cmake -G Ninja -DUSE_GOLD_LINKER=ON  -DBOOST_ROOT=/opt/boost_1_72_0 -DBoost_NO_SYSTEM_PATHS=ON -DRocksDB_ROOT=/opt/rocksdb-6.10.1 -DCMAKE_BUILD_TYPE=Release .. && ninja -j50 all",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "test",
+            "type": "shell",
+            "command": "cd workspace; ctest -T Test -L fast -j50 --output-on-failure ;"
+        }
+    ]
+}
