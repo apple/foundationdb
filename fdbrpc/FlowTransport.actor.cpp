@@ -855,6 +855,9 @@ static bool checkCompatible(const PeerCompatibilityPolicy& policy, ProtocolVersi
 		return version.version() == policy.version.version();
 	case RequirePeer::AtLeast:
 		return version.version() >= policy.version.version();
+	default:
+		ASSERT(false);
+		return false;
 	}
 }
 
