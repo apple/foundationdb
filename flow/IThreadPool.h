@@ -114,11 +114,11 @@ public:
 	~DummyThreadPool() {}
 	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() const override { return errors.getFuture(); }
-	void addThread( IThreadPoolReceiver* userData ) {
+	void addThread(IThreadPoolReceiver* userData) override {
 		ASSERT( !thread );
 		thread = userData;
 	}
-	void post( PThreadAction action ) {
+	void post(PThreadAction action) override {
 		try {
 			(*action)( thread );
 		} catch (Error& e) {
@@ -127,15 +127,9 @@ public:
 			errors.sendError( unknown_error() );
 		}
 	}
-	Future<Void> stop(Error const& e) {
-		return Void();
-	}
-	void addref() {
-		ReferenceCounted<DummyThreadPool>::addref();
-	}
-	void delref() {
-		ReferenceCounted<DummyThreadPool>::delref();
-	}
+	Future<Void> stop(Error const& e) override { return Void(); }
+	void addref() override { ReferenceCounted<DummyThreadPool>::addref(); }
+	void delref() override { ReferenceCounted<DummyThreadPool>::delref(); }
 
 private:
 	IThreadPoolReceiver* thread;
