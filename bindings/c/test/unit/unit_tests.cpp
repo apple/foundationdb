@@ -37,6 +37,7 @@
 
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
+#include "fdbclient/rapidjson/document.h"
 
 #include "fdb_api.hpp"
 
@@ -1965,6 +1966,65 @@ TEST_CASE("special-key-space tracing get range") {
     CHECK(std::stoul(std::string((char *)out_kv[1].value, out_kv[1].value_length)) > 0);
     break;
   }
+}
+
+std::string get_valid_status_json() {
+  fdb::Transaction tr(db);
+  while (1) {
+    fdb::ValueFuture f1 = tr.get("\xff\xff/status/json", false);
+    fdb_error_t err = wait_future(f1);
+    if (err) {
+      fdb::EmptyFuture f2 = tr.on_error(err);
+      fdb_check(wait_future(f2));
+      continue;
+    }
+
+    int out_present;
+    char *val;
+    int vallen;
+    fdb_check(f1.get(&out_present, (const uint8_t **)&val, &vallen));
+    assert(out_present);
+    std::string statusJsonStr(val, vallen);
+    rapidjson::Document statusJson;
+    statusJson.Parse(statusJsonStr.c_str());
+    // make sure it is available
+    bool available = statusJson["client"]["database_status"]["available"].GetBool();
+    if (!available)
+      continue; // cannot reach to the cluster, retry
+    return statusJsonStr;
+  }
+}
+
+TEST_CASE("fdb_database_reboot_worker") {
+  std::string status_json = get_valid_status_json();
+  rapidjson::Document statusJson;
+  statusJson.Parse(status_json.c_str());
+  CHECK(statusJson.HasMember("cluster"));
+  CHECK(statusJson["cluster"].HasMember("generation"));
+  int old_generation = statusJson["cluster"]["generation"].GetInt();
+  CHECK(statusJson["cluster"].HasMember("processes"));
+  // Make sure we only have one process in the cluster
+  // Thus, rebooting the worker ensures a recovery
+  // Configuration changes may break the contract here
+  CHECK(statusJson["cluster"]["processes"].MemberCount() == 1);
+  auto processPtr = statusJson["cluster"]["processes"].MemberBegin();
+  CHECK(processPtr->value.HasMember("address"));
+  std::string network_address = processPtr->value["address"].GetString();
+  while (1) {
+	  fdb::Int64Future f =
+		  fdb::Database::reboot_worker(db, (const uint8_t*)network_address.c_str(), network_address.size(), false, 0);
+	  fdb_check(wait_future(f));
+	  int64_t successful;
+	  fdb_check(f.get(&successful));
+	  if (successful) break; // retry rebooting until success
+  }
+  status_json = get_valid_status_json();
+  statusJson.Parse(status_json.c_str());
+  CHECK(statusJson.HasMember("cluster"));
+  CHECK(statusJson["cluster"].HasMember("generation"));
+  int new_generation = statusJson["cluster"]["generation"].GetInt();
+  // The generation number should increase after the recovery
+  CHECK(new_generation > old_generation);
 }
 
 TEST_CASE("fdb_error_predicate") {

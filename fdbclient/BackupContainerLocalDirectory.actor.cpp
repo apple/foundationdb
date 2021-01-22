@@ -30,16 +30,38 @@ namespace {
 
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
-	BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath)
-	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath) {}
+	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
+	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0) {
+		m_buffer.reserve(m_buffer.arena(), CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+	}
 
 	Future<Void> append(const void* data, int len) {
-		Future<Void> r = m_file->write(data, len, m_offset);
-		m_offset += len;
+		m_buffer.append(m_buffer.arena(), (const uint8_t*)data, len);
+
+		if (m_buffer.size() >= CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
+			return flush(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
+		}
+
+		return Void();
+	}
+
+	Future<Void> flush(int size) {
+		ASSERT(size <= m_buffer.size());
+
+		// Keep a reference to the old buffer
+		Standalone<VectorRef<uint8_t>> old = m_buffer;
+		// Make a new buffer, initialized with the excess bytes over the block size from the old buffer
+		m_buffer = Standalone<VectorRef<uint8_t>>(old.slice(size, old.size()));
+
+		// Write the old buffer to the underlying file and update the write offset
+		Future<Void> r = holdWhile(old, m_file->write(old.begin(), size, m_writeOffset));
+		m_writeOffset += size;
+
 		return r;
 	}
 
 	ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
+		wait(f->flush(f->m_buffer.size()));
 		wait(f->m_file->truncate(f->size())); // Some IAsyncFile implementations extend in whole block sizes.
 		wait(f->m_file->sync());
 		std::string name = f->m_file->getFilename();
@@ -48,6 +70,8 @@ public:
 		return Void();
 	}
 
+	int64_t size() const { return m_buffer.size() + m_writeOffset; }
+
 	Future<Void> finish() { return finish_impl(Reference<BackupFile>::addRef(this)); }
 
 	void addref() override { return ReferenceCounted<BackupFile>::addref(); }
@@ -55,6 +79,8 @@ public:
 
 private:
 	Reference<IAsyncFile> m_file;
+	Standalone<VectorRef<uint8_t>> m_buffer;
+	int64_t m_writeOffset;
 	std::string m_finalFullPath;
 };
 
@@ -72,7 +98,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 		                   [](std::string const& f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }),
 		    files.end());
 
-	for (auto& f : files) {
+	for (const auto& f : files) {
 		// Hide .part or .temp files.
 		StringRef s(f);
 		if (!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
@@ -147,7 +173,7 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	std::vector<std::string> dirs = platform::listDirectories(path);
 	std::vector<std::string> results;
 
-	for (auto& r : dirs) {
+	for (const auto& r : dirs) {
 		if (r == "." || r == "..") continue;
 		results.push_back(std::string("file://") + joinPath(path, r));
 	}

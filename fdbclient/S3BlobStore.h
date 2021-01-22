@@ -123,7 +123,7 @@ public:
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
 	// parameters in addition to the passed params string
-	std::string getResourceURL(std::string resource, std::string params);
+	std::string getResourceURL(std::string resource, std::string params) const;
 
 	struct ReusableConnection {
 		Reference<IConnection> conn;

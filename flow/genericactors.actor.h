@@ -725,8 +725,8 @@ private:
 class Debouncer : NonCopyable {
 public:
 	explicit Debouncer( double delay ) { worker = debounceWorker(this, delay); }
-	Debouncer(Debouncer&& at) : input(std::move(at.input)), output(std::move(at.output)) {}
-	void operator=(Debouncer&& at) { input = std::move(at.input); output = std::move(at.output); }
+	Debouncer(Debouncer&& at) = default;
+	Debouncer& operator=(Debouncer&& at) = default;
 	Future<Void> onTrigger() {
 		return output.onChange();
 	}

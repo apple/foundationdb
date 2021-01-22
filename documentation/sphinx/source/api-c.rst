@@ -426,6 +426,25 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
 
+.. function:: FDBFuture* fdb_database_reboot_worker(FDBDatabase* database, uint8_t const* address, int address_length, fdb_bool_t check, int duration)
+
+   Reboot the specified process in the database.
+
+   |future-return0| a :type:`int64_t` which represents whether the reboot request is sent or not. In particular, 1 means request sent and 0 means failure (e.g. the process with the specified address does not exist). |future-return1| call :func:`fdb_future_get_int64()` to extract the result, |future-return2|
+
+   ``address``
+        A pointer to the network address of the process.
+
+   ``address_length``
+        |length-of| ``address``.
+   
+   ``check``
+        whether to perform a storage engine integrity check. In particular, the check-on-reboot is implemented by writing a check/validation file on disk as breadcrumb for the process to find after reboot, at which point it will eat the breadcrumb file and pass true to the integrityCheck parameter of the openKVStore() factory method.
+   
+   ``duration``
+        If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
+
+
 Transaction
 ===========
 

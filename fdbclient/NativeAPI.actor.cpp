@@ -868,13 +868,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
-    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0), internal(internal), transactionTracingEnabled(true),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
+    transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
+    transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
+    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), outstandingWatches(0),
+    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
+    bytesPerCommit(1000), mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    internal(internal), transactionTracingEnabled(true), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -974,6 +974,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<ClusterConnectionF
 		                                           [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                                           if (ryw->getDatabase().getPtr() &&
 			                                               ryw->getDatabase()->getConnectionFile()) {
+				                                           ++ryw->getDatabase()->transactionStatusRequests;
 				                                           return getJSON(ryw->getDatabase());
 			                                           } else {
 				                                           return Optional<Value>();
@@ -1042,13 +1043,14 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsCommitStarted("CommitStarted", cc), transactionsCommitCompleted("CommitCompleted", cc),
     transactionKeyServerLocationRequests("KeyServerLocationRequests", cc),
     transactionKeyServerLocationRequestsCompleted("KeyServerLocationRequestsCompleted", cc),
-    transactionsTooOld("TooOld", cc), transactionsFutureVersions("FutureVersions", cc),
-    transactionsNotCommitted("NotCommitted", cc), transactionsMaybeCommitted("MaybeCommitted", cc),
-    transactionsResourceConstrained("ResourceConstrained", cc), transactionsThrottled("Throttled", cc),
-    transactionsProcessBehind("ProcessBehind", cc), latencies(1000), readLatencies(1000), commitLatencies(1000),
-    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    transactionStatusRequests("StatusRequests", cc), transactionsTooOld("TooOld", cc),
+    transactionsFutureVersions("FutureVersions", cc), transactionsNotCommitted("NotCommitted", cc),
+    transactionsMaybeCommitted("MaybeCommitted", cc), transactionsResourceConstrained("ResourceConstrained", cc),
+    transactionsThrottled("Throttled", cc), transactionsProcessBehind("ProcessBehind", cc), latencies(1000),
+    readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false), transactionTracingEnabled(true) {}
+    transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), internal(false),
+    transactionTracingEnabled(true) {}
 
 Database DatabaseContext::create(Reference<AsyncVar<ClientDBInfo>> clientInfo, Future<Void> clientInfoMonitor, LocalityData clientLocality, bool enableLocalityLoadBalance, TaskPriority taskID, bool lockAware, int apiVersion, bool switchable) {
 	return Database( new DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>>(), clientInfo, clientInfoMonitor, taskID, clientLocality, enableLocalityLoadBalance, lockAware, true, apiVersion, switchable ) );
@@ -1104,7 +1106,7 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& keys, const vector<StorageServerInterface>& servers ) {
 	vector<Reference<ReferencedInterface<StorageServerInterface>>> serverRefs;
 	serverRefs.reserve(servers.size());
-	for(auto& interf : servers) {
+	for (const auto& interf : servers) {
 		serverRefs.push_back( StorageServerInfo::getInterface( this, interf, clientLocality ) );
 	}
 
@@ -1850,17 +1852,17 @@ Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations(
 	}
 
 	bool foundFailed = false;
-	for(auto& it : locations) {
+	for (const auto& [range, locInfo] : locations) {
 		bool onlyEndpointFailed = false;
-		for(int i = 0; i < it.second->size(); i++) {
-			if( IFailureMonitor::failureMonitor().onlyEndpointFailed(it.second->get(i, member).getEndpoint()) ) {
+		for (int i = 0; i < locInfo->size(); i++) {
+			if (IFailureMonitor::failureMonitor().onlyEndpointFailed(locInfo->get(i, member).getEndpoint())) {
 				onlyEndpointFailed = true;
 				break;
 			}
 		}
 
 		if( onlyEndpointFailed ) {
-			cx->invalidateCache( it.first.begin );
+			cx->invalidateCache(range.begin);
 			foundFailed = true;
 		}
 	}
@@ -1911,6 +1913,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 {
 	state Version ver = wait( version );
 	state Span span("NAPI:getValue"_loc, info.spanID);
+	span.addTag("key"_sr, key);
 	cx->validateVersion(ver);
 
 	loop {
@@ -2535,7 +2538,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				}
 
 				++cx->transactionPhysicalReads;
-				++cx->transactionGetRangeRequests;
 				state GetKeyValuesReply rep;
 				try {
 					if (CLIENT_BUGGIFY) {
@@ -4778,4 +4780,54 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, vector<AddressExclusion> exc
 	    .detail("DataDistributorCheck", ddCheck);
 
 	return (ddCheck && coordinatorCheck);
+}
+
+ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderRegInterface>>* address_interface, Reference<FlowLock> connectLock, KeyValue kv) {
+	wait(connectLock->take());
+	state FlowLock::Releaser releaser(*connectLock);
+	state ClientWorkerInterface workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
+	choose {
+		when( Optional<LeaderInfo> rep = wait( brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())) ) ) {
+			StringRef ip_port =
+				kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key;
+			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+			if(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls")) ? full_ip_port2.removeSuffix(LiteralStringRef(":tls")) : full_ip_port2;
+				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+			}
+		}
+		when( wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT)) ) {} // NOTE : change timeout time here if necessary
+	}
+	return Void();
+}
+
+ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+	// ignore negative value
+	if (duration < 0) duration = 0;
+	// fetch the addresses of all workers
+	state std::map<Key,std::pair<Value,ClientLeaderRegInterface>> address_interface;
+	if (!cx->getConnectionFile())
+		return 0;
+	Standalone<RangeResultRef> kvs = wait(getWorkerInterfaces(cx->getConnectionFile()));
+	ASSERT(!kvs.more);
+	// Note: reuse this knob from fdbcli, change it if necessary
+	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	std::vector<Future<Void>> addInterfs;
+	for( const auto& it : kvs ) {
+		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	}
+	wait(waitForAll(addInterfs));
+	if (!address_interface.count(addr)) return 0;
+
+	BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
+	    .reboot.send(RebootRequest(false, check, duration));
+	return 1;
+}
+
+Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
+	return rebootWorkerActor(this, addr, check, duration);
 }

@@ -41,9 +41,11 @@
 // A more intelligent SFINAE that does "binarySerialize if POD and no serialize() is defined" could
 // replace the usage of is_binary_serializable.
 template <class T>
-struct is_binary_serializable { enum { value = 0 }; };
+struct is_binary_serializable : std::false_type {};
 
-#define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
+#define BINARY_SERIALIZABLE(T)                                                                                         \
+	template <>                                                                                                        \
+	struct is_binary_serializable<T> : std::true_type {};
 
 BINARY_SERIALIZABLE( int8_t );
 BINARY_SERIALIZABLE( uint8_t );
@@ -143,10 +145,19 @@ inline void save( Archive& ar, const std::string& value ) {
 }
 
 template <class Archive, class T>
-class Serializer< Archive, T, typename std::enable_if< is_binary_serializable<T>::value >::type> {
+class Serializer<Archive, T, typename std::enable_if_t<is_binary_serializable<T>::value>> {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		ar.serializeBinaryItem(t);
+	}
+};
+
+template <class Archive, class T>
+class Serializer<Archive, T, typename std::enable_if_t<std::is_enum_v<T>>> {
+public:
+	static void serialize(Archive& ar, T& t) {
+		static_assert(is_binary_serializable<std::underlying_type_t<T>>::value);
+		ar.serializeBinaryItem(reinterpret_cast<std::underlying_type_t<T>&>(t));
 	}
 };
 
@@ -346,14 +357,14 @@ public:
 		*(T*)writeBytes(sizeof(T)) = t;
 	}
 	void* getData() { return data; }
-	int getLength() { return size; }
-	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
+	int getLength() const { return size; }
+	Standalone<StringRef> toValue() const { return Standalone<StringRef>(StringRef(data, size), arena); }
 	template <class VersionOptions>
 	explicit BinaryWriter( VersionOptions vo ) : data(nullptr), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
-		rhs.data = 0;
+		rhs.data = nullptr;
 	}
 	void operator=( BinaryWriter&& r) {
 		arena = std::move(r.arena);
@@ -363,7 +374,7 @@ public:
 		m_protocolVersion = r.m_protocolVersion;
 		r.size = 0;
 		r.allocated = 0;
-		r.data = 0;
+		r.data = nullptr;
 	}
 
 	template <class T, class VersionOptions>

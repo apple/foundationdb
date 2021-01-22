@@ -127,9 +127,11 @@ public:
 
 	class BackupFile final : public IBackupFile, ReferenceCounted<BackupFile> {
 		Reference<IAsyncFile> m_file;
+		int64_t m_offset;
 
 	public:
-		BackupFile(const std::string& fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
+		BackupFile(const std::string& fileName, Reference<IAsyncFile> file)
+		  : IBackupFile(fileName), m_file(file), m_offset(0) {}
 		Future<Void> append(const void* data, int len) override {
 			Future<Void> r = m_file->write(data, len, m_offset);
 			m_offset += len;
@@ -142,6 +144,7 @@ public:
 				return Void();
 			});
 		}
+		int64_t size() const override { return m_offset; }
 		void addref() override { ReferenceCounted<BackupFile>::addref(); }
 		void delref() override { ReferenceCounted<BackupFile>::delref(); }
 	};

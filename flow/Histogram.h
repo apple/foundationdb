@@ -56,7 +56,7 @@ HistogramRegistry& GetHistogramRegistry();
  * For more information about this technique, see:
  * https://www.fsl.cs.stonybrook.edu/project-osprof.html
  */
-class Histogram sealed : public ReferenceCounted<Histogram> {
+class Histogram final : public ReferenceCounted<Histogram> {
 public:
 	enum class Unit { microseconds, bytes, bytes_per_second };
 

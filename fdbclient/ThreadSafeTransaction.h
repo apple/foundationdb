@@ -41,6 +41,8 @@ public:
 	void addref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
 
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration);
+
 private:
 	friend class ThreadSafeTransaction;
 	DatabaseContext* db;

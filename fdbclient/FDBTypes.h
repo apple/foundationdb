@@ -71,9 +71,7 @@ struct Tag {
 	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
 	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
 
-	int toTagDataIndex() {
-		return locality >= 0 ? 2 * locality : 1 - (2 * locality);
-	}
+	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
 
 	std::string toString() const {
 		return format("%d:%d", locality, id);
