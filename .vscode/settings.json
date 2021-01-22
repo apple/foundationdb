@@ -1,5 +1,4 @@
 {
-    "docker.host": "ssh://fdb-devshare",
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "git.ignoreLimitWarning": true,
     "cmake.buildDirectory":"${workspaceFolder}/workspace",
