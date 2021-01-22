@@ -44,7 +44,7 @@ public:
 			                                  blobName = this->blobName, data, length, offset] {
 				std::ostringstream oss(std::ios::out | std::ios::binary);
 				client->download_blob_to_stream(containerName, blobName, offset, length, oss);
-				auto str = oss.str();
+				auto str = std::move(oss).str();
 				memcpy(data, str.c_str(), str.size());
 				return static_cast<int>(str.size());
 			});
