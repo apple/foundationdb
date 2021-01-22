@@ -288,9 +288,10 @@ bool isWhitelisted(const vector<Standalone<StringRef>>& binPathVec, StringRef bi
 	return std::find(binPathVec.begin(), binPathVec.end(), binPath) != binPathVec.end();
 }
 
-ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, MutationListRef>* logRangeMutations,
-                                      LogPushData* toCommit, Version commitVersion, double* computeDuration, double* computeStart) {
-	state std::map<Key, MutationListRef>::iterator logRangeMutation = logRangeMutations->begin();
+ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, const std::map<Key, MutationListRef>* logRangeMutations,
+                                      LogPushData* toCommit, Version commitVersion, double* computeDuration,
+                                      double* computeStart) {
+	state std::map<Key, MutationListRef>::const_iterator logRangeMutation = logRangeMutations->cbegin();
 	state int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	state int yieldBytes = 0;
 	state BinaryWriter valueWriter(Unversioned());
@@ -298,8 +299,7 @@ ACTOR Future<Void> addBackupMutations(ProxyCommitData* self, std::map<Key, Mutat
 	toCommit->addTransactionInfo(SpanID());
 
 	// Serialize the log range mutations within the map
-	for (; logRangeMutation != logRangeMutations->end(); ++logRangeMutation)
-	{
+	for (; logRangeMutation != logRangeMutations->cend(); ++logRangeMutation) {
 		//FIXME: this is re-implementing the serialize function of MutationListRef in order to have a yield
 		valueWriter = BinaryWriter(IncludeVersion(ProtocolVersion::withBackupMutations()));
 		valueWriter << logRangeMutation->second.totalSize();

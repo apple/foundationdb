@@ -182,7 +182,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 	}
 
 	int msgSize = 0;
-	for(auto& i : taggedMessages) {
+	for (const auto& i : taggedMessages) {
 		msgSize += i.message.size();
 	}
 
@@ -199,7 +199,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 
 	block.pop_front(block.size());
 
-	for(auto& msg : taggedMessages) {
+	for (const auto& msg : taggedMessages) {
 		if(msg.message.size() > block.capacity() - block.size()) {
 			self->messageBlocks.emplace_back(version, block);
 			block = Standalone<VectorRef<uint8_t>>();
@@ -207,7 +207,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 		}
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
-		for(auto& tag : msg.tags) {
+		for (const auto& tag : msg.tags) {
 			auto tagData = self->getTagData(tag);
 			if(!tagData) {
 				tagData = self->createTagData(tag, 0, 0);

@@ -968,8 +968,7 @@ static void printAgentUsage(bool devhelp) {
 void printBackupContainerInfo() {
 	printf("                 Backup URL forms:\n\n");
 	std::vector<std::string> formats = IBackupContainer::getURLFormats();
-	for(auto &f : formats)
-		printf("                     %s\n", f.c_str());
+	for (const auto& f : formats) printf("                     %s\n", f.c_str());
 	printf("\n");
 }
 
@@ -2936,15 +2935,15 @@ int main(int argc, char* argv[]) {
 		RestoreType restoreType = RestoreType::UNKNOWN;
 		DBType dbType = DBType::UNDEFINED;
 
-		CSimpleOpt* args = NULL;
+		std::unique_ptr<CSimpleOpt> args;
 
 		switch (programExe)
 		{
 		case ProgramExe::AGENT:
-			args = new CSimpleOpt(argc, argv, g_rgAgentOptions, SO_O_EXACT);
+			args = std::make_unique<CSimpleOpt>(argc, argv, g_rgAgentOptions, SO_O_EXACT);
 			break;
 		case ProgramExe::DR_AGENT:
-			args = new CSimpleOpt(argc, argv, g_rgDBAgentOptions, SO_O_EXACT);
+			args = std::make_unique<CSimpleOpt>(argc, argv, g_rgDBAgentOptions, SO_O_EXACT);
 			break;
 		case ProgramExe::BACKUP:
 			// Display backup help, if no arguments
@@ -2960,53 +2959,53 @@ int main(int argc, char* argv[]) {
 				switch (backupType)
 				{
 				case BackupType::START:
-					args = new CSimpleOpt(argc-1, &argv[1], g_rgBackupStartOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc-1, &argv[1], g_rgBackupStartOptions, SO_O_EXACT);
 					break;
 				case BackupType::STATUS:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupStatusOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupStatusOptions, SO_O_EXACT);
 					break;
 				case BackupType::ABORT:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupAbortOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupAbortOptions, SO_O_EXACT);
 					break;
 				case BackupType::CLEANUP:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupCleanupOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupCleanupOptions, SO_O_EXACT);
 					break;
 				case BackupType::WAIT:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupWaitOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupWaitOptions, SO_O_EXACT);
 					break;
 				case BackupType::DISCONTINUE:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupDiscontinueOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDiscontinueOptions, SO_O_EXACT);
 					break;
 				case BackupType::PAUSE:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT);
 					break;
 				case BackupType::RESUME:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupPauseOptions, SO_O_EXACT);
 					break;
 				case BackupType::EXPIRE:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupExpireOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupExpireOptions, SO_O_EXACT);
 					break;
 				case BackupType::DELETE:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupDeleteOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDeleteOptions, SO_O_EXACT);
 					break;
 				case BackupType::DESCRIBE:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupDescribeOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDescribeOptions, SO_O_EXACT);
 					break;
 				case BackupType::DUMP:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupDumpOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupDumpOptions, SO_O_EXACT);
 					break;
 				case BackupType::LIST:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupListOptions, SO_O_EXACT);
 					break;
 				case BackupType::QUERY:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupQueryOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupQueryOptions, SO_O_EXACT);
 					break;
 				case BackupType::MODIFY:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT);
 					break;
 				case BackupType::UNDEFINED:
 				default:
-					args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 					break;
 				}
 			}
@@ -3025,26 +3024,26 @@ int main(int argc, char* argv[]) {
 				switch (dbType)
 				{
 				case DBType::START:
-					args = new CSimpleOpt(argc-1, &argv[1], g_rgDBStartOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc-1, &argv[1], g_rgDBStartOptions, SO_O_EXACT);
 					break;
 				case DBType::STATUS:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBStatusOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBStatusOptions, SO_O_EXACT);
 					break;
 				case DBType::SWITCH:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBSwitchOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBSwitchOptions, SO_O_EXACT);
 					break;
 				case DBType::ABORT:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBAbortOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBAbortOptions, SO_O_EXACT);
 					break;
 				case DBType::PAUSE:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT);
 					break;
 				case DBType::RESUME:
-					args = new CSimpleOpt(argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc - 1, &argv[1], g_rgDBPauseOptions, SO_O_EXACT);
 					break;
 				case DBType::UNDEFINED:
 				default:
-					args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
+					args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 					break;
 				}
 			}
@@ -3057,9 +3056,9 @@ int main(int argc, char* argv[]) {
 			// Get the restore operation type
 			restoreType = getRestoreType(argv[1]);
 			if(restoreType == RestoreType::UNKNOWN) {
-				args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
+				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 			} else {
-				args = new CSimpleOpt(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
+				args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
 			}
 			break;
 		case ProgramExe::FASTRESTORE_TOOL:
@@ -3070,9 +3069,9 @@ int main(int argc, char* argv[]) {
 			// Get the restore operation type
 			restoreType = getRestoreType(argv[1]);
 			if (restoreType == RestoreType::UNKNOWN) {
-				args = new CSimpleOpt(argc, argv, g_rgOptions, SO_O_EXACT);
+				args = std::make_unique<CSimpleOpt>(argc, argv, g_rgOptions, SO_O_EXACT);
 			} else {
-				args = new CSimpleOpt(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
+				args = std::make_unique<CSimpleOpt>(argc - 1, argv + 1, g_rgRestoreOptions, SO_O_EXACT);
 			}
 			break;
 		case ProgramExe::UNDEFINED:
@@ -3561,13 +3560,6 @@ int main(int argc, char* argv[]) {
 			default:
 				return FDB_EXIT_ERROR;
 			}
-		}
-
-		// Delete the simple option object, if defined
-		if (args)
-		{
-			delete args;
-			args = NULL;
 		}
 
 		delete FLOW_KNOBS;

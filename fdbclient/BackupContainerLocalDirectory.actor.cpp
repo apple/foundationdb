@@ -30,7 +30,7 @@ namespace {
 
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
-	BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath)
+	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
 	  : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath), m_writeOffset(0) {
 		m_buffer.reserve(m_buffer.arena(), CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
 	}
@@ -98,7 +98,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 		                   [](std::string const& f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }),
 		    files.end());
 
-	for (auto& f : files) {
+	for (const auto& f : files) {
 		// Hide .part or .temp files.
 		StringRef s(f);
 		if (!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
@@ -173,7 +173,7 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	std::vector<std::string> dirs = platform::listDirectories(path);
 	std::vector<std::string> results;
 
-	for (auto& r : dirs) {
+	for (const auto& r : dirs) {
 		if (r == "." || r == "..") continue;
 		results.push_back(std::string("file://") + joinPath(path, r));
 	}

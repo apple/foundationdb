@@ -152,17 +152,16 @@ public:
 
 	//Applies all enabled transaction options to the given transaction
 	void apply(Reference<ReadYourWritesTransaction> tr) {
-		for(auto itr = transactionOptions.options.begin(); itr != transactionOptions.options.end(); ++itr)
-			tr->setOption(itr->first, itr->second.castTo<StringRef>());
+		for (const auto& [name, value] : transactionOptions.options) {
+			tr->setOption(name, value.castTo<StringRef>());
+		}
 	}
 
 	//Returns true if any options have been set
-	bool hasAnyOptionsEnabled() {
-		return !transactionOptions.options.empty();
-	}
+	bool hasAnyOptionsEnabled() const { return !transactionOptions.options.empty(); }
 
 	//Prints a list of enabled options, along with their parameters (if any)
-	void print() {
+	void print() const {
 		bool found = false;
 		found = found || transactionOptions.print();
 
@@ -171,14 +170,10 @@ public:
 	}
 
 	//Returns a vector of the names of all documented options
-	std::vector<std::string> getValidOptions() {
-		return transactionOptions.getValidOptions();
-	}
+	std::vector<std::string> getValidOptions() const { return transactionOptions.getValidOptions(); }
 
 	//Prints the help string obtained by invoking `help options'
-	void printHelpString() {
-		transactionOptions.printHelpString();
-	}
+	void printHelpString() const { transactionOptions.printHelpString(); }
 
 private:
 	//Sets a transaction option. If intrans == true, then this option is also applied to the passed in transaction.
@@ -219,7 +214,7 @@ private:
 		}
 
 		//Prints a list of all enabled options in this group
-		bool print() {
+		bool print() const {
 			bool found = false;
 
 			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
@@ -238,7 +233,7 @@ private:
 		}
 
 		//Returns true if the specified option is documented
-		bool isDocumented(typename T::Option option) {
+		bool isDocumented(typename T::Option option) const {
 			FDBOptionInfo info = T::optionInfo.getMustExist(option);
 
 			std::string deprecatedStr = "Deprecated";
@@ -246,7 +241,7 @@ private:
 		}
 
 		//Returns a vector of the names of all documented options
-		std::vector<std::string> getValidOptions() {
+		std::vector<std::string> getValidOptions() const {
 			std::vector<std::string> ret;
 
 			for (auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr)
@@ -258,7 +253,7 @@ private:
 
 		//Prints a help string for each option in this group. Any options with no comment
 		//are excluded from this help string. Lines are wrapped to 80 characters.
-		void printHelpString() {
+		void printHelpString() const {
 			for(auto itr = legalOptions.begin(); itr != legalOptions.end(); ++itr) {
 				if(isDocumented(itr->second)) {
 					FDBOptionInfo info = T::optionInfo.getMustExist(itr->second);
@@ -632,12 +627,12 @@ void printVersion() {
 
 void printHelpOverview() {
 	printf("\nList of commands:\n\n");
-	for (auto i = helpMap.begin(); i != helpMap.end(); ++i)
-		if (i->second.short_desc.size())
-			printf(" %s:\n      %s\n", i->first.c_str(), i->second.short_desc.c_str());
-	printf("\nFor information on a specific command, type `help <command>'.");
-	printf("\nFor information on escaping keys and values, type `help escaping'.");
-	printf("\nFor information on available options, type `help options'.\n\n");
+	for (const auto& [command, help] : helpMap) {
+		if (help.short_desc.size()) printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
+		printf("\nFor information on a specific command, type `help <command>'.");
+		printf("\nFor information on escaping keys and values, type `help escaping'.");
+		printf("\nFor information on available options, type `help options'.\n\n");
+	}
 }
 
 void printHelp(StringRef command) {
@@ -2025,16 +2020,18 @@ ACTOR Future<bool> fileConfigure(Database db, std::string filePath, bool isNewDa
 		configString = "new";
 	}
 
-	for(auto kv : configJSON) {
+	for (const auto& [name, value] : configJSON) {
 		if(!configString.empty()) {
 			configString += " ";
 		}
-		if( kv.second.type() == json_spirit::int_type ) {
-			configString += kv.first + ":=" + format("%d", kv.second.get_int());
-		} else if( kv.second.type() == json_spirit::str_type ) {
-			configString += kv.second.get_str();
-		} else if( kv.second.type() == json_spirit::array_type ) {
-			configString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
+		if (value.type() == json_spirit::int_type) {
+			configString += name + ":=" + format("%d", value.get_int());
+		} else if (value.type() == json_spirit::str_type) {
+			configString += value.get_str();
+		} else if (value.type() == json_spirit::array_type) {
+			configString +=
+			    name + "=" +
+			    json_spirit::write_string(json_spirit::mValue(value.get_array()), json_spirit::Output_options::none);
 		} else {
 			printUsage(LiteralStringRef("fileconfigure"));
 			return true;
@@ -2249,8 +2246,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		}
 
 		printf("There are currently %zu servers or processes being excluded from the database:\n", excl.size());
-		for(auto& e : excl)
-			printf("  %s\n", e.toString().c_str());
+		for (const auto& e : excl) printf("  %s\n", e.toString().c_str());
 
 		printf("To find out whether it is safe to remove one or more of these\n"
 			   "servers from the cluster, type `exclude <addresses>'.\n"
@@ -2455,7 +2451,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 		bool foundCoordinator = false;
 		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
-		for( auto& c : ccs.coordinators()) {
+		for (const auto& c : ccs.coordinators()) {
 			if (std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip, c.port)) ||
 			    std::count(exclusionVector.begin(), exclusionVector.end(), AddressExclusion(c.ip))) {
 				printf("WARNING: %s is a coordinator!\n", c.toString().c_str());
@@ -2503,7 +2499,7 @@ ACTOR Future<bool> setClass( Database db, std::vector<StringRef> tokens ) {
 		std::sort(workers.begin(), workers.end(), ProcessData::sort_by_address());
 
 		printf("There are currently %zu processes in the database:\n", workers.size());
-		for(auto& w : workers)
+		for (const auto& w : workers)
 			printf("  %s: %s (%s)\n", w.address.toString().c_str(), w.processClass.toString().c_str(), w.processClass.sourceString().c_str());
 		return false;
 	}
@@ -2861,22 +2857,25 @@ struct CLIOptions {
 		ClientKnobs* clientKnobs = new ClientKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
-		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
+		for (const auto& [knob, value] : knobs) {
 			try {
-				if (!flowKnobs->setKnob( k->first, k->second ) &&
-					!clientKnobs->setKnob( k->first, k->second ))
-				{
-					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
-					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
+				if (!flowKnobs->setKnob(knob, value) && !clientKnobs->setKnob(knob, value)) {
+					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knob.c_str());
+					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knob));
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", k->second.c_str(), k->first.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue").detail("Knob", printable(k->first)).detail("Value", printable(k->second));
+					fprintf(stderr, "WARNING: Invalid value '%s' for knob option '%s'\n", value.c_str(), knob.c_str());
+					TraceEvent(SevWarnAlways, "InvalidKnobValue")
+					    .detail("Knob", printable(knob))
+					    .detail("Value", printable(value));
 				}
 				else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", k->first.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob").detail("Knob", printable(k->first)).detail("Value", printable(k->second)).error(e);
+					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knob.c_str(), e.what());
+					TraceEvent(SevError, "FailedToSetKnob")
+					    .detail("Knob", printable(knob))
+					    .detail("Value", printable(value))
+					    .error(e);
 					exit_code = FDB_EXIT_ERROR;
 				}
 			}

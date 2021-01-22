@@ -38,7 +38,7 @@ ITLSPolicy *FDBLibTLSPlugin::create_policy() {
 	if (rc < 0) {
 		// Log the failure from tls_init during our constructor.
 		TraceEvent(SevError, "FDBLibTLSInitError").detail("LibTLSErrorMessage", "failed to initialize libtls");
-		return NULL;
+		return nullptr;
 	}
 	return new FDBLibTLSPolicy(Reference<FDBLibTLSPlugin>::addRef(this));
 }
@@ -47,5 +47,5 @@ extern "C" BOOST_SYMBOL_EXPORT void *get_tls_plugin(const char *plugin_type_name
 	if (strcmp(plugin_type_name_and_version, FDBLibTLSPlugin::get_plugin_type_name_and_version()) == 0) {
 		return new FDBLibTLSPlugin;
 	}
-	return NULL;
+	return nullptr;
 }

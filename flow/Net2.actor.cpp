@@ -103,7 +103,8 @@ class Net2;
 class Peer;
 class Connection;
 
-Net2 *g_net2 = 0;
+// Outlives main
+Net2 *g_net2 = nullptr;
 
 class Task {
 public:
@@ -120,7 +121,7 @@ struct OrderedTask {
 
 thread_local INetwork* thread_network = 0;
 
-class Net2 sealed : public INetwork, public INetworkConnections {
+class Net2 final : public INetwork, public INetworkConnections {
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
@@ -129,55 +130,55 @@ public:
 	void initMetrics();
 
 	// INetworkConnections interface
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
-	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr);
-	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6);
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
-	virtual Reference<IListener> listen( NetworkAddress localAddr );
+	Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
+	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) override;
+	Reference<IListener> listen( NetworkAddress localAddr ) override;
 
 	// INetwork interface
-	virtual double now() const override { return currentTime; };
-	virtual double timer() override { return ::timer(); };
+	double now() const override { return currentTime; };
+	double timer() override { return ::timer(); };
 	double timer_monotonic() override { return ::timer_monotonic(); };
-	virtual Future<Void> delay(double seconds, TaskPriority taskId) override;
-	virtual Future<class Void> yield(TaskPriority taskID) override;
-	virtual bool check_yield(TaskPriority taskId) override;
-	virtual TaskPriority getCurrentTask() const override { return currentTaskID; }
-	virtual void setCurrentTask(TaskPriority taskID ) { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
-	virtual void onMainThread( Promise<Void>&& signal, TaskPriority taskID );
+	Future<Void> delay(double seconds, TaskPriority taskId) override;
+	Future<class Void> yield(TaskPriority taskID) override;
+	bool check_yield(TaskPriority taskId) override;
+	TaskPriority getCurrentTask() const override { return currentTaskID; }
+	void setCurrentTask(TaskPriority taskID ) override { currentTaskID = taskID; priorityMetric = (int64_t)taskID; }
+	void onMainThread( Promise<Void>&& signal, TaskPriority taskID ) override;
 	bool isOnMainThread() const override {
 		return thread_network == this;
 	}
-	virtual void stop() {
+	void stop() override {
 		if ( thread_network == this )
 			stopImmediately();
 		else
 			onMainThreadVoid( [this] { this->stopImmediately(); }, nullptr );
 	}
-	virtual void addStopCallback( std::function<void()> fn ) {
+	void addStopCallback( std::function<void()> fn ) override {
 		if ( thread_network == this )
 			stopCallbacks.emplace_back(std::move(fn));
 		else
 			onMainThreadVoid( [this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr );
 	}
 
-	virtual bool isSimulated() const { return false; }
-	virtual THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg);
+	bool isSimulated() const override { return false; }
+	THREAD_HANDLE startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg) override;
 
-	virtual void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total );
-	virtual bool isAddressOnThisHost(NetworkAddress const& addr) const override;
+	void getDiskBytes( std::string const& directory, int64_t& free, int64_t& total ) override;
+	bool isAddressOnThisHost(NetworkAddress const& addr) const override;
 	void updateNow(){ currentTime = timer_monotonic(); }
 
-	virtual flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
-	virtual void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
+	flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
+	void setGlobal(size_t id, flowGlobalType v) override { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; }
 
 	ProtocolVersion protocolVersion() override { return currentProtocolVersion; }
 
-	std::vector<flowGlobalType>		globals;
+	std::vector<flowGlobalType> globals;
 
-	virtual const TLSConfig& getTLSConfig() const override { return tlsConfig; }
+	const TLSConfig& getTLSConfig() const override { return tlsConfig; }
 
-	virtual bool checkRunnable() override;
+	bool checkRunnable() override;
 
 	bool useThreadPool;
 
@@ -356,12 +357,12 @@ struct SendBufferIterator {
 	}
 };
 
-class Connection : public IConnection, ReferenceCounted<Connection> {
+class Connection final : public IConnection, ReferenceCounted<Connection> {
 public:
-	virtual void addref() { ReferenceCounted<Connection>::addref(); }
-	virtual void delref() { ReferenceCounted<Connection>::delref(); }
+	void addref() override { ReferenceCounted<Connection>::addref(); }
+	void delref() override { ReferenceCounted<Connection>::delref(); }
 
-	virtual void close() {
+	void close() override {
 		closeSocket();
 	}
 
@@ -397,12 +398,12 @@ public:
 		init();
 	}
 
-	virtual Future<Void> acceptHandshake() { return Void(); }
+	Future<Void> acceptHandshake() override { return Void(); }
 
-	virtual Future<Void> connectHandshake() { return Void(); }
+	Future<Void> connectHandshake() override { return Void(); }
 
 	// returns when write() can write at least one byte
-	virtual Future<Void> onWritable() {
+	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
@@ -411,7 +412,7 @@ public:
 	}
 
 	// returns when read() can read at least one byte
-	virtual Future<Void> onReadable() {
+	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
@@ -420,7 +421,7 @@ public:
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
-	virtual int read( uint8_t* begin, uint8_t* end ) {
+	int read( uint8_t* begin, uint8_t* end ) override {
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end-begin;
@@ -441,7 +442,7 @@ public:
 	}
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	virtual int write( SendBuffer const* data, int limit ) {
+	int write( SendBuffer const* data, int limit ) override {
 		boost::system::error_code err;
 		++g_net2->countWrites;
 
@@ -470,9 +471,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
+	NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() const override { return id; }
+	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 private:
@@ -693,7 +694,7 @@ private:
 	}
 };
 
-class Listener : public IListener, ReferenceCounted<Listener> {
+class Listener final : public IListener, ReferenceCounted<Listener> {
 	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
@@ -705,15 +706,15 @@ public:
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
-	virtual void addref() { ReferenceCounted<Listener>::addref(); }
-	virtual void delref() { ReferenceCounted<Listener>::delref(); }
+	void addref() override { ReferenceCounted<Listener>::addref(); }
+	void delref() override { ReferenceCounted<Listener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	virtual Future<Reference<IConnection>> accept() {
+	Future<Reference<IConnection>> accept() override {
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( Listener* self ) {
@@ -739,9 +740,9 @@ private:
 #ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
-struct SSLHandshakerThread : IThreadPoolReceiver {
+struct SSLHandshakerThread final : IThreadPoolReceiver {
 	SSLHandshakerThread() {}
-	virtual void init() {}
+	void init() override {}
 
 	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
 		Handshake(ssl_socket &socket, ssl_socket::handshake_type type) : socket(socket), type(type) {
@@ -780,12 +781,12 @@ struct SSLHandshakerThread : IThreadPoolReceiver {
 	}
 };
 
-class SSLConnection : public IConnection, ReferenceCounted<SSLConnection> {
+class SSLConnection final : public IConnection, ReferenceCounted<SSLConnection> {
 public:
-	virtual void addref() { ReferenceCounted<SSLConnection>::addref(); }
-	virtual void delref() { ReferenceCounted<SSLConnection>::delref(); }
+	void addref() override { ReferenceCounted<SSLConnection>::addref(); }
+	void delref() override { ReferenceCounted<SSLConnection>::delref(); }
 
-	virtual void close() {
+	void close() override {
 		closeSocket();
 	}
 
@@ -909,7 +910,7 @@ public:
 		}
 	}
 
-	virtual Future<Void> acceptHandshake() { 
+	Future<Void> acceptHandshake() override {
 		return acceptHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
 	}
 
@@ -971,12 +972,12 @@ public:
 		}
 	}
 
-	virtual Future<Void> connectHandshake() { 
+	Future<Void> connectHandshake() override { 
 		return connectHandshakeWrapper( Reference<SSLConnection>::addRef(this) );
 	}
 
 	// returns when write() can write at least one byte
-	virtual Future<Void> onWritable() {
+	Future<Void> onWritable() override {
 		++g_net2->countWriteProbes;
 		BindPromise p("N2_WriteProbeError", id);
 		auto f = p.getFuture();
@@ -985,7 +986,7 @@ public:
 	}
 
 	// returns when read() can read at least one byte
-	virtual Future<Void> onReadable() {
+	Future<Void> onReadable() override {
 		++g_net2->countReadProbes;
 		BindPromise p("N2_ReadProbeError", id);
 		auto f = p.getFuture();
@@ -994,7 +995,7 @@ public:
 	}
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might be 0)
-	virtual int read( uint8_t* begin, uint8_t* end ) {
+	int read( uint8_t* begin, uint8_t* end ) override {
 		boost::system::error_code err;
 		++g_net2->countReads;
 		size_t toRead = end-begin;
@@ -1015,7 +1016,7 @@ public:
 	}
 
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of bytes written (might be 0)
-	virtual int write( SendBuffer const* data, int limit ) {
+	int write( SendBuffer const* data, int limit ) override {
 #ifdef __APPLE__
 		// For some reason, writing ssl_sock with more than 2016 bytes when socket is writeable sometimes results in a broken pipe error.
 		limit = std::min(limit, 2016);
@@ -1048,9 +1049,9 @@ public:
 		return sent;
 	}
 
-	virtual NetworkAddress getPeerAddress() const override { return peer_address; }
+	NetworkAddress getPeerAddress() const override { return peer_address; }
 
-	virtual UID getDebugID() const override { return id; }
+	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() { return socket; }
 
@@ -1088,7 +1089,7 @@ private:
 	}
 };
 
-class SSLListener : public IListener, ReferenceCounted<SSLListener> {
+class SSLListener final : public IListener, ReferenceCounted<SSLListener> {
 	boost::asio::io_context& io_service;
 	NetworkAddress listenAddress;
 	tcp::acceptor acceptor;
@@ -1101,15 +1102,15 @@ public:
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
-	virtual void addref() { ReferenceCounted<SSLListener>::addref(); }
-	virtual void delref() { ReferenceCounted<SSLListener>::delref(); }
+	void addref() override { ReferenceCounted<SSLListener>::addref(); }
+	void delref() override { ReferenceCounted<SSLListener>::delref(); }
 
 	// Returns one incoming connection when it is available
-	virtual Future<Reference<IConnection>> accept() {
+	Future<Reference<IConnection>> accept() override {
 		return doAccept( this );
 	}
 
-	virtual NetworkAddress getListenAddress() const override { return listenAddress; }
+	NetworkAddress getListenAddress() const override { return listenAddress; }
 
 private:
 	ACTOR static Future<Reference<IConnection>> doAccept( SSLListener* self ) {

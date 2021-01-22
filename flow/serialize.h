@@ -357,14 +357,14 @@ public:
 		*(T*)writeBytes(sizeof(T)) = t;
 	}
 	void* getData() { return data; }
-	int getLength() { return size; }
-	Standalone<StringRef> toValue() { return Standalone<StringRef>( StringRef(data,size), arena ); }
+	int getLength() const { return size; }
+	Standalone<StringRef> toValue() const { return Standalone<StringRef>(StringRef(data, size), arena); }
 	template <class VersionOptions>
 	explicit BinaryWriter( VersionOptions vo ) : data(nullptr), size(0), allocated(0) { vo.write(*this); }
 	BinaryWriter( BinaryWriter&& rhs ) : arena(std::move(rhs.arena)), data(rhs.data), size(rhs.size), allocated(rhs.allocated), m_protocolVersion(rhs.m_protocolVersion) {
 		rhs.size = 0;
 		rhs.allocated = 0;
-		rhs.data = 0;
+		rhs.data = nullptr;
 	}
 	void operator=( BinaryWriter&& r) {
 		arena = std::move(r.arena);
@@ -374,7 +374,7 @@ public:
 		m_protocolVersion = r.m_protocolVersion;
 		r.size = 0;
 		r.allocated = 0;
-		r.data = 0;
+		r.data = nullptr;
 	}
 
 	template <class T, class VersionOptions>

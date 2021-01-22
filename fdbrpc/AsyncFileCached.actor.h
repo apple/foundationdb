@@ -142,7 +142,7 @@ struct OpenFileInfo : NonCopyable {
 
 struct AFCPage;
 
-class AsyncFileCached : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
+class AsyncFileCached final : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
 	friend struct AFCPage;
 
 public:
@@ -221,11 +221,11 @@ public:
 
 	std::string getFilename() const override { return filename; }
 
-	virtual void addref() { 
+	void addref() override {
 		ReferenceCounted<AsyncFileCached>::addref(); 
 		//TraceEvent("AsyncFileCachedAddRef").detail("Filename", filename).detail("Refcount", debugGetReferenceCount()).backtrace();
 	}
-	virtual void delref() {
+	void delref() override {
 		if (delref_no_destroy()) {
 			// If this is ever ThreadSafeReferenceCounted...
 			// setrefCountUnsafe(0);
