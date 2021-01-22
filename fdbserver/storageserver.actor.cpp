@@ -2359,7 +2359,6 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					//FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
-						// TODO: Add SevWarnAlways to say it was disabled.
 						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
 
