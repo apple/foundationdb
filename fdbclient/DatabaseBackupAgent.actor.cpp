@@ -1490,6 +1490,12 @@ namespace dbBackup {
 					Version bVersion = wait(srcTr->getReadVersion());
 					beginVersionKey = BinaryWriter::toValue(bVersion, Unversioned());
 
+					state Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
+					Optional<Key> versionRecord = wait( srcTr->get(versionKey) );
+					if(!versionRecord.present()) {
+						srcTr->set(versionKey, beginVersionKey);
+					}
+
 					task->params[BackupAgentBase::destUid] = destUidValue;
 
 					wait(srcTr->commit());
@@ -1524,6 +1530,7 @@ namespace dbBackup {
 					wait(tr->commit());
 					break;
 				} catch (Error &e) {
+					TraceEvent("SetDestUidOrBeginVersionError").error(e, true);
 					wait(tr->onError(e));
 				}
 			}
@@ -1538,9 +1545,6 @@ namespace dbBackup {
 
 					if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyFolderId], Unversioned()))
 						return Void();
-
-					Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
-					srcTr2->set(versionKey, beginVersionKey);
 
 					srcTr2->set( Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceTagName).pack(task->params[BackupAgentBase::keyTagName]), logUidValue );
 					srcTr2->set( sourceStates.pack(DatabaseBackupAgent::keyFolderId), task->params[DatabaseBackupAgent::keyFolderId] );
@@ -1907,7 +1911,7 @@ public:
 		tr->set(backupAgent->config.get(logUidValue).pack(DatabaseBackupAgent::keyConfigLogUid), logUidValue);
 		tr->set(backupAgent->config.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid);
 		tr->set(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid); // written to config and states because it's also used by abort
-		tr->set(backupAgent->config.get(logUidValue).pack(DatabaseBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
+		tr->set(backupAgent->config.get(logUidValue).pack(DatabaseBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion(ProtocolVersion::withDRBackupRanges())));
 		tr->set(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_SUBMITTED)));
 		if (stopWhenDone) {
 			tr->set(backupAgent->config.get(logUidValue).pack(DatabaseBackupAgent::keyConfigStopWhenDoneKey), StringRef());
@@ -1931,7 +1935,7 @@ public:
 		tr->set(mapPrefix, BinaryWriter::toValue<Version>(readVersion, Unversioned()));
 
 		Key taskKey = wait(dbBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, logUidValue, backupUid,
-			addPrefix, removePrefix, BinaryWriter::toValue(backupRanges, IncludeVersion()), tagName, TaskCompletionKey::noSignal(), Reference<TaskFuture>(), databasesInSync));
+			addPrefix, removePrefix, BinaryWriter::toValue(backupRanges, IncludeVersion(ProtocolVersion::withDRBackupRanges())), tagName, TaskCompletionKey::noSignal(), Reference<TaskFuture>(), databasesInSync));
 
 		if (lockDB)
 			wait(lockDatabase(tr, logUid));
@@ -2094,7 +2098,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial, bool abortOldBackup) {
+	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial,
+	                                      bool abortOldBackup, bool dstOnly, bool waitForDestUID) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state Key logUidValue, destUidValue;
 		state UID logUid, destUid;
@@ -2114,13 +2119,18 @@ public:
 				state Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
 				wait(success(statusFuture) && success(destUidFuture));
 
-				UID destUid = destUidFuture.get();
-				if (destUid.isValid()) {
-					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
-				}
 				int status = statusFuture.get();
 				if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 					throw backup_unneeded();
+				}
+				UID destUid = destUidFuture.get();
+				if (destUid.isValid()) {
+					destUidValue = BinaryWriter::toValue(destUid, Unversioned());
+				} else if (destUidValue.size() == 0 && waitForDestUID) {
+					// Give DR task a chance to update destUid to avoid the problem of
+					// leftover version key. If we got an commit_unknown_result before,
+					// reuse the previous destUidValue.
+					throw not_committed();
 				}
 
 				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId)));
@@ -2141,6 +2151,7 @@ public:
 				break;
 			}
 			catch (Error &e) {
+				TraceEvent("DBA_AbortError").error(e, true);
 				wait(tr->onError(e));
 			}
 		}
@@ -2186,67 +2197,68 @@ public:
 			}
 		}
 
-		state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
+		if (! dstOnly) {
+			state Future<Void> partialTimeout = partial ? delay(30.0) : Never();
+			state Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
+			state Version beginVersion;
+			state Version endVersion;
 
-		state Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
-		state Version beginVersion;
-		state Version endVersion;
+			loop {
+				try {
+					srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					state Future<Optional<Value>> backupVersionF = srcTr->get( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId) );
+					wait(success(backupVersionF) || partialTimeout);
+					if(partialTimeout.isReady()) {
+						return Void();
+					}
 
-		loop {
-			try {
-				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Future<Optional<Value>> backupVersionF = srcTr->get( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId) );
-				wait(success(backupVersionF) || partialTimeout);
-				if(partialTimeout.isReady()) {
-					return Void();
-				}
+					if(backupVersionF.get().present() && BinaryReader::fromStringRef<Version>(backupVersionF.get().get(), Unversioned()) > BinaryReader::fromStringRef<Version>(backupUid, Unversioned())) {
+						break;
+					}
 
-				if(backupVersionF.get().present() && BinaryReader::fromStringRef<Version>(backupVersionF.get().get(), Unversioned()) > BinaryReader::fromStringRef<Version>(backupUid, Unversioned())) {
-					break;
-				}
+					if (abortOldBackup) {
+						srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_ABORTED) ));
+						srcTr->set( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid );
+						srcTr->clear(prefixRange(logUidValue.withPrefix(backupLogKeys.begin)));
+						srcTr->clear(prefixRange(logUidValue.withPrefix(logRangesRange.begin)));
+						break;
+					}
 
-				if (abortOldBackup) {
-					srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_ABORTED) ));
+					Key latestVersionKey = logUidValue.withPrefix(destUidValue.withPrefix(backupLatestVersionsPrefix));
+
+					state Future<Optional<Key>> bVersionF = srcTr->get(latestVersionKey);
+					wait(success(bVersionF) || partialTimeout);
+					if(partialTimeout.isReady()) {
+						return Void();
+					}
+
+					if (bVersionF.get().present()) {
+						beginVersion = BinaryReader::fromStringRef<Version>(bVersionF.get().get(), Unversioned());
+					} else {
+						break;
+					}
+
+					srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED) ));
 					srcTr->set( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid );
-					srcTr->clear(prefixRange(logUidValue.withPrefix(backupLogKeys.begin)));
-					srcTr->clear(prefixRange(logUidValue.withPrefix(logRangesRange.begin)));
+
+					wait( eraseLogData(srcTr, logUidValue, destUidValue) || partialTimeout );
+					if(partialTimeout.isReady()) {
+						return Void();
+					}
+
+					wait(srcTr->commit() || partialTimeout);
+					if(partialTimeout.isReady()) {
+						return Void();
+					}
+
+					endVersion = srcTr->getCommittedVersion() + 1;
+
 					break;
 				}
-
-				Key latestVersionKey = logUidValue.withPrefix(destUidValue.withPrefix(backupLatestVersionsPrefix));
-
-				state Future<Optional<Key>> bVersionF = srcTr->get(latestVersionKey);
-				wait(success(bVersionF) || partialTimeout);
-				if(partialTimeout.isReady()) {
-					return Void();
+				catch (Error &e) {
+					wait(srcTr->onError(e));
 				}
-
-				if (bVersionF.get().present()) {
-					beginVersion = BinaryReader::fromStringRef<Version>(bVersionF.get().get(), Unversioned());
-				} else {
-					break;
-				}
-
-				srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED) ));
-				srcTr->set( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid );
-				
-				wait( eraseLogData(srcTr, logUidValue, destUidValue) || partialTimeout );
-				if(partialTimeout.isReady()) {
-					return Void();
-				}
-
-				wait(srcTr->commit() || partialTimeout);
-				if(partialTimeout.isReady()) {
-					return Void();
-				}
-				
-				endVersion = srcTr->getCommittedVersion() + 1;
-
-				break;
-			}
-			catch (Error &e) {
-				wait(srcTr->onError(e));
 			}
 		}
 
@@ -2448,8 +2460,9 @@ Future<Void> DatabaseBackupAgent::discontinueBackup(Reference<ReadYourWritesTran
 	return DatabaseBackupAgentImpl::discontinueBackup(this, tr, tagName);
 }
 
-Future<Void> DatabaseBackupAgent::abortBackup(Database cx, Key tagName, bool partial, bool abortOldBackup){
-	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup);
+Future<Void> DatabaseBackupAgent::abortBackup(Database cx, Key tagName, bool partial, bool abortOldBackup, bool dstOnly,
+                                              bool waitForDestUID) {
+	return DatabaseBackupAgentImpl::abortBackup(this, cx, tagName, partial, abortOldBackup, dstOnly, waitForDestUID);
 }
 
 Future<std::string> DatabaseBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {

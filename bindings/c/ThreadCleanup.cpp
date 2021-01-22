@@ -34,6 +34,10 @@ BOOL WINAPI DllMain( HINSTANCE dll, DWORD reason, LPVOID reserved ) {
 
 #elif defined( __unixish__ )
 
+#ifdef __INTEL_COMPILER
+#pragma warning ( disable:2415 )
+#endif
+
 static pthread_key_t threadDestructorKey;
 
 static void threadDestructor(void*) {

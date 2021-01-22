@@ -79,4 +79,41 @@ TEST_CASE("/flow/Deque/max_size") {
 	return Void();
 }
 
+struct RandomlyThrows {
+	int data = 0;
+	RandomlyThrows() = default;
+	explicit RandomlyThrows(int data) : data(data) {}
+	~RandomlyThrows() = default;
+	RandomlyThrows(const RandomlyThrows& other) : data(other.data) { randomlyThrow(); }
+	RandomlyThrows& operator=(const RandomlyThrows& other) {
+		data = other.data;
+		randomlyThrow();
+		return *this;
+	}
+
+private:
+	void randomlyThrow() {
+		if (deterministicRandom()->random01() < 0.1) {
+			throw success();
+		}
+	}
+};
+
+TEST_CASE("/flow/Deque/grow_exception_safety") {
+	Deque<RandomlyThrows> q;
+	for (int i = 0; i < 100; ++i) {
+		loop {
+			try {
+				q.push_back(RandomlyThrows{ i });
+				break;
+			} catch (Error& e) {
+			}
+		}
+	}
+	for (int i = 0; i < 100; ++i) {
+		ASSERT(q[i].data == i);
+	}
+	return Void();
+}
+
 void forceLinkDequeTests() {}

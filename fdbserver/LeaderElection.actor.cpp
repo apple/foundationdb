@@ -20,7 +20,6 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -85,7 +84,10 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators, Valu
 	state UID prevChangeID;
 
 
-	if(asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad || asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote || asyncPriorityInfo->get().isExcluded) {
+	if(asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad ||
+	   asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote ||
+	   asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessNotPreferred ||
+	   asyncPriorityInfo->get().isExcluded) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) );
 	} else if( asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit ) {
 		wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );

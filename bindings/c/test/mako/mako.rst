@@ -1,27 +1,27 @@
 ##############
-mako Benchmark
+🦈 Mako Benchmark
 ##############
 
-| mako (named after a small, but very fast shark) is a micro-benchmark for FoundationDB
+| Mako (named after a very fast shark) is a micro-benchmark for FoundationDB
 | which is designed to be very light and flexible
 | so that you can stress a particular part of an FoundationDB cluster without introducing unnecessary overhead.
 
 
 How to Build
 ============
-| ``mako`` gets build automatically when you build FoundationDB.
+| ``mako`` gets built automatically when you build FoundationDB.
 | To build ``mako`` manually, simply build ``mako`` target in the FoundationDB build directory.
-| e.g. If you're using Unix Makefiles
+| e.g. If you're using Unix Makefiles, type:
 | ``make mako``
 
 
 Architecture
 ============
 - mako is a stand-alone program written in C,
-  which communicates to FoundationDB using C binding API (``libfdb_c.so``)
-- It creates one master process, and one or more worker processes (multi-process)
-- Each worker process creates one or more multiple threads (multi-thread)
-- All threads within the same process share the same network thread
+  which communicates to FoundationDB using C API (via ``libfdb_c.so``)
+- It creates one master process, one stats emitter process, and one or more worker processes (multi-process)
+- Each worker process creates one FDB network thread, and one or more worker threads (multi-thread)
+- All worker threads within the same process share the same network thread
 
 
 Data Specification
@@ -32,7 +32,7 @@ Data Specification
 
 Arguments
 =========
-- | ``--mode <mode>``
+- | ``-m | --mode <mode>``
   | One of the following modes must be specified.  (Required)
   | - ``clean``:  Clean up existing data
   | - ``build``:  Populate data
@@ -41,6 +41,9 @@ Arguments
 - | ``-c | --cluster <cluster file>``
   | FDB cluster file (Required)
 
+- | ``-a | --api_version <api_version>``
+  | FDB API version to use (Default: Latest)
+
 - | ``-p | --procs <procs>``
   | Number of worker processes (Default: 1)
 
@@ -48,7 +51,7 @@ Arguments
   | Number of threads per worker process (Default: 1)
 
 - | ``-r | --rows <rows>``
-  | Number of rows populated (Default: 10000)
+  | Number of rows initially populated (Default: 100000)
 
 - | ``-s | --seconds <seconds>``
   | Test duration in seconds (Default: 30)
@@ -58,12 +61,23 @@ Arguments
   | Specify the number of operations to be executed.
   | This option cannot be set with ``--seconds``.
 
-- | ``--tps <tps>``
-  | Target total transaction-per-second (TPS) of all worker processes/threads
+- | ``--tps|--tpsmax <tps>``
+  | Target total transaction-per-second (TPS) of all worker processes/threads.
+  | When --tpsmin is also specified, this defines the upper-bound TPS.
   | (Default: Unset / Unthrottled)
 
+- | ``--tpsmin <tps>``
+  | Target total lower-bound TPS of all worker processes/threads
+  | (Default: Unset / Unthrottled)
+
+- | ``--tpsinterval <seconds>``
+  | Time period TPS oscillates between --tpsmax and --tpsmin (Default: 10)
+
+- | ``--tpschange <sin|square|pulse>``
+  | Shape of the TPS change (Default: sin)
+
 - | ``--keylen <num>``
-  | Key string length in bytes (Default and Minimum: 16)
+  | Key string length in bytes (Default and Minimum: 32)
 
 - | ``--vallen <num>``
   | Value string length in bytes (Default and Minimum: 16)
@@ -75,22 +89,19 @@ Arguments
   | Generate a skewed workload based on Zipf distribution (Default: Unset = Uniform)
 
 - | ``--sampling <num>``
-  | Sampling rate (1 sample / <num> ops) for latency stats
+  | Sampling rate (1 sample / <num> ops) for latency stats (Default: 1000)
 
 - | ``--trace``
-  | Enable tracing.  The trace file will be created in the current directory.
+  | Enable tracing.  The trace file will be created in the current directory.  (Default: Unset)
 
 - | ``--tracepath <path>``
   | Enable tracing and set the trace file path.
 
 - | ``--knobs <knobs>``
-  | Set client knobs
-
-- | ``--flatbuffers``
-  | Enable flatbuffers
+  | Set client knobs (comma-separated)
 
 - | ``--commitget``
-  | Force commit for read-only transactions
+  | Force commit for read-only transactions (Default: Unset)
 
 - | ``-v | --verbose <level>``
   | Set verbose level (Default: 1)
@@ -102,10 +113,10 @@ Arguments
 
 Transaction Specification
 =========================
-| A transaction may contain multiple operations of multiple types.
+| A transaction may contain multiple operations of various types.
 | You can specify multiple operations for one operation type by specifying "Count".
-| For RANGE operations, "Range" needs to be specified in addition to "Count".
-| Every transaction is committed unless it contains only GET / GET RANGE operations.
+| For RANGE operations, the "Range" needs to be specified in addition to "Count".
+| Every transaction is committed unless the transaction is read-only.
 
 Operation Types
 ---------------
@@ -126,21 +137,22 @@ Format
 ------
 | One operation type is defined as ``<Type><Count>`` or ``<Type><Count>:<Range>``.
 | When Count is omitted, it's equivalent to setting it to 1.  (e.g. ``g`` is equivalent to ``g1``)
-| Multiple operation types can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
+| Multiple operation types within the same trancaction can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
 
 Transaction Specification Examples
 ----------------------------------
-- | 100 GETs (No Commit)
+- | 100 GETs (Non-commited)
   | ``g100``
 
-- | 10 GET RANGE with Range of 50 (No Commit)
+- | 10 GET RANGE with Range of 50 (Non-commited)
   | ``gr10:50``
 
 - | 90 GETs and 10 Updates (Committed)
   | ``g90u10``
 
-- | 80 GETs, 10 Updates and 10 Inserts (Committed)
-  | ``g90u10i10``
+- | 70 GETs, 10 Updates and 10 Inserts (Committed)
+  | ``g70u10i10``
+  | This is 80-20.
 
 
 Execution Examples
@@ -149,12 +161,14 @@ Execution Examples
 Preparation
 -----------
 - Start the FoundationDB cluster and create a database
-- Set LD_LIBRARY_PATH pointing to a proper ``libfdb_c.so``
+- Set ``LD_LIBRARY_PATH`` environment variable pointing to a proper ``libfdb_c.so`` shared library
 
-Build
------
+Populate Initial Database
+-------------------------
 ``mako --cluster /etc/foundationdb/fdb.cluster --mode build --rows 1000000 --procs 4``
+Note: You may be able to speed up the data population by increasing the number of processes or threads.
 
 Run
 ---
+Run a mixed workload with a total of 8 threads for 60 seconds, keeping the throughput limited to 1000 TPS.
 ``mako --cluster /etc/foundationdb/fdb.cluster --mode run --rows 1000000 --procs 2 --threads 8 --transaction "g8ui" --seconds 60 --tps 1000``

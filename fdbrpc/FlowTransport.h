@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include "fdbrpc/HealthMonitor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/FileIdentifier.h"
@@ -45,9 +46,11 @@ public:
 	}
 
 	void choosePrimaryAddress() {
-		if(addresses.secondaryAddress.present() && !g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) {
+		if(addresses.secondaryAddress.present() && 
+		((!g_network->getLocalAddresses().secondaryAddress.present() && (addresses.address.isTLS() != g_network->getLocalAddresses().address.isTLS())) ||
+		(g_network->getLocalAddresses().secondaryAddress.present() && !addresses.address.isTLS()))) {
 			std::swap(addresses.address, addresses.secondaryAddress.get());
-		}	
+		}
 	}
 
 	bool isValid() const { return token.isValid(); }
@@ -59,20 +62,24 @@ public:
 		return addresses.address;
 	}
 
+	NetworkAddress getStableAddress() const {
+		return addresses.getTLSAddress();
+	}
+
+	Endpoint getAdjustedEndpoint( uint32_t index ) {
+		uint32_t newIndex = token.second();
+		newIndex += index;
+		return Endpoint( addresses, UID(token.first()+(uint64_t(index)<<32), (token.second()&0xffffffff00000000LL) | newIndex) );
+	}
+
 	bool operator == (Endpoint const& r) const {
-		return getPrimaryAddress() == r.getPrimaryAddress() && token == r.token;
+		return token == r.token && getPrimaryAddress() == r.getPrimaryAddress();
 	}
 	bool operator != (Endpoint const& r) const {
 		return !(*this == r);
 	}
-
 	bool operator < (Endpoint const& r) const {
-		const NetworkAddress& left = getPrimaryAddress();
-		const NetworkAddress& right = r.getPrimaryAddress();
-		if (left != right)
-			return left < right;
-		else
-			return token < r.token;
+		return addresses.address < r.addresses.address || (addresses.address == r.addresses.address && token < r.token);
 	}
 
 	template <class Ar>
@@ -97,10 +104,21 @@ public:
 };
 #pragma pack(pop)
 
+namespace std
+{
+	template <>
+	struct hash<Endpoint>
+	{
+		size_t operator()(const Endpoint& ep) const
+		{
+			return  ep.token.hash() + ep.addresses.address.hash();
+		}
+	};
+}
+
 class ArenaObjectReader;
 class NetworkMessageReceiver {
 public:
-	virtual void receive( ArenaReader& ) = 0;
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
 };
@@ -130,20 +148,13 @@ struct Peer : public ReferenceCounted<Peer> {
 	double lastLoggedTime;
 	int64_t lastLoggedBytesReceived;
 	int64_t lastLoggedBytesSent;
-
 	// Cleared every time stats are logged for this peer.
 	int connectOutgoingCount;
 	int connectIncomingCount;
 	int connectFailedCount;
 	ContinuousSample<double> connectLatencies;
 
-	explicit Peer(TransportData* transport, NetworkAddress const& destination)
-	  : transport(transport), destination(destination), outgoingConnectionIdle(true), lastConnectTime(0.0),
-	    reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), outstandingReplies(0),
-	    incompatibleProtocolVersionNewer(false), peerReferences(-1), bytesReceived(0), lastDataPacketSentTime(now()),
-	    pingLatencies(destination.isPublic() ? FLOW_KNOBS->PING_SAMPLE_AMOUNT : 1), lastLoggedBytesReceived(0),
-	    bytesSent(0), lastLoggedBytesSent(0), lastLoggedTime(0.0), connectOutgoingCount(0), connectIncomingCount(0),
-	    connectFailedCount(0), connectLatencies(destination.isPublic() ? FLOW_KNOBS->NETWORK_CONNECT_SAMPLE_AMOUNT : 1) {}
+	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
 	void send(PacketBuffer* pb, ReliablePacket* rp, bool firstUnsent);
 
@@ -181,6 +192,9 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
+	Future<Void> onIncompatibleChanged();
+	// Returns when getIncompatiblePeers has at least one peer which is incompatible.
+
 	void addPeerReference(const Endpoint&, bool isStream);
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
 
@@ -189,6 +203,8 @@ public:
 
 	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
+
+	void addEndpoints( std::vector<std::pair<struct FlowReceiver*, TaskPriority>> const& streams );
 
 	void removeEndpoint( const Endpoint&, NetworkMessageReceiver* );
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
@@ -214,9 +230,6 @@ public:
 
 	Reference<Peer> sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection );// { cancelReliable(sendReliable(what,destination)); }
 
-	int getEndpointCount();
-	// for tracing only
-
 	bool incompatibleOutgoingConnectionsPresent();
 
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
@@ -224,6 +237,8 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+
+	HealthMonitor* healthMonitor();
 
 private:
 	class TransportData* self;

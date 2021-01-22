@@ -93,7 +93,9 @@ Future<Void> ApiWorkload::start(Database const& cx) {
 void ApiWorkload::testFailure(std::string reason)
 {
 	printf("test failure on client %d: %s\n", clientPrefixInt, reason.c_str());
-	TraceEvent(SevError, "TestFailure").detail("Reason", description() + reason).detail("Workload", "ApiCorrectness");
+	TraceEvent(SevError, "TestFailure")
+	    .detail("Reason", description() + " " + reason)
+	    .detail("Workload", "ApiCorrectness");
 	success = false;
 }
 

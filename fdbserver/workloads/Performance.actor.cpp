@@ -22,7 +22,6 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ClusterRecruitmentInterface.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PerformanceWorkload : TestWorkload {

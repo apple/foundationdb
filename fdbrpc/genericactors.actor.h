@@ -75,7 +75,7 @@ Future<T> timeoutWarning( Future<T> what, double time, PromiseStream<Void> outpu
 		when ( T t = wait( what ) ) { return t; }
 		when ( wait( end ) ) {
 			output.send( Void() );
-			end = delay( time ); 
+			end = delay(time);
 		}
 	}
 }
@@ -149,6 +149,32 @@ ACTOR template <class T> Future<Void> incrementalBroadcast( Future<T> input, std
 	return Void();
 }
 
+ACTOR template <class T>
+Future<Void> incrementalBroadcastWithError(Future<T> input, std::vector<Promise<T>> output, int batchSize) {
+	state int i = 0;
+	try {
+		state T value = wait(input);
+		for (; i < output.size(); i++) {
+			output[i].send(value);
+			if ((i + 1) % batchSize == 0) {
+				wait(delay(0));
+			}
+		}
+	} catch (Error& _e) {
+		if (_e.code() == error_code_operation_cancelled) {
+			throw _e;
+		}
+		state Error e = _e;
+		for (; i < output.size(); i++) {
+			output[i].sendError(e);
+			if ((i + 1) % batchSize == 0) {
+				wait(delay(0));
+			}
+		}
+	}
+	return Void();
+}
+
 // Needed for the call to endpointNotFound()
 #include "fdbrpc/FailureMonitor.h"
 
@@ -173,12 +199,8 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 	loop {
 		try {
 			choose {
-				when ( X x = wait(value) ) {
-					return x; 
-				}
-				when ( wait(signal) ) {
-					return ErrorOr<X>(request_maybe_delivered()); 
-				}
+				when(X x = wait(value)) { return x; }
+				when(wait(signal)) { return ErrorOr<X>(request_maybe_delivered()); }
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
@@ -192,9 +214,9 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 			// broken_promise error normally means an endpoint failure, which in tryGetReply has the same semantics as receiving the failure signal
 			if (e.code() != error_code_broken_promise || signal.isError())
 				return ErrorOr<X>(e);
-			
+
 			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
-			value = Never();	
+			value = Never();
 		}
 	}
 }
@@ -216,9 +238,9 @@ Future<T> sendCanceler( ReplyPromise<T> reply, ReliablePacket* send, Endpoint en
 
 ACTOR template <class X>
 Future<X> reportEndpointFailure( Future<X> value, Endpoint endpoint ) {
-	try { 
+	try {
 		X x = wait(value);
-		return x; 
+		return x;
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise) {
 			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );

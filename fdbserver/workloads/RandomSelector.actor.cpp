@@ -288,7 +288,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						myValue = format("%d", deterministicRandom()->randomInt( 0, 10000000 ) );
 						//TraceEvent("RYOWor").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Or);
-								
+
 						loop {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
@@ -311,7 +311,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						myValue = format("%d", deterministicRandom()->randomInt( 0, 10000000 ) );
 						//TraceEvent("RYOWxor").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Xor);
-								
+
 						loop {
 							try {
 								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());

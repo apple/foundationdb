@@ -283,6 +283,8 @@ def run_simulation_test(basedir, options):
     if options.buggify:
         pargs.append('-b')
         pargs.append('on')
+    if options.crash:
+        pargs.append('--crash')
     pargs.append('--trace_format')
     pargs.append(options.log_format)
     test_dir = td.get_current_test_dir()
@@ -384,6 +386,8 @@ if __name__ == '__main__':
                         help='Path to the old binary to use for upgrade tests')
     parser.add_argument('-S', '--symbolicate', action='store_true', default=False,
                         help='Symbolicate backtraces in trace events')
+    parser.add_argument('--crash', action='store_true', default=False,
+                        help='Test ASSERT failures should crash the test')
     parser.add_argument('--aggregate-traces', default='NONE',
                         choices=['NONE', 'FAILED', 'ALL'])
     parser.add_argument('--keep-logs', default='FAILED',

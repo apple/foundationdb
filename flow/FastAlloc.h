@@ -25,7 +25,7 @@
 #include "flow/Error.h"
 #include "flow/Platform.h"
 
-// ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by scripts/alloc.pl
+// ALLOC_INSTRUMENTATION_STDOUT enables non-sampled logging of all allocations and deallocations to stdout to be processed by tools/alloc_instrumentation.py
 //#define ALLOC_INSTRUMENTATION_STDOUT ENABLED(NOT_IN_CLEAN)
 
 //#define ALLOC_INSTRUMENTATION ENABLED(NOT_IN_CLEAN)
@@ -104,7 +104,7 @@ void recordDeallocation( void *ptr );
 template <int Size>
 class FastAllocator {
 public:
-	static void* allocate();
+	[[nodiscard]] static void* allocate();
 	static void release(void* ptr);
 	static void check( void* ptr, bool alloc );
 
@@ -133,7 +133,7 @@ private:
 	};
 	static thread_local ThreadData threadData;
 	static thread_local bool threadInitialized;
-	static GlobalData* globalData() {
+	static GlobalData* globalData() noexcept {
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
 #endif
@@ -149,7 +149,7 @@ private:
 
 	FastAllocator();  // not implemented
 	static void initThread();
-	static void getMagazine();   
+	static void getMagazine();
 	static void releaseMagazine(void*);
 };
 
@@ -188,7 +188,7 @@ inline constexpr int nextFastAllocatedSize(int x) {
 template <class Object>
 class FastAllocated {
 public:
-	static void* operator new(size_t s) {
+	[[nodiscard]] static void* operator new(size_t s) {
 		if (s != sizeof(Object)) abort();
 		INSTRUMENT_ALLOCATE(typeid(Object).name());
 		void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
@@ -204,7 +204,7 @@ public:
 	static void operator delete( void*, void* ) { }
 };
 
-static void* allocateFast(int size) {
+[[nodiscard]] inline void* allocateFast(int size) {
 	if (size <= 16) return FastAllocator<16>::allocate();
 	if (size <= 32) return FastAllocator<32>::allocate();
 	if (size <= 64) return FastAllocator<64>::allocate();
@@ -216,10 +216,11 @@ static void* allocateFast(int size) {
 	if (size <= 2048) return FastAllocator<2048>::allocate();
 	if (size <= 4096) return FastAllocator<4096>::allocate();
 	if (size <= 8192) return FastAllocator<8192>::allocate();
+	if (size <= 16384) return FastAllocator<16384>::allocate();
 	return new uint8_t[size];
 }
 
-static void freeFast(int size, void* ptr) {
+inline void freeFast(int size, void* ptr) {
 	if (size <= 16) return FastAllocator<16>::release(ptr);
 	if (size <= 32) return FastAllocator<32>::release(ptr);
 	if (size <= 64) return FastAllocator<64>::release(ptr);
@@ -231,6 +232,7 @@ static void freeFast(int size, void* ptr) {
 	if (size <= 2048) return FastAllocator<2048>::release(ptr);
 	if (size <= 4096) return FastAllocator<4096>::release(ptr);
 	if (size <= 8192) return FastAllocator<8192>::release(ptr);
+	if (size <= 16384) return FastAllocator<16384>::release(ptr);
 	delete[](uint8_t*)ptr;
 }
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python -B
+#!/usr/bin/env python3
 #
 # make_public.py
 #
@@ -25,13 +25,12 @@ import platform
 import socket
 import sys
 import re
-import random
 import errno
 import subprocess
 import os
 
 def invalidClusterFile(clusterFile):
-    print 'ERROR: \'%s\' is not a valid cluster file' % clusterFile
+    print('ERROR: \'%s\' is not a valid cluster file' % clusterFile)
     sys.exit(1)
 
 def getOrValidateAddress(address):
@@ -41,7 +40,7 @@ def getOrValidateAddress(address):
             s.connect(('www.foundationdb.org', 80))
             return s.getsockname()[0]
         except Exception as e:
-            print 'ERROR: Could not determine an address'
+            print('ERROR: Could not determine an address')
             exit(1)
     else:
         try:
@@ -53,7 +52,7 @@ def getOrValidateAddress(address):
             if e.errno == errno.EADDRINUSE:
                 return address
             else:
-                print 'ERROR: Address %s could not be bound' % address
+                print('ERROR: Address %s could not be bound' % address)
                 exit(1)
 
 def makePublic(clusterFile, newAddress, makeTLS):
@@ -75,7 +74,7 @@ def makePublic(clusterFile, newAddress, makeTLS):
     if not re.match('^[a-zA-Z0-9_]*:[a-zA-Z0-9]*@([0-9\\.]*:[0-9]*(:tls)?,)*[0-9\\.]*:[0-9]*(:tls)?$', clusterStr):
         invalidClusterFile(clusterFile)
     if not re.match('^.*@(127\\.0\\.0\\.1:[0-9]*(:tls)?,)*127\\.0\\.0\\.1:[0-9]*(:tls)?$', clusterStr):
-        print 'ERROR: Cannot modify cluster file whose coordinators are not at address 127.0.0.1'
+        print('ERROR: Cannot modify cluster file whose coordinators are not at address 127.0.0.1')
         sys.exit(1)
 
     f.close()
@@ -98,7 +97,7 @@ def restartServer():
 if __name__ == '__main__':
 
     if platform.system() != 'Linux':
-        print 'ERROR: this script can only be run on Linux'
+        print('ERROR: this script can only be run on Linux')
         sys.exit(1)
 
     parser = argparse.ArgumentParser(description='Converts a cluster with a local address to one with a public address')
@@ -113,10 +112,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if os.geteuid() != 0:
-        print 'ERROR: this script must be run as root'
+        print('ERROR: this script must be run as root')
         sys.exit(1)
 
     address, hasTLS = makePublic(args.clusterFile, args.address, args.tls)
     restartServer()
 
-    print '%s is now using address %s%s' % (args.clusterFile, address, " (TLS enabled)" if hasTLS else "")
+    print('%s is now using address %s%s' % (args.clusterFile, address, " (TLS enabled)" if hasTLS else ""))

@@ -105,7 +105,7 @@ Status: Standard (float and double) ; Reserved (long double)
 The binary representation should not be assumed to be canonicalized (as to multiple representations of NaN, for example) by a reader. This order sorts all numbers in the following way:
 
 * All negative NaN values with order determined by mantissa bits (which are semantically meaningless)
-* Negative inifinity
+* Negative infinity
 * All real numbers in the standard order (except that -0.0 < 0.0)
 * Positive infinity
 * All positive NaN values with order determined by mantissa bits

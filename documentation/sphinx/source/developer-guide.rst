@@ -53,8 +53,6 @@
 .. |timeout-database-option| replace:: FIXME
 .. |causal-read-risky-database-option| replace:: FIXME
 .. |causal-read-risky-transaction-option| replace:: FIXME
-.. |include-port-in-address-database-option| replace:: FIXME
-.. |include-port-in-address-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-transaction-option| replace:: FIXME
 .. |transaction-logging-max-field-length-database-option| replace:: FIXME
 
@@ -373,7 +371,7 @@ An additional important property, though technically not part of ACID, is also g
 
 FoundationDB implements these properties using multiversion concurrency control (MVCC) for reads and optimistic concurrency for writes. As a result, neither reads nor writes are blocked by other readers or writers. Instead, conflicting transactions will fail at commit time and will usually be retried by the client.
 
-In particular, the reads in a transaction take place from an instantaneous snapshot of the database. From the perspective of the transaction this snapshot is not modified by the writes of other, concurrent transactions. When the transaction is ready to be committed, the FoundationDB cluster checks that it does not conflict with any previously committed transaction (i.e. that no value read by a transaction has been modified by another transaction since the read occurred) and, if it does conflict, rejects it. Rejected conflicting transactions are usually retried by the client. Accepted transactions are written to disk on multiple cluster nodes and then reported accepted to the client.
+In particular, the reads in a transaction take place from an instantaneous snapshot of the database. From the perspective of the transaction this snapshot is not modified by the writes of other, concurrent transactions. When the read-write transaction is ready to be committed (read-only transactions don't get committed and therefore never conflict), the FoundationDB cluster checks that it does not conflict with any previously committed transaction (i.e. that no value read by a transaction has been modified by another transaction since the read occurred) and, if it does conflict, rejects it. Rejected conflicting transactions are usually retried by the client. Accepted transactions are written to disk on multiple cluster nodes and then reported accepted to the client.
 
 * For more background on transactions, see Wikipedia articles for `Database transaction <http://en.wikipedia.org/wiki/Database_transaction>`_, `Atomicity (database systems) <http://en.wikipedia.org/wiki/Atomicity_(database_systems)>`_, and `Concurrency Control <http://en.wikipedia.org/wiki/Concurrency_control>`_.
 
@@ -471,7 +469,6 @@ In some situations, you may want to explicitly control the number of key-value p
 
   LIMIT = 100 # adjust according to data characteristics
 
-  @fdb.transactional
   def get_range_limited(tr, begin, end):
       keys_found = True
       while keys_found:
@@ -759,6 +756,162 @@ If you only need to detect the *fact* of a change, and your response doesn't dep
 
 .. _developer-guide-peformance-considerations:
 
+
+Special keys
+============
+
+Keys starting with the bytes ``\xff\xff`` are called "special" keys, and they are materialized when read. :doc:`\\xff\\xff/status/json <mr-status>` is an example of a special key.
+As of api version 630, additional features have been exposed as special keys and are available to read as ranges instead of just individual keys. Additionally, the special keys are now organized into "modules".
+
+Modules
+-------
+
+A module is loosely defined as a key range in the special key space where a user can expect similar behavior from reading any key in that range.
+By default, users will see a ``special_keys_no_module_found`` error if they read from a range not contained in a module.
+The error indicates the read would always return an empty set of keys if it proceeded. This could be caused by typo in the keys to read.
+Users will also (by default) see a ``special_keys_cross_module_read`` error if their read spans a module boundary.
+The error is to save the user from the surprise of seeing the behavior of multiple modules in the same read.
+Users may opt out of these restrictions by setting the ``special_key_space_relaxed`` transaction option.
+
+Each special key that existed before api version 630 is its own module. These are
+
+#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/cluster_file_path`` See :ref:`cluster file client access <cluster-file-client-access>`
+#. ``\xff\xff/status/json`` See :doc:`Machine-readable status <mr-status>`
+
+Prior to api version 630, it was also possible to read a range starting at
+``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
+but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
+
+Api version 630 includes two new modules with prefixes
+``\xff\xff/transaction/`` (information about the current transaction), and
+``\xff\xff/metrics/`` (various metrics, not transactional).
+
+Transaction module
+------------------
+
+Reads from the transaction module generally do not require an rpc and only inspect in-memory state for the current transaction.
+
+There are three sets of keys exposed by the transaction module, and each set uses the same encoding, so let's first describe that encoding.
+
+Let's say we have a set of keys represented as intervals of the form ``begin1 <= k < end1 && begin2 <= k < end2 && ...``.
+It could be the case that some of the intervals overlap, e.g. if ``begin1 <= begin2 < end1``, or are adjacent, e.g. if ``end1 == begin2``.
+If we merge all overlapping/adjacent intervals then sort, we end up with a canonical representation of this set of keys.
+
+We encode this canonical set as ordered key value pairs like this::
+
+  <namespace><begin1> -> "1"
+  <namespace><end1> -> "0"
+  <namespace><begin2> -> "1"
+  <namespace><end2> -> "0"
+  ...
+
+Python example::
+
+  >>> tr = db.create_transaction()
+  >>> tr.add_read_conflict_key('foo')
+  >>> tr.add_read_conflict_range('bar/', 'bar0')
+  >>> for k, v in tr.get_range_startswith('\xff\xff/transaction/read_conflict_range/'):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/transaction/read_conflict_range/bar/', '1')
+  ('\xff\xff/transaction/read_conflict_range/bar0', '0')
+  ('\xff\xff/transaction/read_conflict_range/foo', '1')
+  ('\xff\xff/transaction/read_conflict_range/foo\x00', '0')
+
+For read-your-writes transactions, this canonical encoding of conflict ranges
+is already available in memory, and so requesting small ranges is
+correspondingly cheaper than large ranges.
+
+For transactions with read-your-writes disabled, this canonical encoding is computed on
+every read, so you're paying the full cost in CPU time whether or not you
+request a small range.
+
+The namespaces for sets of keys are
+
+#. ``\xff\xff/transaction/read_conflict_range/`` This is the set of keys that will be used for read conflict detection. If another transaction writes to any of these keys after this transaction's read version, then this transaction won't commit.
+#. ``\xff\xff/transaction/write_conflict_range/`` This is the set of keys that will be used for write conflict detection. Keys in this range may cause other transactions which read these keys to abort if this transaction commits.
+#. ``\xff\xff/transaction/conflicting_keys/`` If this transaction failed due to a conflict, it must be the case that some transaction attempted [#conflicting_keys]_ to commit with a write conflict range that intersects this transaction's read conflict range. This is the subset of your read conflict range that actually intersected a write conflict from another transaction.
+
+Caveats
+~~~~~~~
+
+#. ``\xff\xff/transaction/read_conflict_range/`` The conflict range for a read is sometimes not known until that read completes (e.g. range reads with limits, key selectors). When you read from these special keys, the returned future first blocks until all pending reads are complete so it can give an accurate response.
+#. ``\xff\xff/transaction/write_conflict_range/`` The conflict range range for a ``set_versionstamped_key`` atomic op is not known until commit time. You'll get an approximate range (the actual range will be a subset of the approximate range) until the precise range is known.
+#. ``\xff\xff/transaction/conflicting_keys/`` Since using this feature costs server (i.e., proxy and resolver) resources, it's disabled by default. You must opt in by setting the ``report_conflicting_keys`` transaction option.
+
+Metrics module
+--------------
+
+Reads in the metrics module are not transactional and may require rpcs to complete.
+
+``\xff\xff/metrics/data_distribution_stats/<begin>`` represent stats about the shard that begins at ``<begin>``
+
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/data_distribution_stats/', limit=3):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/metrics/data_distribution_stats/', '{"shard_bytes":3828000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00079', '{"shard_bytes":2013000}')
+  ('\xff\xff/metrics/data_distribution_stats/mako00126', '{"shard_bytes":3201000}')
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+shard_bytes               number   An estimate of the sum of kv sizes for this shard.
+========================= ======== ===============
+
+Keys starting with ``\xff\xff/metrics/health/`` represent stats about the health of the cluster, suitable for application-level throttling.
+Some of this information is also available in ``\xff\xff/status/json``, but these keys are significantly cheaper (in terms of server resources) to read.
+
+  >>> for k, v in db.get_range_startswith('\xff\xff/metrics/health/'):
+  ...     print(k, v)
+  ...
+  ('\xff\xff/metrics/health/aggregate', '{"batch_limited":false,"tps_limit":483988.66315011407,"worst_storage_durability_lag":5000001,"worst_storage_queue":2036,"worst_log_queue":300}')
+  ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"log_queue":300}')
+  ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpu_usage":2.398696781487125,"disk_usage":0.059995917598039405,"storage_durability_lag":5000001,"storage_queue":2036}')
+
+``\xff\xff/metrics/health/aggregate``
+
+Aggregate stats about cluster health. Reading this key alone is slightly cheaper than reading any of the per-process keys.
+
+============================ ======== ===============
+**Field**                    **Type** **Description**
+---------------------------- -------- ---------------
+batch_limited                boolean  Whether or not the cluster is limiting batch priority transactions
+tps_limit                    number   The rate at which normal priority transactions are allowed to start
+worst_storage_durability_lag number   See the description for storage_durability_lag
+worst_storage_queue          number   See the description for storage_queue
+worst_log_queue              number   See the description for log_queue
+============================ ======== ===============
+
+``\xff\xff/metrics/health/log/<id>``
+
+Stats about the health of a particular transaction log process
+
+========================= ======== ===============
+**Field**                 **Type** **Description**
+------------------------- -------- ---------------
+log_queue                 number   The number of bytes of mutations that need to be stored in memory on this transaction log process
+========================= ======== ===============
+
+``\xff\xff/metrics/health/storage/<id>``
+
+Stats about the health of a particular storage process
+
+========================== ======== ===============
+**Field**                  **Type** **Description**
+-------------------------- -------- ---------------
+cpu_usage                  number   The cpu percentage used by this storage process
+disk_usage                 number   The disk IO percentage used by this storage process
+storage_durability_lag     number   The difference between the newest version and the durable version on this storage process. On a lightly loaded cluster this will stay just above 5000000 [#max_read_transaction_life_versions]_.
+storage_queue              number   The number of bytes of mutations that need to be stored in memory on this storage process
+========================== ======== ===============
+
+Caveats
+~~~~~~~
+
+#. ``\xff\xff/metrics/health/`` These keys may return data that's several seconds old, and the data may not be available for a brief period during recovery. This will be indicated by the keys being absent.
+
 Performance considerations
 ==========================
 
@@ -825,3 +978,139 @@ Loading data is a common task in any database. Loading data in FoundationDB will
 * Use multiple processes loading in parallel if a single one is CPU-bound.
 
 Using these techniques, our cluster of 24 nodes and 48 SSDs loads about 3 billion (100 byte) key-value pairs per hour.
+
+Implementation Details
+======================
+
+These following sections go into some of the gritty details of FoundationDB. Most users don't need to read or understand this in order to use FoundationDB efficiently.
+
+How FoundationDB Detects Conflicts
+----------------------------------
+
+As written above, FoundationDB implements serializable transactions with external consistency. The underlying algorithm uses multi-version concurrency control. At commit time, each transaction is checked for read-write conflicts.
+
+Conceptually this algorithm is quite simple. Each transaction will get a read version assigned when it issues the first read or before it tries to commit. All reads that happen during that transaction will be read as of that version. Writes will go into a local cache and will be sent to FoundationDB during commit time. The transaction can successfully commit if it is conflict free; it will then get a commit-version assigned. A transaction is conflict free if and only if there have been no writes to any key that was read by that transaction between the time the transaction started and the commit time. This is true if there was no transaction with a commit version larger than our read version but smaller than our commit version that wrote to any of the keys that we read.
+
+This form of conflict detection, while simple, can often be confusing for people who are familiar with databases that check for write-write conflicts.
+
+Some interesting properties of FoundationDB transactions are:
+
+* FoundationDB transactions are optimistic: we never block on reads or writes (there are no locks), instead we abort transactions at commit time.
+* Read-only transactions will never conflict and never cause conflicts with other transactions.
+* Write-only transactions will never conflict but might cause future transactions to conflict.
+* For read-write transactions: A read will never cause any other transaction to be aborted - but reading a key might result in the current transaction being aborted at commit time. A write will never cause a conflict in the current transaction but might cause conflicts in transactions that try to commit in the future.
+* FoundationDB only uses the read conflict set and the write conflict set to resolve transactions. A user can read from and write to FoundationDB without adding entries to these sets. If not done carefully, this can cause non-serializable executions (see :ref:`Snapshot Reads <api-python-snapshot-reads>` and the :ref:`no-write-conflict-range option <api-python-no-write-conflict-range>` option).
+
+How Versions are Generated and Assigned
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Versions are generated by the process that runs the *master* role. FoundationDB guarantees that no version will be generated twice and that the versions are monotonically increasing.
+
+In order to assign read and commit versions to transactions, a client will never talk to the master. Instead it will get both from a proxy. Getting a read version is more complex than a commit version. Let's first look at commit versions:
+
+#. The client will send a commit message to a proxy.
+#. The proxy will put this commit message in a queue in order to build a batch.
+#. In parallel, the proxy will ask for a new version from the master (note that this means that only proxies will ever ask for new versions - which scales much better as it puts less stress on the network).
+#. The proxy will then resolve all transactions within that batch (discussed later) and assign the version it got from the master to *all* transactions within that batch. It will then write the transactions to the transaction log system to make it durable.
+#. If the transaction succeeded, it will send back the version as commit version to the client. Otherwise it will send back an error.
+
+As mentioned before, the algorithm to assign read versions is a bit more complex. At the start of a transaction, a client will ask a proxy server for a read version. The proxy will reply with the last committed version as of the time it received the request - this is important to guarantee external consistency. This is how this is achieved:
+
+#. The client will send a GRV (get read version) request to a proxy.
+#. The proxy will batch GRV requests for a short amount of time (it depends on load and configuartion how big these batches will be).
+#. The proxy will do the following steps in parallel:
+   * Ask all other proxies for their most recent committed version (the largest version they received from the master for which it successfully wrote the transactions to the transaction log system).
+   * Send a message to the transaction log system to verify that it is still writable. This is to prevent that we fetch read versions from a proxy that has been declared to be dead.
+#. It will then take the largest committed version from all proxies (including its own) and send it back to the clients.
+
+Checking whether the log-system is still writeable can be especially expensive if a clusters runs in a multi-region configuration. If a user is fine to sacrifice strict serializability they can use :ref:`option-causal-read-risky <api-python-option-set-causal-read-risky>`.
+
+Conflict Detection
+~~~~~~~~~~~~~~~~~~
+
+This section will only explain conceptually how transactions are resolved in FoundationDB. The implementation will use multiple servers running the *Resolver* role and the keyspace will be sharded across them. It will also only allow resolving transactions whose read versions are less than 5 million versions older than their commit version (around 5 seconds).
+
+A resolver will keep a map in memory which stores the written keys of each commit version. A simpified resolver state could look like this:
+
+=======    =======
+Version    Keys
+=======    =======
+1000       a, b
+1200       f, q, c
+1210       a
+1340       t, u, x
+=======    =======
+
+Now let's assume we have a transaction with read version *1200* and the assigned commit version will be something larger than 1340 - let's say it is *1450*. In that transaction we read keys ``b, m, s`` and we want to write to ``a``. Note that we didn't read ``a`` - so we will issue a blind write. The resolver will check whether any of the read keys (``b, m, or s``) appers in any line between version *1200* and the most recent version, *1450*. The last write to ``b`` was at version 1000 which was before the read version. This means that transaction read the most recent value. We don't know about any recent writes to the other keys. Therefore the resolver will decide that this transaction does *NOT* conflict and it can be committed. It will then add this new write set to its internal state so that it can resolve future transactions. The new state will look like this:
+
+=======    =======
+Version    Keys
+=======    =======
+1000       a, b
+1200       f, q, c
+1210       a
+1340       t, u, x
+1450       a
+=======    =======
+
+Note that the resolver didn't use the write set at all in order to make a decision whether the transaction can commit or not. This means that blind writes (writes to keys without reading them first) will never cause a conflict. But since the resolver will then remember these writes, blind writes can cause future transactions to conflict.
+
+Error Handling
+--------------
+
+When using FoundationDB we strongly recommend users to use the retry-loop. In Python the retry loop would look this this:
+
+.. code-block:: python
+
+   tr = tr.create_transaction()
+   while True:
+       try:
+           # execute reads and writes on FDB using the tr object
+           tr.commit().wait()
+           break
+       except FDBError as e:
+           tr.on_error(e.code).wait()
+
+This is also what the transaction decoration in python does, if you pass a ``Database`` object to a decorated function. There are some interesting properies of this retry loop:
+
+* We never create a new transaction within that loop. Instead ``tr.on_error`` will create a soft reset on the transaction.
+* ``tr.on_error`` returns a future. This is because ``on_error`` will do back off to make sure we don't overwhelm the cluster.
+* If ``tr.on_error`` throws an error, we exit the retry loop.
+
+If you use this retry loop, there are very few caveats. If you write your own and you are not careful, some things might behave differently than you would expect. The following sections will go over the most common errors you will see, the guarantees FoundationDB provides during failures, and common caveats. This retry loop will take care of most of these errors, but it might still be beneficial to understand those.
+
+Errors where we know the State of the Transaction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The most common errors you will see are errors where we know that the transaction failed to commit. In this case, we're guaranteed that nothing that we attempted to write was written to the database. The most common error codes for this are:
+
+* ``not_committed`` is thrown whenever there was a conflict. This will only be thrown by a ``commit``, read and write operations won't generate this error.
+* ``transaction_too_old`` is thrown if your transaction runs for more than five seconds. If you see this error often, you should try to make your transactions shorter.
+* ``future_version`` is one of the slightly more complex errors. There are a couple ways this error could be generated: if you set the read version of your transaction manually to something larger than exists or if the storage servers are falling behind. The second case should be more common. This is usually caused by a write load that is too high for FoundationDB to handle or by faulty/slow disks.
+
+The good thing about these errors is that retrying is simple: you know that the transaction didn't commit and therefore you can retry even without thinking much about weird corner cases.
+
+The ``commit_unknown_result`` Error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``commit_unknown_result`` can be thrown during a commit. This error is difficult to handle as you won't know whether your transaction was committed or not. There are mostly two reasons why you might see this error:
+
+#. The client lost the connection to the proxy to which it did send the commit. So it never got a reply and therefore can't know whether the commit was successful or not.
+#. There was a FoundationDB failure - for example a proxy failed during the commit. In that case there is no way for the client know whether the transaction succeeded or not.
+
+However, there is one guarantee FoundationDB gives to the caller: at the point of time where you receive this error, the transaction either committed or not and if it didn't commit, it will never commit in the future. Or: it is guaranteed that the transaction is not in-flight anymore. This is an important guarantee as it means that if your transaction is idempotent you can simply retry. For more explanations see developer-guide-unknown-results_.
+
+Non-Retryable Errors
+~~~~~~~~~~~~~~~~~~~~
+
+The trickiest errors are non-retryable errors. ``Transaction.on_error`` will rethrow these. Some examples of non-retryable errors are:
+
+#. ``transaction_timed_out``. If you set a timeout for a transaction, the transaction will throw this error as soon as that timeout occurs.
+#. ``operation_cancelled``. This error is thrown if you call ``cancel()`` on any future returned by a transaction. So if this future is shared by multiple threads or coroutines, all other waiters will see this error.
+
+If you see one of those errors, the best way of action is to fail the client.
+
+At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.
+
+.. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
+.. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS

@@ -136,17 +136,19 @@ struct SidebandWorkload : TestWorkload {
 	ACTOR Future<Void> mutator( SidebandWorkload *self, Database cx ) {
 		state SidebandInterface checker = wait( self->fetchSideband( self, cx->clone() ) );
 		state double lastTime = now();
+		state Version commitVersion;
 
 		loop {
 			wait( poisson( &lastTime, 1.0 / self->operationsPerSecond ) );
 			state Transaction tr(cx);
 			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
-			state Version commitVersion = wait( tr.getReadVersion() );  // Used if the key is already present
+			
 			state Standalone<StringRef> messageKey(format( "Sideband/Message/%llx", key ));
 			loop {
 				try {
 					Optional<Value> val = wait( tr.get( messageKey ) );
 					if( val.present() ) {
+						commitVersion = tr.getReadVersion().get();
 						++self->keysUnexpectedlyPresent;
 						break;
 					}

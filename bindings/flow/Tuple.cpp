@@ -253,8 +253,8 @@ namespace FDB {
 		for(size_t i = 0; i < value.size(); i++) {
 			size_t offset = value.offsets[i];
 			size_t next_offset = (i+1 < value.offsets.size() ? value.offsets[i+1] : value.data.size());
-			ASSERT(offset < value.data.size());
-			ASSERT(next_offset <= value.data.size());
+			ASSERT_LT(offset, value.data.size());
+			ASSERT_LE(next_offset, value.data.size());
 			uint8_t code = value.data[offset];
 			if(code == NULL_CODE) {
 				data.push_back( data.arena(), NULL_CODE );
@@ -363,7 +363,7 @@ namespace FDB {
 		int64_t swap;
 		bool neg = false;
 
-		ASSERT(offsets[index] < data.size());
+		ASSERT_LT(offsets[index], data.size());
 		uint8_t code = data[offsets[index]];
 		if(code < NEG_INT_START || code > POS_INT_END) {
 			throw invalid_tuple_data_type();
@@ -392,7 +392,7 @@ namespace FDB {
 		if(index >= offsets.size()) {
 			throw invalid_tuple_index();
 		}
-		ASSERT(offsets[index] < data.size());
+		ASSERT_LT(offsets[index], data.size());
 		uint8_t code = data[offsets[index]];
 		if(code == FALSE_CODE) {
 			return false;
@@ -407,7 +407,7 @@ namespace FDB {
 		if(index >= offsets.size()) {
 			throw invalid_tuple_index();
 		}
-		ASSERT(offsets[index] < data.size());
+		ASSERT_LT(offsets[index], data.size());
 		uint8_t code = data[offsets[index]];
 		if(code != FLOAT_CODE) {
 			throw invalid_tuple_data_type();
@@ -415,7 +415,7 @@ namespace FDB {
 
 		float swap;
 		uint8_t* bytes = (uint8_t*)&swap;
-		ASSERT(offsets[index] + 1 + sizeof(float) <= data.size());
+		ASSERT_LE(offsets[index] + 1 + sizeof(float), data.size());
 		swap = *(float*)(data.begin() + offsets[index] + 1);
 		adjust_floating_point( bytes, sizeof(float), false );
 
@@ -426,7 +426,7 @@ namespace FDB {
 		if(index >= offsets.size()) {
 			throw invalid_tuple_index();
 		}
-		ASSERT(offsets[index] < data.size());
+		ASSERT_LT(offsets[index], data.size());
 		uint8_t code = data[offsets[index]];
 		if(code != DOUBLE_CODE) {
 			throw invalid_tuple_data_type();
@@ -434,7 +434,7 @@ namespace FDB {
 
 		double swap;
 		uint8_t* bytes = (uint8_t*)&swap;
-		ASSERT(offsets[index] + 1 + sizeof(double) <= data.size());
+		ASSERT_LE(offsets[index] + 1 + sizeof(double), data.size());
 		swap = *(double*)(data.begin() + offsets[index] + 1);
 		adjust_floating_point( bytes, sizeof(double), false );
 
@@ -446,12 +446,12 @@ namespace FDB {
 			throw invalid_tuple_index();
 		}
 		size_t offset = offsets[index];
-		ASSERT(offset < data.size());
+		ASSERT_LT(offset, data.size());
 		uint8_t code = data[offset];
 		if(code != UUID_CODE) {
 			throw invalid_tuple_data_type();
 		}
-		ASSERT(offset + Uuid::SIZE + 1 <= data.size());
+		ASSERT_LE(offset + Uuid::SIZE + 1, data.size());
 		StringRef uuidData(data.begin() + offset + 1, Uuid::SIZE);
 		return Uuid(uuidData);
 	}
@@ -461,15 +461,15 @@ namespace FDB {
 			throw invalid_tuple_index();
 		}
 		size_t offset = offsets[index];
-		ASSERT(offset < data.size());
+		ASSERT_LT(offset, data.size());
 		uint8_t code = data[offset];
 		if(code != NESTED_CODE) {
 			throw invalid_tuple_data_type();
 		}
 
 		size_t next_offset = (index + 1 < offsets.size() ? offsets[index+1] : data.size());
-		ASSERT(next_offset <= data.size());
-		ASSERT(data[next_offset - 1] == (uint8_t)0x00);
+		ASSERT_LE(next_offset, data.size());
+		ASSERT_EQ(data[next_offset - 1], (uint8_t)0x00);
 		Standalone<VectorRef<uint8_t>> dest;
 		dest.reserve(dest.arena(), next_offset - offset);
 		std::vector<size_t> dest_offsets;
@@ -493,21 +493,21 @@ namespace FDB {
 					}
 				} else {
 					// A null object within the nested tuple.
-					ASSERT(i + 1 < next_offset - 1);
-					ASSERT(data[i+1] == 0xff);
+					ASSERT_LT(i + 1, next_offset - 1);
+					ASSERT_EQ(data[i+1], 0xff);
 					i += 2;
 				}
 			}
 			else if(code == BYTES_CODE || code == STRING_CODE) {
 				size_t next_i = find_string_terminator(data, i+1) + 1;
-				ASSERT(next_i <= next_offset - 1);
+				ASSERT_LE(next_i, next_offset - 1);
 				size_t length = next_i - i - 1;
 				dest.append(dest.arena(), data.begin() + i + 1, length);
 				i = next_i;
 			}
 			else if(code >= NEG_INT_START && code <= POS_INT_END) {
 				size_t int_size = abs(code - INT_ZERO_CODE);
-				ASSERT(i + int_size <= next_offset - 1);
+				ASSERT_LE(i + int_size, next_offset - 1);
 				dest.append(dest.arena(), data.begin() + i + 1, int_size);
 				i += int_size + 1;
 			}
@@ -515,17 +515,17 @@ namespace FDB {
 				i += 1;
 			}
 			else if(code == UUID_CODE) {
-				ASSERT(i + 1 + Uuid::SIZE <= next_offset - 1);
+				ASSERT_LE(i + 1 + Uuid::SIZE, next_offset - 1);
 				dest.append(dest.arena(), data.begin() + i + 1, Uuid::SIZE);
 				i += Uuid::SIZE + 1;
 			}
 			else if(code == FLOAT_CODE) {
-				ASSERT(i + 1 + sizeof(float) <= next_offset - 1);
+				ASSERT_LE(i + 1 + sizeof(float), next_offset - 1);
 				dest.append(dest.arena(), data.begin() + i + 1, sizeof(float));
 				i += sizeof(float) + 1;
 			}
 			else if(code == DOUBLE_CODE) {
-				ASSERT(i + 1 + sizeof(double) <= next_offset - 1);
+				ASSERT_LE(i + 1 + sizeof(double), next_offset - 1);
 				dest.append(dest.arena(), data.begin() + i + 1, sizeof(double));
 				i += sizeof(double) + 1;
 			}

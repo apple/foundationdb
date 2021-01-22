@@ -316,7 +316,7 @@ struct SerializabilityWorkload : TestWorkload {
 
 	ACTOR static Future<Void> resetDatabase( Database cx, Standalone<VectorRef<KeyValueRef>> data ) {
 		state ReadYourWritesTransaction tr(cx);
-	
+
 		tr.clear(normalKeys);
 		for(auto kv : data)
 			tr.set(kv.key, kv.value);
@@ -346,7 +346,7 @@ struct SerializabilityWorkload : TestWorkload {
 			try {
 				if(now() - startTime > self->testDuration)
 					return Void();
-				
+
 				//Generate initial data
 				state Standalone<VectorRef<KeyValueRef>> initialData;
 				int initialAmount = deterministicRandom()->randomInt(0, 100);
@@ -356,7 +356,7 @@ struct SerializabilityWorkload : TestWorkload {
 					initialData.push_back_deep(initialData.arena(), KeyValueRef(key, value));
 					//TraceEvent("SRL_Init").detail("Key", printable(key)).detail("Value", printable(value));
 				}
-		
+
 				//Generate three random transactions
 				state std::vector<TransactionOperation> a = self->randomTransaction();
 				state std::vector<TransactionOperation> b = self->randomTransaction();
@@ -369,7 +369,7 @@ struct SerializabilityWorkload : TestWorkload {
 				wait( tr[0].commit() );
 
 				//TraceEvent("SRL_FinishedA");
-		
+
 				wait( runTransaction(&tr[1], b, &getFutures[0], &getKeyFutures[0], &getRangeFutures[0], &watchFutures[0], true) );
 				wait( tr[1].commit() );
 

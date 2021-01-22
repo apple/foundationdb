@@ -53,7 +53,7 @@ public:
 			connect_timeout,
 			max_connection_life,
 			request_tries,
-			request_timeout,
+			request_timeout_min,
 			requests_per_second,
 			list_requests_per_second,
 			write_requests_per_second,
@@ -80,7 +80,7 @@ public:
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
 				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP response other than 429 is received.",
-				"request_timeout (or rto)              Number of seconds to wait for a request to succeed after a connection is established.",
+				"request_timeout_min (or rtom)         Number of seconds to wait for a request to succeed after a connection is established.",
 				"requests_per_second (or rps)          Max number of requests to start per second.",
 				"list_requests_per_second (or lrps)    Max number of list requests to start per second.",
 				"write_requests_per_second (or wrps)   Max number of write requests to start per second.",
@@ -193,10 +193,13 @@ public:
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests
 	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
 	// Recursefilter is a must be a function that takes a string and returns true if it passes.  The default behavior is to assume true.
-	Future<Void> listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+	Future<Void> listObjectsStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
 
-	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
-	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+	// Get a list of the files in a bucket, see listObjectsStream for more argument detail.
+	Future<ListResult> listObjects(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
+
+	// Get a list of all buckets
+	Future<std::vector<std::string>> listBuckets();
 
 	// Check if a bucket exists
 	Future<bool> bucketExists(std::string const &bucket);
@@ -216,9 +219,9 @@ public:
 	// Delete all objects in a bucket under a prefix.  Note this is not atomic as blob store does not
 	// support this operation directly. This method is just a convenience method that lists and deletes
 	// all of the objects in the bucket under the given prefix.
-	// Since it can take a while, if a pNumDeleted is provided then it will be incremented every time
+	// Since it can take a while, if a pNumDeleted and/or pBytesDeleted are provided they will be incremented every time
 	// a deletion of an object completes.
-	Future<Void> deleteRecursively(std::string const &bucket, std::string prefix = "", int *pNumDeleted = NULL);
+	Future<Void> deleteRecursively(std::string const &bucket, std::string prefix = "", int *pNumDeleted = nullptr, int64_t *pBytesDeleted = nullptr);
 
 	// Create a bucket if it does not already exists.
 	Future<Void> createBucket(std::string const &bucket);

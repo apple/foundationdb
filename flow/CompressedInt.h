@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include <stdint.h>
 
 // A signed compressed integer format that retains ordering in compressed form.
 // Format is: [~sign_bit] [unary_len] [value_bits]

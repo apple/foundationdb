@@ -48,7 +48,6 @@ Code
 Here’s a basic function that successively reads sub-ranges of a size determined by the value of ``LIMIT``.
 ::
 
-    @fdb.transactional
     def get_range_limited(tr, begin, end):
         keys_found = True
         while keys_found:

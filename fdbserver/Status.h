@@ -27,14 +27,14 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
-typedef Standalone<VectorRef<StringRef>> ProcessIssues;
-typedef std::map<NetworkAddress, std::pair<ProcessIssues, UID>> ProcessIssuesMap;
+struct ProcessIssues {
+    NetworkAddress address;
+    Standalone<VectorRef<StringRef>> issues;
 
-void setIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, VectorRef<StringRef> const& issues, Optional<UID>& issueID);
+	ProcessIssues(NetworkAddress address, Standalone<VectorRef<StringRef>> issues) : address(address), issues(issues) {}
+};
 
-void removeIssues(ProcessIssuesMap& issueMap, NetworkAddress const& addr, Optional<UID>& issueID);
-
-Future<StatusReply> clusterGetStatus( Reference<AsyncVar<CachedSerialization<struct ServerDBInfo>>> const& db, Database const& cx, vector<WorkerDetails> const& workers,
-	ProcessIssuesMap const& workerIssues, std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus, ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
+Future<StatusReply> clusterGetStatus( Reference<AsyncVar<struct ServerDBInfo>> const& db, Database const& cx, vector<WorkerDetails> const& workers, std::vector<ProcessIssues> const& workerIssues,
+	std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* const& clientStatus, ServerCoordinators const& coordinators, std::vector<NetworkAddress> const& incompatibleConnections, Version const& datacenterVersionDifference );
 
 #endif

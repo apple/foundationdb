@@ -113,7 +113,7 @@ LineNoise::LineNoise(
             for( auto const& c : completions )
                 linenoiseAddCompletion( lc, c.c_str() );
         });
-        /*linenoiseSetHintsCallback( [](const char* line, int* color, int*bold) -> const char* {
+        linenoiseSetHintsCallback( [](const char* line, int* color, int*bold) -> char* {
             Hint h = onMainThread( [line]() -> Future<Hint> {
                 return hint_callback(line);
             }).getBlocking();
@@ -122,7 +122,7 @@ LineNoise::LineNoise(
             *bold = h.bold;
             return strdup( h.text.c_str() );
         });
-        linenoiseSetFreeHintsCallback( free );*/
+        linenoiseSetFreeHintsCallback( free );
     #endif
 
     threadPool->addThread(reader);

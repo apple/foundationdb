@@ -1,6 +1,7 @@
 [Unit]
 Description=FoundationDB Key-Value Store
-After=syslog.target network.target
+After=syslog.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=forking

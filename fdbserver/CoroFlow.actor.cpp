@@ -180,10 +180,10 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 	ACTOR Future<Void> stopOnError( WorkPool* w ) {
 		try { 
 			wait( w->getError() );  
+			ASSERT(false);
 		} catch (Error& e) {
-			w->error = e;
+			w->stop(e);
 		}
-		w->stop();
 		return Void();
 	}
 
@@ -230,12 +230,14 @@ public:
 		} else
 			pool->queueLock.leave();
 	}
-	virtual Future<Void> stop() {
-		if (error.code() == invalid_error_code) error = success();
+	virtual Future<Void> stop(Error const& e) {
+		if (error.code() == invalid_error_code) {
+			error = e;
+		}
 
 		pool->queueLock.enter();
 		TraceEvent("WorkPool_Stop").detail("Workers", pool->workers.size()).detail("Idle", pool->idle.size())
-			.detail("Work", pool->work.size());
+			.detail("Work", pool->work.size()).error(e, true);
 
 		for (uint32_t i=0; i<pool->work.size(); i++)
 			pool->work[i]->cancel();   // What if cancel() does something to this?

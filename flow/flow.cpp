@@ -114,6 +114,45 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 	return ret;
 }
 
+// Parses a duration with one of the following suffixes and returns the duration in seconds
+// s - seconds
+// m - minutes
+// h - hours
+// d - days
+Optional<uint64_t> parseDuration(std::string str, std::string defaultUnit) {
+	char *endptr;
+	uint64_t ret = strtoull(str.c_str(), &endptr, 10);
+
+	if (endptr == str.c_str()) {
+		return Optional<uint64_t>();
+	}
+
+	std::string unit;
+	if (*endptr == '\0') {
+		if (!defaultUnit.empty()) {
+			unit = defaultUnit;
+		} else {
+			return Optional<uint64_t>();
+		}
+	} else {
+		unit = endptr;
+	}
+
+	if (!unit.compare("s")) {
+		// Nothing to do
+	} else if (!unit.compare("m")) {
+		ret *= 60;
+	} else if (!unit.compare("h")) {
+		ret *= 60 * 60;
+	} else if (!unit.compare("d")) {
+		ret *= 24 * 60 * 60;
+	} else {
+		return Optional<uint64_t>();
+	}
+
+	return ret;
+}
+
 int vsformat( std::string &outputString, const char* form, va_list args) {
 	char buf[200];
 

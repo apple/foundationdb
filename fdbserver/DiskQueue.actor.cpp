@@ -22,7 +22,7 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -127,7 +127,7 @@ private:
 	}
 };
 
-// We use a Tracked instead of a Reference when the shutdown/destructor code would need to wait().
+// We use a Tracked instead of a Reference when the shutdown/destructor code would need to wait() on pending file operations (e.g., read).
 template <typename T>
 class Tracked {
 protected:
@@ -156,6 +156,9 @@ private:
 	AsyncVar<bool> actorCountIsZero = true;
 };
 
+// DiskQueue uses two files to implement a dynamically resizable ring buffer, where files only allow append and read operations.
+//    To increase the ring buffer size, it creates a ring buffer in the other file.
+//    After finish reading the current file, it switch to use the other file as the ring buffer.
 class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
 public:
 	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit )
@@ -215,7 +218,7 @@ public:
 	void dispose() { shutdown(this, true); }
 	void close() { shutdown(this, false); }
 
-	StorageBytes getStorageBytes() {
+	StorageBytes getStorageBytes() const {
 		int64_t free;
 		int64_t total;
 
@@ -260,7 +263,7 @@ public:
 	bool isFirstCommit;
 
 	StringBuffer readingBuffer; // Pages that have been read and not yet returned
-	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete
+	int readingFile;  // File index where the next page (after readingBuffer) should be read from, i.e., files[readingFile]. readingFile = 2 if recovery is complete (all files have been read). 
 	int64_t readingPage;  // Page within readingFile that is the next page after readingBuffer
 
 	int64_t writingPos;  // Position within files[1] that will be next written
@@ -308,7 +311,7 @@ public:
 	}
 
 	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self, StringRef pageData, vector<Reference<SyncQueue>>* toSync) {
-		// Write the given data to the queue files, swapping or extending them if necessary.
+		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT( self->readingFile == 2 );
 		ASSERT( pageData.size() % _PAGE_SIZE == 0 );
@@ -386,6 +389,7 @@ public:
 		return waitForAll(waitfor);
 	}
 
+	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem) that hold the pageData
 	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self, StringRef pageData, StringBuffer* pageMem, uint64_t poppedPages) {
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
@@ -457,7 +461,7 @@ public:
 		files[1].popped += popped - pop0;
 	}
 
-
+	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
 	ACTOR static Future<Void> setPoppedPage( RawDiskQueue_TwoFiles *self, int file, int64_t page, int64_t debugSeq ) {
 		self->files[file].popped = page*sizeof(Page);
 		if (file) self->files[0].popped = self->files[0].size;
@@ -528,6 +532,8 @@ public:
 		state Error error = success();
 		try {
 			wait(success(errorOr(self->lastCommit)));
+			// Wait for the pending operations (e.g., read) to finish before we destroy the DiskQueue, because
+			// tLog, instead of DiskQueue, hold the future of the pending operations.
 			wait( self->onSafeToDestruct() );
 
 			for(int i=0; i<2; i++)
@@ -557,6 +563,7 @@ public:
 		}
 	}
 
+	// Return the most recently written page, the page with largest seq number
 	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> readFirstAndLastPages(RawDiskQueue_TwoFiles* self, compare_pages compare) {
 		state TrackMe trackMe(self);
 
@@ -656,6 +663,7 @@ public:
 		}
 	}
 
+	// Read nPages from pageOffset*sizeof(Page) offset in file self->files[file]
 	ACTOR static Future<Standalone<StringRef>> read(RawDiskQueue_TwoFiles* self, int file, int pageOffset, int nPages) {
 		state TrackMe trackMe(self);
 		state const size_t bytesRequested = nPages * sizeof(Page);
@@ -721,6 +729,7 @@ public:
 		}
 	}
 
+	// Set zero and free the memory from pos to the end of file self->files[file].
 	ACTOR static UNCANCELLABLE Future<Void> truncateFile(RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
 		state TrackMe trackMe(self);
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
@@ -780,7 +789,7 @@ public:
 	{
 	}
 
-	virtual location push( StringRef contents ) {
+	location push(StringRef contents) override {
 		ASSERT( recovered );
 		uint8_t const* begin = contents.begin();
 		uint8_t const* end = contents.end();
@@ -798,10 +807,13 @@ public:
 		return endLocation();
 	}
 
-	virtual void pop( location upTo ) {
+	void pop(location upTo) override {
 		ASSERT( !upTo.hi );
 		ASSERT( !recovered || upTo.lo <= endLocation() );
 
+		// SS can pop pages that have not been sync.ed to disk because of concurrency:
+		//   SS can read (i.e., pop) data at the same time or before tLog syncs the page to disk.
+		//   This is rare in real situation but common in simulation.
 		// The following ASSERT is NOT part of the intended contract of IDiskQueue, but alerts the user to a known bug where popping
 		//  into uncommitted pages can cause a durability failure.
 		// FIXME: Remove this ASSERT when popping into uncommitted pages is fixed
@@ -817,34 +829,38 @@ public:
 		}
 	}
 
-	virtual Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) { return read(this, from, to, ch); }
-
-	int getMaxPayload() {
-		return Page::maxPayload;
+	Future<Standalone<StringRef>> read(location from, location to, CheckHashes ch) override {
+		return read(this, from, to, ch);
 	}
 
-	virtual int getCommitOverhead() {
+	int getMaxPayload() const { return Page::maxPayload; }
+
+	// Always commit an entire page. Commit overhead is the unused space in a to-be-committed page
+	int getCommitOverhead() const override {
 		if(!pushedPageCount()) {
 			if(!anyPopped)
 				return 0;
 
+			// To mark pages are poped, we push an empty page to specify that following pages were poped.
+			// maxPayLoad is the max. payload size, i.e., (page_size - page_header_size).
 			return Page::maxPayload;
 		}
 		else
 			return backPage().remainingCapacity();
 	}
 
-	virtual Future<Void> commit() {
+	Future<Void> commit() override {
 		ASSERT( recovered );
 		if (!pushedPageCount()) {
 			if (!anyPopped) return Void();
-			addEmptyPage();
+			addEmptyPage(); // To remove poped pages, we push an empty page to specify that pages behind it were poped.
 		}
 		anyPopped = false;
 		backPage().popped = poppedSeq;
 		backPage().zeroPad();
 		backPage().updateHash();
 
+		// Warn users that we pushed too many pages. 8000 is an arbitrary value.
 		if( pushedPageCount() >= 8000 ) {
 			TraceEvent( warnAlwaysForMemory ? SevWarnAlways : SevWarn, "DiskQueueMemoryWarning", dbgid)
 				.suppressFor(1.0)
@@ -871,30 +887,30 @@ public:
 		rawQueue->stall();
 	}
 
-	virtual Future<bool> initializeRecovery(location recoverAt) { return initializeRecovery( this, recoverAt ); }
-	virtual Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
+	Future<bool> initializeRecovery(location recoverAt) override { return initializeRecovery(this, recoverAt); }
+	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
 
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
 	// to be changed to understand the new intiailizeRecovery protocol.
-	virtual location getNextReadLocation() { return nextReadLocation; }
-	virtual location getNextCommitLocation() { ASSERT( initialized ); return lastCommittedSeq + sizeof(Page); }
-	virtual location getNextPushLocation() { ASSERT( initialized ); return endLocation(); }
+	location getNextReadLocation() const override { return nextReadLocation; }
+	location getNextCommitLocation() const override {
+		ASSERT(initialized);
+		return lastCommittedSeq + sizeof(Page);
+	}
+	location getNextPushLocation() const override {
+		ASSERT(initialized);
+		return endLocation();
+	}
 
-	virtual Future<Void> getError() { return rawQueue->getError(); }
-	virtual Future<Void> onClosed() { return rawQueue->onClosed(); }
+	Future<Void> getError() override { return rawQueue->getError(); }
+	Future<Void> onClosed() override { return rawQueue->onClosed(); }
 
-	virtual void dispose() {
+	void dispose() override {
 		TraceEvent("DQDestroy", dbgid).detail("LastPoppedSeq", lastPoppedSeq).detail("PoppedSeq", poppedSeq).detail("NextPageSeq", nextPageSeq).detail("File0Name", rawQueue->files[0].dbgFilename);
 		dispose(this);
 	}
-	ACTOR static void dispose(DiskQueue* self) {
-		wait( self->onSafeToDestruct() );
-		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
-		self->rawQueue->dispose();
-		delete self;
-	}
 
-	virtual void close() {
+	void close() override {
 		TraceEvent("DQClose", dbgid)
 			.detail("LastPoppedSeq", lastPoppedSeq)
 			.detail("PoppedSeq", poppedSeq)
@@ -903,6 +919,17 @@ public:
 			.detail("File0Name", rawQueue->files[0].dbgFilename);
 		close(this);
 	}
+
+	StorageBytes getStorageBytes() const override { return rawQueue->getStorageBytes(); }
+
+private:
+	ACTOR static void dispose(DiskQueue* self) {
+		wait(self->onSafeToDestruct());
+		TraceEvent("DQDestroyDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
+		self->rawQueue->dispose();
+		delete self;
+	}
+
 	ACTOR static void close(DiskQueue* self) {
 		wait( self->onSafeToDestruct() );
 		TraceEvent("DQCloseDone", self->dbgid).detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -910,11 +937,6 @@ public:
 		delete self;
 	}
 
-	virtual StorageBytes getStorageBytes() {
-		return rawQueue->getStorageBytes();
-	}
-
-private:
 	#pragma pack(push, 1)
 	struct PageHeader {
 		union {
@@ -926,7 +948,7 @@ private:
 				uint16_t implementationVersion;
 			};
 		};
-		uint64_t seq;
+		uint64_t seq; // seq is the index of the virtually infinite disk queue file. Its unit is bytes.
 		uint64_t popped;
 		int payloadSize;
 	};
@@ -1037,6 +1059,7 @@ private:
 		delete buffer;
 	}
 
+	// Read pages from [start, end) bytes
 	ACTOR static Future<Standalone<StringRef>> readPages(DiskQueue *self, location start, location end) {
 		state TrackMe trackme(self);
 		state int fromFile;
@@ -1234,6 +1257,9 @@ private:
 		return result.str;
 	}
 
+	// recoverAt is the minimum position in the disk queue file that needs to be read to restore log's states. 
+	// This allows log to read only a small portion of the most recent data from a large (e.g., 10GB) disk file.
+	// This is particularly useful for logSpilling feature.
 	ACTOR static Future<bool> initializeRecovery( DiskQueue* self, location recoverAt ) {
 		if (self->initialized) {
 			return self->recovered;
@@ -1251,11 +1277,7 @@ private:
 
 		Page* lastPage = (Page*)lastPageData.begin();
 		self->poppedSeq = lastPage->popped;
-		if (self->diskQueueVersion >= DiskQueueVersion::V1) {
-			self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
-		} else {
-			self->nextReadLocation = lastPage->popped;
-		}
+		self->nextReadLocation = std::max(recoverAt.lo, self->poppedSeq);
 
 		/*
 		state std::auto_ptr<Page> testPage(new Page);
@@ -1343,8 +1365,8 @@ private:
 	bool anyPopped;  // pop() has been called since the most recent call to commit()
 	bool warnAlwaysForMemory;
 	loc_t nextPageSeq, poppedSeq;
-	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called
-	loc_t lastCommittedSeq;
+	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called.
+	loc_t lastCommittedSeq; // The seq location where the last commit finishes at.
 
 	// Buffer of pushed pages that haven't been committed.  The last one (backPage()) is still mutable.
 	StringBuffer* pushed_page_buffer;
@@ -1364,9 +1386,9 @@ private:
 	int readBufPos;
 };
 
-//A class wrapping DiskQueue which durably allows uncommitted data to be popped
+//A class wrapping DiskQueue which durably allows uncommitted data to be popped.
 //This works by performing two commits when uncommitted data is popped:
-//	Commit 1 - pop only previously committed data and push new data
+//	Commit 1 - pop only previously committed data and push new data (i.e., commit uncommitted data)
 //  Commit 2 - finish pop into uncommitted data
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
@@ -1383,29 +1405,30 @@ public:
 	Future<bool> initializeRecovery(location recoverAt) { return queue->initializeRecovery(recoverAt); }
 	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
 
-	virtual location getNextReadLocation() { return queue->getNextReadLocation(); }
+	location getNextReadLocation() const override { return queue->getNextReadLocation(); }
 
-	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes ch ) { return queue->read( start, end, ch ); }
-	virtual location getNextCommitLocation() { return queue->getNextCommitLocation(); }
-	virtual location getNextPushLocation() { return queue->getNextPushLocation(); }
+	Future<Standalone<StringRef>> read(location start, location end, CheckHashes ch) override {
+		return queue->read(start, end, ch);
+	}
+	location getNextCommitLocation() const override { return queue->getNextCommitLocation(); }
+	location getNextPushLocation() const override { return queue->getNextPushLocation(); }
 
-
-	virtual location push( StringRef contents ) {
+	location push(StringRef contents) override {
 		pushed = queue->push(contents);
 		return pushed;
 	}
 
-	virtual void pop( location upTo ) {
+	void pop(location upTo) override {
 		popped = std::max(popped, upTo);
 		ASSERT_WE_THINK(committed >= popped);
 		queue->pop(std::min(committed, popped));
 	}
 
-	virtual int getCommitOverhead() {
+	int getCommitOverhead() const override {
 		return queue->getCommitOverhead() + (popped > committed ? queue->getMaxPayload() : 0);
 	}
 
-	Future<Void> commit() {
+	Future<Void> commit() override {
 		location pushLocation = pushed;
 		location popLocation = popped;
 
@@ -1428,7 +1451,7 @@ public:
 		return commitFuture;
 	}
 
-	virtual StorageBytes getStorageBytes() { return queue->getStorageBytes(); }
+	StorageBytes getStorageBytes() const override { return queue->getStorageBytes(); }
 
 private:
 	DiskQueue *queue;

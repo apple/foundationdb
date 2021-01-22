@@ -20,17 +20,19 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "fdbrpc/crc32c.h"
+#include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
+#include "flow/xxhash.h"
 
 extern "C" {
 #include "fdbserver/sqlite/sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
+#include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -100,22 +102,41 @@ struct PageChecksumCodec {
 			return true;
 		}
 
-		SumType sum;
+		SumType crc32Sum;
 		if (pSumInPage->part1 == 0) {
-			// part1 being 0 indicates with high probability that a CRC32 checksum
+			// part1 being 0 indicates with very high probability that a CRC32 checksum
 			// was used, so check that first. If this checksum fails, there is still
-			// some chance the page was written with hashlittle2, so fall back to checking
-			// hashlittle2
-			sum.part1 = 0;
-			sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
-			if (sum == *pSumInPage) return true;
+			// some chance the page was written with another checksum algorithm
+			crc32Sum.part1 = 0;
+			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
+			if (crc32Sum == *pSumInPage) return true;
 		}
 
+		// Try xxhash3
+		SumType xxHash3Sum;
+		if ((pSumInPage->part1 >> 24) == 0) {
+			// The first 8 bits of part1 being 0 indicates with high probability that an
+			// xxHash3 checksum was used, so check that next. If this checksum fails, there is
+			// still some chance the page was written with hashlittle2, so fall back to checking
+			// hashlittle2
+			auto xxHash3 = XXH3_64bits(data, dataLen);
+			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
+			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
+			if (xxHash3Sum == *pSumInPage) {
+				TEST(true); // Read xxHash3 checksum
+				return true;
+			}
+		}
+
+		// Try hashlittle2
 		SumType hashLittle2Sum;
 		hashLittle2Sum.part1 = pageNumber; // DO NOT CHANGE
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
-		if (hashLittle2Sum == *pSumInPage) return true;
+		if (hashLittle2Sum == *pSumInPage) {
+			TEST(true); // Read HashLittle2 checksum
+			return true;
+		}
 
 		if (!silent) {
 			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
@@ -127,7 +148,12 @@ struct PageChecksumCodec {
 			    .detail("PageSize", pageLen)
 			    .detail("ChecksumInPage", pSumInPage->toString())
 			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
-			if (pSumInPage->part1 == 0) trEvent.detail("ChecksumCalculatedCRC", sum.toString());
+			if (pSumInPage->part1 == 0) {
+				trEvent.detail("ChecksumCalculatedCRC", crc32Sum.toString());
+			}
+			if (pSumInPage->part1 >> 24 == 0) {
+				trEvent.detail("ChecksumCalculatedXXHash3", xxHash3Sum.toString());
+			}
 		}
 		return false;
 	}
@@ -241,8 +267,9 @@ struct SQLiteDB : NonCopyable {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
 			Error err = io_error();
-			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
+			if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 				err = err.asInjectedFault();
+			}
 
 			if (db)
 				db->errCode = rc;
@@ -1448,7 +1475,7 @@ struct ThreadSafeCounter {
 	ThreadSafeCounter() : counter(0) {}
 	void operator ++() { interlockedIncrement64(&counter); }
 	void operator --() { interlockedDecrement64(&counter); }
-	operator const int64_t() const { return counter; }
+	operator int64_t() const { return counter; }
 };
 
 class KeyValueStoreSQLite : public IKeyValueStore {
@@ -1866,13 +1893,15 @@ private:
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {
 		try {
 			wait( self->readThreads->getError() || self->writeThread->getError() );
+			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
+
+			self->readThreads->stop(e);
+			self->writeThread->stop(e);
 		}
 
-		self->readThreads->stop();
-		self->writeThread->stop();
 		return Void();
 	}
 

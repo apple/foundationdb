@@ -148,6 +148,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status
@@ -169,7 +170,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					printf("%.6f Wait #%4d for %lld tasks to end\n", now(), waitCycles, (long long) taskCount);
 
 					wait(delay(20.0));
-					tr->commit();
 					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 					int64_t _taskCount = wait( backupAgent->getTaskCount(tr) );
 					taskCount = _taskCount;
@@ -341,7 +341,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
-		state DatabaseBackupAgent restoreAgent(self->extraDB);
+		state DatabaseBackupAgent restoreTool(self->extraDB);
 		state Standalone<VectorRef<KeyRangeRef>> prevBackupRanges;
 		state UID logUid;
 		state Version commitVersion;
@@ -437,7 +437,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			// start restoring db
 			try {
 				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
-				wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
+				wait(restoreTool.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
 			}
 			catch (Error& e) {
 				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
@@ -445,12 +445,12 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					throw;
 			}
 
-			wait(success(restoreAgent.waitBackup(cx, self->restoreTag)));
-			wait(restoreAgent.unlockBackup(cx, self->restoreTag));
+			wait(success(restoreTool.waitBackup(cx, self->restoreTag)));
+			wait(restoreTool.unlockBackup(cx, self->restoreTag));
 			wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
 
-			state UID restoreUid = wait(restoreAgent.getLogUid(cx, self->restoreTag));
-			wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent));
+			state UID restoreUid = wait(restoreTool.getLogUid(cx, self->restoreTag));
+			wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreTool));
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 

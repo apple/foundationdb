@@ -210,6 +210,7 @@ struct MovableValue {
 	MovableValue() : mode( Active ) {}
 	MovableValue( Value const& v, int mode, Optional<Value> other = Optional<Value>() ) : value( v ), mode( mode ), other( other ) {}
 
+	//To change this serialization, ProtocolVersion::MovableCoordinatedStateV2 must be updated, and downgrades need to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion().hasMovableCoordinatedState() );
@@ -251,7 +252,7 @@ struct MovableCoordinatedStateImpl {
 
 	Future<Void> setExclusive( Value v ) {
 		lastValue=v;
-		lastCSValue=BinaryWriter::toValue( MovableValue( v, MovableValue::Active ), IncludeVersion() );
+		lastCSValue=BinaryWriter::toValue( MovableValue( v, MovableValue::Active ), IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()) );
 		return cs.setExclusive( lastCSValue.get() );
 	}
 
@@ -275,7 +276,7 @@ struct MovableCoordinatedStateImpl {
 
 		choose {
 			when (wait(creationTimeout)) { throw new_coordinators_timed_out(); }
-			when ( wait( nccs.setExclusive( BinaryWriter::toValue( MovableValue( self->lastValue.get(), MovableValue::MovingFrom, self->coordinators.ccf->getConnectionString().toString() ), IncludeVersion() ) ) ) ) {}
+			when ( wait( nccs.setExclusive( BinaryWriter::toValue( MovableValue( self->lastValue.get(), MovableValue::MovingFrom, self->coordinators.ccf->getConnectionString().toString() ), IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()) ) ) ) ) {}
 		}
 
 		if (BUGGIFY) wait(delay(5));
@@ -293,7 +294,7 @@ struct MovableCoordinatedStateImpl {
 	}
 
 	ACTOR static Future<Void> moveTo( MovableCoordinatedStateImpl* self, CoordinatedState* coordinatedState, ClusterConnectionString nc, Value value ) {
-		wait( coordinatedState->setExclusive( BinaryWriter::toValue( MovableValue( value, MovableValue::MaybeTo, nc.toString() ), IncludeVersion() ) ) );
+		wait( coordinatedState->setExclusive( BinaryWriter::toValue( MovableValue( value, MovableValue::MaybeTo, nc.toString() ), IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()) ) ) );
 
 		if (BUGGIFY) wait( delay(5) );
 

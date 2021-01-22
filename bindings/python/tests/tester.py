@@ -127,6 +127,29 @@ class Instruction:
         self.stack.push(self.index, val)
 
 
+def test_fdb_transactional_generator(db):
+    try:
+        @fdb.transactional
+        def function_that_yields(tr):
+            yield 0
+        assert fdb.get_api_version() < 630, "Pre-6.3, a decorator may wrap a function that yields"
+    except ValueError as e:
+        assert fdb.get_api_version() >= 630, "Post-6.3, a decorator should throw if wrapped function yields"
+
+
+def test_fdb_transactional_returns_generator(db):
+    try:
+        def function_that_yields(tr):
+            yield 0
+        @fdb.transactional
+        def function_that_returns(tr):
+            return function_that_yields(tr)
+        function_that_returns()
+        assert fdb.get_api_version() < 630, "Pre-6.3, returning a generator is allowed"
+    except ValueError as e:
+        assert fdb.get_api_version() >= 630, "Post-6.3, returning a generator should throw"
+
+
 def test_db_options(db):
     db.options.set_location_cache_size(100001)
     db.options.set_max_watches(100001)
@@ -366,6 +389,10 @@ class Tester:
                         inst.push(b'RESULT_NOT_PRESENT')
                     else:
                         inst.push(f)
+                elif inst.op == six.u("GET_ESTIMATED_RANGE_SIZE"):
+                    begin, end = inst.pop(2)
+                    estimatedSize = obj.get_estimated_range_size_bytes(begin, end).wait()
+                    inst.push(b"GOT_ESTIMATED_RANGE_SIZE")
                 elif inst.op == six.u("GET_KEY"):
                     key, or_equal, offset, prefix = inst.pop(4)
                     result = obj.get_key(fdb.KeySelector(key, or_equal, offset))

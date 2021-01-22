@@ -34,7 +34,8 @@ import com.apple.foundationdb.Transaction;
  *  {@link #printable(byte[])} for debugging non-text keys and values.
  *
  */
-public class ByteArrayUtil {
+public class ByteArrayUtil extends FastByteComparisons {
+	private static final byte[] EMPTY_BYTES = new byte[0];
 
 	/**
 	 * Joins a set of byte arrays into a larger array. The {@code interlude} is placed
@@ -45,36 +46,46 @@ public class ByteArrayUtil {
 	 *  concatenated elements.
 	 * @param parts the pieces to be joined. May be {@code null}, but does not allow
 	 *  for elements in the list to be {@code null}.
-	 *
+	 * 
 	 * @return a newly created concatenation of the input
 	 */
 	public static byte[] join(byte[] interlude, List<byte[]> parts) {
+		return interludeJoin(interlude, parts.toArray(new byte[0][]));
+	}
+	/**
+	 * Joins a set of byte arrays into a larger array. The {@code interlude} is placed
+	 *  between each of the elements, but not at the beginning or end. In the case that
+	 *  the list is empty or {@code null}, a zero-length byte array will be returned.
+	 *
+	 * @param interlude can be {@code null} or zero length. Placed internally between
+	 *  concatenated elements.
+	 * @param parts the pieces to be joined. May be {@code null}, but does not allow
+	 *  for elements in the array to be {@code null}.
+	 *
+	 * @return a newly created concatenation of the input
+	 */
+	public static byte[] interludeJoin(byte[] interlude, byte[][] parts) {
 		if(parts == null)
 			return new byte[0];
-		int partCount = parts.size();
+		int partCount = parts.length;
 		if(partCount == 0)
-			return new byte[0];
+			return EMPTY_BYTES;
 
 		if(interlude == null)
-			interlude = new byte[0];
+			interlude = EMPTY_BYTES;
 
 		int elementTotals = 0;
 		int interludeSize = interlude.length;
-		for(byte[] e : parts) {
-			elementTotals += e.length;
+		for (int i = 0; i < partCount; i++) {
+			elementTotals += parts[i].length;
 		}
-
 		byte[] dest = new byte[(interludeSize * (partCount - 1)) + elementTotals];
-
-		//System.out.println(" interlude -> " + ArrayUtils.printable(interlude));
-
 		int startByte = 0;
 		int index = 0;
-		for(byte[] part : parts) {
-			//System.out.println(" section -> " + ArrayUtils.printable(parts.get(i)));
-			int length = part.length;
+		for (int i = 0; i < partCount; i++) {
+			int length = parts[i].length;
 			if(length > 0) {
-				System.arraycopy(part, 0, dest, startByte, length);
+				System.arraycopy(parts[i], 0, dest, startByte, length);
 				startByte += length;
 			}
 			if(index < partCount - 1 && interludeSize > 0) {
@@ -84,8 +95,6 @@ public class ByteArrayUtil {
 			}
 			index++;
 		}
-
-		//System.out.println(" complete -> " + ArrayUtils.printable(dest));
 		return dest;
 	}
 
@@ -97,7 +106,7 @@ public class ByteArrayUtil {
 	 * @return a newly created concatenation of the input
 	 */
 	public static byte[] join(byte[]... parts) {
-		return join(null, Arrays.asList(parts));
+		return interludeJoin(null, parts);
 	}
 
 	/**
@@ -135,11 +144,7 @@ public class ByteArrayUtil {
 		if(src.length < start + pattern.length)
 			return false;
 
-		for(int i = 0; i < pattern.length; i++)
-			if(pattern[i] != src[start + i])
-				return false;
-
-		return true;
+		return compareTo(src, start, pattern.length, pattern, 0, pattern.length) == 0;
 	}
 
 	/**
@@ -307,14 +312,7 @@ public class ByteArrayUtil {
 	 *  {@code r}.
 	 */
 	public static int compareUnsigned(byte[] l, byte[] r) {
-		for(int idx = 0; idx < l.length && idx < r.length; ++idx) {
-			if(l[idx] != r[idx]) {
-				return (l[idx] & 0xFF) < (r[idx] & 0xFF) ? -1 : 1;
-			}
-		}
-		if(l.length == r.length)
-			return 0;
-		return l.length < r.length ? -1 : 1;
+		return compareTo(l, 0, l.length, r, 0, r.length);
 	}
 
 	/**
@@ -328,15 +326,11 @@ public class ByteArrayUtil {
 	 * @return {@code true} if {@code array} starts with {@code prefix}
 	 */
 	public static boolean startsWith(byte[] array, byte[] prefix) {
+		// Short Circuit
 		if(array.length < prefix.length) {
 			return false;
 		}
-		for(int i = 0; i < prefix.length; ++i) {
-			if(prefix[i] != array[i]) {
-				return false;
-			}
-		}
-		return true;
+		return compareTo(array, 0, prefix.length, prefix, 0, prefix.length) == 0;
 	}
 
 	/**
@@ -356,6 +350,21 @@ public class ByteArrayUtil {
 		// Since rstrip makes sure the last character is not \xff, we can be sure
 		//  we're able to add 1 to it without overflow.
 		copy[copy.length -1] = (byte) (copy[copy.length - 1] + 1);
+		return copy;
+	}
+
+	/**
+	 * Computes the key that would sort immediately after {@code key}.
+	 *  {@code key} must be non-null.
+	 *
+	 * @param key byte array for which next key is to be computed
+	 *
+	 * @return a newly created byte array that would sort immediately after {@code key}
+	*/
+	public static byte[] keyAfter(byte[] key) {
+		byte[] copy = new byte[key.length + 1];
+		System.arraycopy(key, 0, copy, 0, key.length);
+		copy[key.length] = 0x0;
 		return copy;
 	}
 

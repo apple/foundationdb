@@ -60,9 +60,15 @@ public:
 						}
 					}
 				}
-				TraceEvent("PeekNextGetMore").detail("Total", self->totalRecoveredBytes).detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc)
-					.detail("End", self->logSystem->getEnd()).detail("HasMessage", self->cursor->hasMessage()).detail("Version", self->cursor->version().version); 
-				
+				TraceEvent("PeekNextGetMore")
+				    .detail("Total", self->totalRecoveredBytes)
+				    .detail("Queue", self->recoveryQueue.size())
+				    .detail("Bytes", bytes)
+				    .detail("Loc", self->recoveryLoc)
+				    .detail("End", self->logSystem->getEnd())
+				    .detail("HasMessage", self->cursor->hasMessage())
+				    .detail("Version", self->cursor->version().version);
+
 				if(self->cursor->popped() != 0 || (!self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01))) {
 					TEST(true); //disk adapter reset
 					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
@@ -130,7 +136,7 @@ Future<Standalone<StringRef>> LogSystemDiskQueueAdapter::readNext( int bytes ) {
 	return LogSystemDiskQueueAdapterImpl::readNext(this, bytes);
 }
 
-IDiskQueue::location LogSystemDiskQueueAdapter::getNextReadLocation() {
+IDiskQueue::location LogSystemDiskQueueAdapter::getNextReadLocation() const {
 	return IDiskQueue::location( 0, recoveryQueueLoc );
 }
 

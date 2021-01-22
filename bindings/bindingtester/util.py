@@ -29,15 +29,15 @@ import fdb
 def initialize_logger_level(logging_level):
     logger = get_logger()
 
-    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
+    assert logging_level in ['DEBUG', 'INFO', 'WARNING', 'ERROR']
 
-    if logging_level == "DEBUG":
+    if logging_level == 'DEBUG':
         logger.setLevel(logging.DEBUG)
-    elif logging_level == "INFO":
+    elif logging_level == 'INFO':
         logger.setLevel(logging.INFO)
-    elif logging_level == "WARNING":
+    elif logging_level == 'WARNING':
         logger.setLevel(logging.WARNING)
-    elif logging_level == "ERROR":
+    elif logging_level == 'ERROR':
         logger.setLevel(logging.ERROR)
 
 
@@ -49,7 +49,7 @@ def get_logger():
 def signal_number_to_name(signal_num):
     name = []
     for key in signal.__dict__.keys():
-        if key.startswith("SIG") and getattr(signal, key) == signal_num:
+        if key.startswith('SIG') and getattr(signal, key) == signal_num:
             name.append(key)
     if len(name) == 1:
         return name[0]

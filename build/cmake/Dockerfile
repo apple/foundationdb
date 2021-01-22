@@ -13,10 +13,10 @@ RUN curl -L https://github.com/Kitware/CMake/releases/download/v3.13.4/cmake-3.1
     cd /tmp && tar xf cmake.tar.gz && cp -r cmake-3.13.4-Linux-x86_64/* /usr/local/
 
 # install boost
-RUN curl -L https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2 > /tmp/boost.tar.bz2 &&\
+RUN curl -L https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_72_0.tar.bz2 > /tmp/boost.tar.bz2 &&\
     cd /tmp && echo "2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba  boost.tar.bz2" > boost-sha.txt &&\
-    sha256sum -c boost-sha.txt && tar xf boost.tar.bz2 && cp -r boost_1_67_0/boost /usr/local/include/ &&\
-    rm -rf boost.tar.bz2 boost_1_67_0
+    sha256sum -c boost-sha.txt && tar xf boost.tar.bz2 && cp -r boost_1_72_0/boost /usr/local/include/ &&\
+    rm -rf boost.tar.bz2 boost_1_72_0
 
 # install mono (for actorcompiler)
 RUN yum install -y epel-release

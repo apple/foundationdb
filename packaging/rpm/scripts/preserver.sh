@@ -4,7 +4,7 @@ getent passwd foundationdb >/dev/null || useradd -c "FoundationDB" -g foundation
 
 if [ $1 -gt 1 ]; then
     # old versions could leave this behind
-    rm -f /usr/lib/foundationdb/argparse.pyc
+    rm -f /usr/lib/foundationdb/argparse.py /usr/lib/foundationdb/argparse.pyc
 fi
 
 CURRENTVER=$(rpm -q --queryformat %%{VERSION} foundationdb-server) || :

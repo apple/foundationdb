@@ -40,7 +40,7 @@ class DirectoryHcaTest(Test):
 
     def setup(self, args):
         self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version, args.types)
-        self.transactions = ['tr%d' % i for i in range(3)]  # SOMEDAY: parameterize this number?
+        self.transactions = [b'tr%d' % i for i in range(3)]  # SOMEDAY: parameterize this number?
         self.barrier_num = 0
 
         self.max_directories_per_transaction = 30
@@ -59,7 +59,7 @@ class DirectoryHcaTest(Test):
 
     def barrier(self, instructions, thread_number, thread_ending=False):
         if not thread_ending:
-            instructions.push_args(self.coordination[(self.barrier_num + 1)][thread_number].key(), '')
+            instructions.push_args(self.coordination[(self.barrier_num + 1)][thread_number].key(), b'')
             instructions.append('SET_DATABASE')
             instructions.append('WAIT_FUTURE')
 
@@ -76,7 +76,7 @@ class DirectoryHcaTest(Test):
 
         instructions.append('NEW_TRANSACTION')
 
-        default_path = unicode('default%d' % self.next_path)
+        default_path = 'default%d' % self.next_path
         self.next_path += 1
         dir_list = directory_util.setup_directories(instructions, default_path, self.random)
         num_dirs = len(dir_list)
@@ -102,7 +102,7 @@ class DirectoryHcaTest(Test):
 
             for i in range(num_directories):
                 path = (self.random.random_unicode_str(16),)
-                op_args = test_util.with_length(path) + ('', None)
+                op_args = test_util.with_length(path) + (b'', None)
                 directory_util.push_instruction_and_record_prefix(instructions, 'DIRECTORY_CREATE',
                                                                   op_args, path, num_dirs, self.random, self.prefix_log)
                 num_dirs += 1
@@ -121,7 +121,7 @@ class DirectoryHcaTest(Test):
     def pre_run(self, tr, args):
         if args.concurrency > 1:
             for i in range(args.concurrency):
-                tr[self.coordination[0][i]] = ''
+                tr[self.coordination[0][i]] = b''
 
     def validate(self, db, args):
         errors = []

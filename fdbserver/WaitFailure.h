@@ -25,8 +25,9 @@
 Future<Void> waitFailureServer(const FutureStream<ReplyPromise<Void>>& waitFailure);
 
 // talks to a wait failure server, returns Void on failure
-Future<Void> waitFailureClient(const RequestStream<ReplyPromise<Void>>& waitFailure, 
-	double const& failureReactionTime=0, double const& failureReactionSlope=0, TaskPriority const& taskID=TaskPriority::DefaultEndpoint);
+Future<Void> waitFailureClient(const RequestStream<ReplyPromise<Void>>& waitFailure,
+                               double const& failureReactionTime = 0, double const& failureReactionSlope = 0,
+                               bool const& trace = false, TaskPriority const& taskID = TaskPriority::DefaultEndpoint);
 
 // talks to a wait failure server, returns Void on failure, reaction time is always waited
 Future<Void> waitFailureClientStrict(const RequestStream<ReplyPromise<Void>>& waitFailure, double const& failureReactionTime=0, TaskPriority const& taskID=TaskPriority::DefaultEndpoint);

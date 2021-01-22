@@ -131,7 +131,7 @@ namespace oldTLog_4_6 {
 		void push( TLogQueueEntryRef const& qe ) {
 			BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 			wr << uint32_t(0);
-			IncludeVersion().write(wr);  // payload is versioned
+			IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr);  // payload is versioned
 			wr << qe;
 			wr << uint8_t(1);
 			*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
@@ -414,6 +414,7 @@ namespace oldTLog_4_6 {
 				recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 		{
 			startRole(Role::TRANSACTION_LOG, interf.id(), tLogData->workerID, {{"SharedTLog", tLogData->dbgid.shortString()}}, "Restored");
+			addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
 			persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 			persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
@@ -877,18 +878,18 @@ namespace oldTLog_4_6 {
 				peekId = req.sequence.get().first;
 				sequence = req.sequence.get().second;
 				if (sequence >= SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->peekTracker.find(peekId) == self->peekTracker.end()) {
-					throw timed_out();
+					throw operation_obsolete();
 				}
 				if(sequence > 0) {
 					auto& trackerData = self->peekTracker[peekId];
 					trackerData.lastUpdate = now();
 					Version ver = wait(trackerData.sequence_version[sequence].getFuture());
-					req.begin = ver;
+					req.begin = std::max(ver, req.begin);
 					wait(yield());
 				}
 			} catch( Error &e ) {
-				if(e.code() == error_code_timed_out) {
-					req.reply.sendError(timed_out());
+				if(e.code() == error_code_timed_out || e.code() == error_code_operation_obsolete) {
+					req.reply.sendError(e);
 					return Void();
 				} else {
 					throw;
@@ -924,15 +925,15 @@ namespace oldTLog_4_6 {
 				auto& sequenceData = trackerData.sequence_version[sequence+1];
 				trackerData.lastUpdate = now();
 				if(trackerData.sequence_version.size() && sequence+1 < trackerData.sequence_version.begin()->first) {
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					if (!sequenceData.isSet())
-						sequenceData.sendError(timed_out());
+						sequenceData.sendError(operation_obsolete());
 					return Void();
 				}
 				if(sequenceData.isSet()) {
 					if(sequenceData.getFuture().get() != rep.end) {
 						TEST(true); //tlog peek second attempt ended at a different version
-						req.reply.sendError(timed_out());
+						req.reply.sendError(operation_obsolete());
 						return Void();
 					}
 				} else {
@@ -1003,7 +1004,7 @@ namespace oldTLog_4_6 {
 			if(sequenceData.isSet()) {
 				if(sequenceData.getFuture().get() != reply.end) {
 					TEST(true); //tlog peek second attempt ended at a different version
-					req.reply.sendError(timed_out());
+					req.reply.sendError(operation_obsolete());
 					return Void();
 				}
 			} else {
@@ -1088,28 +1089,9 @@ namespace oldTLog_4_6 {
 		loop {
 			auto const& inf = self->dbInfo->get();
 			bool isDisplaced = !std::count( inf.priorCommittedLogServers.begin(), inf.priorCommittedLogServers.end(), tli.id() );
-			isDisplaced = isDisplaced && inf.recoveryCount >= recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED;
-
-			if(isDisplaced) {
-				for(auto& log : inf.logSystemConfig.tLogs) {
-					 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-						isDisplaced = false;
-						break;
-					 }
-				}
-			}
-			if(isDisplaced) {
-				for(auto& old : inf.logSystemConfig.oldTLogs) {
-					for(auto& log : old.tLogs) {
-						 if( std::count( log.tLogs.begin(), log.tLogs.end(), tli.id() ) ) {
-							isDisplaced = false;
-							break;
-						 }
-					}
-				}
-			}
-			if ( isDisplaced )
-			{
+			isDisplaced = isDisplaced && inf.recoveryCount >= recoveryCount &&
+			              inf.recoveryState != RecoveryState::UNINITIALIZED && !inf.logSystemConfig.hasTLog(tli.id());
+			if (isDisplaced) {
 				TraceEvent("TLogDisplaced", tli.id()).detail("Reason", "DBInfoDoesNotContain").detail("RecoveryCount", recoveryCount).detail("InfRecoveryCount", inf.recoveryCount).detail("RecoveryState", (int)inf.recoveryState)
 					.detail("LogSysConf", describe(inf.logSystemConfig.tLogs)).detail("PriorLogs", describe(inf.priorCommittedLogServers)).detail("OldLogGens", inf.logSystemConfig.oldTLogs.size());
 				if (BUGGIFY) wait( delay( SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01() ) );

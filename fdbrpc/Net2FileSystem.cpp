@@ -93,7 +93,8 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
 {
 	Net2AsyncFile::init();
 #ifdef __linux__
-	AsyncFileKAIO::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
+	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
+		AsyncFileKAIO::init( Reference<IEventFD>(N2::ASIOReactor::getEventFD()), ioTimeout );
 
 	if (fileSystemPath.empty()) {
 		checkFileSystem = false;
@@ -108,7 +109,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, std::string fileSystemPath)
 					criticalError(FDB_EXIT_ERROR, "FileSystemError", format("`%s' is not a mount point", fileSystemPath.c_str()).c_str());
 				}
 			}
-		} catch (Error& e) {
+		} catch (Error&) {
 			criticalError(FDB_EXIT_ERROR, "FileSystemError", format("Could not get device id from `%s'", fileSystemPath.c_str()).c_str());
 		}
 	}

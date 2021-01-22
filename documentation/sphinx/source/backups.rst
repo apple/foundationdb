@@ -24,14 +24,14 @@ Backup vs DR
 
 FoundationDB can backup a database to local disks, a blob store (such as Amazon S3), or to another FoundationDB database.  
 
-Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contains a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
+Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contain a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
 
 While a cluster is being used as the destination for a DR operation it will be locked to prevent accidental use or modification.
 
 Limitations
 ===========
 
-Backup data is not encrypted on disk, in a blob store account, or in transit to a destination blob store account or database.
+Backup data is not encrypted at rest on disk or in a blob store account.
 
 Tools
 ===========
@@ -108,19 +108,37 @@ Here is a complete list of valid parameters:
 
  *connect_tries* (or *ct*) - Number of times to try to connect for each request.
 
+ *connect_timeout* (or *cto*) - Number of seconds to wait for a connect request to succeed.
+
+ *max_connection_life* (or *mcl*) - Maximum number of seconds to reuse a single TCP connection.
+
+ *request_timeout_min* (or *rtom*) - Minimum number of seconds to wait for a request to succeed after a connection is established.
+
  *request_tries* (or *rt*) - Number of times to try each request until a parseable HTTP response other than 429 is received.
 
  *requests_per_second* (or *rps*) - Max number of requests to start per second.
 
+ *list_requests_per_second* (or *lrps*) - Max number of list requests to start per second.
+
+ *write_requests_per_second* (or *wrps*) - Max number of write requests to start per second.
+
+ *read_requests_per_second* (or *rrps*) - Max number of read requests to start per second.
+
+ *delete_requests_per_second* (or *drps*) - Max number of delete requests to start per second.
+
  *concurrent_requests* (or *cr*) - Max number of requests in progress at once.
+
+ *concurrent_uploads* (or *cu*) - Max concurrent uploads (part or whole) that can be in progress at once.
+
+ *concurrent_lists* (or *cl*) - Max concurrent list operations that can be in progress at once.
+
+ *concurrent_reads_per_file* (or *crps*) - Max concurrent reads in progress for any one file.
+
+ *concurrent_writes_per_file* (or *cwps*)  Max concurrent uploads in progress for any one file.
 
  *multipart_max_part_size* (or *maxps*) - Max part size for multipart uploads.
 
  *multipart_min_part_size* (or *minps*) - Min part size for multipart uploads.
-
- *concurrent_uploads* (or *cu*) - Max concurrent uploads (part or whole) that can be in progress at once.
-
- *concurrent_reads_per_file* (or *crps*) - Max concurrent reads in progress for any one file.
 
  *read_block_size* (or *rbs*) - Block size in bytes to be used for reads.
 
@@ -159,15 +177,14 @@ The Blob Credential File format is JSON with the following schema:
     }
   }
 
-SSL Support
+TLS Support
 ===========
 
-By default, backup will communicate over https. To configure https, the following environment variables are used:
+In-flight traffic for blob store or disaster recovery backups can be encrypted with the following environment variables. They are also offered as command-line flags or can be specified in ``foundationdb.conf`` for backup agents.
 
 ============================ ====================================================
 Environment Variable         Purpose
 ============================ ====================================================
-``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
 ``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
                              can be loaded, used by the plugin
 ``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
@@ -177,8 +194,11 @@ Environment Variable         Purpose
 ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
                              to trust. Specify to override the default openssl
                              location.
+``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
+                             certificates and sessions.
 ============================ ====================================================
 
+Blob store backups can be configured to use HTTPS/TLS by setting the ``secure_connection`` or ``sc`` backup URL option to ``1``, which is the default. Disaster recovery backups are secured by using TLS for both the source and target clusters and setting the TLS options for the ``fdbdr`` and ``dr_agent`` commands.
 
 ``fdbbackup`` command line tool
 ===============================
@@ -216,13 +236,16 @@ The ``start`` subcommand is used to start a backup.  If there is already a backu
 
 ::
 
-   user@host$ fdbbackup start [-t <TAG>] -d <BACKUP_URL> [-z] [-s <DURATION>] [-w] [-k '<BEGIN>[ <END>]']...
+   user@host$ fdbbackup start [-t <TAG>] -d <BACKUP_URL> [-z] [-s <DURATION>] [--partitioned_log_experimental] [-w] [-k '<BEGIN>[ <END>]']...
 
 ``-z``
   Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup's target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.
 
 ``-s <DURATION>`` or ``--snapshot_interval <DURATION>``  
   Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.
+
+``--partitioned_log_experimental``
+  Specifies the backup uses the partitioned mutation logs generated by backup workers. Since FDB version 6.3, this option is experimental and requires using fast restore for restoring the database from the generated files. The default is to use non-partitioned mutation logs generated by backup agents.
 
 ``-w``
   Wait for the backup to complete with behavior identical to that of the :ref:`wait command <backup-wait>`.

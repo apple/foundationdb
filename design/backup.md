@@ -17,7 +17,7 @@
  KV ranges {(a-b, v0), (c-d, v1), (e-f, v2) ... (y-z, v10)}. With mutation log recorded all along, we can still use
  the simple backup-restore scheme described above on sub keyspaces seperately. Assuming we did record mutation log from
  v0 to vn, that allows us to restore
-  
+
 * Keyspace a-b to any version between v0 and vn
 * Keyspace c-d to any version between v1 and vn
 * Keyspace y-z to any version between v10 and vn
@@ -47,7 +47,7 @@ take the same example
 
 Restoring to version vk (v10 < vk <= vn), needs KV ranges to be restored first and then replaying mutation logs. For
 each KV range (k1-k2, vx) that is restored we need to replay mutation log [(k1-k2, vx+1), .., (k1-k2, vk)]. But, this
-needs scanning complete muation log to get mutaions for k1-k2, that is sub-optimal, for any decent sized database
+needs scanning complete mutation log to get mutations for k1-k2, that is sub-optimal, for any decent sized database
 this will take forever.
 
 Instead looking at restore on key space, we can replay events on version space, that way we need to scan

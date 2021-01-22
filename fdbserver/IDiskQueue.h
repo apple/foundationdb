@@ -33,7 +33,8 @@ enum class CheckHashes {
 class IDiskQueue : public IClosable {
 public:
 	struct location {
-		int64_t hi, lo;
+		// location is same with seq., specifying the index of the virtualy infinite queue.
+		int64_t hi, lo; // hi is always 0, lo is always equal to seq.
 		location() : hi(0), lo(0) {}
 		location(int64_t lo) : hi(0), lo(lo) {}
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
@@ -67,18 +68,23 @@ public:
 	// Before calling push or commit, the caller *must* perform recovery by calling readNext() until it returns less than the requested number of bytes.
 	// Thereafter it may not be called again.
 	virtual Future<Standalone<StringRef>> readNext( int bytes ) = 0;  // Return the next bytes in the queue (beginning, the first time called, with the first unpopped byte)
-	virtual location getNextReadLocation() = 0;    // Returns a location >= the location of all bytes previously returned by readNext(), and <= the location of all bytes subsequently returned
-	virtual location getNextCommitLocation() = 0;  // If commit() were to be called, all buffered writes would be written starting at `location`.
-	virtual location getNextPushLocation() = 0;  // If push() were to be called, the pushed data would be written starting at `location`.
+	virtual location getNextReadLocation()
+	    const = 0; // Returns a location >= the location of all bytes previously returned by readNext(), and <= the
+	               // location of all bytes subsequently returned
+	virtual location getNextCommitLocation()
+	    const = 0; // If commit() were to be called, all buffered writes would be written starting at `location`.
+	virtual location getNextPushLocation()
+	    const = 0; // If push() were to be called, the pushed data would be written starting at `location`.
 
 	virtual Future<Standalone<StringRef>> read( location start, location end, CheckHashes vc ) = 0;
 	virtual location push( StringRef contents ) = 0;  // Appends the given bytes to the byte stream.  Returns a location token representing the *end* of the contents.
 	virtual void pop( location upTo ) = 0;            // Removes all bytes before the given location token from the byte stream.
 	virtual Future<Void> commit() = 0;  // returns when all prior pushes and pops are durable.  If commit does not return (due to close or a crash), any prefix of the pushed bytes and any prefix of the popped bytes may be durable.
 
-	virtual int getCommitOverhead() = 0; // returns the amount of unused space that would be written by a commit that immediately followed this call
+	virtual int getCommitOverhead() const = 0; // returns the amount of unused space that would be written by a commit
+	                                           // that immediately followed this call
 
-	virtual StorageBytes getStorageBytes() = 0;
+	virtual StorageBytes getStorageBytes() const = 0;
 };
 
 template<>
@@ -105,9 +111,10 @@ struct numeric_limits<IDiskQueue::location> {
 };
 }
 
+// Specify which hash function to use for checksum of pages in DiskQueue
 enum class DiskQueueVersion : uint16_t {
-	V0 = 0,
-	V1 = 1,
+	V0 = 0, // Use hashlittle
+	V1 = 1, // Use crc32, which is faster than hashlittle
 };
 
 IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext

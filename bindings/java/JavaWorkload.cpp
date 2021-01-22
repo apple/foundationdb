@@ -19,7 +19,7 @@
  */
 
 #include <foundationdb/ClientWorkload.h>
-#define FDB_API_VERSION 620
+#define FDB_API_VERSION 630
 #include <foundationdb/fdb_c.h>
 
 #include <jni.h>
@@ -371,9 +371,11 @@ struct JVM {
 		                 { { "send", "(JZ)V", reinterpret_cast<void*>(&promiseSend) } });
 		auto fdbClass = getClass("com/apple/foundationdb/FDB");
 		jmethodID selectMethod =
-		    env->GetStaticMethodID(fdbClass, "selectAPIVersion", "(IZ)Lcom/apple/foundationdb/FDB;");
+		    env->GetStaticMethodID(fdbClass, "selectAPIVersion", "(I)Lcom/apple/foundationdb/FDB;");
 		checkException();
-		env->CallStaticObjectMethod(fdbClass, selectMethod, jint(620), jboolean(false));
+		auto fdbInstance = env->CallStaticObjectMethod(fdbClass, selectMethod, jint(630));
+		checkException();
+		env->CallObjectMethod(fdbInstance, getMethod(fdbClass, "disableShutdownHook", "()V"));
 		checkException();
 	}
 

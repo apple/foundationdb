@@ -9,6 +9,28 @@ This document provides an overview of changes that an application developer may 
 
 For more details about API versions, see :ref:`api-versions`.
 
+.. _api-version-upgrade-guide-630:
+
+API version 630
+===============
+
+General
+-------
+
+* In previous api versions, a get range starting at ``\xff\xff/worker_interfaces`` ignored its arguments and returned keys outside the range requested. In api version 630, you can get similar behavior by reading from ``\xff\xff/worker_interfaces/`` to ``\xff\xff/worker_interfaces0`` and stripping the prefix ``\xff\xff/worker_interfaces/`` from each key in the result.
+* The ``get_addresses_for_key`` function now returns strings that include the port in the address. Prior to API version 630, this required using the ``INCLUDE_PORT_IN_ADDRESS`` option, which has now been deprecated.
+* The ``ENABLE_SLOW_TASK_PROFILING`` network option has been replaced by ``ENABLE_RUN_LOOP_PROFILING`` and is now deprecated.
+
+C bindings
+----------
+
+* The ``FDBKeyValue`` struct's ``key`` and ``value`` members have changed type from ``void*`` to ``uint8_t*``.
+
+Python bindings
+---------------
+
+* ``@fdb.transactional`` decorated functions will now throw an error if they return a generator. Previously, it was very easy to write these generators in a way that resulted them committing or retrying earlier than intended.
+
 .. _api-version-upgrade-guide-620:
 
 API version 620

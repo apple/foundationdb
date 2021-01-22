@@ -300,7 +300,7 @@ bool FDBLibTLSPolicy::set_verify_peers(int count, const uint8_t* verify_peers[],
 			}
 			Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start)));
 			verify_rules.push_back(verify);
-		} catch ( const std::runtime_error& e ) {
+		} catch ( const std::runtime_error& ) {
 			verify_rules.clear();
 			std::string verifyString((const char*)verify_peers[i], verify_peers_len[i]);
 			TraceEvent(SevError, "FDBLibTLSVerifyPeersParseError").detail("Config", verifyString);

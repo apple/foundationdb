@@ -28,7 +28,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
 
-struct FlowReceiver : private NetworkMessageReceiver {
+struct FlowReceiver : public NetworkMessageReceiver {
 	// Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 
 	FlowReceiver() : m_isLocalEndpoint(false), m_stream(false) {
@@ -60,6 +60,12 @@ struct FlowReceiver : private NetworkMessageReceiver {
 		return endpoint;
 	}
 
+	void setEndpoint(Endpoint const& e) {
+		ASSERT(!endpoint.isValid());
+		m_isLocalEndpoint = true;
+		endpoint = e;
+	}
+
 	void makeWellKnownEndpoint(Endpoint::Token token, TaskPriority taskID) {
 		ASSERT(!endpoint.isValid());
 		m_isLocalEndpoint = true;
@@ -84,22 +90,6 @@ struct NetSAV : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		if (!SAV<T>::canBeSet()) return;  // load balancing and retries can result in the same request being answered twice
-		this->addPromiseRef();
-		bool ok;
-		reader >> ok;
-		if (ok) {
-			T message;
-			reader >> message;
-			SAV<T>::sendAndDelPromiseRef(message);
-		}
-		else {
-			Error error;
-			reader >> error;
-			SAV<T>::sendErrorAndDelPromiseRef(error);
-		}
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		if (!SAV<T>::canBeSet()) return;
 		this->addPromiseRef();
@@ -239,13 +229,6 @@ struct NetNotifiedQueue : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotif
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	virtual void destroy() { delete this; }
-	virtual void receive(ArenaReader& reader) {
-		this->addPromiseRef();
-		T message;
-		reader >> message;
-		this->send(std::move(message));
-		this->delPromiseRef();
-	}
 	virtual void receive(ArenaObjectReader& reader) {
 		this->addPromiseRef();
 		T message;
@@ -270,6 +253,15 @@ public:
 		else
 			queue->send(value);
 	}
+
+	void send(T&& value) const {
+		if (queue->isRemoteEndpoint()) {
+			FlowTransport::transport().sendUnreliable(SerializeSource<T>(std::move(value)), getEndpoint(), true);
+		}
+		else
+			queue->send(std::move(value));
+	}
+
 	/*void sendError(const Error& error) const {
 	ASSERT( !queue->isRemoteEndpoint() );
 	queue->sendError(error);
@@ -282,6 +274,7 @@ public:
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
 	Future< REPLY_TYPE(X) > getReply(const X& value) const {
+		ASSERT(!getReplyPromise(value).getFuture().isReady());
 		if (queue->isRemoteEndpoint()) {
 			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()), getEndpoint());
 		}
@@ -404,6 +397,10 @@ public:
 	bool operator == (const RequestStream<T>& rhs) const { return queue == rhs.queue; }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
+
+	std::pair<FlowReceiver*, TaskPriority> getReceiver( TaskPriority taskID = TaskPriority::DefaultEndpoint ) {
+		return std::make_pair((FlowReceiver*)queue, taskID);
+	}
 
 private:
 	NetNotifiedQueue<T>* queue;

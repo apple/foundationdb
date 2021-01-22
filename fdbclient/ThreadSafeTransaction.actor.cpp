@@ -21,10 +21,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/DatabaseContext.h"
-#if defined(CMAKE_BUILD) || !defined(WIN32)
-#include "versions.h"
-#endif
-#include <new>
+#include "fdbclient/versions.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't call addRef (e.g. C API follows this).
 // Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any of these functions.
@@ -64,9 +61,9 @@ void ThreadSafeDatabase::setOption( FDBDatabaseOptions::Option option, Optional<
 	Standalone<Optional<StringRef>> passValue = value;
 
 	// ThreadSafeDatabase is not allowed to do anything with options except pass them through to RYW.
-	onMainThreadVoid( [db, option, passValue](){ 
+	onMainThreadVoid( [db, option, passValue](){
 		db->checkDeferredError();
-		db->setOption(option, passValue.contents()); 
+		db->setOption(option, passValue.contents());
 	}, &db->deferredError );
 }
 
@@ -77,7 +74,7 @@ ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion)
 	// but run its constructor on the main thread
 	DatabaseContext *db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connFile, apiVersion](){ 
+	onMainThreadVoid([db, connFile, apiVersion](){
 		try {
 			Database::createDatabase(Reference<ClusterConnectionFile>(connFile), apiVersion, false, LocalityData(), db).extractPtr();
 		}
@@ -156,6 +153,17 @@ ThreadFuture< Key > ThreadSafeTransaction::getKey( const KeySelectorRef& key, bo
 			return tr->getKey(k, snapshot);
 		} );
 }
+
+ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes( const KeyRangeRef& keys ) {
+	KeyRange r = keys;
+
+	ReadYourWritesTransaction *tr = this->tr;
+	return onMainThread( [tr, r]() -> Future<int64_t> {
+			tr->checkDeferredError();
+			return tr->getEstimatedRangeSizeBytes(r);
+		} );
+}
+
 
 ThreadFuture< Standalone<RangeResultRef> > ThreadSafeTransaction::getRange( const KeySelectorRef& begin, const KeySelectorRef& end, int limit, bool snapshot, bool reverse ) {
 	KeySelector b = begin;
@@ -292,7 +300,7 @@ void ThreadSafeTransaction::setOption( FDBTransactionOptions::Option option, Opt
 		TraceEvent("UnknownTransactionOption").detail("Option", option);
 		throw invalid_option();
 	}
-	
+
 	ReadYourWritesTransaction *tr = this->tr;
 	Standalone<Optional<StringRef>> passValue = value;
 
@@ -333,9 +341,9 @@ void ThreadSafeTransaction::reset() {
 	onMainThreadVoid( [tr](){ tr->reset(); }, NULL );
 }
 
-extern const char* getHGVersion();
+extern const char* getSourceVersion();
 
-ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getHGVersion(), currentProtocolVersion)), transportId(0) {}
+ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion)), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = apiVersion;

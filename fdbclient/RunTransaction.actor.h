@@ -27,17 +27,21 @@
 #elif !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_H)
 	#define FDBCLIENT_RUNTRANSACTION_ACTOR_H
 
+#include <utility>
+
 #include "flow/flow.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
-ACTOR template < class Function >
-Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
-runRYWTransaction(Database cx, Function func) {
+ACTOR template <class Function>
+Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransaction(
+    Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop{
 		try {
-			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
+			// func should be idempodent; otherwise, retry will get undefined result
+			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
+			    wait(func(tr));
 			wait(tr->commit());
 			return result;
 		}
@@ -47,13 +51,14 @@ runRYWTransaction(Database cx, Function func) {
 	}
 }
 
-ACTOR template < class Function >
-Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
+ACTOR template <class Function>
+Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
 runRYWTransactionFailIfLocked(Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	loop{
 		try {
-			state decltype( fake<Function>()( Reference<ReadYourWritesTransaction>() ).getValue()) result = wait(func(tr));
+			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
+			    wait(func(tr));
 			wait(tr->commit());
 			return result;
 		}
@@ -65,11 +70,11 @@ runRYWTransactionFailIfLocked(Database cx, Function func) {
 	}
 }
 
-ACTOR template < class Function >
-Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
-runRYWTransactionNoRetry(Database cx, Function func) {
+ACTOR template <class Function>
+Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionNoRetry(
+    Database cx, Function func) {
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
+	state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
 	wait(tr->commit());
 	return result;
 }

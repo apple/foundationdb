@@ -59,9 +59,10 @@ def write_windows_asm(asmfile, functions):
 
 
 def write_unix_asm(asmfile, functions, prefix):
-    asmfile.write(".intel_syntax noprefix\n")
+    if platform != "linux-aarch64":
+        asmfile.write(".intel_syntax noprefix\n")
 
-    if platform == "linux":
+    if platform.startswith('linux') or platform == "freebsd":
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
@@ -73,10 +74,15 @@ def write_unix_asm(asmfile, functions, prefix):
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
         asmfile.write("%s%s:\n" % (prefix, f))
-        asmfile.write(
-            "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
-        asmfile.write("\tmov r11, qword ptr [r11]\n")
-        asmfile.write("\tjmp r11\n")
+        if platform == "linux-aarch64":
+            asmfile.write("\tldr x16, =fdb_api_ptr_%s\n" % (f))
+            asmfile.write("\tldr x16, [x16]\n")
+            asmfile.write("\tbr x16\n")
+        else:
+            asmfile.write(
+                "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
+            asmfile.write("\tmov r11, qword ptr [r11]\n")
+            asmfile.write("\tjmp r11\n")
 
 
 with open(asm, 'w') as asmfile:
@@ -86,7 +92,7 @@ with open(asm, 'w') as asmfile:
         hfile.write(
             "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
 
-        if platform == "linux":
+        if platform.startswith('linux'):
             write_unix_asm(asmfile, functions, '')
         elif platform == "osx":
             write_unix_asm(asmfile, functions, '_')

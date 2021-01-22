@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -38,7 +39,7 @@ static std::set<int> const& normalAttritionErrors() {
 ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	// duration doesn't matter since this won't timeout
 	TraceEvent("IgnoreSSFailureStart");
-	bool _ = wait(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)); 
+	wait(success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)));
 	TraceEvent("IgnoreSSFailureWait");
 	wait(delay(duration));
 	TraceEvent("IgnoreSSFailureClear");
@@ -58,11 +59,16 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 
 struct MachineAttritionWorkload : TestWorkload {
 	bool enabled;
-	int machinesToKill, machinesToLeave;
-	double testDuration;
+	int machinesToKill, machinesToLeave, workersToKill, workersToLeave;
+	double testDuration, suspendDuration, liveDuration;
 	bool reboot;
 	bool killDc;
+	bool killMachine;
+	bool killDatahall;
+	bool killProcess;
+	bool killZone;
 	bool killSelf;
+	std::vector<std::string> targetIds;
 	bool replacement;
 	bool waitForVersion;
 	bool allowFaultInjection;
@@ -77,10 +83,20 @@ struct MachineAttritionWorkload : TestWorkload {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		machinesToKill = getOption( options, LiteralStringRef("machinesToKill"), 2 );
 		machinesToLeave = getOption( options, LiteralStringRef("machinesToLeave"), 1 );
+		workersToKill = getOption( options, LiteralStringRef("workersToKill"), 2 );
+		workersToLeave = getOption( options, LiteralStringRef("workersToLeave"), 1 );
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		suspendDuration = getOption( options, LiteralStringRef("suspendDuration"), 1.0 );
+		liveDuration = getOption( options, LiteralStringRef("liveDuration"), 5.0);
 		reboot = getOption( options, LiteralStringRef("reboot"), false );
-		killDc = getOption( options, LiteralStringRef("killDc"), deterministicRandom()->random01() < 0.25 );
-		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
+		killDc = getOption(options, LiteralStringRef("killDc"),
+		                   g_network->isSimulated() && deterministicRandom()->random01() < 0.25);
+		killMachine = getOption(options, LiteralStringRef("killMachine"), false);
+		killDatahall = getOption(options, LiteralStringRef("killDatahall"), false);
+		killProcess = getOption(options, LiteralStringRef("killProcess"), false);
+		killZone = getOption(options, LiteralStringRef("killZone"), false);
+		killSelf = getOption(options, LiteralStringRef("killSelf"), false);
+		targetIds = getOption(options, LiteralStringRef("targetIds"), std::vector<std::string>());
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && deterministicRandom()->random01() < 0.5 );
 		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
 		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
@@ -124,6 +140,11 @@ struct MachineAttritionWorkload : TestWorkload {
 				reportErrorsExcept( machineKillWorker( this, meanDelay, cx ), "machineKillWorkerError", UID(), &normalAttritionErrors()),
 				testDuration, Void() );
 		}
+		if (!clientId && !g_network->isSimulated()) {
+			return timeout(
+				reportErrorsExcept(noSimMachineKillWorker(this, cx), "noSimMachineKillWorkerError", UID(), &normalAttritionErrors()),
+			    testDuration, Void());
+		}
 		if(killSelf)
 			throw please_reboot();
 		return Void();
@@ -132,17 +153,111 @@ struct MachineAttritionWorkload : TestWorkload {
 	virtual void getMetrics( vector<PerfMetric>& m ) {
 	}
 
-	struct UIDPredicate {
-		UIDPredicate(StringRef uid ) : uid( uid ) {}
-		bool operator() ( WorkerInterface rhs ) { return rhs.locality.zoneId() != uid; }
-	private:
-		StringRef uid;
-	};
+	static bool noSimIsViableKill(WorkerDetails worker) {
+		return (worker.processClass != ProcessClass::ClassType::TesterClass);
+	}
+
+	template <typename Proc>
+	static void sendRebootRequests(std::vector<WorkerDetails> workers, std::vector<std::string> targets,
+	                               RebootRequest rbReq, Proc idAccess) {
+		for (const auto& worker : workers) {
+			// kill all matching workers
+			if (idAccess(worker).present() &&
+			    std::count(targets.begin(), targets.end(), idAccess(worker).get().toString())) {
+				TraceEvent("SendingRebootRequest").detail("TargetWorker", worker.interf.locality.toString());
+				worker.interf.clientInterface.reboot.send(rbReq);
+			}
+		}
+	}
+
+	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload *self, Database cx) {
+		ASSERT(!g_network->isSimulated());
+		state int killedWorkers = 0;
+		state std::vector<WorkerDetails> allWorkers =
+		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
+		// Can reuse reboot request to send to each interface since no reply promise needed
+		state RebootRequest rbReq;
+		if (self->reboot) {
+			rbReq.waitForDuration = self->suspendDuration;
+		} else {
+			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
+		}
+		state std::vector<WorkerDetails> workers;
+		// Pre-processing step: remove all testers from list of workers
+		for (const auto& worker : allWorkers) {
+			if (noSimIsViableKill(worker)) {
+				workers.push_back(worker);
+			}
+		}
+		deterministicRandom()->randomShuffle(workers);
+		wait(delay(self->liveDuration));
+		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
+		if (self->killDc) {
+			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.dcId(); });
+		} else if (self->killMachine) {
+			TraceEvent("Assassination").detail("TargetMachineIds", describe(self->targetIds));
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.machineId(); });
+		} else if (self->killDatahall) {
+			TraceEvent("Assassination").detail("TargetDatahallIds", describe(self->targetIds));
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.dataHallId(); });
+		} else if (self->killProcess) {
+			TraceEvent("Assassination").detail("TargetProcessIds", describe(self->targetIds));
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.processId(); });
+		} else if (self->killZone) {
+			TraceEvent("Assassination").detail("TargetZoneIds", describe(self->targetIds));
+			sendRebootRequests(workers, self->targetIds, rbReq,
+			                   // idAccess lambda
+			                   [](WorkerDetails worker) { return worker.interf.locality.zoneId(); });
+		} else {
+			while (killedWorkers < self->workersToKill && workers.size() > self->workersToLeave) {
+				TraceEvent("WorkerKillBegin")
+				    .detail("KilledWorkers", killedWorkers)
+				    .detail("WorkersToKill", self->workersToKill)
+				    .detail("WorkersToLeave", self->workersToLeave)
+				    .detail("Workers", workers.size());
+				if (self->waitForVersion) {
+					state Transaction tr(cx);
+					loop {
+						try {
+							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							wait(success(tr.getReadVersion()));
+							break;
+						} catch (Error& e) {
+							wait(tr.onError(e));
+						}
+					}
+				}
+				// Pick a worker to kill
+				state WorkerDetails targetWorker;
+				targetWorker = workers.back();
+				TraceEvent("Assassination")
+				    .detail("TargetWorker", targetWorker.interf.locality.toString())
+				    .detail("ZoneId", targetWorker.interf.locality.zoneId())
+				    .detail("KilledWorkers", killedWorkers)
+				    .detail("WorkersToKill", self->workersToKill)
+				    .detail("WorkersToLeave", self->workersToLeave)
+				    .detail("Workers", workers.size());
+				targetWorker.interf.clientInterface.reboot.send(rbReq);
+				killedWorkers++;
+				workers.pop_back();
+			}
+		}
+		return Void();
+	}
 
 	ACTOR static Future<Void> machineKillWorker( MachineAttritionWorkload *self, double meanDelay, Database cx ) {
 		state int killedMachines = 0;
 		state double delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-		state std::set<UID> killedUIDs;
 
 		ASSERT( g_network->isSimulated() );
 
@@ -194,12 +309,12 @@ struct MachineAttritionWorkload : TestWorkload {
 				state LocalityData targetMachine = self->machines.back();
 				if(BUGGIFY_WITH_PROB(0.01)) {
 					TEST(true); //Marked a zone for maintenance before killing it
-					bool _ =
-					    wait(setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
-					// }
+					wait(success(
+					    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
 				} else if (BUGGIFY_WITH_PROB(0.005)) {
 					TEST(true); // Disable DD for all storage server failures
-					self->ignoreSSFailures = ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5);
+					self->ignoreSSFailures =
+					    uncancellable(ignoreSSFailuresForDuration(cx, deterministicRandom()->random01() * 5));
 				}
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())

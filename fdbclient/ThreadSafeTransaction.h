@@ -71,6 +71,7 @@ public:
 	}
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 
 	void addReadConflictRange( const KeyRangeRef& keys ) override;
 	void makeSelfConflicting();

@@ -39,6 +39,13 @@ namespace ClientLogEventsParser {
 		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END);
 	}
 
+	void parseEventGetVersion_V3(BinaryReader &reader) {
+		FdbClientLogEvents::EventGetVersion_V3 gv;
+		reader >> gv;
+		ASSERT(gv.latency < 10000);
+		ASSERT(gv.priorityType >= 0 && gv.priorityType < FdbClientLogEvents::PRIORITY_END && gv.readVersion > 0);
+	}
+
 	void parseEventGet(BinaryReader &reader) {
 		FdbClientLogEvents::EventGet g;
 		reader >> g;
@@ -55,6 +62,12 @@ namespace ClientLogEventsParser {
 		FdbClientLogEvents::EventCommit c;
 		reader >> c;
 		ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000);
+	}
+
+	void parseEventCommit_V2(BinaryReader &reader) {
+		FdbClientLogEvents::EventCommit_V2 c;
+		reader >> c;
+		ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000 && c.commitVersion > 0);
 	}
 
 	void parseEventErrorGet(BinaryReader &reader) {
@@ -94,10 +107,19 @@ namespace ClientLogEventsParser {
 		Parser_V2() { parseGetVersion = parseEventGetVersion_V2; }
 		virtual ~Parser_V2() override {}
 	};
+	struct Parser_V3 : ParserBase {
+		Parser_V3() {
+			parseGetVersion = parseEventGetVersion_V3;
+			parseCommit = parseEventCommit_V2;
+		}
+		virtual ~Parser_V3() override {}
+	};
 
 	struct ParserFactory {
 		static std::unique_ptr<ParserBase> getParser(ProtocolVersion version) {
-			if(version.version() >= (uint64_t) 0x0FDB00B062000001LL) {
+			if(version.version() >= (uint64_t) 0x0FDB00B063010001LL) {
+				return std::unique_ptr<ParserBase>(new Parser_V3());
+			} else if(version.version() >= (uint64_t) 0x0FDB00B062000001LL) {
 				return std::unique_ptr<ParserBase>(new Parser_V2());
 			} else {
 				return std::unique_ptr<ParserBase>(new Parser_V1());
@@ -116,11 +138,9 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 
 	while (!reader.empty()) {
 		// Get EventType and timestamp
-		FdbClientLogEvents::EventType event;
+		FdbClientLogEvents::Event event;
 		reader >> event;
-		double timeStamp;
-		reader >> timeStamp;
-		switch (event)
+		switch (event.type)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
 			parser->parseGetVersion(reader);
@@ -144,7 +164,7 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 			parser->parseErrorCommit(reader);
 			break;
 		default:
-			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event);
+			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event.type);
 			return false;
 		}
 	}

@@ -25,7 +25,7 @@
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
-	constexpr bool has##x() const { return this->version() > x ::protocolVersion; }                                   \
+	constexpr bool has##x() const { return this->version() >= x ::protocolVersion; }                                   \
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
 // ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
@@ -88,6 +88,40 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, TLogVersion);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, PseudoLocalities);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, TLogQueueEntryRef);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, GenerationRegVal);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, MovableCoordinatedStateV2);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, KeyServerValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, LogsValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ServerTagValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, TagLocalityListValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, DatacenterReplicasValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ProcessClassValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, WorkerListValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, BackupStartValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, LogRangeEncodeValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, HealthyZoneValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, DRBackupRanges);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, RegionConfiguration);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ReplicationPolicy);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, BackupMutations);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ClusterControllerPriorityInfo);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ProcessIDFile);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, DBCoreState);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, TagThrottleValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ServerListValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, StorageCacheValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreStatusValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestDoneVersionValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestTriggerValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreWorkerInterfaceValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupProgressValue);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, KeyServerValueV2);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063000000LL, UnifiedTLogSpilling);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupWorker);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 };
 
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys.
@@ -97,7 +131,10 @@ public: // introduced features
 //
 //                                                         xyzdev
 //                                                         vvvv
-constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B062010001LL);
+constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B063010001LL);
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
+
+// Downgrades are only supported for one minor version
+constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B071000000LL);

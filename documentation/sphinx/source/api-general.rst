@@ -65,7 +65,7 @@ To install on **RHEL/CentOS** use the rpm command:
 
 To install on **macOS**, run the installer as in :doc:`getting-started-mac`, but deselect the "FoundationDB Server" feature.
 
-The client binaries include the ``fdbcli`` tool and language bindings for C and Python.  Other language bindings must be installed separately.
+The client binaries include the ``fdbcli`` tool and language bindings for C.  Other language bindings must be installed separately.
 
 Clients will also need a :ref:`cluster file <foundationdb-cluster-file>` to connect to a FoundationDB cluster.  You should copy the ``fdb.cluster`` file from the :ref:`default location <default-cluster-file>` on one of your FoundationDB servers to the default location on the client machine.
 

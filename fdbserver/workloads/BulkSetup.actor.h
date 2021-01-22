@@ -155,51 +155,7 @@ Future<uint64_t> setupRangeWorker( Database cx, T* workload, std::vector<std::pa
 //to reach that mark.  Returns a vector of times (in seconds) corresponding to the counts in the countsOfInterest vector.
 
 //Expects countsOfInterest to be sorted in ascending order
-ACTOR static Future<std::vector<std::pair<uint64_t, double> > > trackInsertionCount(Database cx, std::vector<uint64_t> countsOfInterest, double checkInterval)
-{
-	state KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
-	state KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
-	state Transaction tr(cx);
-	state uint64_t lastInsertionCount = 0;
-	state int currentCountIndex = 0;
-
-	state std::vector<std::pair<uint64_t, double> > countInsertionRates;
-
-	state double startTime = now();
-
-	while(currentCountIndex < countsOfInterest.size())
-	{
-		try
-		{
-			state Future<Standalone<RangeResultRef>> countFuture = tr.getRange(keyPrefix, 1000000000);
-			state Future<Standalone<RangeResultRef>> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
-			wait(success(countFuture) && success(bytesFuture));
-
-			Standalone<RangeResultRef> counts = countFuture.get();
-			Standalone<RangeResultRef> bytes = bytesFuture.get();
-
-			uint64_t numInserted = 0;
-			for(int i = 0; i < counts.size(); i++)
-				numInserted += *(uint64_t*)counts[i].value.begin();
-
-			uint64_t bytesInserted = 0;
-			for(int i = 0; i < bytes.size(); i++)
-				bytesInserted += *(uint64_t*)bytes[i].value.begin();
-
-			while(currentCountIndex < countsOfInterest.size() && countsOfInterest[currentCountIndex] > lastInsertionCount && countsOfInterest[currentCountIndex] <= numInserted)
-				countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++], bytesInserted / (now() - startTime));
-
-			lastInsertionCount = numInserted;
-			wait(delay(checkInterval));
-		}
-		catch(Error& e)
-		{
-			wait(tr.onError(e));
-		}
-	}
-
-	return countInsertionRates;
-}
+ACTOR Future<std::vector<std::pair<uint64_t, double> > > trackInsertionCount(Database cx, std::vector<uint64_t> countsOfInterest, double checkInterval);
 
 ACTOR template <class T>
 Future<Void> bulkSetup(Database cx, T* workload, uint64_t nodeCount, Promise<double> setupTime,

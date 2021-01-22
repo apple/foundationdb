@@ -335,7 +335,7 @@ you are holding the corresponding future.
     - Unions
     ```
     // Flow type
-    using T = boost::variant<A, B, C>;
+    using T = std::variant<A, B, C>;
 
     // IDL equivalent
     union T { A, B, C}
@@ -363,7 +363,7 @@ you are holding the corresponding future.
     - `scalar_traits` corresponds to a flatbuffers struct. See `UID` for an example.
     - `vector_like_traits` corresponds to a flatbuffers vector. See `VectorRef` for an example.
     - `dynamic_size_traits` corresponds to a flatbuffers vector of uint8_t. See `StringRef` for an example.
-    - `union_like_traits` corresponds to a flatbuffers union. See `boost::variant` for an example.
+    - `union_like_traits` corresponds to a flatbuffers union. See `std::variant` for an example.
 
 1. Potential Gotchas
     - Flatbuffers 'vtables' are collected from default-constructed instances of
@@ -427,6 +427,9 @@ ACTOR Future<Void> periodically(PromiseStream<Void> ps, int seconds) {
 
 In this example, the `PromiseStream `is actually a way for the actor to return data from some
 operation that it ongoing.
+
+By default it is a compiler error to discard the result of a cancellable actor. If you don't think this is appropriate for your actor you can use the `[[flow_allow_discard]]` attribute.
+This does not apply to UNCANCELLABLE actors.
 
 ## “gotchas”
 

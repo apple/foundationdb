@@ -1,0 +1,43 @@
+testTitle=WriteDuringReadTest
+    testName=WriteDuringRead
+    maximumTotalData=1000000
+    testDuration=240.0
+    slowModeStart=60.0
+    minNode=1
+    useSystemKeys=false
+
+    testName=AtomicRestore
+    startAfter=10.0
+    restoreAfter=50.0
+    clearAfterTest=false
+    simBackupAgents=BackupToFile
+    fastRestore=true
+    usePartitionedLogs=true
+
+    testName=RandomClogging
+    testDuration=60.0
+
+    testName=Rollback
+    meanDelay=60.0
+    testDuration=60.0
+
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=60.0
+
+    testName=Attrition
+    machinesToKill=10
+    machinesToLeave=3
+    reboot=true
+    testDuration=60.0
+
+    StderrSeverity=30
+
+    ; Each testName=RunRestoreWorkerWorkload creates a restore worker
+    ; We need at least 3 restore workers: master, loader, and applier
+    testName=RunRestoreWorkerWorkload
+
+    ;timeout is in seconds
+    timeout=360000

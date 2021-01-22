@@ -393,10 +393,10 @@ bool validateAllCombinations(
 		for (int i = 0; i < newItems.size(); ++i) {
 			localGroup->add(newItems[i]);
 		}
-		
+
 		std::string bitmask(nCombinationSize, 1); // K leading 1's
 		bitmask.resize(newItems.size(), 0); // N-K trailing 0's
-		
+
 		std::vector<LocalityEntry> resultEntries;
 		do
 		{
@@ -925,6 +925,14 @@ void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData
 		}
 	}
 }
+}
+
+void filterLocalityDataForPolicyDcAndProcess(Reference<IReplicationPolicy> policy, LocalityData* ld) {
+	if (!policy) return;
+	std::set<std::string> keys = policy->attributeKeys();
+	keys.insert(LocalityData::keyDcId.toString());
+	keys.insert(LocalityData::keyProcessId.toString());
+	filterLocalityDataForPolicy(policy->attributeKeys(), ld);
 }
 
 void filterLocalityDataForPolicy(Reference<IReplicationPolicy> policy, LocalityData* ld) {

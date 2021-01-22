@@ -59,7 +59,7 @@ public:
 	virtual void delref() { ReferenceCounted<AsyncFileBlobStoreWrite>::delref(); }
 
 	struct Part : ReferenceCounted<Part> {
-		Part(int n) : number(n), writer(content.getWriteBuffer(), NULL, Unversioned()), length(0) {
+		Part(int n, int minSize) : number(n), writer(content.getWriteBuffer(minSize), NULL, Unversioned()), length(0) {
 			etag = std::string();
 			::MD5_Init(&content_md5_buf);
 		}
@@ -231,7 +231,7 @@ private:
 
 		// Make a new part to write to
 		if(startNew)
-			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1)));
+			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1, f->m_bstore->knobs.multipart_min_part_size)));
 
 		return Void();
 	}
@@ -247,7 +247,7 @@ public:
 		: m_bstore(bstore), m_bucket(bucket), m_object(object), m_cursor(0), m_concurrentUploads(bstore->knobs.concurrent_writes_per_file) {
 
 		// Add first part
-		m_parts.push_back(Reference<Part>(new Part(1)));
+		m_parts.push_back(Reference<Part>(new Part(1, m_bstore->knobs.multipart_min_part_size)));
 	}
 
 };

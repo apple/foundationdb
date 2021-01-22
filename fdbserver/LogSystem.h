@@ -45,10 +45,12 @@ struct ConnectionResetInfo : public ReferenceCounted<ConnectionResetInfo> {
 	ConnectionResetInfo() : lastReset(now()), slowReplies(0), fastReplies(0), resetCheck(Void()) {}
 };
 
+// The set of tLog servers, logRouters and backupWorkers for a log tag
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
+	std::vector<Reference<AsyncVar<OptionalInterface<BackupInterface>>>> backupWorkers;
 	std::vector<Reference<ConnectionResetInfo>> connectionResetTrackers;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
@@ -79,9 +81,18 @@ public:
 		return result;
 	}
 
-	bool hasLogRouter(UID id) {
+	bool hasLogRouter(UID id) const {
 		for (const auto& router : logRouters) {
 			if (router->get().id() == id) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool hasBackupWorker(UID id) const {
+		for (const auto& worker : backupWorkers) {
+			if (worker->get().id() == id) {
 				return true;
 			}
 		}
@@ -387,14 +398,13 @@ struct ILogSystem {
 
 	struct ServerPeekCursor : IPeekCursor, ReferenceCounted<ServerPeekCursor> {
 		Reference<AsyncVar<OptionalInterface<TLogInterface>>> interf;
-		Tag tag;
+		const Tag tag;
 
 		TLogPeekReply results;
 		ArenaReader rd;
 		LogMessageVersion messageVersion, end;
 		Version poppedVersion;
-		int32_t messageLength, rawLength;
-		VectorRef<Tag> tags;
+		TagsAndMessage messageAndTags;
 		bool hasMsg;
 		Future<Void> more;
 		UID randomID;
@@ -413,7 +423,7 @@ struct ILogSystem {
 		int unknownReplies;
 
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
-		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag );
+		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, TagsAndMessage const& message, bool hasMsg, Version poppedVersion, Tag tag );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 		virtual void setProtocolVersion( ProtocolVersion version );
@@ -727,6 +737,20 @@ struct ILogSystem {
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0) will be readable)
 
+	// Returns the start version of current epoch for backup workers.
+	virtual Version getBackupStartVersion() const = 0;
+
+	struct EpochTagsVersionsInfo {
+		int32_t logRouterTags; // Number of log router tags.
+		Version epochBegin, epochEnd;
+
+		explicit EpochTagsVersionsInfo(int32_t n, Version begin, Version end)
+		  : logRouterTags(n), epochBegin(begin), epochEnd(end) {}
+	};
+
+	// Returns EpochTagVersionsInfo for old epochs that this log system is aware of, excluding the current epoch.
+	virtual std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const = 0;
+
 	virtual Future<Reference<ILogSystem>> newEpoch( struct RecruitFromConfigurationReply const& recr, Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config,
 		LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> const& allTags, Reference<AsyncVar<bool>> const& recruitmentStalled ) = 0;
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
@@ -749,6 +773,7 @@ struct ILogSystem {
 	virtual bool hasRemoteLogs() const = 0;
 
 	virtual Tag getRandomRouterTag() const = 0;
+	virtual int getLogRouterTags() const = 0; // Returns the number of router tags.
 
 	virtual Tag getRandomTxsTag() const = 0;
 
@@ -762,9 +787,21 @@ struct ILogSystem {
 	// process class doesn't use pseudo tag, return the same tag.
 	virtual Tag getPseudoPopTag(Tag tag, ProcessClass::ClassType type) = 0;
 
-	virtual bool isPseudoLocality(int8_t locality) = 0;
+	virtual bool hasPseudoLocality(int8_t locality) = 0;
 
-	virtual Version popPseudoLocalityTag(int8_t locality, Version upTo) = 0;
+	// Returns the actual version to be popped from the log router tag for the given pseudo tag.
+	// For instance, a pseudo tag (-8, 2) means the actual popping tag is (-2, 2). Assuming there
+	// are multiple pseudo tags, the returned version is the min(all pseudo tags' "upTo" versions).
+	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
+
+	virtual void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) = 0;
+
+	// Removes a finished backup worker from log system and returns true. Returns false
+	// if the worker is not found.
+	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) = 0;
+
+	virtual LogEpoch getOldestBackupEpoch() const = 0;
+	virtual void setOldestBackupEpoch(LogEpoch epoch) = 0;
 };
 
 struct LengthPrefixedStringRef {

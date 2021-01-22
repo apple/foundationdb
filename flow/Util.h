@@ -34,4 +34,47 @@ void swapAndPop(C* container, int index) {
 	container->pop_back();
 }
 
+// Adds n to pCount upon construction, subtracts in upon destruction
+template<typename T>
+struct Hold {
+	Hold(T *pCount = nullptr, T n = 1) : pCount(pCount), n(n) {
+		if(pCount != nullptr) {
+			*pCount += n;
+		}
+	}
+	~Hold() {
+		if(pCount != nullptr) {
+			*pCount -= n;
+		}
+	}
+
+	Hold(Hold &&other) {
+		pCount = other.pCount;
+		other.pCount = nullptr;
+		n = other.n;
+	}
+
+	Hold & operator=(Hold &&other) {
+		if(pCount != nullptr) {
+			*pCount -= n;
+		}
+		pCount = other.pCount;
+		other.pCount = nullptr;
+		n = other.n;
+		return *this;
+	};
+
+	void release() {
+		if(pCount != nullptr) {
+			*pCount -= n;
+			pCount = nullptr;
+		}
+	}
+
+	T *pCount;
+	T n;
+
+	void operator=(const Hold &other) = delete;
+};
+
 #endif  // _FLOW_UTIL_H_

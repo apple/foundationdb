@@ -33,9 +33,10 @@ struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	enum { AlwaysFresh = 1 };
 
-	LocalityData locality;
+	LocalityData filteredLocality;
 	UID uniqueID;
 	UID sharedTLogID;
+
 	RequestStream< struct TLogPeekRequest > peekMessages;
 	RequestStream< struct TLogPopRequest > popMessages;
 
@@ -49,22 +50,31 @@ struct TLogInterface {
 	RequestStream< struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream< struct TLogSnapRequest> snapRequest;
 
-	
 	TLogInterface() {}
-	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
-	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
+	explicit TLogInterface(const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), filteredLocality(locality) { sharedTLogID = uniqueID; }
+	TLogInterface(UID sharedTLogID, const LocalityData& locality) : uniqueID( deterministicRandom()->randomUniqueID() ), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), filteredLocality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().getPrimaryAddress(); }
+	Optional<NetworkAddress> secondaryAddress() const { return peekMessages.getEndpoint().addresses.secondaryAddress; }
+
 	void initEndpoints() {
-		getQueuingMetrics.getEndpoint( TaskPriority::TLogQueuingMetrics );
-		popMessages.getEndpoint( TaskPriority::TLogPop );
-		peekMessages.getEndpoint( TaskPriority::TLogPeek );
-		confirmRunning.getEndpoint( TaskPriority::TLogConfirmRunning );
-		commit.getEndpoint( TaskPriority::TLogCommit );
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(peekMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(popMessages.getReceiver(TaskPriority::TLogPop));
+		streams.push_back(commit.getReceiver(TaskPriority::TLogCommit));
+		streams.push_back(lock.getReceiver());
+		streams.push_back(getQueuingMetrics.getReceiver(TaskPriority::TLogQueuingMetrics));
+		streams.push_back(confirmRunning.getReceiver(TaskPriority::TLogConfirmRunning));
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(recoveryFinished.getReceiver());
+		streams.push_back(disablePopRequest.getReceiver());
+		streams.push_back(enablePopRequest.getReceiver());
+		streams.push_back(snapRequest.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
 	}
 
 	template <class Ar> 
@@ -72,9 +82,19 @@ struct TLogInterface {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.isDeserializing || uniqueID != UID());
 		}
-		serializer(ar, uniqueID, sharedTLogID, locality, peekMessages, popMessages
-		  , commit, lock, getQueuingMetrics, confirmRunning, waitFailure, recoveryFinished
-		  , disablePopRequest, enablePopRequest, snapRequest);
+		serializer(ar, uniqueID, sharedTLogID, filteredLocality, peekMessages);
+		if( Ar::isDeserializing ) {
+			popMessages = RequestStream< struct TLogPopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(1) );
+			commit = RequestStream< struct TLogCommitRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(2) );
+			lock = RequestStream< ReplyPromise< struct TLogLockResult > >( peekMessages.getEndpoint().getAdjustedEndpoint(3) );
+			getQueuingMetrics = RequestStream< struct TLogQueuingMetricsRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(4) );
+			confirmRunning = RequestStream< struct TLogConfirmRunningRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(5) );
+			waitFailure = RequestStream< ReplyPromise<Void> >( peekMessages.getEndpoint().getAdjustedEndpoint(6) );
+			recoveryFinished = RequestStream< struct TLogRecoveryFinishedRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(7) );
+			disablePopRequest = RequestStream< struct TLogDisablePopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(8) );
+			enablePopRequest = RequestStream< struct TLogEnablePopRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(9) );
+			snapRequest = RequestStream< struct TLogSnapRequest >( peekMessages.getEndpoint().getAdjustedEndpoint(10) );
+		}
 	}
 };
 
@@ -115,22 +135,6 @@ struct TLogConfirmRunningRequest {
 	}
 };
 
-struct VersionUpdateRef {
-	Version version;
-	MutationListRef mutations;
-	bool isPrivateData;
-
-	VersionUpdateRef() : isPrivateData(false), version(invalidVersion) {}
-	VersionUpdateRef( Arena& to, const VersionUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
-	int totalSize() const { return mutations.totalSize(); }
-	int expectedSize() const { return mutations.expectedSize(); }
-
-	template <class Ar> 
-	void serialize( Ar& ar ) {
-		serializer(ar, version, mutations, isPrivateData);
-	}
-};
-
 struct VerUpdateRef {
 	Version version;
 	VectorRef<MutationRef> mutations;
@@ -139,6 +143,11 @@ struct VerUpdateRef {
 	VerUpdateRef() : isPrivateData(false), version(invalidVersion) {}
 	VerUpdateRef( Arena& to, const VerUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
 	int expectedSize() const { return mutations.expectedSize(); }
+
+	MutationRef push_back_deep(Arena& arena, const MutationRef& m) {
+		mutations.push_back_deep(arena, m);
+		return mutations.back();
+	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
