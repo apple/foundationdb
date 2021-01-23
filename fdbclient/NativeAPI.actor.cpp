@@ -1213,11 +1213,11 @@ void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<Str
 				validateOptionValue(value, false);
 				snapshotRywEnabled--;
 				break;
-			case FDBDatabaseOptions::TRANSACTION_TRACE_ENABLE:
+			case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_ENABLE:
 				validateOptionValue(value, false);
 				transactionTracingEnabled++;
 				break;
-			case FDBDatabaseOptions::TRANSACTION_TRACE_DISABLE:
+			case FDBDatabaseOptions::DISTRIBUTED_TRANSACTION_TRACE_DISABLE:
 				validateOptionValue(value, false);
 				transactionTracingEnabled--;
 				break;
@@ -1541,7 +1541,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, false);
 			networkOptions.runLoopProfilingEnabled = true;
 			break;
-		case FDBNetworkOptions::CLIENT_TRACER: {
+		case FDBNetworkOptions::DISTRIBUTED_CLIENT_TRACER: {
 			validateOptionValue(value, true);
 			std::string tracer = value.get().toString();
 			if (tracer == "none" || tracer == "disabled") {
