@@ -24,8 +24,8 @@
 EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv)
   : ctx(EVP_CIPHER_CTX_new()) {
 	EVP_EncryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr);
-	EVP_EncryptInit_ex(ctx, nullptr, nullptr, key, iv);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
+	EVP_EncryptInit_ex(ctx, nullptr, nullptr, key.data(), iv.data());
 }
 
 EncryptionStreamCipher::~EncryptionStreamCipher() {
@@ -46,12 +46,12 @@ StringRef EncryptionStreamCipher::finish(Arena& arena) {
 	return StringRef(ciphertext, bytes);
 }
 
-DecryptionStreamCipher::DecryptionStreamCipher(unsigned char const* key, unsigned char const* iv)
+DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv)
   : ctx(EVP_CIPHER_CTX_new()) {
 
 	EVP_DecryptInit_ex(ctx, EVP_aes_128_gcm(), nullptr, nullptr, nullptr);
-	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, 12, nullptr);
-	EVP_DecryptInit_ex(ctx, nullptr, nullptr, key, iv);
+	EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
+	EVP_DecryptInit_ex(ctx, nullptr, nullptr, key.data(), iv.data());
 }
 
 DecryptionStreamCipher::~DecryptionStreamCipher() {
@@ -77,10 +77,10 @@ StringRef DecryptionStreamCipher::finish(Arena& arena) {
 void forceLinkStreamCipherTests() {}
 
 TEST_CASE("flow/StreamCipher") {
-	std::array<unsigned char, 16> key;
+	StreamCipher::Key key;
 	generateRandomData(key.data(), key.size());
 
-	std::array<unsigned char, 12> iv;
+	StreamCipher::IV iv;
 	generateRandomData(iv.data(), iv.size());
 
 	Arena arena;
@@ -93,7 +93,7 @@ TEST_CASE("flow/StreamCipher") {
 	    .detail("PlaintextSize", plaintext.size())
 	    .detail("AESBlockSize", AES_BLOCK_SIZE);
 	{
-		EncryptionStreamCipher encryptor(key.data(), iv.data());
+		EncryptionStreamCipher encryptor(key, iv);
 		int index = 0;
 		int encryptedOffset = 0;
 		while (index < plaintext.size()) {
@@ -113,7 +113,7 @@ TEST_CASE("flow/StreamCipher") {
 	}
 
 	{
-		DecryptionStreamCipher decryptor(key.data(), iv.data());
+		DecryptionStreamCipher decryptor(key, iv);
 		int index = 0;
 		int decryptedOffset = 0;
 		while (index < plaintext.size()) {

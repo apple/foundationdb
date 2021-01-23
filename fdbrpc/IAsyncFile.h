@@ -35,21 +35,25 @@ public:
 	virtual ~IAsyncFile();
 	// Pass these to g_network->open to get an IAsyncFile
 	enum {
-		// Implementation relies on the low bits being the same as the SQLite flags (this is validated by a static_assert there)
-		OPEN_READONLY = 0x1, 
-		OPEN_READWRITE = 0x2, 
-		OPEN_CREATE = 0x4, 
-		OPEN_EXCLUSIVE = 0x10, 
-		
+		// Implementation relies on the low bits being the same as the SQLite flags (this is validated by a
+		// static_assert there)
+		OPEN_READONLY = 0x1,
+		OPEN_READWRITE = 0x2,
+		OPEN_CREATE = 0x4,
+		OPEN_EXCLUSIVE = 0x10,
+
 		// Further flag values are arbitrary bits
-		OPEN_UNBUFFERED = 0x10000, 
-		OPEN_UNCACHED = 0x20000, 
-		OPEN_LOCK = 0x40000, 
-		OPEN_ATOMIC_WRITE_AND_CREATE = 0x80000,  // A temporary file is opened, and on the first call to sync() it is atomically renamed to the given filename
-		OPEN_LARGE_PAGES = 0x100000, 
-		OPEN_NO_AIO = 0x200000,                   // Don't use AsyncFileKAIO or similar implementations that rely on filesystem support for AIO
-		OPEN_CACHED_READ_ONLY = 0x400000          // AsyncFileCached opens files read/write even if you specify read only
-	};  
+		OPEN_UNBUFFERED = 0x10000,
+		OPEN_UNCACHED = 0x20000,
+		OPEN_LOCK = 0x40000,
+		OPEN_ATOMIC_WRITE_AND_CREATE = 0x80000, // A temporary file is opened, and on the first call to sync() it is
+		                                        // atomically renamed to the given filename
+		OPEN_LARGE_PAGES = 0x100000,
+		OPEN_NO_AIO =
+		    0x200000, // Don't use AsyncFileKAIO or similar implementations that rely on filesystem support for AIO
+		OPEN_CACHED_READ_ONLY = 0x400000, // AsyncFileCached opens files read/write even if you specify read only
+		OPEN_ENCRYPTED = 0x800000 // File is encrypted using AES-128-GCM (must be either read-only or write-only)
+	};
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

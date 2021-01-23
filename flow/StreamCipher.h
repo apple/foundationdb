@@ -30,10 +30,15 @@
 #include <string>
 #include <vector>
 
+namespace StreamCipher {
+using Key = std::array<unsigned char, 16>;
+using IV = std::array<unsigned char, 16>;
+}; // namespace StreamCipher
+
 class EncryptionStreamCipher final : NonCopyable, public ReferenceCounted<EncryptionStreamCipher> {
 	EVP_CIPHER_CTX* ctx;
 public:
-	EncryptionStreamCipher(unsigned char const* key, unsigned char const* salt);
+	EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
 	~EncryptionStreamCipher();
 	StringRef encrypt(unsigned char const* plaintext, int len, Arena&);
 	StringRef finish(Arena&);
@@ -42,7 +47,7 @@ public:
 class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<DecryptionStreamCipher> {
 	EVP_CIPHER_CTX* ctx;
 public:
-	DecryptionStreamCipher(unsigned char const* key, unsigned char const* salt);
+	DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
 	~DecryptionStreamCipher();
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
