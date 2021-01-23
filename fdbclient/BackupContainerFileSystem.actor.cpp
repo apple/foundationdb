@@ -159,8 +159,7 @@ public:
 		state int i;
 
 		// Validate each filename, update version range
-		for (i = 0; i < fileNames.size(); ++i) {
-			auto const& f = fileNames[i];
+		for (const auto& f : fileNames) {
 			if (pathToRangeFile(rf, f, 0)) {
 				fileArray.push_back(f);
 				if (rf.version < minVer) minVer = rf.version;

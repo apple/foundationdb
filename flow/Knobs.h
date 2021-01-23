@@ -70,6 +70,7 @@ public:
 	double HUGE_ARENA_LOGGING_INTERVAL;
 
 	bool WRITE_TRACING_ENABLED;
+	int TRACING_UDP_LISTENER_PORT;
 
 	//run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;

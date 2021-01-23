@@ -54,10 +54,10 @@ static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 // using multi-part upload and beginning to transfer each part as soon as it is large enough.
 // All write operations file operations must be sequential and contiguous.
 // Limits on part sizes, upload speed, and concurrent uploads are taken from the S3BlobStoreEndpoint being used.
-class AsyncFileS3BlobStoreWrite : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreWrite> {
+class AsyncFileS3BlobStoreWrite final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreWrite> {
 public:
-	virtual void addref() { ReferenceCounted<AsyncFileS3BlobStoreWrite>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileS3BlobStoreWrite>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreWrite>::delref(); }
 
 	struct Part : ReferenceCounted<Part> {
 		Part(int n, int minSize)
@@ -256,10 +256,10 @@ public:
 };
 
 // This class represents a read-only file that lives in an S3-style blob store.  It reads using the REST API.
-class AsyncFileS3BlobStoreRead : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreRead> {
+class AsyncFileS3BlobStoreRead final : public IAsyncFile, public ReferenceCounted<AsyncFileS3BlobStoreRead> {
 public:
-	virtual void addref() { ReferenceCounted<AsyncFileS3BlobStoreRead>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileS3BlobStoreRead>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileS3BlobStoreRead>::delref(); }
 
 	Future<int> read(void* data, int length, int64_t offset) override;
 

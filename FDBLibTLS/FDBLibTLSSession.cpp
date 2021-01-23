@@ -60,14 +60,16 @@ static ssize_t tls_write_func(struct tls *ctx, const void *buf, size_t buflen, v
 	return (ssize_t)rv;
 }
 
-FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uidptr) :
-	tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
-	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), lastVerifyFailureLogged(0.0) {
+FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername,
+                                   TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func,
+                                   void* recv_ctx, void* uidptr)
+  : tls_ctx(nullptr), tls_sctx(nullptr), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
+    recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), lastVerifyFailureLogged(0.0) {
 	if (uidptr)
 		uid = * (UID*) uidptr;
 
 	if (is_client) {
-		if ((tls_ctx = tls_client()) == NULL) {
+		if ((tls_ctx = tls_client()) == nullptr) {
 			TraceEvent(SevError, "FDBLibTLSClientError", uid);
 			throw std::runtime_error("FDBLibTLSClientError");
 		}
@@ -82,7 +84,7 @@ FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_cl
 			throw std::runtime_error("FDBLibTLSConnectError");
 		}
 	} else {
-		if ((tls_sctx = tls_server()) == NULL) {
+		if ((tls_sctx = tls_server()) == nullptr) {
 			TraceEvent(SevError, "FDBLibTLSServerError", uid);
 			throw std::runtime_error("FDBLibTLSServerError");
 		}
@@ -108,14 +110,13 @@ FDBLibTLSSession::~FDBLibTLSSession() {
 
 bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, MatchType mt) {
 	bool rc = false;
-	ASN1_STRING* asn_criteria = NULL;
-	unsigned char* criteria_utf8 = NULL;
+	ASN1_STRING* asn_criteria = nullptr;
+	unsigned char* criteria_utf8 = nullptr;
 	int criteria_utf8_len = 0;
-	unsigned char* entry_utf8 = NULL;
+	unsigned char* entry_utf8 = nullptr;
 	int entry_utf8_len = 0;
 
-	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL)
-		goto err;
+	if ((asn_criteria = ASN1_IA5STRING_new()) == nullptr) goto err;
 	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1)
 		goto err;
 	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1)
@@ -152,8 +153,7 @@ bool match_name_criteria(X509_NAME *name, NID nid, const std::string& criteria, 
 		return false;
 	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1)
 		return false;
-	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL)
-		return false;
+	if ((name_entry = X509_NAME_get_entry(name, idx)) == nullptr) return false;
 
 	return match_criteria_entry(criteria, name_entry->value, mt);
 }
@@ -169,8 +169,9 @@ bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, Mat
 	}
 	std::string value_gen = value.substr(0, pos);
 	std::string value_val = value.substr(pos+1, value.npos);
-	STACK_OF(GENERAL_NAME)* sans = reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, NULL, NULL));
-	if (sans == NULL) {
+	STACK_OF(GENERAL_NAME)* sans =
+	    reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, nullptr, nullptr));
+	if (sans == nullptr) {
 		return false;
 	}
 	int num_sans = sk_GENERAL_NAME_num( sans );
@@ -231,10 +232,10 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 }
 
 std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
-	X509_STORE_CTX *store_ctx = NULL;
+	X509_STORE_CTX* store_ctx = nullptr;
 	X509_NAME *subject, *issuer;
 	bool rc = false;
-	X509* cert = NULL;
+	X509* cert = nullptr;
 	// if returning false, give a reason string
 	std::string reason = "";
 
@@ -243,12 +244,12 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 		return std::make_tuple(true, reason);
 
 	// Verify the certificate.
-	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
+	if ((store_ctx = X509_STORE_CTX_new()) == nullptr) {
 		TraceEvent(SevError, "FDBLibTLSOutOfMemory", uid);
 		reason = "Out of memory";
 		goto err;
 	}
-	if (!X509_STORE_CTX_init(store_ctx, NULL, sk_X509_value(certs, 0), certs)) {
+	if (!X509_STORE_CTX_init(store_ctx, nullptr, sk_X509_value(certs, 0), certs)) {
 		reason = "Store ctx init";
 		goto err;
 	}
@@ -264,7 +265,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 
 	// Check subject criteria.
 	cert = sk_X509_value(store_ctx->chain, 0);
-	if ((subject = X509_get_subject_name(cert)) == NULL) {
+	if ((subject = X509_get_subject_name(cert)) == nullptr) {
 		reason = "Cert subject error";
 		goto err;
 	}
@@ -276,7 +277,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 	}
 
 	// Check issuer criteria.
-	if ((issuer = X509_get_issuer_name(cert)) == NULL) {
+	if ((issuer = X509_get_issuer_name(cert)) == nullptr) {
 		reason = "Cert issuer error";
 		goto err;
 	}
@@ -289,7 +290,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 
 	// Check root criteria - this is the subject of the final certificate in the stack.
 	cert = sk_X509_value(store_ctx->chain, sk_X509_num(store_ctx->chain) - 1);
-	if ((subject = X509_get_subject_name(cert)) == NULL) {
+	if ((subject = X509_get_subject_name(cert)) == nullptr) {
 		reason = "Root subject error";
 		goto err;
 	}
@@ -310,7 +311,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 }
 
 bool FDBLibTLSSession::verify_peer() {
-	struct stack_st_X509 *certs = NULL;
+	struct stack_st_X509* certs = nullptr;
 	const uint8_t *cert_pem;
 	size_t cert_pem_len;
 	bool rc = false;
@@ -323,12 +324,11 @@ bool FDBLibTLSSession::verify_peer() {
 	if (policy->verify_rules.empty())
 		return true;
 
-	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == NULL) {
+	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == nullptr) {
 		TraceEvent(SevError, "FDBLibTLSNoCertError", uid);
 		goto err;
 	}
-	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL)
-		goto err;
+	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == nullptr) goto err;
 
 	// Any matching rule is sufficient.
 	for (auto &verify_rule: policy->verify_rules) {

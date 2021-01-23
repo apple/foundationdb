@@ -35,7 +35,7 @@
 #undef min
 #undef max
 
-class AsyncFileWinASIO : public IAsyncFile, public ReferenceCounted<AsyncFileWinASIO> {
+class AsyncFileWinASIO final : public IAsyncFile, public ReferenceCounted<AsyncFileWinASIO> {
 public:
 	static void init() {}
 
@@ -84,8 +84,8 @@ public:
 		return buf.st_mtime;
 	}
 
-	virtual void addref() { ReferenceCounted<AsyncFileWinASIO>::addref(); }
-	virtual void delref() { ReferenceCounted<AsyncFileWinASIO>::delref(); }
+	void addref() override { ReferenceCounted<AsyncFileWinASIO>::addref(); }
+	void delref() override { ReferenceCounted<AsyncFileWinASIO>::delref(); }
 
 	int64_t debugFD() const override { return (int64_t)(const_cast<decltype(file)&>(file).native_handle()); }
 

@@ -65,7 +65,7 @@ set(FLOW_SRCS
   Trace.cpp
   Trace.h
   Tracing.h
-  Tracing.cpp
+  Tracing.actor.cpp
   TreeBenchmark.h
   UnitTest.cpp
   UnitTest.h

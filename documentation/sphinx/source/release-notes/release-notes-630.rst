@@ -4,6 +4,12 @@ Release Notes
 
 6.3.10
 ======
+* Make fault tolerance metric calculation in HA clusters consistent with 6.2 branch. `(PR #4175) <https://github.com/apple/foundationdb/pull/4175>`_
+* Bug fix, stack overflow in redwood storage engine. `(PR #4161) <https://github.com/apple/foundationdb/pull/4161>`_
+* Bug fix, getting certain special keys fail. `(PR #4128) <https://github.com/apple/foundationdb/pull/4128>`_ 
+* Prevent slow task on TLog by yielding while processing ignored pop requests. `(PR #4112) <https://github.com/apple/foundationdb/pull/4112>`_
+* Support reading xxhash3 sqlite checksums. `(PR #4104) <https://github.com/apple/foundationdb/pull/4104>`_
+* Fix a race between submit and abort backup. `(PR #3935) <https://github.com/apple/foundationdb/pull/3935>`_
 
 Packaging
 ---------
@@ -132,7 +138,7 @@ Fixes from previous versions
 * The 6.3.3 patch release includes all fixes from the patch release 6.2.23. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.5 patch release includes all fixes from the patch releases 6.2.24 and 6.2.25. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 * The 6.3.9 patch release includes all fixes from the patch releases 6.2.26. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
-* The 6.3.10 patch release includes all fixes from the patch releases 6.2.27. :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
+* The 6.3.10 patch release includes all fixes from the patch releases 6.2.27-6.2.29 :doc:`(6.2 Release Notes) </release-notes/release-notes-620>`
 
 Fixes only impacting 6.3.0+
 ---------------------------

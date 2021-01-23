@@ -54,7 +54,7 @@ struct ITraceLogIssuesReporter {
 	virtual void addIssue(std::string issue) = 0;
 	virtual void resolveIssue(std::string issue) = 0;
 
-	virtual void retrieveIssues(std::set<std::string>& out) = 0;
+	virtual void retrieveIssues(std::set<std::string>& out) const = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

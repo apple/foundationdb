@@ -449,8 +449,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 
-			if (g_simulator.drAgents == ISimulator::BackupToDB) {
-				g_simulator.drAgents = ISimulator::NoBackupAgents;
+			if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
+				g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);
