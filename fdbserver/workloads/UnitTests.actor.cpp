@@ -28,6 +28,7 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
+void forceLinkStreamCipherTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -49,6 +50,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
+		forceLinkStreamCipherTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }
