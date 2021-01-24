@@ -1323,6 +1323,7 @@ int SQLiteDB::checkAllPageChecksums() {
 		.detail("TotalErrors", totalErrors);
 
 	ASSERT(!vfsAsyncIsOpen(filename));
+	ASSERT(!vfsAsyncIsOpen(filename + "-wal"));
 
 	return totalErrors;
 }
@@ -1375,10 +1376,29 @@ void SQLiteDB::open(bool writable) {
 
 	// Set Rate control if FLOW_KNOBS are positive
 	if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT > 0 && FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS > 0) {
-		Reference<SpeedLimit> rc(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
-		                                        FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS));
-		dbFile.get()->setRateControl(rc);
-		walFile.get()->setRateControl(rc);
+		// The writer thread is created before the readers, so it should initialize the rate controls.
+		if(writable) {
+			// If either rate control is already initialized, then its file is still being held open by a previous
+			// usage, likely because ~AsyncFileCached() launched a background actor that is waiting for outstanding
+			// operations to finish.  In case any of those are waiting for time to pass due to the rate control, 
+			// send them an io_error.
+			if(dbFile.get()->getRateControl()) {
+				dbFile.get()->getRateControl()->killWaiters(io_error());
+			}
+			if(walFile.get()->getRateControl()) {
+				walFile.get()->getRateControl()->killWaiters(io_error());
+			}
+
+			// Create a new rate control and assign it to both files.
+			Reference<SpeedLimit> rc(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
+													FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS));
+			dbFile.get()->setRateControl(rc);
+			walFile.get()->setRateControl(rc);
+		} else {
+			// When a reader thread is opened, the rate controls should already be equal and not null
+			ASSERT(dbFile.get()->getRateControl() == walFile.get()->getRateControl());
+			ASSERT(dbFile.get()->getRateControl());
+		}
 	}
 
 	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("Filename", filename).detail("Writable", writable);
@@ -1984,6 +2004,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 
 	//The DB file should not already be open
 	ASSERT(!vfsAsyncIsOpen(filename));
+	ASSERT(!vfsAsyncIsOpen(filename + "-wal"));
 
 	readCursors.resize(SERVER_KNOBS->SQLITE_READER_THREADS); //< number of read threads
 

@@ -113,8 +113,17 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( MAX_EVICT_ATTEMPTS,                                  100 ); if( randomize && BUGGIFY ) MAX_EVICT_ATTEMPTS = 2;
 	init( CACHE_EVICTION_POLICY,                          "random" );
 	init( PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION,                 0.1 ); if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 0.0; else if( randomize && BUGGIFY ) PAGE_CACHE_TRUNCATE_LOOKUP_FRACTION = 1.0;
-	init( FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,                  500 ); if( randomize && BUGGIFY ) FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT = 1e6; // 0 - auto(TODO); Negative - no limit
-	init( FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS,               0.05 ); if( randomize && BUGGIFY ) FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS = 1; // 0 - auto(TODO); Negative - no limit
+
+	init( FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS,                 -1 );
+	init( FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,                   -1 );
+	if( randomize && BUGGIFY ) {
+		// Choose an window between .01 and 1.01 seconds.
+		FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS = 0.01 + deterministicRandom()->random01();
+		// Choose 10k to 50k operations per second
+		int opsPerSecond = deterministicRandom()->randomInt(10000, 50000);
+		// Set window limit to opsPerSecond scaled down to window size
+		FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT = opsPerSecond * FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS;
+	}
 
 	//AsyncFileEIO
 	init( EIO_MAX_PARALLELISM,                                  4  );
