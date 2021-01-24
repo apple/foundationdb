@@ -234,7 +234,7 @@ public:
 
 	void setRateControl(Reference<IRateControl> const& rc) override { rateControl = rc; }
 
-	Reference<IRateControl> const& getRateControl() { return rateControl; }
+	Reference<IRateControl> const& getRateControl() override { return rateControl; }
 
 	virtual void addref() { 
 		ReferenceCounted<AsyncFileCached>::addref(); 
@@ -244,6 +244,9 @@ public:
 		if (delref_no_destroy()) {
 			// If this is ever ThreadSafeReferenceCounted...
 			// setrefCountUnsafe(0);
+			if(rateControl) {
+				rateControl->killWaiters(io_error());
+			}
 
 			auto f = quiesce();
 			//TraceEvent("AsyncFileCachedDel").detail("Filename", filename)

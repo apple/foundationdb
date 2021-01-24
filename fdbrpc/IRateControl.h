@@ -30,6 +30,8 @@ public:
 	// If all of the allowance is not used the unused units can be given back.
 	// For convenience, n can safely be negative.
 	virtual void returnUnused(int n) = 0;
+	virtual void killWaiters(const Error &e) = 0;
+	virtual void wakeWaiters() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 };
@@ -40,12 +42,14 @@ public:
 	SpeedLimit(int windowLimit, double windowSeconds) : m_limit(windowLimit), m_seconds(windowSeconds), m_last_update(0), m_budget(0) {
 		m_last_update = now();
 	}
-	virtual ~SpeedLimit() {}
+	virtual ~SpeedLimit() {
+		m_stop.send(Never());
+	}
 
-	virtual void addref() { ReferenceCounted<SpeedLimit>::addref(); }
-	virtual void delref() { ReferenceCounted<SpeedLimit>::delref(); }
+	void addref() override { ReferenceCounted<SpeedLimit>::addref(); }
+	void delref() override { ReferenceCounted<SpeedLimit>::delref(); }
 
-	virtual Future<Void> getAllowance(unsigned int n) {
+	Future<Void> getAllowance(unsigned int n) override {
 		// Replenish budget based on time since last update
 		double ts = now();
 		// returnUnused happens to do exactly what we want here
@@ -56,13 +60,25 @@ public:
 		if(m_budget >= 0)
 			return Void();
 		// Otherise return the amount of time it will take for the budget to rise to 0.
-		return delay(m_seconds * -m_budget / m_limit);
+		return m_stop.getFuture() || delay(m_seconds * -m_budget / m_limit);
 	}
 
-	virtual void returnUnused(int n) {
+	void returnUnused(int n) override {
 		if(n < 0)
 			return;
 		m_budget = std::min<int64_t>(m_budget + n, m_limit);
+	}
+
+	void wakeWaiters() override {
+		Promise<Void> p;
+		p.swap(m_stop);
+		p.send(Void());
+	}
+
+	void killWaiters(const Error &e) override {
+		Promise<Void> p;
+		p.swap(m_stop);
+		p.sendError(e);
 	}
 
 private:
@@ -70,6 +86,7 @@ private:
 	double m_seconds;
 	double m_last_update;
 	int64_t m_budget;
+	Promise<Void> m_stop;
 };
 
 // An IRateControl implemenation that enforces no limit
@@ -77,9 +94,11 @@ class Unlimited : public IRateControl, ReferenceCounted<Unlimited> {
 public:
 	Unlimited() {}
 	virtual ~Unlimited() {}
-	virtual void addref() { ReferenceCounted<Unlimited>::addref(); }
-	virtual void delref() { ReferenceCounted<Unlimited>::delref(); }
+	void addref() override { ReferenceCounted<Unlimited>::addref(); }
+	void delref() override { ReferenceCounted<Unlimited>::delref(); }
 
-	virtual Future<Void> getAllowance(unsigned int n) { return Void(); }
-	virtual void returnUnused(int n) {}
+	Future<Void> getAllowance(unsigned int n) override { return Void(); }
+	void returnUnused(int n) override {}
+	void wakeWaiters() override {}
+	void killWaiters(const Error &e) override {}
 };
