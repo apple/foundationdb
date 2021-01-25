@@ -3415,7 +3415,7 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						    .detail("Info", team->getDesc())
 						    .detail("ZeroHealthyServerTeams", self->zeroHealthyTeams->get())
 						    .detail("Hint", severity == SevWarnAlways ? "No replicas remain of some data"
-						                                              : "This team's priority changed");
+						                                              : "The priority of this team changed");
 						if (team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 							// 0 servers left in this team, data might be lost.
 							zeroServerLeftLogger = zeroServerLeftLogger_impl(self, team);
