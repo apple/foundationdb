@@ -29,7 +29,7 @@ set(FDBRPC_SRCS
   TimedRequest.h
   TraceFileIO.cpp)
 
-if(WITH_TLS)
+if(WITH_TLS AND NOT WIN32)
   set(FDBRPC_SRCS
     ${FDBRPC_SRCS}
     AsyncFileEncrypted.h

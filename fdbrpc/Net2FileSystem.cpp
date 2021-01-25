@@ -33,7 +33,9 @@
 
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "fdbrpc/AsyncFileEncrypted.h"
+#endif
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
 #include "fdbrpc/AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
@@ -71,7 +73,7 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
 	if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 		f = map(f, [](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
-#ifndef TLS_DISABLED
+#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	if (flags & IAsyncFile::OPEN_ENCRYPTED)
 		f = map(f, [flags](Reference<IAsyncFile> r) {
 			return Reference<IAsyncFile>(new AsyncFileEncrypted(r, flags & IAsyncFile::OPEN_READWRITE));
