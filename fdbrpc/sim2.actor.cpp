@@ -2062,10 +2062,12 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );
 		if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 			f = map(f, [](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+#ifndef TLS_DISABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
 				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, flags & IAsyncFile::OPEN_READWRITE));
 			});
+#endif
 		return f;
 	}
 	else

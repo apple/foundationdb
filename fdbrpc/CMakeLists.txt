@@ -8,8 +8,6 @@ set(FDBRPC_SRCS
   AsyncFileCached.actor.cpp
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
-  AsyncFileEncrypted.actor.cpp
-  AsyncFileEncrypted.h
   FailureMonitor.actor.cpp
   FlowTransport.actor.cpp
   genericactors.actor.h
@@ -30,6 +28,13 @@ set(FDBRPC_SRCS
   sim_validation.cpp
   TimedRequest.h
   TraceFileIO.cpp)
+
+if(WITH_TLS)
+  set(FDBRPC_SRCS
+    ${FDBRPC_SRCS}
+    AsyncFileEncrypted.h
+    AsyncFileEncrypted.actor.cpp)
+endif()
 
 set(FDBRPC_THIRD_PARTY_SRCS
   libcoroutine/Common.c

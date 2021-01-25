@@ -50,8 +50,6 @@ set(FLOW_SRCS
   SignalSafeUnwind.cpp
   SignalSafeUnwind.h
   SimpleOpt.h
-  StreamCipher.cpp
-  StreamCipher.h
   SystemMonitor.cpp
   SystemMonitor.h
   TDMetric.actor.h
@@ -94,6 +92,13 @@ set(FLOW_SRCS
   version.cpp
   xxhash.c
   xxhash.h)
+
+if(WITH_TLS)
+  set(FLOW_SRCS
+    ${FLOW_SRCS}
+    StreamCipher.cpp
+    StreamCipher.h)
+endif()
 
 add_library(stacktrace stacktrace.amalgamation.cpp stacktrace.h)
 if (USE_ASAN)
