@@ -764,7 +764,7 @@ public:
 };
 
 struct PacketWriter {
-	static const int isDeserializing = 0;
+	static constexpr int isDeserializing = 0;
 	static constexpr bool isSerializing = true;
 	typedef PacketWriter WRITER;
 
@@ -786,9 +786,7 @@ struct PacketWriter {
 			serializeBytesAcrossBoundary(data, bytes);
 		}
 	}
-	void serializeBytesAcrossBoundary(const void* data, int bytes);
 	void writeAhead( int bytes, struct SplitBuffer* );
-	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	PacketBuffer* finish();
 	int size() const { return length; }
 
@@ -808,6 +806,8 @@ struct PacketWriter {
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
 
 private:
+	void serializeBytesAcrossBoundary(const void* data, int bytes);
+	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	uint8_t* writeBytes(size_t size) {
 		if (size > buffer->bytes_unwritten()) {
 			nextBuffer(size);
