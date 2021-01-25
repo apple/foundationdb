@@ -816,10 +816,8 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 }
 
 ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
-	if (dbState->db) {
-		return dbState->db->forceRecoveryWithDataLoss(dcid);
-	}
-	return Void();
+	auto f = dbState->db ? dbState->db->forceRecoveryWithDataLoss(dcid) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
 void MultiVersionDatabase::Connector::connect() {
