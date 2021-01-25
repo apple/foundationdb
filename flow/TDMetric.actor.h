@@ -1046,7 +1046,7 @@ public:
 	void addref() override { ReferenceCounted<DynamicEventMetric>::addref(); }
 	void delref() override { ReferenceCounted<DynamicEventMetric>::delref(); }
 
-	void onEnable() {
+	void onEnable() override {
 		// Must initialize fields, previously knobs may not have been set.
 		// Note that future fields will be okay because the field constructor will init and the knobs will be set.
 		time.init();
