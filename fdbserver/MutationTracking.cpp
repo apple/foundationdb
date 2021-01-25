@@ -34,9 +34,21 @@ StringRef debugKey2 = LiteralStringRef( "\xff\xff\xff\xff" );
 TraceEvent debugMutationEnabled( const char* context, Version version, MutationRef const& mutation ) {
 	if ((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
 			((mutation.param1<=debugKey && mutation.param2>debugKey) || (mutation.param1<=debugKey2 && mutation.param2>debugKey2))) {
-		return std::move(TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", typeString[mutation.type]).detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2));
+		TraceEvent event("MutationTracking");
+		event.detail("At", context)
+		    .detail("Version", version)
+		    .detail("MutationType", typeString[mutation.type])
+		    .detail("KeyBegin", mutation.param1)
+		    .detail("KeyEnd", mutation.param2);
+		return event;
 	} else if (mutation.param1 == debugKey || mutation.param1 == debugKey2) {
-		return std::move(TraceEvent("MutationTracking").detail("At", context).detail("Version", version).detail("MutationType", typeString[mutation.type]).detail("Key", mutation.param1).detail("Value", mutation.param2));
+		TraceEvent event("MutationTracking");
+		event.detail("At", context)
+		    .detail("Version", version)
+		    .detail("MutationType", typeString[mutation.type])
+		    .detail("Key", mutation.param1)
+		    .detail("Value", mutation.param2);
+		return event;
 	} else {
 		return TraceEvent();
 	}
@@ -80,9 +92,10 @@ TraceEvent debugTagsAndMessageEnabled( const char* context, Version version, Str
 			MutationRef m;
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
 			br >> m;
-			TraceEvent&& event = debugMutation(context, version, m);
+			TraceEvent event = debugMutation(context, version, m);
 			if (event.isEnabled()) {
-				return std::move(event.detail("MessageTags", msg.tags));
+				event.detail("MessageTags", msg.tags);
+				return event;
 			}
 		}
 	}
