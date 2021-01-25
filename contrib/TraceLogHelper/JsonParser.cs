@@ -51,7 +51,7 @@ namespace Magnesium
 					}
 					catch (Exception e)
 					{
-						throw new Exception(string.Format("Failed to parse {0}", root), e);
+						throw new Exception(string.Format("Failed to parse JSON {0}", root), e);
 					}
 					if (ev != null) yield return ev;
 				}
@@ -81,7 +81,7 @@ namespace Magnesium
 				DDetails = xEvent.Elements()
 					.Where(a=>a.Name != "Type" && a.Name != "Time" && a.Name != "Machine" && a.Name != "ID" && a.Name != "Severity" && (!rolledEvent || a.Name != "OriginalTime"))
 					.ToDictionary(a=>string.Intern(a.Name.LocalName), a=>(object)a.Value),
-				original = keepOriginalElement ? xEvent : null,
+				original = keepOriginalElement ? xEvent : null
 			};
 		}
 
