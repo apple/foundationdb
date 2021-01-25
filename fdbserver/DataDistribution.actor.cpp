@@ -3181,7 +3181,7 @@ ACTOR Future<Void> zeroServerLeftLogger_impl(DDTeamCollection* self, Reference<T
 
 	for (auto const& shard : shards) {
 		sizes.emplace_back(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(shard))));
-		TraceEvent(SevError, "DDShardLost", self->distributorId)
+		TraceEvent(SevWarnAlways, "DDShardLost", self->distributorId)
 		    .detail("ServerTeamID", team->getTeamID())
 		    .detail("ShardBegin", shard.begin)
 		    .detail("ShardEnd", shard.end);
@@ -3194,7 +3194,7 @@ ACTOR Future<Void> zeroServerLeftLogger_impl(DDTeamCollection* self, Reference<T
 		bytesLost += size.get().bytes;
 	}
 
-	TraceEvent(SevError, "DDZeroServerLeftInTeam", self->distributorId)
+	TraceEvent(SevWarnAlways, "DDZeroServerLeftInTeam", self->distributorId)
 	    .detail("Team", team->getDesc())
 	    .detail("TotalBytesLost", bytesLost);
 
@@ -3409,13 +3409,13 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 					}
 					if (logTeamEvents) {
 						int dataLoss = team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
-						Severity severity = dataLoss ? SevError : SevInfo;
+						Severity severity = dataLoss ? SevWarnAlways : SevInfo;
 						TraceEvent(severity, "ServerTeamPriorityChange", self->distributorId)
 						    .detail("Priority", team->getPriority())
 						    .detail("Info", team->getDesc())
 						    .detail("ZeroHealthyServerTeams", self->zeroHealthyTeams->get())
-						    .detail("Hint", severity == SevError ? "No replicas remain of some data"
-						                                         : "This team's priority changed");
+						    .detail("Hint", severity == SevWarnAlways ? "No replicas remain of some data"
+						                                              : "This team's priority changed");
 						if (team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 							// 0 servers left in this team, data might be lost.
 							zeroServerLeftLogger = zeroServerLeftLogger_impl(self, team);
