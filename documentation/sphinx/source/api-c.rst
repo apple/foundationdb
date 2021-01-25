@@ -448,15 +448,15 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Force the database to recover into the given datacenter.
 
-   A forced recovery will cause the database to lose the most recently committed mutations.
+   This function is only useful in a fearless configuration where you want to recover your database even with losing recently committed mutations.
    
-   The amount of mutations that will be lost depends on how far behind the remote datacenter is.
+   In particular, the function will set usable_regions to 1 and the amount of mutations that will be lost depends on how far behind the remote datacenter is.
    
    The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
+
+   In particular, no error will be thrown if the given dcId does not exist. It will just have no effect on the cluster.
    
-   The function will set usable_regions to 1.
-   
-   If the database has already recovered, the function does nothing.
+   If the database has already recovered, the function does nothing. Thus it's safe to call it multiple times.
 
    |future-returnvoid|
 
