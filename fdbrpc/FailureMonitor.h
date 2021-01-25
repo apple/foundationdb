@@ -138,8 +138,8 @@ public:
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
 	SimpleFailureMonitor();
-	void setStatus(NetworkAddress const& address, FailureStatus const& status);
-	void endpointNotFound(Endpoint const&);
+	void setStatus(NetworkAddress const& address, FailureStatus const& status) override;
+	void endpointNotFound(Endpoint const&) override;
 	void notifyDisconnect(NetworkAddress const&) override;
 
 	Future<Void> onStateChanged(Endpoint const& endpoint) override;
