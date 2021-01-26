@@ -629,10 +629,10 @@ void printHelpOverview() {
 	printf("\nList of commands:\n\n");
 	for (const auto& [command, help] : helpMap) {
 		if (help.short_desc.size()) printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
-		printf("\nFor information on a specific command, type `help <command>'.");
-		printf("\nFor information on escaping keys and values, type `help escaping'.");
-		printf("\nFor information on available options, type `help options'.\n\n");
 	}
+	printf("\nFor information on a specific command, type `help <command>'.");
+	printf("\nFor information on escaping keys and values, type `help escaping'.");
+	printf("\nFor information on available options, type `help options'.\n\n");
 }
 
 void printHelp(StringRef command) {

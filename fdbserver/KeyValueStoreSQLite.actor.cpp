@@ -32,6 +32,7 @@ extern "C" {
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
+#include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -273,8 +274,9 @@ struct SQLiteDB : NonCopyable {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
 			Error err = io_error();
-			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
+			if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 				err = err.asInjectedFault();
+			}
 
 			if (db)
 				db->errCode = rc;

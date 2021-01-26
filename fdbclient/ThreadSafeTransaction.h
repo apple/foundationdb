@@ -42,6 +42,7 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 
 private:
 	friend class ThreadSafeTransaction;
