@@ -20,13 +20,12 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_METRIC_LOGGER_G_H)
-#define FLOW_METRIC_LOGGER_G_H
-#include "flow/MetricLogger.actor.g.h"
-#elif !defined(FLOW_METRIC_LOGGER_G_H)
-#define FLOW_METRIC_LOGGER_G_H
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+#if defined(NO_INTELLISENSE) && !defined(FLOW_METRICLOGGER_ACTOR_G_H)
+        #define FLOW_METRICLOGGER_ACTOR_G_H
+        #include "flow/TDMetric.actor.g.h"
+#elif !defined(FLOW_METRICLOGGER_ACTOR_H)
+        #define FLOW_METRICLOGGER_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include
 
 ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
