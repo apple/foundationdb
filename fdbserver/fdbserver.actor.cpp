@@ -1584,27 +1584,16 @@ int main(int argc, char* argv[]) {
 
 		enableBuggify(opts.buggifyEnabled, BuggifyType::General);
 
-		delete FLOW_KNOBS;
-		delete SERVER_KNOBS;
-		delete CLIENT_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs;
-		ClientKnobs* clientKnobs = new ClientKnobs;
-		ServerKnobs* serverKnobs = new ServerKnobs;
-		FLOW_KNOBS = flowKnobs;
-		SERVER_KNOBS = serverKnobs;
-		CLIENT_KNOBS = clientKnobs;
-
-		if (!serverKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
+		if (!globalServerKnobs->setKnob("log_directory", opts.logFolder)) ASSERT(false);
 		if (role != ServerRole::Simulation) {
-			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
+			if (!globalServerKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(opts.memLimit)))
 				ASSERT(false);
 		}
 		for (auto k = opts.knobs.begin(); k != opts.knobs.end(); ++k) {
 			try {
-				if (!flowKnobs->setKnob( k->first, k->second ) &&
-					!clientKnobs->setKnob( k->first, k->second ) &&
-					!serverKnobs->setKnob( k->first, k->second ))
-				{
+				if (!globalFlowKnobs->setKnob(k->first, k->second) &&
+				    !globalClientKnobs->setKnob(k->first, k->second) &&
+				    !globalServerKnobs->setKnob(k->first, k->second)) {
 					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", k->first.c_str());
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(k->first));
 				}
@@ -1619,15 +1608,15 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
-		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
+		if (!globalServerKnobs->setKnob("server_mem_limit", std::to_string(opts.memLimit))) ASSERT(false);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		flowKnobs->initialize(true, role == ServerRole::Simulation);
-		clientKnobs->initialize(true);
-		serverKnobs->initialize(true, clientKnobs, role == ServerRole::Simulation);
+		globalFlowKnobs->initialize(true, role == ServerRole::Simulation);
+		globalClientKnobs->initialize(true);
+		globalServerKnobs->initialize(true, globalClientKnobs.get(), role == ServerRole::Simulation);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
-		EvictablePageCache::evictionPolicyStringToEnum(flowKnobs->CACHE_EVICTION_POLICY);
+		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
 		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
 			fprintf(stderr, "ERROR: --memory has to be larger than --cache_memory\n");
@@ -1765,9 +1754,9 @@ int main(int argc, char* argv[]) {
 
 			auto histogramReportActor = histogramReport();
 
-			clientKnobs->trace();
-			flowKnobs->trace();
-			serverKnobs->trace();
+			CLIENT_KNOBS->trace();
+			FLOW_KNOBS->trace();
+			SERVER_KNOBS->trace();
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories( dataFolder );
