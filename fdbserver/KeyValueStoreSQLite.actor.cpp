@@ -1485,8 +1485,8 @@ public:
 	Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
 	Future<Void> onClosed() override { return stopped.getFuture(); }
 
-	virtual KeyValueStoreType getType() const override { return type; }
-	virtual StorageBytes getStorageBytes() const override;
+	KeyValueStoreType getType() const override { return type; }
+	StorageBytes getStorageBytes() const override;
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
@@ -1498,7 +1498,7 @@ public:
 	                                             int byteLimit = 1 << 30) override;
 
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
-	~KeyValueStoreSQLite();
+	~KeyValueStoreSQLite() override;
 
 	struct SpringCleaningWorkPerformed {
 		int lazyDeletePages = 0;
@@ -1535,9 +1535,7 @@ private:
 			: conn( filename, is_btree_v2, is_btree_v2 ), counter(counter), dbgid(dbgid), ppReadCursor(ppReadCursor)
 		{
 		}
-		~Reader() {
-			ppReadCursor->clear();
-		}
+		~Reader() override { ppReadCursor->clear(); }
 
 		void init() override { conn.open(false); }
 
@@ -1633,7 +1631,7 @@ private:
 			  checkIntegrityOnOpen(checkIntegrityOnOpen)
 		{
 		}
-		~Writer() {
+		~Writer() override {
 			TraceEvent("KVWriterDestroying", dbgid);
 			delete cursor;
 			TraceEvent("KVWriterDestroyed", dbgid);

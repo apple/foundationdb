@@ -100,18 +100,18 @@ namespace ClientLogEventsParser {
 	ParserBase::~ParserBase() {}
 
 	struct Parser_V1 : ParserBase {
-		virtual ~Parser_V1() override {}
+		~Parser_V1() override {}
 	};
 	struct Parser_V2 : ParserBase {
 		Parser_V2() { parseGetVersion = parseEventGetVersion_V2; }
-		virtual ~Parser_V2() override {}
+		~Parser_V2() override {}
 	};
 	struct Parser_V3 : ParserBase {
 		Parser_V3() {
 			parseGetVersion = parseEventGetVersion_V3;
 			parseCommit = parseEventCommit_V2;
 		}
-		virtual ~Parser_V3() override {}
+		~Parser_V3() override {}
 	};
 
 	struct ParserFactory {

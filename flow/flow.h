@@ -641,9 +641,9 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		ASSERT(SingleCallback<T>::next == this);
 		cb->insert(this);
 	}
-	virtual void unwait() override { delFutureRef(); }
-	virtual void fire(T const&) override { ASSERT(false); }
-	virtual void fire(T&&) override { ASSERT(false); }
+	void unwait() override { delFutureRef(); }
+	void fire(T const&) override { ASSERT(false); }
+	void fire(T&&) override { ASSERT(false); }
 };
 
 
@@ -1004,21 +1004,15 @@ struct Actor<void> {
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorCallback : Callback<ValueType> {
-	virtual void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
-	virtual void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
+	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 
 template <class ActorType, int CallbackNumber, class ValueType>
 struct ActorSingleCallback : SingleCallback<ValueType> {
-	virtual void fire(ValueType const& value) override {
-		static_cast<ActorType*>(this)->a_callback_fire(this, value);
-	}
-	virtual void fire(ValueType && value) override {
-		static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value));
-	}
-	virtual void error(Error e) override {
-		static_cast<ActorType*>(this)->a_callback_error(this, e);
-	}
+	void fire(ValueType const& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, value); }
+	void fire(ValueType&& value) override { static_cast<ActorType*>(this)->a_callback_fire(this, std::move(value)); }
+	void error(Error e) override { static_cast<ActorType*>(this)->a_callback_error(this, e); }
 };
 inline double now() { return g_network->now(); }
 inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) { return g_network->delay(seconds, taskID); }

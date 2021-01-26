@@ -30,7 +30,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MetricLogger.h"
+#include "fdbserver/MetricLogger.actor.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"

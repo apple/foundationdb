@@ -362,24 +362,26 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	state std::vector<Future<Void>> fClearRanges;
 	Standalone<VectorRef<KeyRangeRef>> clearRanges;
 	double curTxnSize = 0;
-	double delayTime = 0;
-	for (auto& rangeMutation : batchData->stagingKeyRanges) {
-		KeyRangeRef range(rangeMutation.mutation.param1, rangeMutation.mutation.param2);
-		debugFRMutation("FastRestoreApplierPrecomputeMutationsResultClearRange", rangeMutation.version.version,
-		                MutationRef(MutationRef::ClearRange, range.begin, range.end));
-		clearRanges.push_back_deep(clearRanges.arena(), range);
-		curTxnSize += range.expectedSize();
-		if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
+	{
+		double delayTime = 0;
+		for (auto& rangeMutation : batchData->stagingKeyRanges) {
+			KeyRangeRef range(rangeMutation.mutation.param1, rangeMutation.mutation.param2);
+			debugFRMutation("FastRestoreApplierPrecomputeMutationsResultClearRange", rangeMutation.version.version,
+			                MutationRef(MutationRef::ClearRange, range.begin, range.end));
+			clearRanges.push_back_deep(clearRanges.arena(), range);
+			curTxnSize += range.expectedSize();
+			if (curTxnSize >= SERVER_KNOBS->FASTRESTORE_TXN_BATCH_MAX_BYTES) {
+				fClearRanges.push_back(
+				    applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex, &batchData->counters));
+				delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
+				clearRanges = Standalone<VectorRef<KeyRangeRef>>();
+				curTxnSize = 0;
+			}
+		}
+		if (curTxnSize > 0) {
 			fClearRanges.push_back(
 			    applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex, &batchData->counters));
-			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
-			clearRanges = Standalone<VectorRef<KeyRangeRef>>();
-			curTxnSize = 0;
 		}
-	}
-	if (curTxnSize > 0) {
-		fClearRanges.push_back(
-		    applyClearRangeMutations(clearRanges, delayTime, cx, applierID, batchIndex, &batchData->counters));
 	}
 
 	// Apply range mutations (i.e., clearRange) to stagingKeyRanges
@@ -423,25 +425,27 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
 	int numGetTxns = 0;
-	double delayTime = 0; // Start transactions at different time to avoid overwhelming FDB.
-	for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
-		if (!stagingKeyIter->second.hasBaseValue()) {
-			incompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
-			numKeysInBatch++;
+	{
+		double delayTime = 0; // Start transactions at different time to avoid overwhelming FDB.
+		for (; stagingKeyIter != batchData->stagingKeys.end(); stagingKeyIter++) {
+			if (!stagingKeyIter->second.hasBaseValue()) {
+				incompleteStagingKeys.emplace(stagingKeyIter->first, stagingKeyIter);
+				numKeysInBatch++;
+			}
+			if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
+				fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
+				                                                      batchIndex, &batchData->counters));
+				numGetTxns++;
+				delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
+				numKeysInBatch = 0;
+				incompleteStagingKeys.clear();
+			}
 		}
-		if (numKeysInBatch == SERVER_KNOBS->FASTRESTORE_APPLIER_FETCH_KEYS_SIZE) {
+		if (numKeysInBatch > 0) {
+			numGetTxns++;
 			fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
 			                                                      batchIndex, &batchData->counters));
-			numGetTxns++;
-			delayTime += SERVER_KNOBS->FASTRESTORE_TXN_EXTRA_DELAY;
-			numKeysInBatch = 0;
-			incompleteStagingKeys.clear();
 		}
-	}
-	if (numKeysInBatch > 0) {
-		numGetTxns++;
-		fGetAndComputeKeys.push_back(getAndComputeStagingKeys(incompleteStagingKeys, delayTime, cx, applierID,
-		                                                      batchIndex, &batchData->counters));
 	}
 
 	TraceEvent("FastRestoreApplerPhasePrecomputeMutationsResult", applierID)

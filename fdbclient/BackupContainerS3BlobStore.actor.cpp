@@ -48,13 +48,13 @@ public:
 		BackupFile(std::string fileName, Reference<IAsyncFile> file)
 		  : IBackupFile(fileName), m_file(file), m_offset(0) {}
 
-		Future<Void> append(const void* data, int len) {
+		Future<Void> append(const void* data, int len) override {
 			Future<Void> r = m_file->write(data, len, m_offset);
 			m_offset += len;
 			return r;
 		}
 
-		Future<Void> finish() {
+		Future<Void> finish() override {
 			Reference<BackupFile> self = Reference<BackupFile>::addRef(this);
 			return map(m_file->sync(), [=](Void _) {
 				self->m_file.clear();

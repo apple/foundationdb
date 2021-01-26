@@ -132,7 +132,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 class DLTransaction : public ITransaction, ThreadSafeReferenceCounted<DLTransaction> {
 public:
 	DLTransaction(Reference<FdbCApi> api, FdbCApi::FDBTransaction *tr) : api(api), tr(tr) {}
-	~DLTransaction() { api->transactionDestroy(tr); }
+	~DLTransaction() override { api->transactionDestroy(tr); }
 
 	void cancel() override;
 	void setVersion(Version v) override;
@@ -183,7 +183,7 @@ class DLDatabase : public IDatabase, ThreadSafeReferenceCounted<DLDatabase> {
 public:
 	DLDatabase(Reference<FdbCApi> api, FdbCApi::FDBDatabase *db) : api(api), db(db), ready(Void()) {}
 	DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture);
-	~DLDatabase() {
+	~DLDatabase() override {
 		if (db) {
 			api->databaseDestroy(db);
 		}
@@ -321,7 +321,7 @@ class MultiVersionApi;
 class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
 	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
-	~MultiVersionDatabase();
+	~MultiVersionDatabase() override;
 
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

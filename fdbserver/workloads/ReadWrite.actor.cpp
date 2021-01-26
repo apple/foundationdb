@@ -229,8 +229,8 @@ struct ReadWriteWorkload : KVWorkload {
 				choose {
 					when( wait( db->onChange() ) ) {}
 
-					when (ErrorOr<std::vector<WorkerDetails>> workerList = wait( db->get().clusterInterface.getWorkers.tryGetReply( GetWorkersRequest() ) );)
-					{
+					when(ErrorOr<std::vector<WorkerDetails>> workerList =
+					         wait(db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()))) {
 						if( workerList.present() ) {
 							std::vector<Future<ErrorOr<Void>>> dumpRequests;
 							for( int i = 0; i < workerList.get().size(); i++)
@@ -248,7 +248,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 
 		if(!cancelWorkersAtDuration && now() < metricsStart + metricsDuration)

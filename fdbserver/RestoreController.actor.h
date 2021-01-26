@@ -162,17 +162,17 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		runningVersionBatches.set(0);
 	}
 
-	~RestoreControllerData() = default;
+	~RestoreControllerData() override = default;
 
 	int getVersionBatchState(int batchIndex) final { return RoleVersionBatchState::INVALID; }
 	void setVersionBatchState(int batchIndex, int vbState) final {}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreControllerInitVersionBatch", id()).detail("VersionBatchIndex", batchIndex);
 	}
 
 	// Reset controller data at the beginning of each restore request
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		TraceEvent("FastRestoreControllerReset").detail("OldVersionBatches", versionBatches.size());
 		versionBatches.clear();
 		batch.clear();
@@ -182,7 +182,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		ASSERT(runningVersionBatches.get() == 0);
 	}
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "Controller";
 		return ss.str();

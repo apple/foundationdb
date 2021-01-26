@@ -135,9 +135,9 @@ class Net2 final : public INetwork, public INetworkConnections {
 
 public:
 	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
-	void initTLS(ETLSInitState targetState);
-	void run();
-	void initMetrics();
+	void initTLS(ETLSInitState targetState) override;
+	void run() override;
+	void initMetrics() override;
 
 	// INetworkConnections interface
 	Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) override;
@@ -1149,7 +1149,7 @@ struct PromiseTask : public Task, public FastAllocated<PromiseTask> {
 	PromiseTask() {}
 	explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 
-	virtual void operator()() {
+	void operator()() override {
 		promise.send(Void());
 		delete this;
 	}

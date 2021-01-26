@@ -182,7 +182,7 @@ public:
 	virtual bool isAvailable() const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
-	virtual ProtocolVersion protocolVersion() = 0;
+	ProtocolVersion protocolVersion() override = 0;
 	void addRole(NetworkAddress const& address, std::string const& role) {
 		roleAddresses[address][role] ++;
 		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("NumRoles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
@@ -291,7 +291,7 @@ public:
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& machineId) = 0;
-	virtual void run() {}
+	void run() override {}
 	virtual void destroyProcess( ProcessInfo *p ) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId ) = 0;
 
@@ -392,7 +392,7 @@ public:
 
 	Sim2FileSystem() {}
 
-	virtual ~Sim2FileSystem() {}
+	~Sim2FileSystem() override {}
 
 	static void newFileSystem();
 };

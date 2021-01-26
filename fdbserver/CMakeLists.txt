@@ -48,7 +48,7 @@ set(FDBSERVER_SRCS
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
   MetricLogger.actor.cpp
-  MetricLogger.h
+  MetricLogger.actor.h
   CommitProxyServer.actor.cpp
   masterserver.actor.cpp
   MutationTracking.h
@@ -281,9 +281,11 @@ if (GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
-if(GENERATE_DEBUG_PACKAGES)
-  fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
-else()
-  add_custom_target(prepare_fdbserver_install ALL DEPENDS strip_only_fdbserver)
-  fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
+if(NOT OPEN_FOR_IDE)
+  if(GENERATE_DEBUG_PACKAGES)
+    fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
+  else()
+    add_custom_target(prepare_fdbserver_install ALL DEPENDS strip_only_fdbserver)
+    fdb_install(PROGRAMS ${CMAKE_BINARY_DIR}/packages/bin/fdbserver DESTINATION sbin COMPONENT server)
+  endif()
 endif()

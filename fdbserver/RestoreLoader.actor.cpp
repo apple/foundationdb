@@ -619,8 +619,8 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		sampleBatchSize = 0;
 	}
 
+	state int samplesMessages = fSendSamples.size();
 	try {
-		state int samplesMessages = fSendSamples.size();
 		wait(waitForAll(fSendSamples));
 	} catch (Error& e) { // In case ci.samples throws broken_promise due to unstable network
 		if (e.code() == error_code_broken_promise || e.code() == error_code_operation_cancelled) {
