@@ -19,7 +19,6 @@
  */
 
 #include "flow/Arena.h"
-#include "flow/actorcompiler.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/TPCCWorkload.h"

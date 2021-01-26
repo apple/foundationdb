@@ -27,7 +27,9 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+#ifdef NO_INTELLISENSE
 namespace {
+#endif
 
 // Initial size of buffer used to store serialized traces. Buffer will be
 // resized when necessary.
@@ -431,7 +433,9 @@ private:
 
 ITracer* g_tracer = new NoopTracer();
 
+#ifdef NO_INTELLISENSE
 } // namespace
+#endif
 
 void openTracer(TracerType type) {
 	if (g_tracer->type() == type) {

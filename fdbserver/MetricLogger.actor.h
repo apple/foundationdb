@@ -1,5 +1,5 @@
 /*
- * MetricLogger.h
+ * MetricLogger.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,6 +20,16 @@
 
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
+#if defined(NO_INTELLISENSE) && !defined(FLOW_METRIC_LOGGER_G_H)
+#define FLOW_METRIC_LOGGER_G_H
+#include "flow/MetricLogger.actor.g.h"
+#elif !defined(FLOW_METRIC_LOGGER_G_H)
+#define FLOW_METRIC_LOGGER_G_H
+#include "flow/actorcompiler.h" // This must be the last #include
 
-Future<Void> runMetrics( Future<Database> const& fcx, Key const& metricsPrefix );
+ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
+
+#include "flow/unactorcompiler.h"
+#endif
