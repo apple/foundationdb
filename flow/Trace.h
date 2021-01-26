@@ -26,7 +26,6 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <string>
-#include <chrono>
 #include <map>
 #include <set>
 #include <type_traits>
