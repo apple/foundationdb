@@ -23,6 +23,7 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
+#include "flow/FastRef.h"
 #include "flow/network.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -309,6 +310,17 @@ ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) 
 		return Void();
 	});
 }
+
+ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef &snapshot_command){
+	if(!api->databaseCreateSnapshot) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture *f = api->databaseCreateSnapshot(db, snapshot_command.begin(), snapshot_command.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
+		return Void();
+	});
+}
 	
 // DLApi
 template<class T>
@@ -346,6 +358,7 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss, lib, fdbCPath, "fdb_database_force_recovery_with_data_loss", headerVersion >= 700);
+	loadClientFunction(&api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
@@ -817,6 +830,11 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 
 ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) {
 	auto f = dbState->db ? dbState->db->forceRecoveryWithDataLoss(dcid) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+
+ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef &snapshot_command) {
+	auto f = dbState->db ? dbState->db->createSnapshot(snapshot_command) : ThreadFuture<Void>(Never());
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 

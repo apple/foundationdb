@@ -4835,3 +4835,17 @@ Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int du
 Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
 	return forceRecovery(getConnectionFile(), dcId);
 }
+
+ACTOR static Future<Void> createSnapshotActor(DatabaseContext* cx, StringRef snapCmd) {
+	UID snapUID = deterministicRandom()->randomUniqueID();
+	try {
+		wait(mgmtSnapCreate(cx->clone(), snapCmd, snapUID));
+	} catch (Error& e) {
+		throw e;
+	}
+	return Void();
+}
+
+Future<Void> DatabaseContext::createSnapshot(StringRef snapshot_command) {
+	return createSnapshotActor(this, snapshot_command);
+}

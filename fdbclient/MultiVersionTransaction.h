@@ -68,6 +68,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	void (*databaseDestroy)(FDBDatabase *database);
 	FDBFuture* (*databaseRebootWorker)(FDBDatabase *database, uint8_t const *address, int addressLength, fdb_bool_t check, int duration);
 	FDBFuture* (*databaseForceRecoveryWithDataLoss)(FDBDatabase *database, uint8_t const *dcid, int dcidLength);
+	FDBFuture* (*databaseCreateSnapshot)(FDBDatabase *database, uint8_t const *snapshot_commmand, int snapshotCommandLength);
 
 	//Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction *tr, FDBTransactionOptions::Option option, uint8_t const *value, int valueLength);
@@ -199,6 +200,7 @@ public:
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
+	ThreadFuture<Void> createSnapshot(const StringRef& snapshot_command) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -320,6 +322,8 @@ class MultiVersionApi;
 
 class MultiVersionDatabase final : public IDatabase, ThreadSafeReferenceCounted<MultiVersionDatabase> {
 public:
+	struct DatabaseState;
+
 	MultiVersionDatabase(MultiVersionApi *api, std::string clusterFilePath, Reference<IDatabase> db, bool openConnectors=true);
 	~MultiVersionDatabase() override;
 
@@ -331,11 +335,14 @@ public:
 
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
+	const Reference<DatabaseState>& getDbState() {return dbState;}
+	ThreadFuture<Void> dbAvaliable();
+
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
+	ThreadFuture<Void> createSnapshot(const StringRef& snapshot_command) override;
 
 private:
-	struct DatabaseState;
 
 	struct Connector : ThreadCallback, ThreadSafeReferenceCounted<Connector> {
 		Connector(Reference<DatabaseState> dbState, Reference<ClientInfo> client, std::string clusterFilePath) : dbState(dbState), client(client), clusterFilePath(clusterFilePath), connected(false), cancelled(false) {}
@@ -361,6 +368,7 @@ private:
 		bool cancelled;
 	};
 
+public:
 	struct DatabaseState : ThreadSafeReferenceCounted<DatabaseState> {
 		DatabaseState();
 

@@ -84,6 +84,14 @@ ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef
 	} );
 }
 
+ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& snapshot_command) {
+	DatabaseContext *db = this->db;
+	Key cmd = snapshot_command;
+	return onMainThread( [db, cmd]() -> Future<Void> {
+		return db->createSnapshot(cmd);
+	} );
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile *connFile = new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
 
