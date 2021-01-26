@@ -24,6 +24,9 @@
 #include <vector>
 
 #include "fdbrpc/simulator.h"
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
@@ -45,8 +48,6 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
-
-#define BOOST_DATE_TIME_NO_LIB
 
 bool simulator_should_inject_fault( const char* context, const char* file, int line, int error_code ) {
 	if (!g_network->isSimulated()) return false;

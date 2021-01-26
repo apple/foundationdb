@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
 #include <boost/range.hpp>
 #include <thread>
@@ -31,8 +34,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace boost::asio;
-
-#define BOOST_DATE_TIME_NO_LIB
 
 static io_service ios;
 
