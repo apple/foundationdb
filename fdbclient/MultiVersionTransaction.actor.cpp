@@ -311,17 +311,15 @@ ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef &dcid) 
 	});
 }
 
-ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef &snapshot_command){
-	if(!api->databaseCreateSnapshot) {
+ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& snapshot_command) {
+	if (!api->databaseCreateSnapshot) {
 		return unsupported_operation();
 	}
 
-	FdbCApi::FDBFuture *f = api->databaseCreateSnapshot(db, snapshot_command.begin(), snapshot_command.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture *f, FdbCApi *api) {
-		return Void();
-	});
+	FdbCApi::FDBFuture* f = api->databaseCreateSnapshot(db, snapshot_command.begin(), snapshot_command.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
-	
+
 // DLApi
 template<class T>
 void loadClientFunction(T *fp, void *lib, std::string libPath, const char *functionName, bool requireFunction = true) {
@@ -358,7 +356,8 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy");
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss, lib, fdbCPath, "fdb_database_force_recovery_with_data_loss", headerVersion >= 700);
-	loadClientFunction(&api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
+	loadClientFunction(&api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot",
+	                   headerVersion >= 700);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option");
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy");
@@ -833,7 +832,7 @@ ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringR
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
-ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef &snapshot_command) {
+ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& snapshot_command) {
 	auto f = dbState->db ? dbState->db->createSnapshot(snapshot_command) : ThreadFuture<Void>(Never());
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }

@@ -102,8 +102,8 @@ EmptyFuture Database::force_recovery_with_data_loss(FDBDatabase *db, const uint8
   return EmptyFuture(fdb_database_force_recovery_with_data_loss(db, dcid, dcid_length));
 }
 
-EmptyFuture Database::create_snapshot(FDBDatabase *db, const uint8_t *snap_command, int snap_command_length) {
-  return EmptyFuture(fdb_database_create_snapshot(db, snap_command, snap_command_length));
+EmptyFuture Database::create_snapshot(FDBDatabase* db, const uint8_t* snap_command, int snap_command_length) {
+	return EmptyFuture(fdb_database_create_snapshot(db, snap_command, snap_command_length));
 }
 
 // Transaction
