@@ -4816,6 +4816,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state bool trackerCancelled;
 	loop {
 		trackerCancelled = false;
+
+		// Stored outside of data distribution tracker to avoid slow tasks
+		// when tracker is cancelled
+		state KeyRangeMap<ShardTrackedData> shards;
+
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4961,10 +4966,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = configuration.storageTeamSize;
-
-			// Stored outside of data distribution tracker to avoid slow tasks
-			// when tracker is cancelled
-			state KeyRangeMap<ShardTrackedData> shards;
 
 			vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {

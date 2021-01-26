@@ -199,7 +199,7 @@ public:
 		return dispatch_impl(func);
 	}
 
-	~AsyncFileEIO() { close_impl( fd ); }
+	~AsyncFileEIO() override { close_impl(fd); }
 
 private:
 	struct ErrorInfo : ReferenceCounted<ErrorInfo>, FastAllocated<ErrorInfo> {

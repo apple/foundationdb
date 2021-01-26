@@ -764,7 +764,7 @@ public:
 };
 
 struct PacketWriter {
-	static const int isDeserializing = 0;
+	static constexpr int isDeserializing = 0;
 	static constexpr bool isSerializing = true;
 	typedef PacketWriter WRITER;
 
@@ -786,9 +786,7 @@ struct PacketWriter {
 			serializeBytesAcrossBoundary(data, bytes);
 		}
 	}
-	void serializeBytesAcrossBoundary(const void* data, int bytes);
 	void writeAhead( int bytes, struct SplitBuffer* );
-	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	PacketBuffer* finish();
 	int size() const { return length; }
 
@@ -808,6 +806,8 @@ struct PacketWriter {
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
 
 private:
+	void serializeBytesAcrossBoundary(const void* data, int bytes);
+	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	uint8_t* writeBytes(size_t size) {
 		if (size > buffer->bytes_unwritten()) {
 			nextBuffer(size);
@@ -832,7 +832,7 @@ struct ISerializeSource {
 template <class T, class V>
 struct MakeSerializeSource : ISerializeSource {
 	using value_type = V;
-	virtual void serializePacketWriter(PacketWriter& w) const {
+	void serializePacketWriter(PacketWriter& w) const override {
 		ObjectWriter writer([&](size_t size) { return w.writeBytes(size); }, AssumeVersion(w.protocolVersion()));
 		writer.serialize(get()); // Writes directly into buffer supplied by |w|
 	}
@@ -844,10 +844,8 @@ struct SerializeSource : MakeSerializeSource<SerializeSource<T>, T> {
 	using value_type = T;
 	T const& value;
 	SerializeSource(T const& value) : value(value) {}
-	virtual void serializeObjectWriter(ObjectWriter& w) const {
-		w.serialize(value);
-	}
-	virtual T const& get() const { return value; }
+	void serializeObjectWriter(ObjectWriter& w) const override { w.serialize(value); }
+	T const& get() const override { return value; }
 };
 
 #endif

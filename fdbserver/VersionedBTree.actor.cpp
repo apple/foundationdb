@@ -721,24 +721,24 @@ public:
 		VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
 	};
 
-	virtual ~FastAllocatedPage() { freeFast(bufferSize, buffer); }
+	~FastAllocatedPage() override { freeFast(bufferSize, buffer); }
 
-	virtual Reference<IPage> clone() const {
+	Reference<IPage> clone() const override {
 		FastAllocatedPage* p = new FastAllocatedPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
 		return Reference<IPage>(p);
 	}
 
 	// Usable size, without checksum
-	int size() const { return logicalSize - sizeof(Checksum); }
+	int size() const override { return logicalSize - sizeof(Checksum); }
 
-	uint8_t const* begin() const { return buffer; }
+	uint8_t const* begin() const override { return buffer; }
 
-	uint8_t* mutate() { return buffer; }
+	uint8_t* mutate() override { return buffer; }
 
-	void addref() const { ReferenceCounted<FastAllocatedPage>::addref(); }
+	void addref() const override { ReferenceCounted<FastAllocatedPage>::addref(); }
 
-	void delref() const { ReferenceCounted<FastAllocatedPage>::delref(); }
+	void delref() const override { ReferenceCounted<FastAllocatedPage>::delref(); }
 
 	typedef uint32_t Checksum;
 
@@ -2178,7 +2178,7 @@ class DWALPagerSnapshot : public IPagerSnapshot, public ReferenceCounted<DWALPag
 public:
 	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version, Future<Void> expiredFuture)
 	  : pager(pager), metaKey(meta), version(version), expired(expiredFuture) {}
-	virtual ~DWALPagerSnapshot() {}
+	~DWALPagerSnapshot() override {}
 
 	Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID, bool cacheable, bool noHit) override {
 		if (expired.isError()) {
@@ -3079,9 +3079,9 @@ public:
 
 	// All async opts on the btree are based on pager reads, writes, and commits, so
 	// we can mostly forward these next few functions to the pager
-	Future<Void> getError() { return m_pager->getError(); }
+	Future<Void> getError() override { return m_pager->getError(); }
 
-	Future<Void> onClosed() { return m_pager->onClosed(); }
+	Future<Void> onClosed() override { return m_pager->onClosed(); }
 
 	void close_impl(bool dispose) {
 		auto* pager = m_pager;
@@ -3092,9 +3092,9 @@ public:
 			pager->close();
 	}
 
-	void dispose() { return close_impl(true); }
+	void dispose() override { return close_impl(true); }
 
-	void close() { return close_impl(false); }
+	void close() override { return close_impl(false); }
 
 	KeyValueStoreType getType() const override { NOT_IMPLEMENTED; }
 	bool supportsMutation(int op) const override { NOT_IMPLEMENTED; }
@@ -3297,7 +3297,7 @@ public:
 		m_latestCommit.cancel();
 	}
 
-	Reference<IStoreCursor> readAtVersion(Version v) {
+	Reference<IStoreCursor> readAtVersion(Version v) override {
 		// Only committed versions can be read.
 		ASSERT(v <= m_lastCommittedVersion);
 		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(v);
@@ -3310,7 +3310,7 @@ public:
 	}
 
 	// Must be nondecreasing
-	void setWriteVersion(Version v) {
+	void setWriteVersion(Version v) override {
 		ASSERT(v > m_lastCommittedVersion);
 		// If there was no current mutation buffer, create one in the buffer map and update m_pBuffer
 		if (m_pBuffer == nullptr) {
@@ -3873,7 +3873,7 @@ private:
 			}
 		}
 
-		virtual ~SuperPage() { delete[] m_data; }
+		~SuperPage() override { delete[] m_data; }
 
 		Reference<IPage> clone() const override {
 			return Reference<IPage>(new SuperPage({ Reference<const IPage>::addRef(this) }));
@@ -5492,8 +5492,8 @@ public:
 		Cursor(Reference<IPagerSnapshot> pageSource, BTreePageIDRef root, Version internalRecordVersion)
 		  : m_version(internalRecordVersion), m_cur1(pageSource, root), m_cur2(m_cur1) {}
 
-		void addref() { ReferenceCounted<Cursor>::addref(); }
-		void delref() { ReferenceCounted<Cursor>::delref(); }
+		void addref() override { ReferenceCounted<Cursor>::addref(); }
+		void delref() override { ReferenceCounted<Cursor>::delref(); }
 
 	private:
 		Version m_version;
@@ -5706,7 +5706,7 @@ public:
 		m_init = catchError(init_impl(this));
 	}
 
-	Future<Void> init() { return m_init; }
+	Future<Void> init() override { return m_init; }
 
 	ACTOR Future<Void> init_impl(KeyValueStoreRedwoodUnversioned* self) {
 		TraceEvent(SevInfo, "RedwoodInit").detail("FilePrefix", self->m_filePrefix);
@@ -5753,9 +5753,9 @@ public:
 
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
-	Future<Void> getError() { return delayed(m_error.getFuture()); };
+	Future<Void> getError() override { return delayed(m_error.getFuture()); };
 
-	void clear(KeyRangeRef range, const Arena* arena = 0) {
+	void clear(KeyRangeRef range, const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
@@ -5869,7 +5869,7 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		return catchError(readValue_impl(this, key, debugID));
 	}
 
@@ -5893,11 +5893,12 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID = Optional<UID>()) {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength,
+	                                        Optional<UID> debugID = Optional<UID>()) override {
 		return catchError(readValuePrefix_impl(this, key, maxLength, debugID));
 	}
 
-	virtual ~KeyValueStoreRedwoodUnversioned(){};
+	~KeyValueStoreRedwoodUnversioned() override{};
 
 private:
 	std::string m_filePrefix;

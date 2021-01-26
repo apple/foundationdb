@@ -23,7 +23,8 @@
 #include <cmath>
 #include <cinttypes>
 
-FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
+std::unique_ptr<FlowKnobs> globalFlowKnobs = std::make_unique<FlowKnobs>();
+FlowKnobs const* FLOW_KNOBS = globalFlowKnobs.get();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
@@ -147,6 +148,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 	init( TSC_YIELD_TIME,                                  1000000 );
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
+	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -335,7 +337,7 @@ void Knobs::initKnob( bool& knob, bool value, std::string const& name ) {
 	}
 }
 
-void Knobs::trace() {
+void Knobs::trace() const {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : int_knobs)

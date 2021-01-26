@@ -38,7 +38,7 @@ struct RYWDisableWorkload : TestWorkload {
 		keyBytes = std::max( getOption( options, LiteralStringRef("keyBytes"), 16 ), 16 );
 	}
 
-	std::string description() const { return "RYWDisable"; }
+	std::string description() const override { return "RYWDisable"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 

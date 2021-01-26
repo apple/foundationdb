@@ -35,7 +35,7 @@ public:
 		m_buffer.reserve(m_buffer.arena(), CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK);
 	}
 
-	Future<Void> append(const void* data, int len) {
+	Future<Void> append(const void* data, int len) override {
 		m_buffer.append(m_buffer.arena(), (const uint8_t*)data, len);
 
 		if (m_buffer.size() >= CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
@@ -70,9 +70,9 @@ public:
 		return Void();
 	}
 
-	int64_t size() const { return m_buffer.size() + m_writeOffset; }
+	int64_t size() const override { return m_buffer.size() + m_writeOffset; }
 
-	Future<Void> finish() { return finish_impl(Reference<BackupFile>::addRef(this)); }
+	Future<Void> finish() override { return finish_impl(Reference<BackupFile>::addRef(this)); }
 
 	void addref() override { return ReferenceCounted<BackupFile>::addref(); }
 	void delref() override { return ReferenceCounted<BackupFile>::delref(); }

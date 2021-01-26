@@ -2027,6 +2027,25 @@ TEST_CASE("fdb_database_reboot_worker") {
   CHECK(new_generation > old_generation);
 }
 
+TEST_CASE("fdb_database_force_recovery_with_data_loss") {
+	// This command cannot be tested completely in the current unit test configuration
+	// For now, we simply call the function to make sure it exist
+	// Background:
+	// It is also only usable when usable_regions=2, so it requires a fearless configuration
+	// In particular, you have two data centers, and the storage servers in one region are allowed to fall behind (async
+	// replication) Normally, you would not want to recover to that set of storage servers unless there are tlogs which
+	// can let those storage servers catch up However, if all the tlogs are dead and you still want to be able to
+	// recover your database even if that means losing recently committed mutation, that's the time this function works
+
+	std::string dcid = "test_id";
+	while (1) {
+		fdb::EmptyFuture f =
+		    fdb::Database::force_recovery_with_data_loss(db, (const uint8_t*)dcid.c_str(), dcid.size());
+		fdb_check(wait_future(f));
+		break;
+  }
+}
+
 TEST_CASE("fdb_error_predicate") {
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
   CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed

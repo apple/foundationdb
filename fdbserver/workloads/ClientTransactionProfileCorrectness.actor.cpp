@@ -100,18 +100,18 @@ namespace ClientLogEventsParser {
 	ParserBase::~ParserBase() {}
 
 	struct Parser_V1 : ParserBase {
-		virtual ~Parser_V1() override {}
+		~Parser_V1() override {}
 	};
 	struct Parser_V2 : ParserBase {
 		Parser_V2() { parseGetVersion = parseEventGetVersion_V2; }
-		virtual ~Parser_V2() override {}
+		~Parser_V2() override {}
 	};
 	struct Parser_V3 : ParserBase {
 		Parser_V3() {
 			parseGetVersion = parseEventGetVersion_V3;
 			parseCommit = parseEventCommit_V2;
 		}
-		virtual ~Parser_V3() override {}
+		~Parser_V3() override {}
 	};
 
 	struct ParserFactory {
@@ -187,7 +187,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_STATUS_DELAY = 2.0; // 2 seconds
+			globalClientKnobs->CSI_STATUS_DELAY = 2.0; // 2 seconds
 			return changeProfilingParameters(cx, trInfoSizeLimit, samplingProbability);
 		}
 		return Void();

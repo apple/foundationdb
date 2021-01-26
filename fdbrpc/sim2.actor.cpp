@@ -492,9 +492,7 @@ public:
 
 	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() {
-		_close( h );
-	}
+	~SimpleFile() override { _close(h); }
 
 private:
 	int h;
@@ -1794,7 +1792,7 @@ public:
 		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
 		process->boundUDPSockets.emplace(localAddress, this);
 	}
-	~UDPSimSocket() {
+	~UDPSimSocket() override {
 		if (!closed.getFuture().isReady()) {
 			close();
 			closed.send(Void());

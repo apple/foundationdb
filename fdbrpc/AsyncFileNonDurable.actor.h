@@ -239,7 +239,7 @@ public:
 		}
 	}
 
-	~AsyncFileNonDurable() {
+	~AsyncFileNonDurable() override {
 		//TraceEvent("AsyncFileNonDurable_Destroy", id).detail("Filename", filename);
 	}
 
@@ -288,7 +288,7 @@ public:
 
 	//Fsyncs the file.  This allows all delayed modifications to the file to complete before
 	//syncing the underlying file
-	Future<Void> sync() {
+	Future<Void> sync() override {
 		//TraceEvent("AsyncFileNonDurable_Sync", id).detail("Filename", filename);
 		Future<Void> syncFuture = sync(this, true);
 		reponses.add( syncFuture );

@@ -306,12 +306,12 @@ public:
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
-		std::unordered_map<UID, KeyRangeRef> keyRangeMap;
+		std::unordered_map<UID, KeyRange> keyRangeMap;
 
 		static const StringRef emptyString;
 		static const KeyRangeRef emptyKeyRange;
 	public:
-		void recordStart(const UID id, const KeyRange keyRange) {
+		void recordStart(const UID id, const KeyRange& keyRange) {
 			startTimeMap[id] =  now();
 			keyRangeMap[id] = keyRange;
 		}
@@ -321,7 +321,7 @@ public:
 			keyRangeMap.erase(id);
 		}
 
-		std::pair<double, KeyRangeRef> longestTime() const {
+		std::pair<double, KeyRange> longestTime() const {
 			if (numRunning() == 0) {
 				return {-1, emptyKeyRange};
 			}
@@ -2394,7 +2394,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					//FIXME: remove when we no longer support upgrades from 5.X
 					if (debug_getRangeRetries >= 100) {
 						data->cx->enableLocalityLoadBalance = false;
-						// TODO: Add SevWarnAlways to say it was disabled.
+						TraceEvent(SevWarnAlways, "FKDisableLB").detail("FKID", fetchKeysID);
 					}
 
 					debug_getRangeRetries++;
@@ -2413,6 +2413,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		//FIXME: remove when we no longer support upgrades from 5.X
 		data->cx->enableLocalityLoadBalance = true;
+		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...

@@ -43,7 +43,8 @@ public:
 	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
 	void notifyContextDestroyed();
 
-	virtual ~StorageServerInfo();
+	~StorageServerInfo() override;
+
 private:
 	DatabaseContext *cx;
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}
@@ -206,8 +207,10 @@ public:
 	Future<Void> connectionFileChanged();
 	bool switchable = false;
  
-	// Management API, Attempt to kill or suspend a process, return 1 for success, 0 for failure
+	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
+	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed mutations
+	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);
 
 //private: 
 	explicit DatabaseContext( Reference<AsyncVar<Reference<ClusterConnectionFile>>> connectionFile, Reference<AsyncVar<ClientDBInfo>> clientDBInfo,

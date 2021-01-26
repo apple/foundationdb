@@ -93,7 +93,7 @@ public:
 
 	explicit SpecialKeyRangeRWImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	virtual ~SpecialKeyRangeRWImpl() {}
+	~SpecialKeyRangeRWImpl() override {}
 };
 
 class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {

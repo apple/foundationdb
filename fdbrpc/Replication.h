@@ -505,7 +505,7 @@ protected:
 struct LocalityGroup : public LocalitySet {
 	LocalityGroup():LocalitySet(*this), _valuemap(new StringToIntMap()) {}
 	LocalityGroup(LocalityGroup const& source):LocalitySet(source), _recordArray(source._recordArray), _valuemap(source._valuemap) {}
-	virtual ~LocalityGroup() { }
+	~LocalityGroup() override {}
 
 	LocalityEntry const& add(LocalityData const& data) {
 		// _recordArray.size() is the new entry index for the new data
@@ -514,7 +514,7 @@ struct LocalityGroup : public LocalitySet {
 		return LocalitySet::add(record, *this);
 	}
 
-	virtual void clear() {
+	void clear() override {
 		LocalitySet::clear();
 		_valuemap->clear();
 		_recordArray.clear();
@@ -534,15 +534,15 @@ struct LocalityGroup : public LocalitySet {
 		return *this;
 	}
 
-	virtual Reference<LocalityRecord> const& getRecord(int recordIndex) const {
+	Reference<LocalityRecord> const& getRecord(int recordIndex) const override {
 		ASSERT((recordIndex >= 0) && (recordIndex < _recordArray.size()));
 		return _recordArray[recordIndex];
 	}
 
 	// Get the locality info for debug purpose
-	virtual std::vector<Reference<LocalityRecord>> const& getRecordArray() const { return _recordArray; }
+	std::vector<Reference<LocalityRecord>> const& getRecordArray() const override { return _recordArray; }
 
-	virtual int	getMemoryUsed() const {
+	int getMemoryUsed() const override {
 		int memorySize = sizeof(_recordArray) + _keymap->getMemoryUsed();
 		for (auto& record : _recordArray) {
 			memorySize += record->getMemoryUsed();
@@ -563,18 +563,14 @@ struct LocalityGroup : public LocalitySet {
 		return attribHashMap;
 	}
 
-	virtual Reference<StringToIntMap> const&	getGroupValueMap() const
-	{	return _valuemap; }
+	Reference<StringToIntMap> const& getGroupValueMap() const override { return _valuemap; }
 
-	virtual Reference<StringToIntMap> const&	getGroupKeyMap() const
-	{	return _keymap; }
+	Reference<StringToIntMap> const& getGroupKeyMap() const override { return _keymap; }
 
 protected:
-	virtual Reference<StringToIntMap> &	getGroupValueMap()
-	{	return _valuemap; }
+	Reference<StringToIntMap>& getGroupValueMap() override { return _valuemap; }
 
-	virtual Reference<StringToIntMap> &	getGroupKeyMap()
-	{	return _keymap; }
+	Reference<StringToIntMap>& getGroupKeyMap() override { return _keymap; }
 
 protected:
 	std::vector<Reference<LocalityRecord>>	_recordArray;
@@ -585,7 +581,7 @@ template <class V>
 struct LocalityMap : public LocalityGroup  {
 	LocalityMap():LocalityGroup() {}
 	LocalityMap(LocalityMap const& source):LocalityGroup(source), _objectArray(source._objectArray) {}
-	virtual ~LocalityMap() {}
+	~LocalityMap() override {}
 
 	bool selectReplicas(
 		Reference<IReplicationPolicy> const&								policy,
@@ -649,12 +645,12 @@ struct LocalityMap : public LocalityGroup  {
 		return getObject(record->_entryIndex);
 	}
 
-	virtual void clear() {
+	void clear() override {
 		LocalityGroup::clear();
 		_objectArray.clear();
 	}
 
-	virtual int	getMemoryUsed() const {
+	int getMemoryUsed() const override {
 		return LocalitySet::getMemoryUsed() + sizeof(_objectArray) + (sizeof(V*) * _objectArray.size());
 	}
 
