@@ -40,7 +40,7 @@ public:
 
 	Net2FileSystem(double ioTimeout = 0.0, const std::string& fileSystemPath = "");
 
-	virtual ~Net2FileSystem() {}
+	~Net2FileSystem() override {}
 
 	static void newFileSystem(double ioTimeout = 0.0, const std::string& fileSystemPath = "");
 

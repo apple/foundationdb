@@ -41,7 +41,7 @@ public:
 		m_budget_max = m_limit * m_seconds;
 		m_last_update = timer();
 	}
-	~SpeedLimit() = default;
+	~SpeedLimit() override = default;
 
 	void addref() override { ReferenceCounted<SpeedLimit>::addref(); }
 	void delref() override { ReferenceCounted<SpeedLimit>::delref(); }
@@ -78,7 +78,7 @@ private:
 class Unlimited final : public IRateControl, ReferenceCounted<Unlimited> {
 public:
 	Unlimited() {}
-	~Unlimited() = default;
+	~Unlimited() override = default;
 	void addref() override { ReferenceCounted<Unlimited>::addref(); }
 	void delref() override { ReferenceCounted<Unlimited>::delref(); }
 

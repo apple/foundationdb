@@ -254,7 +254,7 @@ struct CompoundWorkload : TestWorkload {
 	CompoundWorkload( WorkloadContext& wcx ) : TestWorkload( wcx ) {}
 	CompoundWorkload* add( TestWorkload* w ) { workloads.push_back(w); return this; }
 
-	~CompoundWorkload() {
+	~CompoundWorkload() override {
 		for (int w = 0; w < workloads.size(); w++) delete workloads[w];
 	}
 	std::string description() const override {

@@ -248,7 +248,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 	}
 
-	virtual Future<bool> check( Database const& cx ) { 
+	Future<bool> check(Database const& cx) override {
 		clients.clear();
 
 		if(!cancelWorkersAtDuration && now() < metricsStart + metricsDuration)

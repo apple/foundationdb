@@ -69,14 +69,12 @@ public:
 template <class Object, class ActionType>
 class TypedAction : public ThreadAction {
 public:
-	virtual void operator()(IThreadPoolReceiver* p) {
+	void operator()(IThreadPoolReceiver* p) override {
 		Object* o = (Object*)p;
 		o->action(*(ActionType*)this);
 		delete (ActionType*)this;
 	}
-	virtual void cancel() {
-		delete (ActionType*)this;
-	}
+	void cancel() override { delete (ActionType*)this; }
 };
 
 template <class T>
@@ -111,7 +109,7 @@ Reference<IThreadPool>	createGenericThreadPool(int stackSize = 0);
 
 class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
-	~DummyThreadPool() {}
+	~DummyThreadPool() override {}
 	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() const override { return errors.getFuture(); }
 	void addThread(IThreadPoolReceiver* userData) override {

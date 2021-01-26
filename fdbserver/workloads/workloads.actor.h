@@ -129,9 +129,7 @@ struct WorkloadFactory : IWorkloadFactory {
 	WorkloadFactory(const char* name) {
 		factories()[name] = this;
 	}
-	virtual TestWorkload* create( WorkloadContext const& wcx ) {
-		return new WorkloadType(wcx);
-	}
+	TestWorkload* create(WorkloadContext const& wcx) override { return new WorkloadType(wcx); }
 };
 
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory( #classname )

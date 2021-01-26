@@ -173,7 +173,7 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig *config, TDMetri
 class MetricDB : public IMetricDB {
 public:
 	MetricDB(ReadYourWritesTransaction *tr = nullptr) : tr(tr) {}
-	~MetricDB() {}
+	~MetricDB() override {}
 
 	// levelKey is the prefix for the entire level, no timestamp at the end
 	ACTOR static Future<Optional<Standalone<StringRef>>> getLastBlock_impl(ReadYourWritesTransaction *tr, Standalone<StringRef> levelKey) {
@@ -183,10 +183,10 @@ public:
 		return Optional<Standalone<StringRef>>();
 	}
 
-	Future<Optional<Standalone<StringRef>>> getLastBlock(Standalone<StringRef> key) {
+	Future<Optional<Standalone<StringRef>>> getLastBlock(Standalone<StringRef> key) override {
 		return getLastBlock_impl(tr, key);
 	}
-	
+
 	ReadYourWritesTransaction *tr;
 };
 

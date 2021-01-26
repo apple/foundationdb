@@ -86,15 +86,15 @@ public:
 	void operator += (Value delta);
 	void operator ++ () { *this += 1; }
 	void clear();
-	void resetInterval();
+	void resetInterval() override;
 
-	std::string const& getName() const { return name; }
+	std::string const& getName() const override { return name; }
 
 	Value getIntervalDelta() const { return interval_delta; }
-	Value getValue() const { return interval_start_value + interval_delta; }
+	Value getValue() const override { return interval_start_value + interval_delta; }
 
 	// dValue / dt
-	double getRate() const;
+	double getRate() const override;
 
 	// Measures the clumpiness or dispersion of the counter.
 	// Computed as a normalized variance of the time between each incrementation of the value.
@@ -106,10 +106,10 @@ public:
 	// A uniformly periodic counter will have roughness of 0
 	// A uniformly periodic counter that increases in clumps of N will have roughness of N-1
 	// A counter with exponentially distributed incrementations will have roughness of 1
-	double getRoughness() const;
+	double getRoughness() const override;
 
-	bool hasRate() const { return true; }
-	bool hasRoughness() const { return true; }
+	bool hasRate() const override { return true; }
+	bool hasRoughness() const override { return true; }
 
 private:
 	std::string name;

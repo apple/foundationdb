@@ -43,7 +43,8 @@ public:
 	static Reference<StorageServerInfo> getInterface( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality );
 	void notifyContextDestroyed();
 
-	virtual ~StorageServerInfo();
+	~StorageServerInfo() override;
+
 private:
 	DatabaseContext *cx;
 	StorageServerInfo( DatabaseContext *cx, StorageServerInterface const& interf, LocalityData const& locality ) : cx(cx), ReferencedInterface<StorageServerInterface>(interf, locality) {}

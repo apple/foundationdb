@@ -60,7 +60,7 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	virtual std::string description() const { return name; }
+	std::string description() const override { return name; }
 	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
 		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
 		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1), true,
@@ -86,7 +86,7 @@ struct UDPWorkload : TestWorkload {
 			}
 		}
 	}
-	virtual Future<Void> setup(Database const& cx) { return _setup(this, cx); }
+	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	class Message {
 		int _type = 0;
@@ -236,9 +236,9 @@ struct UDPWorkload : TestWorkload {
 		UNSTOPPABLE_ASSERT(false);
 		return Void();
 	}
-	virtual Future<Void> start(Database const& cx) { return delay(runFor) || _start(this, cx); }
-	virtual Future<bool> check(Database const& cx) { return true; }
-	virtual void getMetrics(vector<PerfMetric>& m) {
+	Future<Void> start(Database const& cx) override { return delay(runFor) || _start(this, cx); }
+	Future<bool> check(Database const& cx) override { return true; }
+	void getMetrics(vector<PerfMetric>& m) override {
 		unsigned totalReceived = 0, totalSent = 0, totalAcked = 0, totalSuccess = 0;
 		for (const auto& p : sent) {
 			totalSent += p.second;

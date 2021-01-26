@@ -32,7 +32,7 @@
 struct IssuesListImpl;
 struct IssuesList final : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
 	IssuesList();
-	~IssuesList();
+	~IssuesList() override;
 	void addIssue(std::string issue) override;
 
 	void retrieveIssues(std::set<std::string>& out) const override;
@@ -66,8 +66,8 @@ public:
 	FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension,
 	                   uint64_t maxLogsSize, std::function<void()> onError, Reference<ITraceLogIssuesReporter> issues);
 
-	void addref();
-	void delref();
+	void addref() override;
+	void delref() override;
 
 	void lastError(int err);
 
