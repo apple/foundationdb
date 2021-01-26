@@ -32,6 +32,8 @@
 
 using namespace boost::asio;
 
+#define BOOST_DATE_TIME_NO_LIB
+
 static io_service ios;
 
 class SimExternalConnectionImpl {
