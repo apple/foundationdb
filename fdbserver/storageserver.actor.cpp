@@ -696,6 +696,9 @@ public:
 	}
 
 	bool checkDurabilityBehind() {
+		return version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_END;
+		
+		/*
 		if(durabilityBehind.get()) {
 			durabilityBehind.set(
 				version.get() - durableVersion.get() > SERVER_KNOBS->LOW_PRIORITY_DURABILITY_LAG_END || 
@@ -706,12 +709,13 @@ public:
 				queueSize() > SERVER_KNOBS->LOW_PRIORITY_STORAGE_QUEUE_BYTES_START );
 		}
 		return durabilityBehind.get();
+		*/
 	}
 
 	Future<Void> getQueryDelay() {
 		if(checkDurabilityBehind()) {
 			++counters.lowPriorityQueries;
-			return increasingPriorityDelay(durabilityBehind.onChange());
+			return delay(0, TaskPriority::Low); //increasingPriorityDelay(durabilityBehind.onChange());
 		}
 		return delay(0, TaskPriority::DefaultEndpoint);
 	}
