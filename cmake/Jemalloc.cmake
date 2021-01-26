@@ -29,6 +29,7 @@ if(NOT WIN32)
       BUILD_IN_SOURCE ON
       BUILD_COMMAND make
       INSTALL_COMMAND make install)
+    message(STATUS "Will link against ${JEMALLOC_DIR}/lib/libjemalloc_pic.a and ${JEMALLOC_DIR}/lib/libjemalloc.a")
     set_target_properties(im_jemalloc_pic PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc_pic.a")
     set_target_properties(im_jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC_DIR}/lib/libjemalloc.a")
     target_include_directories(jemalloc INTERFACE "${JEMALLOC_DIR}/include")
