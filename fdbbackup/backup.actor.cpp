@@ -68,6 +68,7 @@ using std::endl;
 #endif
 
 #include "fdbclient/versions.h"
+#include "fdbclient/BuildFlags.h"
 
 #include "flow/SimpleOpt.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -152,6 +153,7 @@ enum {
 	OPT_HELP,
 	OPT_DEVHELP,
 	OPT_VERSION,
+	OPT_BUILD_FLAGS,
 	OPT_PARENTPID,
 	OPT_CRASHONERROR,
 	OPT_NOBUFSTDOUT,
@@ -174,11 +176,12 @@ enum {
 
 // Top level binary commands.
 CSimpleOpt::SOption g_rgOptions[] = {
-	{ OPT_VERSION, "-v",        SO_NONE },
-	{ OPT_VERSION, "--version", SO_NONE },
-	{ OPT_HELP,    "-?",        SO_NONE },
-	{ OPT_HELP,    "-h",        SO_NONE },
-	{ OPT_HELP,    "--help",    SO_NONE },
+	{ OPT_VERSION,     "-v",            SO_NONE },
+	{ OPT_VERSION,     "--version",     SO_NONE },
+	{ OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
+	{ OPT_HELP,        "-?",            SO_NONE },
+	{ OPT_HELP,        "-h",            SO_NONE },
+	{ OPT_HELP,        "--help",        SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
@@ -192,6 +195,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_KNOB, "--knob_", SO_REQ_SEP },
 	{ OPT_VERSION, "--version", SO_NONE },
 	{ OPT_VERSION, "-v", SO_NONE },
+	{ OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	{ OPT_QUIET, "-q", SO_NONE },
 	{ OPT_QUIET, "--quiet", SO_NONE },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -706,6 +710,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
+	{ OPT_BUILD_FLAGS,     "--build_flags",    SO_NONE },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -908,6 +913,10 @@ static void printVersion() {
 	printf("protocol %llx\n", (long long) currentProtocolVersion.version());
 }
 
+static void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
+}
+
 const char *BlobCredentialInfo =
 	"  BLOB CREDENTIALS\n"
 	"     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
@@ -947,6 +956,7 @@ static void printAgentUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
+	printf("  --build_flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 
@@ -978,6 +988,7 @@ static void printBackupUsage(bool devhelp) {
 	       "delete | describe | list | query | cleanup) [ACTION_OPTIONS]\n\n",
 	       exeBackup.toString().c_str());
 	printf(" TOP LEVEL OPTIONS:\n");
+	printf("  --build_flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n");
@@ -1080,6 +1091,7 @@ static void printRestoreUsage(bool devhelp ) {
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | abort | wait) [OPTIONS]\n\n", exeRestore.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
+	printf("  --build_flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n");
@@ -1173,6 +1185,7 @@ static void printDBAgentUsage(bool devhelp) {
 #ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
+	printf("  --build_flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -1192,6 +1205,7 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | switch | abort | pause | resume) [OPTIONS]\n\n", exeDatabaseBackup.toString().c_str());
 
 	printf(" TOP LEVEL OPTIONS:\n");
+	printf("  --build_flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n");
@@ -3195,6 +3209,10 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_VERSION:
 					printVersion();
+					return FDB_EXIT_SUCCESS;
+					break;
+				case OPT_BUILD_FLAGS:
+					printBuildInformation();
 					return FDB_EXIT_SUCCESS;
 					break;
 				case OPT_NOBUFSTDOUT:
