@@ -88,24 +88,21 @@ struct AddingCacheRange : NonCopyable {
 	bool isTransferred() const { return phase == Waiting; }
 };
 
-struct CacheRangeInfo : ReferenceCounted<CacheRangeInfo>, NonCopyable {
-	AddingCacheRange* adding;
+class CacheRangeInfo : public ReferenceCounted<CacheRangeInfo>, NonCopyable {
+	CacheRangeInfo(KeyRange keys, std::unique_ptr<AddingCacheRange> &&adding, StorageCacheData* readWrite)
+		: adding(std::move(adding)), readWrite(readWrite), keys(keys)
+	{
+	}
+
+public:
+	std::unique_ptr<AddingCacheRange> adding;
 	struct StorageCacheData* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
 
-	CacheRangeInfo(KeyRange keys, AddingCacheRange* adding, StorageCacheData* readWrite)
-		: adding(adding), readWrite(readWrite), keys(keys)
-	{
-	}
-
-	~CacheRangeInfo() {
-		delete adding;
-	}
-
 	static CacheRangeInfo* newNotAssigned(KeyRange keys) { return new CacheRangeInfo(keys, nullptr, nullptr); }
 	static CacheRangeInfo* newReadWrite(KeyRange keys, StorageCacheData* data) { return new CacheRangeInfo(keys, nullptr, data); }
-	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, new AddingCacheRange(data, keys), nullptr); }
+	static CacheRangeInfo* newAdding(StorageCacheData* data, KeyRange keys) { return new CacheRangeInfo(keys, std::make_unique<AddingCacheRange>(data, keys), nullptr); }
 
 	bool isReadable() const { return readWrite!=nullptr; }
 	bool isAdding() const { return adding!=nullptr; }

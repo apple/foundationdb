@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/TPCCWorkload.h"
 

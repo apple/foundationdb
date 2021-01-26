@@ -53,7 +53,7 @@ Future<T> sendErrorOnShutdown( Future<T> in ) {
 	}
 }
 
-class AsyncFileDetachable sealed : public IAsyncFile, public ReferenceCounted<AsyncFileDetachable>{
+class AsyncFileDetachable final : public IAsyncFile, public ReferenceCounted<AsyncFileDetachable> {
 private:
 	Reference<IAsyncFile> file;
 	Future<Void> shutdown;
@@ -125,7 +125,7 @@ public:
 
 //An async file implementation which wraps another async file and will randomly destroy sectors that it is writing when killed
 //This is used to simulate a power failure which prevents all written data from being persisted to disk
-class AsyncFileNonDurable sealed : public IAsyncFile, public ReferenceCounted<AsyncFileNonDurable>{
+class AsyncFileNonDurable final : public IAsyncFile, public ReferenceCounted<AsyncFileNonDurable> {
 public:
 	UID id;
 	std::string filename;
@@ -239,7 +239,7 @@ public:
 		}
 	}
 
-	~AsyncFileNonDurable() {
+	~AsyncFileNonDurable() override {
 		//TraceEvent("AsyncFileNonDurable_Destroy", id).detail("Filename", filename);
 	}
 
@@ -288,7 +288,7 @@ public:
 
 	//Fsyncs the file.  This allows all delayed modifications to the file to complete before
 	//syncing the underlying file
-	Future<Void> sync() {
+	Future<Void> sync() override {
 		//TraceEvent("AsyncFileNonDurable_Sync", id).detail("Filename", filename);
 		Future<Void> syncFuture = sync(this, true);
 		reponses.add( syncFuture );

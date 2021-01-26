@@ -177,7 +177,7 @@ public:
 
 	std::string getFilename() const override { return m_f->getFilename(); }
 
-	~AsyncFileReadAheadCache() {
+	~AsyncFileReadAheadCache() override {
 		for(auto &it : m_blocks) {
 			it.second.cancel();
 		}

@@ -458,7 +458,8 @@ public:
 		enASIOTimedOut = 9,
 		enBlobCredentialFiles = 10,
 		enNetworkAddressesFunc = 11,
-		enClientFailureMonitor = 12
+		enClientFailureMonitor = 12,
+		enSQLiteInjectedError = 13
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -574,6 +575,7 @@ public:
 
 	virtual UID getDebugID() const = 0;
 	virtual NetworkAddress localAddress() const = 0;
+	virtual boost::asio::ip::udp::socket::native_handle_type native_handle() = 0;
 };
 
 class INetworkConnections {

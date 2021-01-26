@@ -116,7 +116,7 @@ struct PolicyAcross final : IReplicationPolicy, public ReferenceCounted<PolicyAc
 	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy);
 	explicit PolicyAcross();
 	explicit PolicyAcross(const PolicyAcross& other) : PolicyAcross(other._count, other._attribKey, other._policy) {}
-	~PolicyAcross();
+	~PolicyAcross() override;
 	std::string name() const override { return "Across"; }
 	std::string embeddedPolicyName() const { return _policy->name(); }
 	int getCount() const { return _count; }

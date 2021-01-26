@@ -96,18 +96,9 @@ void ISimulator::displayWorkers() const
 int openCount = 0;
 
 struct SimClogging {
-	double getSendDelay( NetworkAddress from, NetworkAddress to ) {
-		return halfLatency();
-		double tnow = now();
-		double t = tnow + halfLatency();
+	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
 
-		if (!g_simulator.speedUpSimulation && clogSendUntil.count( to.ip ))
-			t = std::max( t, clogSendUntil[ to.ip ] );
-
-		return t - tnow;
-	}
-
-	double getRecvDelay( NetworkAddress from, NetworkAddress to ) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to) {
 		auto pair = std::make_pair( from.ip, to.ip );
 
 		double tnow = now();
@@ -501,9 +492,7 @@ public:
 
 	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() {
-		_close( h );
-	}
+	~SimpleFile() override { _close(h); }
 
 private:
 	int h;
@@ -1803,7 +1792,7 @@ public:
 		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
 		process->boundUDPSockets.emplace(localAddress, this);
 	}
-	~UDPSimSocket() {
+	~UDPSimSocket() override {
 		if (!closed.getFuture().isReady()) {
 			close();
 			closed.send(Void());
@@ -1898,6 +1887,10 @@ public:
 
 	NetworkAddress localAddress() const override {
 		return _localAddress;
+	}
+
+	boost::asio::ip::udp::socket::native_handle_type native_handle() override {
+		return 0;
 	}
 
 };
@@ -2036,8 +2029,7 @@ int sf_open( const char* filename, int flags, int convFlags, int mode ) {
 #endif
 
 // Opens a file for asynchronous I/O
-Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
-{
+Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 	ASSERT( (flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) ||
 			!(flags & IAsyncFile::OPEN_CREATE) ||
 			StringRef(filename).endsWith(LiteralStringRef(".fdb-lock")) );  // We don't use "ordinary" non-atomic file creation right now except for folder locking, and we don't have code to simulate its unsafeness.
@@ -2074,12 +2066,11 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
-{
+Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
-Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
+Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
 	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {

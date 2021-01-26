@@ -209,9 +209,9 @@ void sortPoints(std::vector<KeyInfo>& points) {
 
 class SkipList : NonCopyable {
 private:
-	static const int MaxLevels = 26;
+	static constexpr int MaxLevels = 26;
 
-	int randomLevel() {
+	int randomLevel() const {
 		uint32_t i = uint32_t(skfastrand()) >> (32 - (MaxLevels - 1));
 		int level = 0;
 		while (i & 1) {
@@ -225,9 +225,9 @@ private:
 	// Represent a node in the SkipList. The node has multiple (i.e., level) pointers to
 	// other nodes, and keeps a record of the max versions for each level.
 	struct Node {
-		int level() { return nPointers - 1; }
+		int level() const { return nPointers - 1; }
 		uint8_t* value() { return end() + nPointers * (sizeof(Node*) + sizeof(Version)); }
-		int length() { return valueLength; }
+		int length() const { return valueLength; }
 
 		// Returns the next node pointer at the given level.
 		Node* getNext(int level) { return *((Node**)end() + level); }
@@ -235,7 +235,7 @@ private:
 		void setNext(int level, Node* n) { *((Node**)end() + level) = n; }
 
 		// Returns the max version at the given level.
-		Version getMaxVersion(int i) { return ((Version*)(end() + nPointers * sizeof(Node*)))[i]; }
+		Version getMaxVersion(int i) const { return ((Version*)(end() + nPointers * sizeof(Node*)))[i]; }
 		// Sets the max version at the given level.
 		void setMaxVersion(int i, Version v) { ((Version*)(end() + nPointers * sizeof(Node*)))[i] = v; }
 
@@ -289,9 +289,10 @@ private:
 		}
 
 	private:
-		int getNodeSize() { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }
+		int getNodeSize() const { return sizeof(Node) + valueLength + nPointers * (sizeof(Node*) + sizeof(Version)); }
 		// Returns the first Node* pointer
 		uint8_t* end() { return (uint8_t*)(this + 1); }
+		uint8_t const* end() const { return (uint8_t const*)(this + 1); }
 		int nPointers, valueLength;
 	};
 
@@ -365,7 +366,7 @@ public:
 				;
 		}
 
-		force_inline bool finished() { return level == 0; }
+		force_inline bool finished() const { return level == 0; }
 
 		// Returns if the finger value is found in the SkipList.
 		force_inline Node* found() const {
@@ -636,7 +637,7 @@ private:
 			this->state = 0;
 		}
 
-		bool noConflict() { return true; }
+		bool noConflict() const { return true; }
 		bool conflict() {
 			*result = true;
 			if (conflictingKeyRange != nullptr) conflictingKeyRange->push_back(*cKRArena, indexInTx);

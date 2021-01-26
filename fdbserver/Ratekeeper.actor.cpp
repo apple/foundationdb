@@ -729,8 +729,7 @@ ACTOR Future<Void> monitorServerListChange(
 			self->lastSSListFetchedTimestamp = now();
 
 			std::map<UID, StorageServerInterface> newServers;
-			for (int i = 0; i < results.size(); i++) {
-				const StorageServerInterface& ssi = results[i].first;
+			for (const auto& [ssi, _] : results) {
 				const UID serverId = ssi.id();
 				newServers[serverId] = ssi;
 

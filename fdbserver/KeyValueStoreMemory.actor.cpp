@@ -63,7 +63,7 @@ public:
 	// IKeyValueStore
 	KeyValueStoreType getType() const override { return type; }
 
-	virtual std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
+	std::tuple<size_t, size_t, size_t> getSize() const override { return data.size(); }
 
 	int64_t getAvailableSize() const {
 		int64_t residentSize = data.sumTo(data.end()) + queue.totalSize() + // doesn't account for overhead in queue
@@ -279,7 +279,7 @@ private:
 		StringRef p1, p2;
 		OpRef() {}
 		OpRef(Arena& a, OpRef const& o) : op(o.op), p1(a, o.p1), p2(a, o.p2) {}
-		size_t expectedSize() { return p1.expectedSize() + p2.expectedSize(); }
+		size_t expectedSize() const { return p1.expectedSize() + p2.expectedSize(); }
 	};
 	struct OpHeader {
 		int op;

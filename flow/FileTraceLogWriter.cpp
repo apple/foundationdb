@@ -55,7 +55,7 @@ struct IssuesListImpl {
 		issues.insert(issue);
 	}
 
-	void retrieveIssues(std::set<std::string>& out) {
+	void retrieveIssues(std::set<std::string>& out) const {
 		MutexHolder h(mutex);
 		for (auto const& i : issues) {
 			out.insert(i);
@@ -68,14 +68,16 @@ struct IssuesListImpl {
 	}
 
 private:
-	Mutex mutex;
+	mutable Mutex mutex;
 	std::set<std::string> issues;
 };
 
-IssuesList::IssuesList() : impl(new IssuesListImpl{}) {}
-IssuesList::~IssuesList() { delete impl; }
+IssuesList::IssuesList() : impl(std::make_unique<IssuesListImpl>()) {}
+IssuesList::~IssuesList() = default;
 void IssuesList::addIssue(std::string issue) { impl->addIssue(issue); }
-void IssuesList::retrieveIssues(std::set<std::string> &out) { impl->retrieveIssues(out); }
+void IssuesList::retrieveIssues(std::set<std::string>& out) const {
+	impl->retrieveIssues(out);
+}
 void IssuesList::resolveIssue(std::string issue) { impl->resolveIssue(issue); }
 
 FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename,

@@ -35,9 +35,9 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 
 	KeyValueStoreCompressTestData(IKeyValueStore* store) : store(store) {}
 
-	virtual Future<Void> getError() override { return store->getError(); }
-	virtual Future<Void> onClosed() override { return store->onClosed(); }
-	virtual void dispose() override {
+	Future<Void> getError() override { return store->getError(); }
+	Future<Void> onClosed() override { return store->onClosed(); }
+	void dispose() override {
 
 		store->dispose();
 		delete this;
@@ -54,7 +54,7 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 		store->set( KeyValueRef( keyValue.key, pack(keyValue.value) ), arena );
 	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
-	Future<Void> commit(bool sequential = false) { return store->commit(sequential); }
+	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
 		return doReadValue(store, key, debugID);

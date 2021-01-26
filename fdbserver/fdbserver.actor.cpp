@@ -39,6 +39,7 @@
 #include "fdbclient/RestoreWorkerInterface.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/BuildFlags.h"
 #include "fdbmonitor/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
@@ -87,8 +88,8 @@
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
-	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK,
-	OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE
 };
@@ -149,6 +150,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
 	{ OPT_VERSION,               "-v",                          SO_NONE },
 	{ OPT_VERSION,               "--version",                   SO_NONE },
+	{ OPT_BUILD_FLAGS,           "--build_flags",               SO_NONE },
 	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
 	{ OPT_NETWORKIMPL,           "-N",                          SO_REQ_SEP },
 	{ OPT_NETWORKIMPL,           "--network",                   SO_REQ_SEP },
@@ -475,6 +477,10 @@ void* parentWatcher(void *arg) {
 }
 #endif
 
+static void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
+}
+
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
@@ -604,6 +610,7 @@ static void printUsage( const char *name, bool devhelp ) {
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if( devhelp ) {
+		printf("  --build_flags  Print build information and exit.\n");
 		printOptionUsage("-r ROLE, --role ROLE",
 			   " Server role (valid options are fdbd, test, multitest,"
 			   " simulation, networktestclient, networktestserver, restore"
@@ -1040,6 +1047,9 @@ private:
 				printVersion();
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
+			case OPT_BUILD_FLAGS:
+				printBuildInformation();
+				flushAndExit(FDB_EXIT_SUCCESS);
 			case OPT_NOBUFSTDOUT:
 				setvbuf(stdout, nullptr, _IONBF, 0);
 				setvbuf(stderr, nullptr, _IONBF, 0);
@@ -1241,6 +1251,10 @@ private:
 					openTracer(TracerType::DISABLED);
 				} else if (tracer == "logfile" || tracer == "file" || tracer == "log_file") {
 					openTracer(TracerType::LOG_FILE);
+				} else if (tracer == "network_async") {
+					openTracer(TracerType::NETWORK_ASYNC);
+				} else if (tracer == "network_lossy") {
+					openTracer(TracerType::NETWORK_LOSSY);
 				} else {
 					fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", args.OptionArg());
 					printHelpTeaser(argv[0]);

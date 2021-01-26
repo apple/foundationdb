@@ -142,7 +142,7 @@ struct OpenFileInfo : NonCopyable {
 
 struct AFCPage;
 
-class AsyncFileCached : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
+class AsyncFileCached final : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
 	friend struct AFCPage;
 
 public:
@@ -221,11 +221,11 @@ public:
 
 	std::string getFilename() const override { return filename; }
 
-	virtual void addref() { 
+	void addref() override {
 		ReferenceCounted<AsyncFileCached>::addref(); 
 		//TraceEvent("AsyncFileCachedAddRef").detail("Filename", filename).detail("Refcount", debugGetReferenceCount()).backtrace();
 	}
-	virtual void delref() {
+	void delref() override {
 		if (delref_no_destroy()) {
 			// If this is ever ThreadSafeReferenceCounted...
 			// setrefCountUnsafe(0);
@@ -240,7 +240,7 @@ public:
 		}
 	}
 
-	~AsyncFileCached();
+	~AsyncFileCached() override;
 
 private:
 	static std::map< std::string, OpenFileInfo > openFiles;
@@ -570,7 +570,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		pageCache->allocate(this);
 	}
 
-	virtual ~AFCPage() {
+	~AFCPage() override {
 		clearDirty();
 		ASSERT_ABORT( flushableIndex == -1 );
 	}
