@@ -4805,7 +4805,7 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 	return Void();
 }
 
-ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0) duration = 0;
 	// fetch the addresses of all workers
@@ -4830,4 +4830,8 @@ ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool
 
 Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	return rebootWorkerActor(this, addr, check, duration);
+}
+
+Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
+	return forceRecovery(getConnectionFile(), dcId);
 }
