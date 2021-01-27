@@ -1,9 +1,11 @@
+list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0)
 find_package(Boost 1.72 EXACT COMPONENTS context QUIET)
 
 if(Boost_FOUND)
   add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::coroutine2)
+  target_link_libraries(boost_target INTERFACE Boost::boost Boost::context)
 else()
+  message(STATUS "Didn't find Boost -- will compile from source")
   # Configure the boost toolset to use
   set(BOOTSTRAP_COMMAND "./bootstrap.sh --with-libraries=context")
   set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
@@ -33,13 +35,21 @@ else()
     set(USER_CONFIG_FLAG "")
   endif()
 
+  if(WIN32)
+    set(BOOTSTRAP_COMMAND bootstrap)
+    set(B2_COMMAND ".\\b2")
+  else()
+    set(BOOTSTRAP_COMMAND ./bootstrap.sh)
+    set(B2_COMMAND "./b2")
+  endif()
+
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add(boostProject
     URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
-    CONFIGURE_COMMAND ./bootstrap.sh --with-libraries=context
-    BUILD_COMMAND ./b2 link=static --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} --with-libraries=context
+    BUILD_COMMAND ${B2_COMMAND} link=static --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
