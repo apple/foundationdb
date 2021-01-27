@@ -1766,7 +1766,7 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 //Simulates delays for performing operations on disk
 Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64_t size, bool sync ) {
-	if(g_simulator.getCurrentProcess()->machine.failedDisk) {
+	if(g_simulator.getCurrentProcess()->machine->failedDisk) {
 		wait(Future<Void>(Never()));
 	}
 	if(g_simulator.connectionFailuresDisableDuration > 1e4)
