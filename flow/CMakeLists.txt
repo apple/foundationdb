@@ -113,7 +113,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 target_link_libraries(flow PRIVATE stacktrace)
-if(NOT USE_ASAN AND NOT USE_VALGRIND AND NOT USE_TSAN AND NOT USE_UBSAN)
+if(NOT USE_ASAN AND NOT USE_VALGRIND AND NOT USE_TSAN AND NOT USE_UBSAN NOT USE_MSAN)
   target_link_libraries(flow PUBLIC jemalloc)
 endif()
 if (NOT APPLE AND NOT WIN32)
