@@ -141,13 +141,13 @@ struct PageChecksumCodec {
 		if (!silent) {
 			TraceEvent trEvent(SevError, "SQLitePageChecksumFailure");
 			trEvent.error(checksum_failed())
-			    .detail("CodecPageSize", pageSize)
-			    .detail("CodecReserveSize", reserveSize)
-			    .detail("Filename", filename)
-			    .detail("PageNumber", pageNumber)
-			    .detail("PageSize", pageLen)
-			    .detail("ChecksumInPage", pSumInPage->toString())
-			    .detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
+				.detail("CodecPageSize", pageSize)
+				.detail("CodecReserveSize", reserveSize)
+				.detail("Filename", filename)
+				.detail("PageNumber", pageNumber)
+				.detail("PageSize", pageLen)
+				.detail("ChecksumInPage", pSumInPage->toString())
+				.detail("ChecksumCalculatedHL2", hashLittle2Sum.toString());
 			if (pSumInPage->part1 == 0) {
 				trEvent.detail("ChecksumCalculatedCRC", crc32Sum.toString());
 			}
@@ -237,15 +237,27 @@ struct SQLiteDB : NonCopyable {
 	void open(bool writable);
 	void createFromScratch();
 
-	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values) {}
+	SQLiteDB( std::string filename, bool page_checksums, bool fragment_values): filename(filename), db(NULL), btree(NULL), table(-1), freetable(-1), haveMutex(false), page_checksums(page_checksums), fragment_values(fragment_values) {
+		TraceEvent(SevDebug, "SQLiteDBCreate")
+			.detail("This", (void*)this)
+			.detail("Filename", filename)
+			.backtrace();
+	}
 
 	~SQLiteDB() {
+		TraceEvent(SevDebug, "SQLiteDBDestroy")
+			.detail("This", (void*)this)
+			.detail("Filename", filename)
+			.backtrace();
+
 		if (db) {
 			if (haveMutex) {
 				sqlite3_mutex_leave(db->mutex);
 			}
 			sqlite3_close( db );
 		}
+
+		disableRateControl();
 	}
 
 	void initPagerCodec() {
@@ -265,7 +277,7 @@ struct SQLiteDB : NonCopyable {
 		//if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
-			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
+			// an injected fault.  Assume that if VFSAsyncFile caught an injected Error that it caused this error return code.
 			Error err = io_error();
 			if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 				err = err.asInjectedFault();
@@ -279,6 +291,24 @@ struct SQLiteDB : NonCopyable {
 			throw err;
 		}
 	}
+
+	void disableRateControl() {
+		if(dbFile && dbFile->getRateControl()) {
+			TraceEvent(SevDebug, "SQLiteDBShutdownRateControl").detail("Filename", dbFile->getFilename());
+			Reference<IRateControl> rc = dbFile->getRateControl();
+			dbFile->setRateControl({});
+			rc->wakeWaiters();
+		}
+
+		if(walFile && walFile->getRateControl()) {
+			TraceEvent(SevDebug, "SQLiteDBShutdownRateControl").detail("Filename", walFile->getFilename());
+			Reference<IRateControl> rc = walFile->getRateControl();
+			walFile->setRateControl({});
+			rc->wakeWaiters();
+		}
+
+	}
+
 	void checkpoint( bool restart ) {
 		int logSize=0, checkpointCount=0;
 		//double t = timer();
@@ -1378,17 +1408,6 @@ void SQLiteDB::open(bool writable) {
 	if (FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT > 0 && FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS > 0) {
 		// The writer thread is created before the readers, so it should initialize the rate controls.
 		if(writable) {
-			// If either rate control is already initialized, then its file is still being held open by a previous
-			// usage, likely because ~AsyncFileCached() launched a background actor that is waiting for outstanding
-			// operations to finish.  In case any of those are waiting for time to pass due to the rate control, 
-			// send them an io_error.
-			if(dbFile.get()->getRateControl()) {
-				dbFile.get()->getRateControl()->killWaiters(io_error());
-			}
-			if(walFile.get()->getRateControl()) {
-				walFile.get()->getRateControl()->killWaiters(io_error());
-			}
-
 			// Create a new rate control and assign it to both files.
 			Reference<SpeedLimit> rc(new SpeedLimit(FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_LIMIT,
 													FLOW_KNOBS->FLOW_CACHEDFILE_WRITE_WINDOW_SECONDS));
@@ -1992,6 +2011,9 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	  writeThread(CoroThreadPool::createThreadPool()),
 	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0)
 {
+	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate")
+		.detail("Filename", filename);
+
 	stopOnErr = stopOnError(this);
 
 	#if SQLITE_THREADSAFE == 0
