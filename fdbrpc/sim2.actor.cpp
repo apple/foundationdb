@@ -1262,7 +1262,6 @@ public:
 	void killProcess_internal( ProcessInfo* machine, KillType kt ) {
 		TEST( true ); // Simulated machine was killed with any kill type
 		TEST( kt == KillInstantly ); // Simulated machine was killed instantly
-		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
 		if (kt == KillInstantly) {
 			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
@@ -1270,11 +1269,18 @@ public:
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
-			should_inject_fault = simulator_should_inject_fault;
-			machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
-			machine->fault_injection_p1 = 0.1;
-			machine->fault_injection_p2 = deterministicRandom()->random01();
+			if(determisticRandom()->random01() < 0.3) {
+				TraceEvent(SevWarn, "FailDiskMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+				TEST(true); // Simulated machine was killed with a failed disk
+				machine->failedDisk = true;
+			} else {
+				TEST(true); // Simulated machine was killed with faults
+				TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
+				should_inject_fault = simulator_should_inject_fault;
+				machine->fault_injection_r = deterministicRandom()->randomUniqueID().first();
+				machine->fault_injection_p1 = 0.1;
+				machine->fault_injection_p2 = deterministicRandom()->random01();
+			}
 		} else {
 			ASSERT( false );
 		}
@@ -1760,6 +1766,9 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 //Simulates delays for performing operations on disk
 Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64_t size, bool sync ) {
+	if(g_simulator.getCurrentProcess()->machine.failedDisk) {
+		wait(Future<Void>(Never()));
+	}
 	if(g_simulator.connectionFailuresDisableDuration > 1e4)
 		return delay(0.0001);
 
