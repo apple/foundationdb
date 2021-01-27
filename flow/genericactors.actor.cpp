@@ -86,7 +86,7 @@ ACTOR Future<bool> quorumEqualsTrue( std::vector<Future<bool>> futures, int requ
 
 ACTOR Future<Void> lowPriorityDelay( double waitTime ) {
 	state int loopCount = 0;
-	state int totalLoops = std::max(waitTime/FLOW_KNOBS->LOW_PRIORITY_MAX_DELAY,FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT);
+	state int totalLoops = std::max<int>(waitTime/FLOW_KNOBS->LOW_PRIORITY_MAX_DELAY,FLOW_KNOBS->LOW_PRIORITY_DELAY_COUNT);
 
 	while(loopCount < totalLoops) {
 		wait(delay(waitTime/totalLoops, TaskPriority::Low));
