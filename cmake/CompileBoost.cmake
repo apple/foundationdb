@@ -25,9 +25,11 @@ else()
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
 
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
-  if(APPLE OR WIN32)
+  if(APPLE)
     # don't set user-config on mac as the behavior is weird
     # and we don't support multiple compilers on macOS anyways
+    set(USER_CONFIG_FLAG "cxxflags=-std=c++14")
+  elseif(WIN32)
     set(USER_CONFIG_FLAG "")
   endif()
 
