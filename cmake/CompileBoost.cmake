@@ -24,13 +24,20 @@ else()
   endforeach()
   configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
 
+  set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
+  if(APPLE OR WIN32)
+    # don't set user-config on mac as the behavior is weird
+    # and we don't support multiple compilers on macOS anyways
+    set(USER_CONFIG_FLAG "")
+  endif()
+
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add(boostProject
     URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
     URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
     CONFIGURE_COMMAND ./bootstrap.sh --with-libraries=context
-    BUILD_COMMAND ./b2 link=static --prefix=${BOOST_INSTALL_DIR} --user-config=${CMAKE_BINARY_DIR}/user-config.jam install
+    BUILD_COMMAND ./b2 link=static --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
