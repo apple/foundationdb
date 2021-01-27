@@ -263,44 +263,18 @@ public:
 
 typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
 
-
-
-ACTOR void coroSwitcher( Future<Void> what, TaskPriority taskID, Coro* coro ) {
-	try {
-		// state double t = now();
-		wait(what);
-		//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
-		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
-	} catch (Error&) {}
-	wait( delay(0, taskID) );
-	Coro_switchTo_( swapCoro(coro), coro );
-}
-
-
-
 void CoroThreadPool::waitFor( Future<Void> what ) {
-	ASSERT (current_coro != main_coro);
+	ASSERT(current_coro != nullptr);
 	if (what.isReady()) return;
 	// double t = now();
-	coroSwitcher(what, g_network->getCurrentTask(), current_coro);
-	Coro_switchTo_( swapCoro(main_coro), main_coro );
-	//if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
-	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed", now()-t).backtrace("Coro");
-	ASSERT( what.isReady() );
+	auto c = current_coro;
+	current_coro = nullptr;
+	c->send(what);
 }
 
 // Right After INet2::run
 void CoroThreadPool::init()
-{
-	if (!current_coro) {
-		current_coro = main_coro = Coro_new();
-		if (main_coro == nullptr) 
-			platform::outOfMemory();
-
-		Coro_initializeMainCoro(main_coro);
-		//printf("Main thread: %d bytes stack presumed available\n", Coro_bytesLeftOnStack(current_coro));
-	}
-}
+{}
 
 
 Reference<IThreadPool> CoroThreadPool::createThreadPool() {
