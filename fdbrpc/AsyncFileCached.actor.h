@@ -244,7 +244,10 @@ public:
 		if (delref_no_destroy()) {
 			// If this is ever ThreadSafeReferenceCounted...
 			// setrefCountUnsafe(0);
+
 			if(rateControl) {
+				TraceEvent(SevDebug, "AsyncFileCachedKillWaiters")
+					.detail("Filename", filename);
 				rateControl->killWaiters(io_error());
 			}
 
