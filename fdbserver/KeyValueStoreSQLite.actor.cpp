@@ -256,8 +256,6 @@ struct SQLiteDB : NonCopyable {
 			}
 			sqlite3_close( db );
 		}
-
-		disableRateControl();
 	}
 
 	void initPagerCodec() {
@@ -1566,6 +1564,9 @@ private:
 	volatile int64_t diskBytesUsed;
 	volatile int64_t freeListPages;
 
+	struct Writer;
+	Writer *writer;
+
 	vector< Reference<ReadCursor> > readCursors;
 
 	struct Reader : IThreadPoolReceiver {
@@ -1946,8 +1947,16 @@ private:
 
 	ACTOR static void doClose( KeyValueStoreSQLite* self, bool deleteOnClose ) {
 		state Error error = success();
+
+		if(self->writer != nullptr) {
+			self->writer->conn.disableRateControl();
+			wait(delay(0));		
+		}
+
 		try {
-			TraceEvent("KVClose", self->logID).detail("Del", deleteOnClose);
+			TraceEvent("KVClose", self->logID)
+				.detail("Filename", self->filename)
+				.detail("Del", deleteOnClose);
 			self->starting.cancel();
 			self->cleaning.cancel();
 			self->logging.cancel();
@@ -1958,12 +1967,14 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
-				.error(e,true)
+				.detail("Filename", self->filename)
+				.error(e, true)
 				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
 
-		TraceEvent("KVClosed", self->logID);
+		TraceEvent("KVClosed", self->logID)
+			.detail("Filename", self->filename);
 		if( error.code() != error_code_actor_cancelled ) {
 			self->stopped.send(Void());
 			delete self;
@@ -2009,7 +2020,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	  logID(id),
 	  readThreads(CoroThreadPool::createThreadPool()),
 	  writeThread(CoroThreadPool::createThreadPool()),
-	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0)
+	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0),
+	  writer(nullptr)
 {
 	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate")
 		.detail("Filename", filename);
@@ -2033,7 +2045,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
-	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
+	writer = new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors);
+	writeThread->addThread(writer);
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
