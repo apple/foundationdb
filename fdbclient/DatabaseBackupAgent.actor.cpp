@@ -138,10 +138,10 @@ namespace dbBackup {
 		static const Key keyAddBackupRangeTasks;
 		static const Key keyBackupRangeBeginKey;
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -459,10 +459,10 @@ namespace dbBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 	};
 	StringRef FinishFullBackupTaskFunc::name = LiteralStringRef("dr_finish_full_backup");
@@ -472,10 +472,10 @@ namespace dbBackup {
 		static StringRef name;
 	    static constexpr uint32_t version = 1;
 
-	    StringRef getName() const { return name; };
+	    StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state FlowLock lock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
@@ -533,10 +533,10 @@ namespace dbBackup {
 
 		static const Key keyNextBeginVersion;
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		// store mutation data from results until the end of stream or the timeout. If breaks on timeout returns the first uncopied version
 		ACTOR static Future<Optional<Version>> dumpData(
@@ -866,10 +866,10 @@ namespace dbBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef CopyLogsTaskFunc::name = LiteralStringRef("dr_copy_logs");
 	REGISTER_TASKFUNC(CopyLogsTaskFunc);
@@ -879,7 +879,7 @@ namespace dbBackup {
 	    static constexpr uint32_t version = 1;
 	    static const Key keyInsertTask;
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
@@ -968,8 +968,8 @@ namespace dbBackup {
 			return Void();
 		}
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef FinishedFullBackupTaskFunc::name = LiteralStringRef("dr_finished_full_backup");
 	const Key FinishedFullBackupTaskFunc::keyInsertTask = LiteralStringRef("insertTask");
@@ -1048,10 +1048,10 @@ namespace dbBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef CopyDiffLogsTaskFunc::name = LiteralStringRef("dr_copy_diff_logs");
 	REGISTER_TASKFUNC(CopyDiffLogsTaskFunc);
@@ -1067,10 +1067,10 @@ namespace dbBackup {
 			return Void();
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return Void(); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef SkipOldEraseLogRangeTaskFunc::name = LiteralStringRef("dr_skip_legacy_task");
 	REGISTER_TASKFUNC(SkipOldEraseLogRangeTaskFunc);
@@ -1087,10 +1087,10 @@ namespace dbBackup {
 
 		static const Key keyNextBeginVersion;
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 
 		ACTOR static Future<Void> dumpData(Database cx, Reference<Task> task, PromiseStream<RCGroup> results, FlowLock* lock, Reference<TaskBucket> tb) {
 			state bool endOfStream = false;
@@ -1303,10 +1303,10 @@ namespace dbBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef AbortOldBackupTaskFunc::name = LiteralStringRef("dr_abort_legacy_backup");
 	REGISTER_TASKFUNC(AbortOldBackupTaskFunc);
@@ -1421,10 +1421,10 @@ namespace dbBackup {
 			return Void();
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef CopyDiffLogsUpgradeTaskFunc::name = LiteralStringRef("db_copy_diff_logs");
 	REGISTER_TASKFUNC(CopyDiffLogsUpgradeTaskFunc);
@@ -1512,10 +1512,10 @@ namespace dbBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef BackupRestorableTaskFunc::name = LiteralStringRef("dr_backup_restorable");
 	REGISTER_TASKFUNC(BackupRestorableTaskFunc);
@@ -1711,10 +1711,10 @@ namespace dbBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		StringRef getName() const { return name; };
+		StringRef getName() const override { return name; };
 
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) override { return _finish(tr, tb, fb, task); };
 	};
 	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("dr_start_full_backup");
 	REGISTER_TASKFUNC(StartFullBackupTaskFunc);

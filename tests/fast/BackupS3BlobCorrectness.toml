@@ -1,0 +1,109 @@
+[[test]]
+testTitle = 'Cycle'
+clearAfterTest = 'false'
+simBackupAgents = 'BackupToFile'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    testDuration = 10.0
+    expectedRate = 0
+    
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 5.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+[[test]]
+testTitle = 'Backup'
+
+    [[test.workload]]
+    testName = 'BackupToBlob'
+    backupAfter = 0.0
+    backupTag = 'default'
+    backupURL = 'blobstore://<access_key>:<secret_key>@127.0.0.1:9000/resource?bucket=bucketname'
+    provideKeys = true
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 5.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+[[test]]
+testTitle = 'Restore'
+clearAfterTest = 'false'
+
+    [[test.workload]]
+    testName = 'RestoreFromBlob'
+    restoreAfter = 0.0
+    backupTag = 'default'
+    backupURL = 'blobstore://<access_key>:<secret_key>@127.0.0.1:9000/resource?bucket=bucketname'
+    provideKeys = true
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 5.0
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 10.0
+
+[[test]]
+testTitle = 'CycleCheck'
+checkOnly = 'true'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    expectedRate = 0

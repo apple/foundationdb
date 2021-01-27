@@ -24,6 +24,10 @@
 #include <vector>
 
 #include "fdbrpc/simulator.h"
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#include "fdbrpc/SimExternalConnection.h"
 #include "flow/ActorCollection.h"
 #include "flow/IRandom.h"
 #include "flow/IThreadPool.h"
@@ -495,9 +499,7 @@ public:
 
 	std::string getFilename() const override { return actualFilename; }
 
-	~SimpleFile() {
-		_close( h );
-	}
+	~SimpleFile() override { _close(h); }
 
 private:
 	int h;
@@ -789,7 +791,7 @@ public:
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
 	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
 	// Sets the taskID/priority of the current task, without yielding
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, std::string host) override {
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string &host) override {
 		ASSERT( host.empty());
 		if (!addressMap.count( toAddr )) {
 			return waitForProcessAndConnect( toAddr, this );
@@ -814,11 +816,15 @@ public:
 		return onConnect( ::delay(0.5*deterministicRandom()->random01()), myc );
 	}
 
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string &host) override {
+		return SimExternalConnection::connect(toAddr);
+	}
+
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 
-  Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string host, std::string service) override {
-		throw lookup_failed();
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string &host, const std::string &service) override {
+		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		wait(ready);
@@ -1797,7 +1803,7 @@ public:
 		ASSERT(process->boundUDPSockets.find(localAddress) == process->boundUDPSockets.end());
 		process->boundUDPSockets.emplace(localAddress, this);
 	}
-	~UDPSimSocket() {
+	~UDPSimSocket() override {
 		if (!closed.getFuture().isReady()) {
 			close();
 			closed.send(Void());

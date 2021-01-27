@@ -27,7 +27,9 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+#ifdef NO_INTELLISENSE
 namespace {
+#endif
 
 // Initial size of buffer used to store serialized traces. Buffer will be
 // resized when necessary.
@@ -37,7 +39,7 @@ constexpr int kTraceBufferSize = 1024;
 constexpr float kQueueSizeLogInterval = 5.0;
 
 struct NoopTracer : ITracer {
-	TracerType type() const { return TracerType::DISABLED; }
+	TracerType type() const override { return TracerType::DISABLED; }
 	void trace(Span const& span) override {}
 };
 
@@ -367,9 +369,7 @@ struct FastUDPTracer : public UDPTracer {
 		};
 	}
 
-	~FastUDPTracer() {
-		free(request_.buffer);
-	}
+	~FastUDPTracer() override { free(request_.buffer); }
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
 
@@ -431,7 +431,9 @@ private:
 
 ITracer* g_tracer = new NoopTracer();
 
+#ifdef NO_INTELLISENSE
 } // namespace
+#endif
 
 void openTracer(TracerType type) {
 	if (g_tracer->type() == type) {

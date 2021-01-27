@@ -22,6 +22,8 @@ set(FDBRPC_SRCS
   ReplicationPolicy.cpp
   ReplicationTypes.cpp
   ReplicationUtils.cpp
+  SimExternalConnection.actor.cpp
+  SimExternalConnection.h
   Stats.actor.cpp
   Stats.h
   sim2.actor.cpp

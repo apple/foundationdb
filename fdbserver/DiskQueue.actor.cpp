@@ -1396,14 +1396,20 @@ public:
 	DiskQueue_PopUncommitted( std::string basename, std::string fileExtension, UID dbgid, DiskQueueVersion diskQueueVersion, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
-	Future<Void> getError() { return queue->getError(); }
-	Future<Void> onClosed() { return queue->onClosed(); }
-	void dispose() { queue->dispose(); delete this; }
-	void close() { queue->close(); delete this; }
+	Future<Void> getError() override { return queue->getError(); }
+	Future<Void> onClosed() override { return queue->onClosed(); }
+	void dispose() override {
+		queue->dispose();
+		delete this;
+	}
+	void close() override {
+		queue->close();
+		delete this;
+	}
 
 	//IDiskQueue
-	Future<bool> initializeRecovery(location recoverAt) { return queue->initializeRecovery(recoverAt); }
-	Future<Standalone<StringRef>> readNext( int bytes ) { return readNext(this, bytes); }
+	Future<bool> initializeRecovery(location recoverAt) override { return queue->initializeRecovery(recoverAt); }
+	Future<Standalone<StringRef>> readNext(int bytes) override { return readNext(this, bytes); }
 
 	location getNextReadLocation() const override { return queue->getNextReadLocation(); }
 

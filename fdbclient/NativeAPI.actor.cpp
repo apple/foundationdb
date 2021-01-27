@@ -1444,22 +1444,17 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 
 			std::string knobName = optionValue.substr(0, eq);
 			std::string knobValue = optionValue.substr(eq+1);
-			if (const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob(knobName, knobValue))
-			{
-				// update dependent knobs
-				const_cast<FlowKnobs*>(FLOW_KNOBS)->initialize();
-			}
-			else if (const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob(knobName, knobValue))
-			{
-				// update dependent knobs
-				const_cast<ClientKnobs*>(CLIENT_KNOBS)->initialize();
-			}
-			else
-			{
-				TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
+		    if (globalFlowKnobs->setKnob(knobName, knobValue)) {
+			    // update dependent knobs
+			    globalFlowKnobs->initialize();
+		    } else if (globalClientKnobs->setKnob(knobName, knobValue)) {
+			    // update dependent knobs
+			    globalClientKnobs->initialize();
+		    } else {
+			    TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
 				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
-			}
-			break;
+		    }
+		    break;
 		}
 		case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
@@ -4805,7 +4800,7 @@ ACTOR Future<Void> addInterfaceActor( std::map<Key,std::pair<Value,ClientLeaderR
 	return Void();
 }
 
-ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
+ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0) duration = 0;
 	// fetch the addresses of all workers
@@ -4830,4 +4825,8 @@ ACTOR Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool
 
 Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	return rebootWorkerActor(this, addr, check, duration);
+}
+
+Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {
+	return forceRecovery(getConnectionFile(), dcId);
 }

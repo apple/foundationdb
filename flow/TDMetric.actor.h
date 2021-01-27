@@ -765,7 +765,7 @@ struct BaseEventMetric : BaseMetric {
 	Void getValue() const {
 		return Void();
 	}
-	virtual ~BaseEventMetric() {}
+	~BaseEventMetric() override {}
 
 	// Every metric should have a set method for its underlying type in order for MetricUtil::getOrCreateInstance
 	// to initialize it.  In the case of event metrics there is no underlying type so the underlying type
@@ -1041,12 +1041,12 @@ private:
 
 public:
 	DynamicEventMetric(MetricNameRef const &name, Void = Void());
-	~DynamicEventMetric() = default;
+	~DynamicEventMetric() override = default;
 
 	void addref() override { ReferenceCounted<DynamicEventMetric>::addref(); }
 	void delref() override { ReferenceCounted<DynamicEventMetric>::delref(); }
 
-	void onEnable() {
+	void onEnable() override {
 		// Must initialize fields, previously knobs may not have been set.
 		// Note that future fields will be okay because the field constructor will init and the knobs will be set.
 		time.init();

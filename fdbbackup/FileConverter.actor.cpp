@@ -31,6 +31,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
+#include "fdbclient/BuildFlags.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {
@@ -51,10 +52,15 @@ void printConvertUsage() {
 	          << "  --trace_format FORMAT\n"
 	          << "                  Select the format of the trace files. xml (the default) and json are supported.\n"
 	          << "                  Has no effect unless --log is specified.\n"
+	          << "  --build_flags   Print build information and exit.\n"
 	          << "  -h, --help      Display this help and exit.\n"
 	          << "\n";
 
 	return;
+}
+
+void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
 }
 
 void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
@@ -534,6 +540,10 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 
 		case OPT_TRACE_LOG_GROUP:
 			param->trace_log_group = args->OptionArg();
+			break;
+		case OPT_BUILD_FLAGS:
+			printBuildInformation();
+			return FDB_EXIT_ERROR;
 			break;
 		}
 	}

@@ -3431,7 +3431,9 @@ ACTOR Future<Void> teamTracker(DDTeamCollection* self, Reference<TCTeamInfo> tea
 						TraceEvent(severity, "ServerTeamPriorityChange", self->distributorId)
 						    .detail("Priority", team->getPriority())
 						    .detail("Info", team->getDesc())
-						    .detail("ZeroHealthyServerTeams", self->zeroHealthyTeams->get());
+						    .detail("ZeroHealthyServerTeams", self->zeroHealthyTeams->get())
+						    .detail("Hint", severity == SevWarnAlways ? "No replicas remain of some data"
+						                                              : "The priority of this team changed");
 						if (team->getPriority() == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
 							// 0 servers left in this team, data might be lost.
 							zeroServerLeftLogger = zeroServerLeftLogger_impl(self, team);
@@ -4816,6 +4818,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 	state bool trackerCancelled;
 	loop {
 		trackerCancelled = false;
+
+		// Stored outside of data distribution tracker to avoid slow tasks
+		// when tracker is cancelled
+		state KeyRangeMap<ShardTrackedData> shards;
+
 		try {
 			loop {
 				TraceEvent("DDInitTakingMoveKeysLock", self->ddId);
@@ -4961,10 +4968,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = configuration.storageTeamSize;
-
-			// Stored outside of data distribution tracker to avoid slow tasks
-			// when tracker is cancelled
-			state KeyRangeMap<ShardTrackedData> shards;
 
 			vector<Future<Void>> actors;
 			if (configuration.usableRegions > 1) {

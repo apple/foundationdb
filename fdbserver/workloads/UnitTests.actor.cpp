@@ -31,6 +31,7 @@ void forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
 #endif
+void forceLinkSimExternalConnectionTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -55,6 +56,7 @@ struct UnitTestWorkload : TestWorkload {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
 #endif
+		forceLinkSimExternalConnectionTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }

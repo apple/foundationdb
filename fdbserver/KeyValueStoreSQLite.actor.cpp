@@ -32,6 +32,7 @@ extern "C" {
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
+#include "fdbserver/VFSAsync.h"
 #include "fdbserver/template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
@@ -273,8 +274,9 @@ struct SQLiteDB : NonCopyable {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
 			Error err = io_error();
-			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
+			if (g_network->isSimulated() && VFSAsyncFile::checkInjectedError()) {
 				err = err.asInjectedFault();
+			}
 
 			if (db)
 				db->errCode = rc;
@@ -1483,8 +1485,8 @@ public:
 	Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
 	Future<Void> onClosed() override { return stopped.getFuture(); }
 
-	virtual KeyValueStoreType getType() const override { return type; }
-	virtual StorageBytes getStorageBytes() const override;
+	KeyValueStoreType getType() const override { return type; }
+	StorageBytes getStorageBytes() const override;
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
@@ -1496,7 +1498,7 @@ public:
 	                                             int byteLimit = 1 << 30) override;
 
 	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
-	~KeyValueStoreSQLite();
+	~KeyValueStoreSQLite() override;
 
 	struct SpringCleaningWorkPerformed {
 		int lazyDeletePages = 0;
@@ -1533,9 +1535,7 @@ private:
 			: conn( filename, is_btree_v2, is_btree_v2 ), counter(counter), dbgid(dbgid), ppReadCursor(ppReadCursor)
 		{
 		}
-		~Reader() {
-			ppReadCursor->clear();
-		}
+		~Reader() override { ppReadCursor->clear(); }
 
 		void init() override { conn.open(false); }
 
@@ -1631,7 +1631,7 @@ private:
 			  checkIntegrityOnOpen(checkIntegrityOnOpen)
 		{
 		}
-		~Writer() {
+		~Writer() override {
 			TraceEvent("KVWriterDestroying", dbgid);
 			delete cursor;
 			TraceEvent("KVWriterDestroyed", dbgid);

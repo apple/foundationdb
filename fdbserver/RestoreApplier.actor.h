@@ -230,11 +230,11 @@ public:
 		vbState = newState;
 	}
 
-	virtual ~ApplierVersionBatchState() = default;
+	~ApplierVersionBatchState() override = default;
 
-	virtual void operator=(int newState) { vbState = newState; }
+	void operator=(int newState) override { vbState = newState; }
 
-	virtual int get() { return vbState; }
+	int get() override { return vbState; }
 };
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
@@ -377,7 +377,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		role = RestoreRole::Applier;
 	}
 
-	~RestoreApplierData() = default;
+	~RestoreApplierData() override = default;
 
 	// getVersionBatchState may be called periodically to dump version batch state,
 	// even when no version batch has been started.
@@ -395,17 +395,17 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		item->second->vbState = vbState;
 	}
 
-	void initVersionBatch(int batchIndex) {
+	void initVersionBatch(int batchIndex) override {
 		TraceEvent("FastRestoreApplierInitVersionBatch", id()).detail("BatchIndex", batchIndex);
 		batch[batchIndex] = Reference<ApplierBatchData>(new ApplierBatchData(nodeID, batchIndex));
 	}
 
-	void resetPerRestoreRequest() {
+	void resetPerRestoreRequest() override {
 		batch.clear();
 		finishedBatch = NotifiedVersion(0);
 	}
 
-	std::string describeNode() {
+	std::string describeNode() override {
 		std::stringstream ss;
 		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;
 		return ss.str();

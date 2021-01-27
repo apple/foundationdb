@@ -29,19 +29,20 @@
 
 class ThreadSafeDatabase : public IDatabase, public ThreadSafeReferenceCounted<ThreadSafeDatabase> {
 public:
-	~ThreadSafeDatabase();
+	~ThreadSafeDatabase() override;
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
-	Reference<ITransaction> createTransaction();
+	Reference<ITransaction> createTransaction() override;
 
-	void setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
+	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 
 	ThreadFuture<Void> onConnected();  // Returns after a majority of coordination servers are available and have reported a leader. The cluster file therefore is valid, but the database might be unavailable.
 
-	void addref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
-	void delref() { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
+	void addref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration);
+	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 
 private:
 	friend class ThreadSafeTransaction;
@@ -55,7 +56,7 @@ public:  // Internal use only
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
 	explicit ThreadSafeTransaction(DatabaseContext* cx);
-	~ThreadSafeTransaction();
+	~ThreadSafeTransaction() override;
 
 	void cancel() override;
 	void setVersion( Version v ) override;
@@ -117,18 +118,18 @@ private:
 
 class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeApi> {
 public:
-	void selectApiVersion(int apiVersion);
-	const char* getClientVersion();
+	void selectApiVersion(int apiVersion) override;
+	const char* getClientVersion() override;
 	ThreadFuture<uint64_t> getServerProtocol(const char* clusterFilePath) override;
 
-	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
-	void setupNetwork();
-	void runNetwork();
-	void stopNetwork();
+	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
+	void setupNetwork() override;
+	void runNetwork() override;
+	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char *clusterFilePath);
+	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
 
-	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 	static IClientApi* api;
 

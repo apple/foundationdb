@@ -180,7 +180,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload
 		fixedRate = getOption(options, LiteralStringRef("fixedRate"), 0.0);
 	}
 
-	virtual ~AsyncFileReadWorkload(){ }
+	~AsyncFileReadWorkload() override {}
 
 	std::string description() const override { return "AsyncFileRead"; }
 

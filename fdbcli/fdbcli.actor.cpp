@@ -51,6 +51,7 @@
 #endif
 
 #include "fdbclient/versions.h"
+#include "fdbclient/BuildFlags.h"
 
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
@@ -70,6 +71,7 @@ enum {
 	OPT_NO_HINTS,
 	OPT_STATUS_FROM_JSON,
 	OPT_VERSION,
+	OPT_BUILD_FLAGS,
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
 	OPT_DEBUG_TLS
@@ -90,6 +92,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_STATUS_FROM_JSON, "--status-from-json", SO_REQ_SEP },
 	                                  { OPT_VERSION, "--version", SO_NONE },
 	                                  { OPT_VERSION, "-v", SO_NONE },
+	                                  { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
 	                                  { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob_", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
@@ -428,6 +431,7 @@ static void printProgramUsage(const char* name) {
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 				 "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 				 "                 Useful in reporting and diagnosing TLS issues.\n"
+	       "  --build_flags  Print build information and exit.\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -625,14 +629,18 @@ void printVersion() {
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
 }
 
+void printBuildInformation() {
+	printf("%s", jsonBuildInformation().c_str());
+}
+
 void printHelpOverview() {
 	printf("\nList of commands:\n\n");
 	for (const auto& [command, help] : helpMap) {
 		if (help.short_desc.size()) printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
-		printf("\nFor information on a specific command, type `help <command>'.");
-		printf("\nFor information on escaping keys and values, type `help escaping'.");
-		printf("\nFor information on available options, type `help options'.\n\n");
 	}
+	printf("\nFor information on a specific command, type `help <command>'.");
+	printf("\nFor information on escaping keys and values, type `help escaping'.");
+	printf("\nFor information on available options, type `help options'.\n\n");
 }
 
 void printHelp(StringRef command) {
@@ -2849,17 +2857,9 @@ struct CLIOptions {
 			return;
 		}
 
-		delete FLOW_KNOBS;
-		FlowKnobs* flowKnobs = new FlowKnobs;
-		FLOW_KNOBS = flowKnobs;
-
-		delete CLIENT_KNOBS;
-		ClientKnobs* clientKnobs = new ClientKnobs;
-		CLIENT_KNOBS = clientKnobs;
-
 		for (const auto& [knob, value] : knobs) {
 			try {
-				if (!flowKnobs->setKnob(knob, value) && !clientKnobs->setKnob(knob, value)) {
+				if (!globalFlowKnobs->setKnob(knob, value) && !globalClientKnobs->setKnob(knob, value)) {
 					fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knob.c_str());
 					TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knob));
 				}
@@ -2882,8 +2882,8 @@ struct CLIOptions {
 		}
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		flowKnobs->initialize(true);
-		clientKnobs->initialize(true);
+		globalFlowKnobs->initialize(true);
+		globalClientKnobs->initialize(true);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -2967,6 +2967,9 @@ struct CLIOptions {
 				break;
 			case OPT_VERSION:
 				printVersion();
+				return FDB_EXIT_SUCCESS;
+			case OPT_BUILD_FLAGS:
+				printBuildInformation();
 				return FDB_EXIT_SUCCESS;
 		}
 		return -1;
