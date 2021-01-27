@@ -1269,7 +1269,7 @@ public:
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			if(determisticRandom()->random01() < 0.3) {
+			if(deterministicRandom()->random01() < 0.3) {
 				TraceEvent(SevWarn, "FailDiskMachine").detail("Name", machine->name).detail("Address", machine->address).detail("ZoneId", machine->locality.zoneId()).detail("Process", machine->toString()).detail("Rebooting", machine->rebooting).detail("Protected", protectedAddresses.count(machine->address)).backtrace();
 				TEST(true); // Simulated machine was killed with a failed disk
 				machine->failedDisk = true;
