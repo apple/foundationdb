@@ -38,7 +38,7 @@ public:
 	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true), usableRegions(1) {}
 
 	// Order matters!
-	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
+	enum KillType { KillInstantly, InjectFaults, FailDisk, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
 
 	enum BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 

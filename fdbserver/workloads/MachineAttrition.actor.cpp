@@ -155,11 +155,13 @@ struct MachineAttritionWorkload : TestWorkload {
 
 			ISimulator::KillType kt = ISimulator::Reboot;
 			if( !self->reboot ) {
-				int killType = deterministicRandom()->randomInt(0,3);
+				int killType = deterministicRandom()->randomInt(0,4);
 				if( killType == 0 )
 					kt = ISimulator::KillInstantly;
 				else if( killType == 1 )
 					kt = ISimulator::InjectFaults;
+				else if( killType == 2 )
+					kt = ISimulator::FailDisk;
 				else
 					kt = ISimulator::RebootAndDelete;
 			}
@@ -221,7 +223,14 @@ struct MachineAttritionWorkload : TestWorkload {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
 						g_simulator.killZone( targetMachine.zoneId(), ISimulator::RebootAndDelete );
 					} else {
-						auto kt = (deterministicRandom()->random01() < 0.5 || !self->allowFaultInjection) ? ISimulator::KillInstantly : ISimulator::InjectFaults;
+						auto kt = ISimulator::KillInstantly;
+						if( self->allowFaultInjection ) {
+							if( randomDouble < 0.56 ) {
+								kt = ISimulator::InjectFaults;
+							} else if( randomDouble < 0.66 ) {
+								kt = ISimulator::FailDisk;
+							}
+						}
 						g_simulator.killZone( targetMachine.zoneId(), kt );
 					}
 				}
