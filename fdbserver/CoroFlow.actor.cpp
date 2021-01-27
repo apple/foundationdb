@@ -20,7 +20,6 @@
 
 #include "fdbserver/CoroFlow.h"
 #include "flow/ActorCollection.h"
-#include "fdbrpc/libcoroutine/Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include <boost/coroutine2/all.hpp>
@@ -30,13 +29,14 @@
 #include "flow/network.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+using coro_t = boost::coroutines2::coroutine<Future<Void>>;
 
-Coro *current_coro = 0, *main_coro = 0;
-Coro* swapCoro( Coro* n ) {
-	Coro* t = current_coro;
-	current_coro = n;
-	return t;
-}
+// Coro *current_coro = 0, *main_coro = 0;
+// Coro* swapCoro( Coro* n ) {
+// 	Coro* t = current_coro;
+// 	current_coro = n;
+// 	return t;
+// }
 
 /*struct IThreadlike {
 public:
@@ -49,6 +49,8 @@ protected:
 	virtual void run() = 0;       // To be overridden by client.  Returning causes the thread to block until it is destroyed.
 };*/
 
+struct Coroutine;
+Coroutine* current_coro;
 
 struct Coroutine /*: IThreadlike*/ {
 	Coroutine() = default;
@@ -62,6 +64,11 @@ struct Coroutine /*: IThreadlike*/ {
 	void unblock() {
 		//Coro_switchTo_( swapCoro(coro), coro );
 		blocked.send(Void());
+	}
+
+	void send(Future<Void> const& what) {
+		(*sink)(what);
+		ASSERT(what.isReady());
 	}
 
 protected:
@@ -98,17 +105,8 @@ protected:
 	virtual void run() = 0;
 
 private:
-	void wrapRun() {
-		run();
-		Coro_switchTo_( swapCoro(main_coro), main_coro );
-		//block();
-	}
-
-	static void entry(void* _this) {
-		((Coroutine*)_this)->wrapRun();
-	}
-
-	Coro* coro;
+	std::unique_ptr<coro_t::pull_type> coro;
+	coro_t::push_type* sink;
 	Promise<Void> blocked;
 	std::shared_ptr<bool> alive{ std::make_shared<bool>(true) };
 };
@@ -156,7 +154,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 			try {
 				if(!stop)
 					userData->init();
-				
+
 				while (!stop) {
 					pool->queueLock.enter();
 					if (pool->work.empty()) {
@@ -198,8 +196,8 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 	Error error;
 
 	ACTOR Future<Void> stopOnError( WorkPool* w ) {
-		try { 
-			wait( w->getError() );  
+		try {
+			wait( w->getError() );
 			ASSERT(false);
 		} catch (Error& e) {
 			w->stop(e);
@@ -265,7 +263,7 @@ public:
 		for(int i=0; i<pool->workers.size(); i++)
 			pool->workers[i]->stop = true;
 
-		std::vector<Worker*> idle; 
+		std::vector<Worker*> idle;
 		std::swap(idle, pool->idle);
 		pool->queueLock.leave();
 
