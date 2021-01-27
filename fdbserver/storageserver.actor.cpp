@@ -2970,7 +2970,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			durableDelay = delay(SERVER_KNOBS->STORAGE_COMMIT_INTERVAL, TaskPriority::UpdateStorage);
 		}
 
-		wait( durable );
+		wait( ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME));
 
 		debug_advanceMinCommittedVersion( data->thisServerID, newOldestVersion );
 
