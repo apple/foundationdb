@@ -470,7 +470,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
          In particular, if the original ``fdbcli`` command is ``snapshot <arg1> <arg2> <argN>``, then the string ``snapshot_command`` points to is ``<arg1> <arg2> <argN>``, which including the spaces.
    
    ``snapshot_command_length``
-         |length-of| `snapshot_command`
+         |length-of| ``snapshot_command``
    
    .. note:: The function is exposing the functionality of the fdbcli command ``snapshot``. Please take a look at the documentation before using (see :ref:`disk-snapshot-backups`).
          
