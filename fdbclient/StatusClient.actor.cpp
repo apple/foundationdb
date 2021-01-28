@@ -503,6 +503,18 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 								faultToleranceWriteable["max_zone_failures_without_losing_data"] = std::min(maxDataLoss, coordinatorsFaultTolerance);
 								faultToleranceWriteable["max_zone_failures_without_losing_availability"] = std::min(maxAvailLoss, coordinatorsFaultTolerance);
 							}
+
+							if (faultToleranceReader.get("max_failures_without_losing_data_primary", maxDataLoss)) {
+								faultToleranceWriteable["max_failures_without_losing_data_primary"] = maxDataLoss;
+							}
+
+							if (faultToleranceReader.get("max_failures_without_losing_data_satellite", maxDataLoss)) {
+								faultToleranceWriteable["max_failures_without_losing_data_satellite"] = maxDataLoss;
+							}
+
+							if (faultToleranceReader.get("max_failures_without_losing_data_remote", maxDataLoss)) {
+								faultToleranceWriteable["max_failures_without_losing_data_remote"] = maxDataLoss;
+							}
 						}
 					}
 					// else clusterStatusFetcher added a message

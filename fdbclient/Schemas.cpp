@@ -295,7 +295,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       ],
       "fault_tolerance":{
          "max_zone_failures_without_losing_availability":0,
-         "max_zone_failures_without_losing_data":0
+         "max_zone_failures_without_losing_data":0,
+         "max_failures_without_losing_data_primary":0,
+         "max_failures_without_losing_data_satellite":0,
+         "max_failures_without_losing_data_remote":0
       },
       "qos":{
          "worst_queue_bytes_log_server":460,

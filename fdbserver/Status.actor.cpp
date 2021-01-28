@@ -1913,7 +1913,8 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(WorkerEve
 	return statusObj;
 }
 
-static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<TLogSet>& tLogs,
+static JsonBuilderObject tlogFetcher(std::pair<int, Optional<int>[3]>* logFaultTolerance,
+                                     const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderObject statusObj;
 	JsonBuilderArray logsObj;
@@ -1975,7 +1976,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 	if(localSetsWithNonNegativeFaultTolerance > 1) {
 		minFaultTolerance++;
 	}
-	*logFaultTolerance = std::min(*logFaultTolerance, minFaultTolerance);
+	logFaultTolerance->first = std::min(logFaultTolerance->first, minFaultTolerance);
 	statusObj["log_interfaces"] = logsObj;
 	// We may lose logs in this log generation, storage servers may never be able to catch up this log
 	// generation.
@@ -1985,21 +1986,32 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance, const std::vector<T
 		statusObj["satellite_log_replication_factor"] = sat_log_replication_factor.get();
 	if (sat_log_write_anti_quorum.present())
 		statusObj["satellite_log_write_anti_quorum"] = sat_log_write_anti_quorum.get();
-	if (sat_log_fault_tolerance.present()) statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
+	if (sat_log_fault_tolerance.present()) {
+		statusObj["satellite_log_fault_tolerance"] = sat_log_fault_tolerance.get();
+		logFaultTolerance->second[1] =
+		    std::min(logFaultTolerance->second[1].orDefault(100), sat_log_fault_tolerance.get());
+	}
 
 	if (log_replication_factor.present()) statusObj["log_replication_factor"] = log_replication_factor.get();
 	if (log_write_anti_quorum.present()) statusObj["log_write_anti_quorum"] = log_write_anti_quorum.get();
-	if (log_fault_tolerance.present()) statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
+	if (log_fault_tolerance.present()) {
+		statusObj["log_fault_tolerance"] = log_fault_tolerance.get();
+		logFaultTolerance->second[0] = std::min(logFaultTolerance->second[0].orDefault(100), log_fault_tolerance.get());
+	}
 
 	if (remote_log_replication_factor.present())
 		statusObj["remote_log_replication_factor"] = remote_log_replication_factor.get();
-	if (remote_log_fault_tolerance.present())
+	if (remote_log_fault_tolerance.present()) {
 		statusObj["remote_log_fault_tolerance"] = remote_log_fault_tolerance.get();
+		logFaultTolerance->second[2] =
+		    std::min(logFaultTolerance->second[2].orDefault(100), remote_log_fault_tolerance.get());
+	}
 
 	return statusObj;
 }
 
-static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<ServerDBInfo>> db,
+static JsonBuilderArray tlogFetcher(std::pair<int, Optional<int>[3]>* logFaultTolerance,
+                                    Reference<AsyncVar<ServerDBInfo>> db,
                                     std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderArray tlogsArray;
 	JsonBuilderObject tlogsStatus;
@@ -2024,9 +2036,9 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance, Reference<AsyncVar<S
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
                                                      std::vector<WorkerDetails>& workers, int extraTlogEligibleZones,
-                                                     int minReplicasRemaining, int oldLogFaultTolerance, 
-													 int fullyReplicatedRegions,
-                                                     bool underMaintenance) {
+                                                     int minReplicasRemaining,
+                                                     std::pair<int, Optional<int>[3]> oldLogFaultTolerance,
+                                                     int fullyReplicatedRegions, bool underMaintenance) {
 	JsonBuilderObject statusObj;
 
 	// without losing data
@@ -2066,7 +2078,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	}
 
 	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or availability.
-	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
+	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance.first), -1);
 	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
 
 	int32_t maxAvaiabilityZoneFailures = configuration.maxZoneFailuresTolerated(fullyReplicatedRegions, true);
@@ -2076,6 +2088,20 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 
 	statusObj["max_zone_failures_without_losing_availability"] =
 	    std::max(std::min(maxAvaiabilityZoneFailures,std::min(extraTlogEligibleZones, zoneFailuresWithoutLosingData)), -1);
+
+	// Populate fault tolerance for individual DCs
+	if (oldLogFaultTolerance.second[0].present()) {
+		statusObj["max_failures_without_losing_data_primary"] = oldLogFaultTolerance.second[0].get();
+	}
+
+	if (oldLogFaultTolerance.second[1].present()) {
+		statusObj["max_failures_without_losing_data_satellite"] = oldLogFaultTolerance.second[1].get();
+	}
+
+	if (oldLogFaultTolerance.second[2].present()) {
+		statusObj["max_failures_without_losing_data_remote"] = oldLogFaultTolerance.second[2].get();
+	}
+
 	return statusObj;
 }
 
@@ -2475,16 +2501,19 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
-			int logFaultTolerance = 100;
+			std::pair<int, Optional<int>[3]> logFaultTolerance;
+			logFaultTolerance.first = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				statusObj["logs"] = tlogFetcher(&logFaultTolerance, db, address_workers);
+				;
 			}
 
-			if(configuration.present()) {
+			if (configuration.present()) {
 				int extraTlogEligibleZones = getExtraTLogEligibleZones(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(
-				    configuration.get(), coordinators, workers, extraTlogEligibleZones, minReplicasRemaining,
-				    logFaultTolerance, fullyReplicatedRegions, loadResult.present() && loadResult.get().healthyZone.present());
+				statusObj["fault_tolerance"] =
+				    faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleZones,
+				                                minReplicasRemaining, logFaultTolerance, fullyReplicatedRegions,
+				                                loadResult.present() && loadResult.get().healthyZone.present());
 			}
 
 			state JsonBuilderObject configObj =
