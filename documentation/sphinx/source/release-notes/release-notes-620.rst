@@ -13,7 +13,7 @@ Release Notes
 * Add documentation on read and write Path. `(PR #4099) <https://github.com/apple/foundationdb/pull/4099>`_
 * Add a histogram to expose commit batching window on Proxies. `(PR #4166) <https://github.com/apple/foundationdb/pull/4166>`_
 * Fix double counting of range reads in TransactionMetrics. `(PR #4130) <https://github.com/apple/foundationdb/pull/4130>`_
-* Added a trace event that can be used as an indicator of the load on the proxy. `(PR #4166) <https://github.com/apple/foundationdb/pull/4166>`_
+* Add a trace event that can be used as an indicator of the load on the proxy. `(PR #4166) <https://github.com/apple/foundationdb/pull/4166>`_
 
 6.2.28
 ======
