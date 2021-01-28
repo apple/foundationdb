@@ -1,3 +1,79 @@
+function(compile_boost)
+  set(options)
+  set(oneValueArgs TARGET)
+  set(multiValueArgs BUILD_ARGS CXXFLAGS LDFLAGS)
+  cmake_parse_arguments(MY "${options}" "${oneValueArgs}"
+                          "${multiValueArgs}" ${ARGN} )
+  # Configure the boost toolset to use
+  set(BOOTSTRAP_COMMAND "./bootstrap.sh --with-libraries=context")
+  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
+  set(BOOST_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+  if(APPLE)
+    set(BOOST_TOOLSET "darwin")
+    set(BOOST_CXX_COMPILER "/usr/bin/clang++")
+  elseif(CLANG)
+    set(BOOST_TOOLSET "clang")
+    set(BOOTSTRAP_COMMAND "${BOOTSTRAP_COMMAND} --with-toolset=clang")
+  else()
+    set(BOOST_TOOLSET "gcc")
+  endif()
+  if(APPLE OR USE_LIBCXX)
+    list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++)
+  endif()
+  set(BOOST_ADDITIONAL_COMPILE_OPTIOINS "")
+  foreach(flag IN LISTS BOOST_COMPILER_FLAGS MY_CXXFLAGS)
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<cxxflags>${flag} ")
+  endforeach()
+  foreach(flag IN LISTS MY_LDFLAGS)
+    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<linkflags>${flag} ")
+  endforeach()
+  configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
+
+  set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
+  if(WIN32)
+    set(USER_CONFIG_FLAG "")
+  endif()
+
+  if(WIN32)
+    set(BOOTSTRAP_COMMAND bootstrap)
+    set(B2_COMMAND "b2")
+  else()
+    set(BOOTSTRAP_COMMAND ./bootstrap.sh)
+    set(B2_COMMAND "./b2")
+  endif()
+
+  include(ExternalProject)
+  set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
+  ExternalProject_add("${MY_TARGET}Project"
+    URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
+    URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
+    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} --with-libraries=context
+    BUILD_COMMAND ${B2_COMMAND} link=static ${MY_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    BUILD_IN_SOURCE ON
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+    BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
+                     "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
+
+  add_library(${MY_TARGET}_context STATIC IMPORTED)
+  add_dependencies(${MY_TARGET}_context ${MY_TARGET}Project)
+  set_target_properties(${MY_TARGET}_context PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
+
+  add_library(${MY_TARGET} INTERFACE)
+  target_include_directories(${MY_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
+  target_link_libraries(${MY_TARGET} INTERFACE ${MY_TARGET}_context)
+endfunction()
+
+if(USE_SANITIZER)
+  if(WIN32)
+    message(FATAL_ERROR "Sanitizers are not supported on Windows")
+  endif()
+  message(STATUS "A sanitizer is enabled, need to build boost from source")
+  compile_boost(TARGET boost_asan BUILD_ARGS context-impl=ucontext
+    CXXFLAGS ${SANITIZER_COMPILE_OPTIONS} LDFLAGS ${SANITIZER_LINK_OPTIONS})
+  return()
+endif()
+
 list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0)
 # since boost 1.72 boost installs cmake configs. We will enforce config mode
 set(Boost_USE_STATIC_LIBS ON)
@@ -13,62 +89,5 @@ else()
   else()
     message(STATUS "Didn't find Boost -- will compile from source")
   endif()
-  # Configure the boost toolset to use
-  set(BOOTSTRAP_COMMAND "./bootstrap.sh --with-libraries=context")
-  set(BOOST_COMPILER_FLAGS -fvisibility=hidden -fPIC -std=c++14 -w)
-  if(APPLE)
-    set(BOOST_TOOLSET "darwin")
-  elseif(CLANG)
-    set(BOOST_TOOLSET "clang")
-    set(BOOTSTRAP_COMMAND "${BOOTSTRAP_COMMAND} --with-toolset=clang")
-  else()
-    set(BOOST_TOOLSET "gcc")
-  endif()
-  if(APPLE OR USE_LIBCXX)
-    list(APPEND BOOST_COMPILER_FLAGS -stdlib=libc++)
-  endif()
-  set(BOOST_ADDITIONAL_COMPILE_OPTIOINS "")
-  foreach(flag IN LISTS BOOST_COMPILER_FLAGS)
-    string(APPEND BOOST_ADDITIONAL_COMPILE_OPTIOINS "<cxxflags>${flag} ")
-  endforeach()
-  configure_file(${CMAKE_SOURCE_DIR}/cmake/user-config.jam.cmake ${CMAKE_BINARY_DIR}/user-config.jam)
-
-  set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
-  if(APPLE)
-    # don't set user-config on mac as the behavior is weird
-    # and we don't support multiple compilers on macOS anyways
-    set(USER_CONFIG_FLAG "cxxflags=-std=c++14")
-  elseif(WIN32)
-    set(USER_CONFIG_FLAG "")
-  endif()
-
-  if(WIN32)
-    set(BOOTSTRAP_COMMAND bootstrap)
-    set(B2_COMMAND "b2")
-  else()
-    set(BOOTSTRAP_COMMAND ./bootstrap.sh)
-    set(B2_COMMAND "./b2")
-  endif()
-
-  include(ExternalProject)
-  set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
-  ExternalProject_add(boostProject
-    URL "https://dl.bintray.com/boostorg/release/1.72.0/source/boost_1_72_0.tar.bz2"
-    URL_HASH SHA256=59c9b274bc451cf91a9ba1dd2c7fdcaf5d60b1b3aa83f2c9fa143417cc660722
-    CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} --with-libraries=context
-    BUILD_COMMAND ${B2_COMMAND} link=static --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
-    BUILD_IN_SOURCE ON
-    INSTALL_COMMAND ""
-    UPDATE_COMMAND ""
-    BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
-
-  add_library(boost_context STATIC IMPORTED)
-  add_dependencies(boost_context boostProject)
-  set_target_properties(boost_context PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_context.a")
-
-  add_library(boost_target INTERFACE)
-  add_dependencies(boost_target boostProject)
-  target_include_directories(boost_target SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(boost_target INTERFACE boost_context)
+  compile_boost(TARGET boost_target)
 endif()
