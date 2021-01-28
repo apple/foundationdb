@@ -77,7 +77,11 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_72_0)
 # since boost 1.72 boost installs cmake configs. We will enforce config mode
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.72.0 EXACT COMPONENTS context CONFIG PATHS /opt/boost_1_72_0)
+set(BOOST_HINT_PATHS /opt/boost_1_72_0)
+if(BOOST_ROOT)
+  list(APPEND BOOST_HINT_PATHS ${BOOST_ROOT})
+endif()
+find_package(Boost 1.72.0 EXACT COMPONENTS context CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
