@@ -144,7 +144,6 @@ else()
   if(USE_ASAN)
     add_compile_options(
       -fsanitize=address
-      -DUSE_SANITIZER
       -DADDRESS_SANITIZER
       -DBOOST_USE_ASAN
       -DBOOST_USE_UCONTEXT

@@ -65,8 +65,8 @@ RUN cd /tmp/ &&\
     sha256sum -c boost-sha-72.txt &&\
     tar -xjf boost_1_72_0.tar.bz2 &&\
     cd boost_1_72_0 &&\
-    CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ ./bootstrap.sh --with-libraries=context &&\
-    CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ ./b2 link=static cxxflags=-std=c++14 --prefix=/opt/boost_1_72_0 install &&\
+    CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ ./bootstrap.sh --with-libraries=context --with-toolset=clang &&\
+    CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ ./b2 link=static cxxflags=-std=c++14 cxxflags=-stdlib=libc++ --prefix=/opt/boost_1_72_0 install &&\
     rm -rf boost_1_72_0.tar.bz2 boost-sha-72.txt boost_1_72_0
 
 
