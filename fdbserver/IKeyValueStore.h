@@ -63,6 +63,12 @@ public:
 
 	virtual void enableSnapshot() {}
 
+	// Inform storage engines that run outside of flow that they need to shut down.  This is needed for
+	// RocksDB, since it manages a threadpool outside the simulator, and those threads could continue to write
+	// invalid data after the RocksDB database is reopened.  Most implementations used the default (empty)
+	// implementation of this method, as performing cleanup tasks here significantly reduces the coverage and
+	// accuracy of the simulator.
+	virtual void preSimulatedCrashHookForNonFlowStorageEngines() { }
 	/*
 	Concurrency contract
 		Causal consistency:
@@ -81,6 +87,30 @@ public:
 	virtual Future<Void> init() {
 		return Void();
 	}
+
+	// Versioned-specific interface.
+	virtual bool supportsVersions() { return false; }
+
+	virtual void setWriteVersion(Version version) {}
+	virtual Version getLastCommittedVersion() { return 0; }
+	virtual Version getOldestVersion() { return 0; }
+	virtual void setOldestVersion(Version version) {}
+
+	// TODO: Should the default implementations just fail an ASSERT?
+	virtual Future<Optional<Value>> readValueAt(KeyRef key, Version version, Optional<UID> debugID = Optional<UID>()) {
+		return readValue(key, debugID);
+	}
+
+	virtual Future<Optional<Value>> readValuePrefixAt(KeyRef key, int maxLength, Version version,
+	                                                  Optional<UID> debugID = Optional<UID>()) {
+		return readValuePrefix(key, maxLength, debugID);
+	}
+
+	virtual Future<Standalone<RangeResultRef>> readRangeAt(KeyRangeRef keys, Version version, int rowLimit = 1 << 30,
+	                                                       int byteLimit = 1 << 30) {
+		return readRange(keys, rowLimit, byteLimit);
+	}
+
 protected:
 	virtual ~IKeyValueStore() {}
 };

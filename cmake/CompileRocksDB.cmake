@@ -11,6 +11,7 @@ if (RocksDB_FOUND)
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+	             -DCMAKE_CXX_FLAGS="-Wno-unused-command-line-argument"
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                -DWITH_GFLAGS=OFF
                -DWITH_TESTS=OFF
