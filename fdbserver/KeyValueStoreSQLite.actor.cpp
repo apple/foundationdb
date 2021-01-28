@@ -265,23 +265,6 @@ struct SQLiteDB : NonCopyable {
 		}
 	}
 
-	void disableRateControl() {
-		if(dbFile && dbFile->getRateControl()) {
-			TraceEvent(SevDebug, "SQLiteDBShutdownRateControl").detail("Filename", dbFile->getFilename());
-			Reference<IRateControl> rc = dbFile->getRateControl();
-			dbFile->setRateControl({});
-			rc->wakeWaiters();
-		}
-
-		if(walFile && walFile->getRateControl()) {
-			TraceEvent(SevDebug, "SQLiteDBShutdownRateControl").detail("Filename", walFile->getFilename());
-			Reference<IRateControl> rc = walFile->getRateControl();
-			walFile->setRateControl({});
-			rc->wakeWaiters();
-		}
-
-	}
-
 	void checkpoint( bool restart ) {
 		int logSize=0, checkpointCount=0;
 		//double t = timer();
@@ -1539,10 +1522,8 @@ private:
 	volatile int64_t diskBytesUsed;
 	volatile int64_t freeListPages;
 
-	struct Writer;
-	Writer *writer;
-
 	vector< Reference<ReadCursor> > readCursors;
+	Reference<IAsyncFile> dbFile, walFile;
 
 	struct Reader : IThreadPoolReceiver {
 		SQLiteDB conn;
@@ -1624,6 +1605,7 @@ private:
 	};
 
 	struct Writer : IThreadPoolReceiver {
+		KeyValueStoreSQLite *kvs;
 		SQLiteDB conn;
 		Cursor* cursor;
 		int commits;
@@ -1638,8 +1620,9 @@ private:
 		bool checkAllChecksumsOnOpen;
 		bool checkIntegrityOnOpen;
 
-		explicit Writer( std::string const& filename, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
-			: conn( filename, isBtreeV2, isBtreeV2 ),
+		explicit Writer( KeyValueStoreSQLite *kvs, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
+			: kvs(kvs),
+			  conn( kvs->filename, isBtreeV2, isBtreeV2 ),
 			  commits(), setsThisCommit(),
 			  freeTableEmpty(false),
 			  writesComplete(writesComplete),
@@ -1669,6 +1652,8 @@ private:
 				}
 			}
 			conn.open(true);
+			kvs->dbFile = conn.dbFile;
+			kvs->walFile = conn.walFile;
 
 			//If a wal file fails during the commit process before finishing a checkpoint, then it is possible that our wal file will be non-empty
 			//when we reload it.  We execute a checkpoint here to remedy that situation.  This call must come before before creating a cursor because
@@ -1905,12 +1890,32 @@ private:
 		}
 	}
 
+	void disableRateControl() {
+		if(dbFile && dbFile->getRateControl()) {
+			TraceEvent(SevDebug, "KeyValueStoreSQLiteShutdownRateControl").detail("Filename", dbFile->getFilename());
+			Reference<IRateControl> rc = dbFile->getRateControl();
+			dbFile->setRateControl({});
+			rc->wakeWaiters();
+		}
+
+		if(walFile && walFile->getRateControl()) {
+			TraceEvent(SevDebug, "KeyValueStoreSQLiteShutdownRateControl").detail("Filename", walFile->getFilename());
+			Reference<IRateControl> rc = walFile->getRateControl();
+			walFile->setRateControl({});
+			rc->wakeWaiters();
+		}
+	}
+
 	ACTOR static Future<Void> stopOnError( KeyValueStoreSQLite* self ) {
 		try {
 			wait( self->readThreads->getError() || self->writeThread->getError() );
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
+
+			self->disableRateControl();
+			self->readThreads->stop(e);
+			self->writeThread->stop(e);
 		}
 
 		self->readThreads->stop();
@@ -1921,10 +1926,7 @@ private:
 	ACTOR static void doClose( KeyValueStoreSQLite* self, bool deleteOnClose ) {
 		state Error error = success();
 
-		if(self->writer != nullptr) {
-			self->writer->conn.disableRateControl();
-			wait(delay(0));		
-		}
+		self->disableRateControl();
 
 		try {
 			TraceEvent("KVClose", self->logID)
@@ -1993,8 +1995,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	  logID(id),
 	  readThreads(CoroThreadPool::createThreadPool()),
 	  writeThread(CoroThreadPool::createThreadPool()),
-	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0),
-	  writer(nullptr)
+	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0)
 {
 	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate")
 		.detail("Filename", filename);
@@ -2018,8 +2019,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
-	writer = new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors);
-	writeThread->addThread(writer);
+	writeThread->addThread(new Writer(this, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors));
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
