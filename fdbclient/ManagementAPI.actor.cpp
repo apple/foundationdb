@@ -1061,9 +1061,11 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr, 
 		}
 	}
 
-	TraceEvent("AttemptingQuorumChange").detail("FromCS", old.toString()).detail("ToCS", conn.toString());
-	ASSERT(old.clusterKeyName() != conn.clusterKeyName());  // Quorum change with new name
-	ASSERT(old.clusterKeyName() == conn.clusterKeyName()); // Quorum change with unchanged name
+	TraceEvent("AttemptingQuorumChange")
+		.detail("FromCS", old.toString())
+		.detail("ToCS", conn.toString())
+		.detail("OldClusterDescription", old.clusterKeyName())
+		.detail("NewClusterDescription", conn.clusterKeyName());
 
 	vector<Future<Optional<LeaderInfo>>> leaderServers;
 	ClientCoordinators coord( Reference<ClusterConnectionFile>( new ClusterConnectionFile( conn ) ) );
